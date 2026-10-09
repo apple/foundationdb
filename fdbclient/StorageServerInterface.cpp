@@ -65,6 +65,7 @@ void StorageServerInterface::initEndpointsFromGetValue() {
 	getHotShards = RequestStream<struct GetHotShardsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
 	getCheckSum = RequestStream<struct GetStorageCheckSumRequest>(getValue.getEndpoint().getAdjustedEndpoint(25));
 	bulkdump = RequestStream<struct BulkDumpRequest>(getValue.getEndpoint().getAdjustedEndpoint(26));
+	getRangeKeys = PublicRequestStream<struct GetRangeKeysRequest>(getValue.getEndpoint().getAdjustedEndpoint(27));
 }
 
 void StorageServerInterface::initEndpoints() {
@@ -96,6 +97,7 @@ void StorageServerInterface::initEndpoints() {
 	streams.push_back(getHotShards.getReceiver());
 	streams.push_back(getCheckSum.getReceiver());
 	streams.push_back(bulkdump.getReceiver());
+	streams.push_back(getRangeKeys.getReceiver(TaskPriority::LoadBalancedEndpoint));
 	FlowTransport::transport().addEndpoints(streams);
 	if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		// streams[0] is `getValue` (base endpoint); streams[1..kNumAdjustedEndpoints] are adjusted endpoints.
@@ -291,6 +293,43 @@ void TSS_traceMismatch(TraceEvent& event,
                        const GetKeyValuesReply& tss,
                        const ComparisonType& type) {
 	traceKeyValuesDiff(event, req, src, tss, type);
+}
+
+template <>
+bool TSS_doCompare(const GetRangeKeysReply& src, const GetRangeKeysReply& tss) {
+	return src.more == tss.more && src.data == tss.data;
+}
+
+template <>
+const char* LB_mismatchTraceName(const GetRangeKeysRequest& req, const ComparisonType& type) {
+	return type == TSS_COMPARISON ? "TSSMismatchGetRangeKeys" : "ReplicaMismatchGetRangeKeys";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const GetRangeKeysRequest& req,
+                       const GetRangeKeysReply& src,
+                       const GetRangeKeysReply& tss,
+                       const ComparisonType& type) {
+	traceKeyValuesSummary(event,
+	                      req.begin,
+	                      req.end,
+	                      req.version,
+	                      req.limit,
+	                      req.limitBytes,
+	                      src.data.size(),
+	                      src.more,
+	                      tss.data.size(),
+	                      tss.more,
+	                      type);
+	for (int i = 0; i < std::max(src.data.size(), tss.data.size()); ++i) {
+		if (i >= src.data.size() || i >= tss.data.size() || src.data[i].key != tss.data[i].key) {
+			event.detail("MismatchIndex", i)
+			    .detail("SourceKey", i < src.data.size() ? src.data[i].key : "missing"_sr)
+			    .detail("ReplicaKey", i < tss.data.size() ? tss.data[i].key : "missing"_sr);
+			break;
+		}
+	}
 }
 
 // range reads and flat map
@@ -495,6 +534,12 @@ void TSSMetrics::recordLatency(const GetKeyValuesRequest& req, double ssLatency,
 }
 
 template <>
+void TSSMetrics::recordLatency(const GetRangeKeysRequest& req, double ssLatency, double tssLatency) {
+	SSgetKeyValuesLatency.addSample(ssLatency);
+	TSSgetKeyValuesLatency.addSample(tssLatency);
+}
+
+template <>
 void TSSMetrics::recordLatency(const GetMappedKeyValuesRequest& req, double ssLatency, double tssLatency) {
 	SSgetMappedKeyValuesLatency.addSample(ssLatency);
 	TSSgetMappedKeyValuesLatency.addSample(tssLatency);
@@ -592,6 +637,73 @@ TEST_CASE("/fdbclient/BasicLoadBalance/releasesCompletedRequest") {
 	ASSERT(!result.isError());
 	ASSERT(alternatives->debugGetReferenceCount() == 1);
 	ASSERT(reply.getPromiseReferenceCount() == 1);
+	co_return;
+}
+
+namespace {
+// Preserve the range-result wire schema independently of the shared result implementation
+struct RangeResultWireSchema {
+	constexpr static FileIdentifier file_identifier = 3985192;
+	VectorRef<KeyValueRef> rows;
+	bool more;
+	Optional<KeyRef> readThrough;
+	bool readToBegin;
+	bool readThroughEnd;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rows, more, readThrough, readToBegin, readThroughEnd);
+	}
+};
+} // namespace
+
+TEST_CASE("/StorageServerInterface/RangeKeys/serialization") {
+	RangeResult values;
+	values.emplace_back(values.arena(), values.arena(), "first"_sr, "large value"_sr);
+	values.emplace_back(values.arena(), values.arena(), "second"_sr, ""_sr);
+	values.more = true;
+	values.readThrough = KeyRef(values.arena(), "third"_sr);
+	values.readToBegin = true;
+	RangeResultWireSchema schema{ values, values.more, values.readThrough, values.readToBegin, values.readThroughEnd };
+	ASSERT(ObjectWriter::toValue(values.contents(), Unversioned()) == ObjectWriter::toValue(schema, Unversioned()));
+	RangeResult copiedValues(values.contents());
+	ASSERT(copiedValues[0].key.begin() != values[0].key.begin());
+	ASSERT(copiedValues.readThrough.get().begin() != values.readThrough.get().begin());
+
+	RangeKeysResult keys = projectRangeKeys(values);
+	ASSERT(keys[0].key.begin() != values[0].key.begin());
+	ASSERT(keys.readThrough.get().begin() != values.readThrough.get().begin());
+	values = RangeResult();
+	ASSERT(copiedValues[0].key == "first"_sr && copiedValues[0].value == "large value"_sr);
+	ASSERT(copiedValues.getReadThrough() == "third"_sr);
+	ASSERT(copiedValues.more && copiedValues.readToBegin && !copiedValues.readThroughEnd);
+
+	RangeKeysResult copiedKeys(keys.contents());
+	ASSERT(copiedKeys[0].key.begin() != keys[0].key.begin());
+	ASSERT(copiedKeys.readThrough.get().begin() != keys.readThrough.get().begin());
+	keys = std::move(copiedKeys);
+	auto encoded = ObjectWriter::toValue(keys, Unversioned());
+	auto decoded = ObjectReader::fromStringRef<RangeKeysResult>(encoded, Unversioned());
+	ASSERT(decoded.size() == 2);
+	ASSERT(decoded[0].key == "first"_sr);
+	ASSERT(decoded[1].key == "second"_sr);
+	ASSERT(decoded.more && decoded.readToBegin && !decoded.readThroughEnd);
+	ASSERT(decoded.getReadThrough() == "third"_sr);
+	ASSERT(decoded.nextBeginKeySelector() == firstGreaterOrEqual("third"_sr));
+	ASSERT(decoded.nextEndKeySelector() == firstGreaterOrEqual("third"_sr));
+
+	GetRangeKeysReply reply;
+	reply.arena.dependsOn(keys.arena());
+	reply.data = keys;
+	reply.version = 123;
+	reply.more = true;
+	reply.cached = true;
+	encoded = ObjectWriter::toValue(reply, Unversioned());
+	auto decodedReply = ObjectReader::fromStringRef<GetRangeKeysReply>(encoded, Unversioned());
+	ASSERT(TSS_doCompare(reply, decodedReply));
+	ASSERT(decodedReply.version == 123 && decodedReply.cached);
+	decodedReply.more = false;
+	ASSERT(!TSS_doCompare(reply, decodedReply));
 	co_return;
 }
 

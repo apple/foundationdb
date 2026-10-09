@@ -352,6 +352,20 @@ struct LoadBalanceRequestHooks<Request,
                                ReferencedInterface<StorageServerInterface>,
                                StorageServerQueueModel,
                                P> {
+	static void prepareRequest(RequestStream<Request, P> const* stream,
+	                           Request& request,
+	                           StorageServerQueueModel* model,
+	                           bool compareReplicas) {
+		if constexpr (std::is_same_v<Request, GetRangeKeysRequest>) {
+			if (!request.deterministicLimits && model &&
+			    (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS ||
+			     model->getTssData(stream->getEndpoint().token.first()).present())) {
+				// Compared replies must not depend on the replicas' durable/MVCC partition
+				request.deterministicLimits = true;
+			}
+		}
+	}
+
 	static void maybeDuplicate(RequestStream<Request, P> const* stream,
 	                           Request& request,
 	                           StorageServerQueueModel* model,

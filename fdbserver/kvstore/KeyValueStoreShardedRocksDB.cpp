@@ -1057,17 +1057,33 @@ struct PhysicalShard {
 	double lastCompactionTime = 0.0;
 };
 
+template <class Result>
 int readRangeInDb(PhysicalShard* shard,
                   const KeyRangeRef range,
                   int rowLimit,
                   int byteLimit,
-                  RangeResult* result,
-                  std::shared_ptr<IteratorPool> iteratorPool) {
+                  Result* result,
+                  std::shared_ptr<IteratorPool> iteratorPool,
+                  int64_t* scanBytes = nullptr,
+                  int64_t scanByteLimit = std::numeric_limits<int64_t>::max()) {
 	if (rowLimit == 0 || byteLimit == 0) {
 		return 0;
 	}
+	if constexpr (std::is_same_v<Result, RangeKeysResult>) {
+		ASSERT(scanBytes != nullptr);
+	}
 
 	int accumulatedBytes = 0;
+	auto append = [&](KeyRef key, ValueRef value) {
+		if constexpr (std::is_same_v<Result, RangeResult>) {
+			accumulatedBytes += sizeof(KeyValueRef) + key.expectedSize() + value.expectedSize();
+			result->emplace_back_deep(result->arena(), key, value);
+		} else {
+			*scanBytes += key.expectedSize() + value.expectedSize();
+			accumulatedBytes += sizeof(uint32_t) + key.expectedSize();
+			result->push_back_deep(result->arena(), RangeKeyRef{ key });
+		}
+	};
 	rocksdb::Status s;
 	std::shared_ptr<ReadIterator> readIter = nullptr;
 
@@ -1094,12 +1110,12 @@ int readRangeInDb(PhysicalShard* shard,
 		cursor->Seek(toSlice(range.begin));
 		while (cursor->Valid() && toStringRef(cursor->key()) < range.end) {
 			KeyRef key = toStringRef(cursor->key());
-			ValueRef value = toStringRef(cursor->value());
 
-			accumulatedBytes += sizeof(KeyValueRef) + key.expectedSize() + value.expectedSize();
-			result->emplace_back_deep(result->arena(), key, value);
+			append(key, toStringRef(cursor->value()));
 			// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
-			if (result->size() >= rowLimit || accumulatedBytes >= byteLimit) {
+			if (result->size() >= rowLimit || accumulatedBytes >= byteLimit ||
+			    (scanBytes != nullptr && *scanBytes >= scanByteLimit)) {
+				result->more = scanBytes != nullptr && *scanBytes >= scanByteLimit;
 				break;
 			}
 			cursor->Next();
@@ -1113,12 +1129,12 @@ int readRangeInDb(PhysicalShard* shard,
 		}
 		while (cursor->Valid() && toStringRef(cursor->key()) >= range.begin) {
 			KeyRef key = toStringRef(cursor->key());
-			ValueRef value = toStringRef(cursor->value());
 
-			accumulatedBytes += sizeof(KeyValueRef) + key.expectedSize() + value.expectedSize();
-			result->emplace_back_deep(result->arena(), key, value);
+			append(key, toStringRef(cursor->value()));
 			// Calling `cursor->Prev()` is potentially expensive, so short-circuit here just in case.
-			if (result->size() >= -rowLimit || accumulatedBytes >= byteLimit) {
+			if (result->size() >= -rowLimit || accumulatedBytes >= byteLimit ||
+			    (scanBytes != nullptr && *scanBytes >= scanByteLimit)) {
+				result->more = scanBytes != nullptr && *scanBytes >= scanByteLimit;
 				break;
 			}
 			cursor->Prev();
@@ -3215,17 +3231,24 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
-		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
+		template <class Result>
+		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction<Result>>, FastAllocated<ReadRangeAction<Result>> {
 			KeyRange keys;
 			std::vector<std::pair<PhysicalShard*, KeyRange>> shardRanges;
-			int rowLimit, byteLimit;
+			int rowLimit, byteLimit, scanByteLimit;
 			ReadType type;
 			double startTime;
 			bool sample;
 			bool logShardMemUsage;
-			ThreadReturnPromise<RangeResult> result;
-			ReadRangeAction(KeyRange keys, std::vector<DataShard*> shards, int rowLimit, int byteLimit, ReadType type)
-			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), type(type), startTime(timer_monotonic()),
+			ThreadReturnPromise<StorageRangeReadResult<Result>> result;
+			ReadRangeAction(KeyRange keys,
+			                std::vector<DataShard*> shards,
+			                int rowLimit,
+			                int byteLimit,
+			                int scanByteLimit,
+			                ReadType type)
+			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), scanByteLimit(scanByteLimit), type(type),
+			    startTime(timer_monotonic()),
 			    sample((deterministicRandom()->random01() < SERVER_KNOBS->SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE)
 			               ? true
 			               : false) {
@@ -3244,7 +3267,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 
-		void action(ReadRangeAction& a) {
+		template <class Result>
+		void action(ReadRangeAction<Result>& a) {
 			double readBeginTime = timer_monotonic();
 			if (a.sample) {
 				latencyMetrics->readActionQueueWait->sampleSeconds(readBeginTime - a.startTime);
@@ -3266,11 +3290,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			int rowLimit = a.rowLimit;
 			int byteLimit = a.byteLimit;
-			RangeResult result;
+			Result result;
 
 			if (rowLimit == 0 || byteLimit == 0) {
 				result.more = false;
-				a.result.send(result);
+				a.result.send(makeStorageRangeReadResult(std::move(result), 0));
 				return;
 			}
 			if (rowLimit < 0) {
@@ -3283,6 +3307,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			// than we expected when parallel read is used when the previous result is not available. It's unlikely
 			// to get to performance improvement when the actual number of rows to read is very small.
 			int accumulatedBytes = 0;
+			int64_t scanBytes = 0;
+			int64_t scanByteLimit = a.scanByteLimit;
 			int numShards = 0;
 			for (auto& [shard, range] : a.shardRanges) {
 				if (shard == nullptr || !shard->initialized()) {
@@ -3291,7 +3317,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					    .detail("Reason", shard == nullptr ? "Not Exist" : "Not Initialized");
 					continue;
 				}
-				auto bytesRead = readRangeInDb(shard, range, rowLimit, byteLimit, &result, iteratorPool);
+				int bytesRead =
+				    readRangeInDb(shard, range, rowLimit, byteLimit, &result, iteratorPool, &scanBytes, scanByteLimit);
 				if (bytesRead < 0) {
 					// Error reading an instance.
 					a.result.sendError(internal_error());
@@ -3300,7 +3327,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				byteLimit -= bytesRead;
 				accumulatedBytes += bytesRead;
 				++numShards;
-				if (result.size() >= abs(a.rowLimit) || accumulatedBytes >= a.byteLimit) {
+				if (result.size() >= abs(a.rowLimit) || accumulatedBytes >= a.byteLimit || result.more) {
 					break;
 				}
 
@@ -3320,9 +3347,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 
-			result.more =
-			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
-			a.result.send(result);
+			result.more = result.more || (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) ||
+			              (accumulatedBytes >= a.byteLimit);
+			a.result.send(makeStorageRangeReadResult(std::move(result), scanBytes));
 
 			if (a.sample) {
 				double currTime = timer_monotonic();
@@ -3632,11 +3659,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
-	static Future<Standalone<RangeResultRef>> read(Reader::ReadRangeAction* action,
-	                                               FlowLock* semaphore,
-	                                               IThreadPool* pool,
-	                                               Counter* counter) {
-		std::unique_ptr<Reader::ReadRangeAction> a(action);
+	template <class Result>
+	static Future<StorageRangeReadResult<Result>> read(Reader::ReadRangeAction<Result>* action,
+	                                                   FlowLock* semaphore,
+	                                                   IThreadPool* pool,
+	                                                   Counter* counter) {
+		std::unique_ptr<Reader::ReadRangeAction<Result>> a(action);
 		Optional<Void> slot = co_await timeout(semaphore->take(), SERVER_KNOBS->ROCKSDB_READ_QUEUE_WAIT);
 		if (!slot.present()) {
 			++(*counter);
@@ -3647,7 +3675,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		auto fut = a->result.getFuture();
 		pool->post(a.release());
-		Standalone<RangeResultRef> result = co_await fut;
+		StorageRangeReadResult<Result> result = co_await fut;
 
 		co_return result;
 	}
@@ -3656,6 +3684,23 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	                              int rowLimit,
 	                              int byteLimit,
 	                              Optional<ReadOptions> options = Optional<ReadOptions>()) override {
+		return readRangeImpl<RangeResult>(keys, rowLimit, byteLimit, byteLimit, options);
+	}
+
+	Future<StorageRangeKeysResult> readRangeKeys(KeyRangeRef keys,
+	                                             int rowLimit,
+	                                             int byteLimit,
+	                                             int scanByteLimit,
+	                                             Optional<ReadOptions> options = Optional<ReadOptions>()) override {
+		return readRangeImpl<RangeKeysResult>(keys, rowLimit, byteLimit, scanByteLimit, options);
+	}
+
+	template <class Result>
+	Future<StorageRangeReadResult<Result>> readRangeImpl(KeyRangeRef keys,
+	                                                     int rowLimit,
+	                                                     int byteLimit,
+	                                                     int scanByteLimit,
+	                                                     Optional<ReadOptions> options) {
 		TraceEvent(SevVerbose, "ShardedRocksReadRangeBegin", this->id).detail("Range", keys);
 		auto shards = shardManager.getDataShardsByRange(keys);
 
@@ -3665,7 +3710,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (!shouldThrottle(type, keys.begin)) {
-			auto a = new Reader::ReadRangeAction(keys, shards, rowLimit, byteLimit, type);
+			auto a = new Reader::ReadRangeAction<Result>(keys, shards, rowLimit, byteLimit, scanByteLimit, type);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -3675,7 +3720,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 		checkWaiters(semaphore, maxWaiters);
 
-		auto a = std::make_unique<Reader::ReadRangeAction>(keys, shards, rowLimit, byteLimit, type);
+		auto a =
+		    std::make_unique<Reader::ReadRangeAction<Result>>(keys, shards, rowLimit, byteLimit, scanByteLimit, type);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 

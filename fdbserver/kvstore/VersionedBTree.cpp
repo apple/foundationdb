@@ -7933,14 +7933,25 @@ public:
 	                              int byteLimit,
 	                              Optional<ReadOptions> options) override {
 		debug_printf("READRANGE %s\n", printable(keys).c_str());
-		return catchError(readRange_impl(this, keys, rowLimit, byteLimit, options));
+		return catchError(readRange_impl<RangeResult>(this, keys, rowLimit, byteLimit, byteLimit, options));
 	}
 
-	static Future<RangeResult> readRange_impl(KeyValueStoreRedwood* self,
-	                                          KeyRange keys,
-	                                          int rowLimit,
-	                                          int byteLimit,
-	                                          Optional<ReadOptions> options) {
+	Future<StorageRangeKeysResult> readRangeKeys(KeyRangeRef keys,
+	                                             int rowLimit,
+	                                             int byteLimit,
+	                                             int scanByteLimit,
+	                                             Optional<ReadOptions> options) override {
+		debug_printf("READRANGEKEYS %s\n", printable(keys).c_str());
+		return catchError(readRange_impl<RangeKeysResult>(this, keys, rowLimit, byteLimit, scanByteLimit, options));
+	}
+
+	template <class Result>
+	static Future<StorageRangeReadResult<Result>> readRange_impl(KeyValueStoreRedwood* self,
+	                                                             KeyRange keys,
+	                                                             int rowLimit,
+	                                                             int byteLimit,
+	                                                             int scanByteLimit,
+	                                                             Optional<ReadOptions> options) {
 		PagerEventReasons reason = PagerEventReasons::RangeRead;
 		VersionedBTree::BTreeCursor cur;
 		if (options.present() && options.get().type == ReadType::FETCH) {
@@ -7952,12 +7963,25 @@ public:
 		Future<Void> f;
 		++g_redwoodMetrics.metric.opGetRange;
 
-		RangeResult result;
-		int accumulatedBytes = 0;
+		Result result;
+		int64_t accumulatedBytes = 0;
+		int resultBytes = 0;
 		ASSERT(byteLimit > 0);
+		auto append = [&](const KeyValueRef& kv) {
+			accumulatedBytes += kv.expectedSize();
+			if constexpr (std::is_same_v<Result, RangeResult>) {
+				result.push_back(result.arena(), kv);
+				resultBytes += kv.expectedSize();
+				return true;
+			} else {
+				result.push_back_deep(result.arena(), RangeKeyRef{ kv.key });
+				resultBytes += sizeof(uint32_t) + kv.key.expectedSize();
+				return false;
+			}
+		};
 
 		if (rowLimit == 0) {
-			co_return result;
+			co_return makeStorageRangeReadResult(std::move(result), accumulatedBytes);
 		}
 
 		if (rowLimit > 0) {
@@ -7991,10 +8015,9 @@ public:
 					if (checkBounds && kv.key.compare(keys.end) >= 0) {
 						break;
 					}
-					accumulatedBytes += kv.expectedSize();
-					result.push_back(result.arena(), kv);
-					usedPage = true;
-					if (--rowLimit == 0 || accumulatedBytes >= byteLimit) {
+					usedPage |= append(kv);
+					if (--rowLimit == 0 || resultBytes >= byteLimit ||
+					    (std::is_same_v<Result, RangeKeysResult> && accumulatedBytes >= scanByteLimit)) {
 						break;
 					}
 					leafCursor.moveNext();
@@ -8046,10 +8069,9 @@ public:
 					if (checkBounds && kv.key.compare(keys.begin) < 0) {
 						break;
 					}
-					accumulatedBytes += kv.expectedSize();
-					result.push_back(result.arena(), kv);
-					usedPage = true;
-					if (++rowLimit == 0 || accumulatedBytes >= byteLimit) {
+					usedPage |= append(kv);
+					if (++rowLimit == 0 || resultBytes >= byteLimit ||
+					    (std::is_same_v<Result, RangeKeysResult> && accumulatedBytes >= scanByteLimit)) {
 						break;
 					}
 					leafCursor.movePrev();
@@ -8072,9 +8094,10 @@ public:
 			}
 		}
 
-		result.more = rowLimit == 0 || accumulatedBytes >= byteLimit;
+		result.more = rowLimit == 0 || resultBytes >= byteLimit ||
+		              (std::is_same_v<Result, RangeKeysResult> && accumulatedBytes >= scanByteLimit);
 		g_redwoodMetrics.kvSizeReadByGetRange->sample(accumulatedBytes);
-		co_return result;
+		co_return makeStorageRangeReadResult(std::move(result), accumulatedBytes);
 	}
 
 	static Future<Optional<Value>> readValue_impl(KeyValueStoreRedwood* self, Key key, Optional<ReadOptions> options) {
