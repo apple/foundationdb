@@ -21,6 +21,7 @@
 #include "fdbclient/ProcessClass.h"
 
 #include <cstdio>
+#include <utility>
 
 ProcessClass::ProcessClass(std::string s, ClassSource source) : _source(source) {
 	if (s == "storage")
@@ -76,59 +77,8 @@ ProcessClass::ProcessClass(std::string s, ClassSource source) : _source(source) 
 	}
 }
 
-ProcessClass::ProcessClass(std::string classStr, std::string sourceStr) {
-	if (classStr == "storage")
-		_class = StorageClass;
-	else if (classStr == "transaction")
-		_class = TransactionClass;
-	else if (classStr == "resolution")
-		_class = ResolutionClass;
-	else if (classStr == "commit_proxy")
-		_class = CommitProxyClass;
-	else if (classStr == "proxy") {
-		_class = CommitProxyClass;
-		printf("WARNING: 'proxy' machine class is deprecated and will be automatically converted "
-		       "'commit_proxy' machine class. Please use 'grv_proxy' or 'commit_proxy' specifically\n");
-	} else if (classStr == "grv_proxy") {
-		_class = GrvProxyClass;
-	} else if (classStr == "master") {
-		_class = MasterClass;
-	} else if (classStr == "test") {
-		_class = TesterClass;
-	} else if (classStr == "unset") {
-		_class = UnsetClass;
-	} else if (classStr == "stateless") {
-		_class = StatelessClass;
-	} else if (classStr == "log") {
-		_class = LogClass;
-	} else if (classStr == "router") {
-		_class = LogRouterClass;
-	} else if (classStr == "cluster_controller") {
-		_class = ClusterControllerClass;
-	} else if (classStr == "fast_restore") {
-		ASSERT(false); // deprecated
-	} else if (classStr == "data_distributor") {
-		_class = DataDistributorClass;
-	} else if (classStr == "coordinator") {
-		_class = CoordinatorClass;
-	} else if (classStr == "ratekeeper") {
-		_class = RatekeeperClass;
-	} else if (classStr == "consistency_scan") {
-		_class = ConsistencyScanClass;
-	} else if (classStr == "blob_manager") {
-		_class = BlobManagerClass;
-	} else if (classStr == "blob_worker") {
-		_class = BlobWorkerClass;
-	} else if (classStr == "backup") {
-		_class = BackupClass;
-	} else if (classStr == "encrypt_key_proxy") {
-		_class = EncryptKeyProxyClass;
-	} else if (classStr == "sim_http_server") {
-		_class = SimHTTPServerClass;
-	} else {
-		_class = InvalidClass;
-	}
-
+ProcessClass::ProcessClass(std::string classStr, std::string sourceStr)
+  : ProcessClass(std::move(classStr), InvalidSource) {
 	if (sourceStr == "command_line")
 		_source = CommandLineSource;
 	else if (sourceStr == "configure_auto")
