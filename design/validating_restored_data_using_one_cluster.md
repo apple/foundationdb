@@ -35,11 +35,11 @@ More detailed steps followed by the diagram
 The validation consists of **three main steps** — **Backup**, **Restore**, and **Compare** — followed by a **Cleanup** phase.
 
 * Backup: 
-    * Run workload → Start Backup → Stop load  → NoteDown ReadVersion → Lock cluster for writes → Wait until (ReadVersion saved > MaxRestorableVersion) → Stop Backup 
+    * Run workload → Start Backup → Stop load  → NoteDown ReadVersion → Lock cluster for writes → Wait until (MaxRestorableVersion >= ReadVersion saved) → Stop Backup 
     * Constraint: If you running this validate entire DB data, ensure cluster has >65% available space in this phase. If space drops below this, stop/clear the load.
         Note: Locking the cluster still allows backup and restore operations
 * Restore:
-    * Setup: Use the `addPrefix` parameter to restore into a validation keyspace. When restoring with a prefix, the restore destination empty check is automatically bypassed.
+    * Setup: Use the `addPrefix` parameter to restore into a validation keyspace. When restoring with the validation prefix (`\xff\x02/rlog/`), the restore destination empty check is automatically bypassed.
     * GetMaxRestoreVersion from backup → Start restore with add-prefix option → Wait for restore completion
     * Note: 
         * Restore writes into a predefined restore_data_prefix (**/xff/x02/rlog**). Restore does lock-aware transactions to bypass the lock. Restore already supports option to add prefix to data.
@@ -63,7 +63,7 @@ The validation consists of **three main steps** — **Backup**, **Restore**, and
 **Note:** 
 
 * Backup–Restore–Compare steps can be automated as a single script/workflow, while Cleanup can be managed via a separate script/workflow.
-* The validate_restore process compares user keys against the restored data, but not the other way around. As a result, it can confirm that all user keys were successfully restored, but cannot detect any extra keys that may exist in the restored data
+* The validate_restore process compares user keys against the restored data and also reports keys that exist only in the restored data ("Extra key(s) in restored data"). Only user keys in the audited range are compared.
 
 ## 
 Alternative Design Considerations
@@ -76,8 +76,8 @@ Alternative Design Considerations
 ## Implementation Details
 
 * **Locking/Unlocking database:** Use the similar api's restore uses locking and unlocking database. [Lock](https://github.com/apple/foundationdb/blob/release-7.4/fdbclient/FileBackupAgent.actor.cpp#L6754) [Unlock](https://github.com/apple/foundationdb/blob/release-7.4/fdbclient/FileBackupAgent.actor.cpp#L4286). Don't allow the restore to unlockDB as we want lock the database until the comparison is done. Restore does lock-aware transactions to bypass this lock.
-* **Wait until (ReadVersion saved > MaxRestorableVersion) step** in Backup phase: There might be small gap before we save readVersion and lock the DB. Ensure to wait for at least backup_lag_seconds not to miss any mutations in the backup
-* **Restore destination check:** The restore empty destination check is bypassed when `addPrefix.size() > 0` (indicating a validation restore to a prefixed keyspace). For regular restores without a prefix, the check remains enforced to prevent accidental data loss. Note that all restores (validation or regular) will clear and overwrite any existing data at the destination range - this is standard restore behavior.
+* **Wait until (MaxRestorableVersion >= ReadVersion saved) step** in Backup phase: Stopping a backup that is already restorable completes it immediately at the version its log copy has reached (see `backup.md`), so this wait is what guarantees the backup covers all writes up to the saved read version. There might be small gap before we save readVersion and lock the DB. Ensure to wait for at least backup_lag_seconds not to miss any mutations in the backup. Alternatively, save the read version after the lock has taken effect, so no write can commit above it.
+* **Restore destination check:** The restore empty destination check is bypassed only when `addPrefix` is the validation prefix `\xff\x02/rlog/` (`validateRestoreLogKeys.begin`), the single prefix `validate_restore` reads from. For regular restores, and for any other prefix, the check remains enforced to prevent accidental data loss. Note that all restores (validation or regular) will clear and overwrite any existing data at the destination range - this is standard restore behavior. Because there is only one validation prefix, validation restores must run one at a time.
 * **Audit Storage:**
     * Default value of BeginKey and EndKey is normalKeys.begin and normalKeys.end. Validate both keys are in normalKeys/userKeys range, systemKeys should be not included as they are in the backup.
     * Add new AuditType **ValidateRestore.**
