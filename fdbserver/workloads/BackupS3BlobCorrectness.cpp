@@ -145,6 +145,12 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	// performValidation: if true, validates backup by restoring with prefix and running audit_storage validate_restore
 	// This must happen BEFORE clearing the database so we can compare original vs restored data
 	bool performValidation;
+	// expectBulkIncrementalRejection: assert that --incremental is refused on both bulk paths. Kept
+	// behind an option and given its own toml so the probes cannot disturb the key-range regression test.
+	bool expectBulkIncrementalRejection;
+	// expectBulkEncryptionRejection: assert --encryption-key-file is refused on a bulkdump backup. Only
+	// the backup side is probed; the comment at the probe records why the restore side cannot be.
+	bool expectBulkEncryptionRejection;
 	// expectRestoreFailure: the bulkload restore is expected NOT to complete, so the workload asserts the
 	// failure is reported and recovered from rather than that the data arrived.
 	bool expectRestoreFailure;
@@ -206,6 +212,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		// performValidation: Validates backup by comparing original data vs restored data
 		// Uses audit_storage validate_restore - must happen BEFORE clearing database
 		performValidation = getOption(options, "performValidation"_sr, false);
+		expectBulkIncrementalRejection = getOption(options, "expectBulkIncrementalRejection"_sr, false);
+		expectBulkEncryptionRejection = getOption(options, "expectBulkEncryptionRejection"_sr, false);
 		// Mutually exclusive with performValidation, whose audit compares restored contents that by
 		// definition do not exist when the restore is expected to fail.
 		expectRestoreFailure = getOption(options, "expectRestoreFailure"_sr, false);
@@ -569,6 +577,80 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 		// Testing v1 (non-partitioned) backup approach
 		// This does not require backup workers
+		if (expectBulkIncrementalRejection) {
+			// --incremental suppresses the snapshot that a bulk mode exists to produce, so submitBackup
+			// must refuse the pair outright. A separate tag keeps a wrongly-accepted submit from
+			// colliding with the real backup below; the assert fails the test either way.
+			Error rejected;
+			try {
+				co_await backupAgent->submitBackup(cx,
+				                                   StringRef(backupContainer),
+				                                   {},
+				                                   initSnapshotInterval,
+				                                   snapshotInterval,
+				                                   tag.toString() + "_incrreject",
+				                                   backupRanges,
+				                                   StopWhenDone{ !stopDifferentialDelay },
+				                                   MutationLogType::DEFAULT,
+				                                   IncrementalBackupOnly::True,
+				                                   encryptionKeyFileName,
+				                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+				                                   snapshotMode);
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				rejected = e;
+			}
+			TraceEvent("BS3BCW_IncrementalBackupRejection", randomID)
+			    .error(rejected)
+			    .detail("SnapshotMode", snapshotMode)
+			    .detail("Accepted", rejected.code() == error_code_success);
+			ASSERT(rejected.code() == error_code_backup_error);
+		}
+
+		if (expectBulkEncryptionRejection) {
+			// Nothing on the SST path encrypts, so submitBackup must refuse a bulkdump under an encryption
+			// key rather than produce a backup whose logs are encrypted and whose SSTs are not. The key
+			// file has to be real: openContainer starts reading it before the guard is reached, and a
+			// missing file raises SevError FailedToOpenEncryptionKeyFile, which would fail the run for an
+			// unrelated reason.
+			//
+			// Only the backup side is probed. The restore side cannot be: restore() rejects a key supplied
+			// against an unencrypted backup with restore_error of its own (FileBackupAgent.cpp, "Backup is
+			// not encrypted") before submitRestore runs, so an assertion on restore_error would pass
+			// without ever reaching the guard. Reaching it needs an encrypted bulkdump backup, which
+			// submitBackup now refuses to create.
+			std::string probeKeyFile = "simfdb/" + getTestEncryptionFileName();
+			co_await BackupContainerFileSystem::createTestEncryptionKeyFile(probeKeyFile);
+			Error rejected;
+			try {
+				co_await backupAgent->submitBackup(cx,
+				                                   StringRef(backupContainer),
+				                                   {},
+				                                   initSnapshotInterval,
+				                                   snapshotInterval,
+				                                   tag.toString() + "_encreject",
+				                                   backupRanges,
+				                                   StopWhenDone{ !stopDifferentialDelay },
+				                                   MutationLogType::DEFAULT,
+				                                   IncrementalBackupOnly::False,
+				                                   probeKeyFile,
+				                                   DEFAULT_ENCRYPTION_BLOCK_SIZE,
+				                                   snapshotMode);
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				rejected = e;
+			}
+			TraceEvent("BS3BCW_EncryptionBackupRejection", randomID)
+			    .error(rejected)
+			    .detail("SnapshotMode", snapshotMode)
+			    .detail("Accepted", rejected.code() == error_code_success);
+			ASSERT(rejected.code() == error_code_backup_error);
+		}
+
 		try {
 			co_await backupAgent->submitBackup(cx,
 			                                   StringRef(backupContainer),
@@ -829,6 +911,42 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					// and our lockUID so restore uses the same lock for checkDatabaseLock calls
 					Version v = ::invalidVersion;
 					Error restoreError;
+					if (expectBulkIncrementalRejection) {
+						// Mirror on the restore side: bulkload ingests the snapshot --incremental skips,
+						// so submitRestore must refuse the pair. Runs against the backup just taken, so
+						// the container is describable and a throw can only come from the guard.
+						Error rejected;
+						try {
+							co_await backupAgent.restore(cx,
+							                             cx,
+							                             Standalone<StringRef>(restoreTag.toString() + "_incrreject"),
+							                             KeyRef(lastBackupContainer->getURL()),
+							                             lastBackupContainer->getProxy(),
+							                             restoreRanges,
+							                             WaitForComplete::False,
+							                             ::invalidVersion,
+							                             Verbose::True,
+							                             Key(),
+							                             Key(),
+							                             LockDB::False,
+							                             UnlockDB::False,
+							                             OnlyApplyMutationLogs::True,
+							                             InconsistentSnapshotOnly::False,
+							                             ::invalidVersion,
+							                             lastBackupContainer->getEncryptionKeyFileName(),
+							                             lockUID,
+							                             /*useRangeFileRestore=*/false);
+						} catch (Error& e) {
+							if (e.code() == error_code_actor_cancelled) {
+								throw;
+							}
+							rejected = e;
+						}
+						TraceEvent("BS3BCW_IncrementalRestoreRejection")
+						    .error(rejected)
+						    .detail("Accepted", rejected.code() == error_code_success);
+						ASSERT(rejected.code() == error_code_restore_error);
+					}
 					try {
 						v = co_await backupAgent.restore(cx,
 						                                 cx,
