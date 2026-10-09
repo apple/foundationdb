@@ -122,6 +122,8 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 			any = t.getDouble(0);
 		} else if (t.getType(0) == Tuple::ElementType::VERSIONSTAMP) {
 			any = t.getVersionstamp(0);
+		} else if (t.getType(0) == Tuple::ElementType::UUID) {
+			any = t.getUuid(0);
 		} else {
 			ASSERT(false);
 		}

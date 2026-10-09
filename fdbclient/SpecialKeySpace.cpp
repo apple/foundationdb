@@ -1647,6 +1647,9 @@ Future<RangeResult> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw,
 				result.push_back_deep(
 				    result.arena(),
 				    KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(config->getValue()))));
+			} else if (config->getValue().type() == typeid(UID)) {
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(prefixedKey, std::any_cast<UID>(config->getValue()).toString()));
 			} else {
 				ASSERT(false);
 			}

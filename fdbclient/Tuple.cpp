@@ -23,9 +23,13 @@
 
 #include <cstring>
 
+const uint8_t UUID_CODE = 0x30;
 const uint8_t VERSIONSTAMP_96_CODE = 0x33;
 const uint8_t USER_TYPE_START = 0x40;
 const uint8_t USER_TYPE_END = 0x4f;
+
+// Size of a UUID element's payload, excluding the typecode.
+const size_t UUID_TUPLE_SIZE = 16;
 
 // TODO: Many functions copied from bindings/flow/Tuple.cpp. Merge at some point.
 static float bigEndianFloat(float orig) {
@@ -82,6 +86,8 @@ Tuple::Tuple(StringRef const& str, bool exclude_incomplete, bool include_user_ty
 			i += 1;
 		} else if (data[i] == VERSIONSTAMP_96_CODE) {
 			i += VERSIONSTAMP_TUPLE_SIZE + 1;
+		} else if (data[i] == UUID_CODE) {
+			i += UUID_TUPLE_SIZE + 1;
 		} else if (include_user_type && isUserType(data[i])) {
 			// User defined codes must come at the end of a Tuple and are not delimited.
 			i = data.size();
@@ -127,6 +133,16 @@ std::string Tuple::tupleToString(const Tuple& tuple) {
 			              versionstamp.getVersion(),
 			              versionstamp.getBatchNumber(),
 			              versionstamp.getUserVersion());
+		} else if (type == Tuple::UUID) {
+			// Canonical 8-4-4-4-12 hex form. An incomplete final UUID is
+			// printed only up to the bytes that are present.
+			StringRef raw = tuple.subTupleRawString(i);
+			for (size_t b = 1; b < raw.size(); b++) {
+				if (b == 5 || b == 7 || b == 9 || b == 11) {
+					str += "-";
+				}
+				str += format("%02x", raw[b]);
+			}
 		} else {
 			ASSERT(false);
 		}
@@ -164,6 +180,16 @@ Tuple& Tuple::append(TupleVersionstamp const& vs) {
 
 	data.push_back(data.arena(), VERSIONSTAMP_96_CODE);
 	data.append(data.arena(), vs.begin(), vs.size());
+
+	return *this;
+}
+
+Tuple& Tuple::append(UID const& uuid) {
+	offsets.push_back(data.size());
+
+	data.push_back(data.arena(), UUID_CODE);
+	uint64_t bytes[2] = { bigEndian64(uuid.first()), bigEndian64(uuid.second()) };
+	data.append(data.arena(), reinterpret_cast<const uint8_t*>(bytes), sizeof(bytes));
 
 	return *this;
 }
@@ -305,6 +331,8 @@ Tuple::ElementType Tuple::getType(size_t index) const {
 		return ElementType::BOOL;
 	} else if (code == VERSIONSTAMP_96_CODE) {
 		return ElementType::VERSIONSTAMP;
+	} else if (code == UUID_CODE) {
+		return ElementType::UUID;
 	} else if (isUserType(code)) {
 		return ElementType::USER_TYPE;
 	} else {
@@ -467,6 +495,21 @@ TupleVersionstamp Tuple::getVersionstamp(size_t index) const {
 	return TupleVersionstamp(StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE));
 }
 
+UID Tuple::getUuid(size_t index) const {
+	if (index >= offsets.size()) {
+		throw invalid_tuple_index();
+	}
+	ASSERT_LT(offsets[index], data.size());
+	uint8_t code = data[offsets[index]];
+	if (code != UUID_CODE) {
+		throw invalid_tuple_data_type();
+	}
+	ASSERT_LE(offsets[index] + 1 + UUID_TUPLE_SIZE, data.size());
+	uint64_t bytes[2];
+	memcpy(bytes, data.begin() + offsets[index] + 1, sizeof(bytes));
+	return UID(bigEndian64(bytes[0]), bigEndian64(bytes[1]));
+}
+
 Tuple::UserTypeStr Tuple::getUserType(size_t index) const {
 	// Valid index.
 	if (index >= offsets.size()) {
@@ -561,6 +604,74 @@ TEST_CASE("/fdbclient/Tuple/makeTuple") {
 	ASSERT(t1.getType(7) == Tuple::VERSIONSTAMP);
 	ASSERT(t1.getType(8) == Tuple::USER_TYPE);
 	ASSERT(t1.size() == 9);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/Tuple/uuid") {
+	// Pack the element by hand, so that the encoding is checked independently
+	// of append(UID).
+	uint8_t packed[17];
+	packed[0] = 0x30;
+	for (int i = 0; i < 16; i++) {
+		packed[i + 1] = uint8_t(i + 1);
+	}
+	Standalone<StringRef> uuidElement = StringRef(packed, sizeof(packed));
+
+	Tuple single = Tuple::unpack(uuidElement);
+	ASSERT(single.size() == 1);
+	ASSERT(single.getType(0) == Tuple::UUID);
+	ASSERT(single.subTupleRawString(0) == uuidElement);
+	ASSERT(single.pack() == uuidElement);
+	ASSERT(Tuple::tupleToString(single) == "01020304-0506-0708-090a-0b0c0d0e0f10");
+
+	// A UUID between other elements must not shift their offsets.
+	Standalone<StringRef> mixedBytes =
+	    Tuple::makeTuple("before"_sr).pack().withSuffix(uuidElement).withSuffix(Tuple::makeTuple(42).pack());
+	Tuple mixed = Tuple::unpack(mixedBytes);
+	ASSERT(mixed.size() == 3);
+	ASSERT(mixed.getType(0) == Tuple::BYTES);
+	ASSERT(mixed.getType(1) == Tuple::UUID);
+	ASSERT(mixed.getType(2) == Tuple::INT);
+	ASSERT(mixed.getString(0) == "before"_sr);
+	ASSERT(mixed.subTupleRawString(1) == uuidElement);
+	ASSERT(mixed.getInt(2) == 42);
+	ASSERT(mixed.pack() == mixedBytes);
+
+	// append(UID) and getUuid() must match the hand-packed encoding.
+	UID uid(0x0102030405060708ULL, 0x090a0b0c0d0e0f10ULL);
+	ASSERT(Tuple().append(uid).pack() == uuidElement);
+	ASSERT(Tuple::makeTuple(uid).pack() == uuidElement);
+	ASSERT(single.getUuid(0) == uid);
+	ASSERT(mixed.getUuid(1) == uid);
+	try {
+		mixed.getUuid(0); // a BYTES element
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_invalid_tuple_data_type);
+	}
+
+	// An incomplete final UUID is kept, like other fixed-size elements, and
+	// dropped if exclude_incomplete is set.
+	for (int len : { 1, 16 }) {
+		StringRef truncated(packed, len);
+		Tuple incomplete = Tuple::unpack(truncated);
+		ASSERT(incomplete.size() == 1);
+		ASSERT(incomplete.getType(0) == Tuple::UUID);
+		ASSERT(incomplete.subTupleRawString(0) == truncated);
+		ASSERT(incomplete.pack() == truncated);
+		ASSERT(Tuple::unpack(truncated, true).size() == 0);
+	}
+	ASSERT(Tuple::tupleToString(Tuple::unpack(StringRef(packed, 1))) == "");
+	ASSERT(Tuple::tupleToString(Tuple::unpack(StringRef(packed, 16))) == "01020304-0506-0708-090a-0b0c0d0e0f");
+
+	Standalone<StringRef> truncatedMixed = Tuple::makeTuple("before"_sr).pack().withSuffix(StringRef(packed, 16));
+	Tuple incompleteMixed = Tuple::unpack(truncatedMixed);
+	ASSERT(incompleteMixed.size() == 2);
+	ASSERT(incompleteMixed.getString(0) == "before"_sr);
+	ASSERT(incompleteMixed.getType(1) == Tuple::UUID);
+	ASSERT(incompleteMixed.pack() == truncatedMixed);
+	ASSERT(Tuple::unpack(truncatedMixed, true).size() == 1);
 
 	return Void();
 }
