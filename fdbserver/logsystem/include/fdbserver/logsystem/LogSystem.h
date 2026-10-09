@@ -328,6 +328,11 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	void stopRejoins();
 
+	// Replaces the advertised interface of a TLog belonging to a completed generation, reporting whether
+	// anything changed. Current-generation TLogs are deliberately not matched: adopting one without
+	// re-locking it would bypass recovery.
+	bool updateOldGenerationTLog(const TLogInterface& tlog);
+
 	void addref();
 
 	void delref();
