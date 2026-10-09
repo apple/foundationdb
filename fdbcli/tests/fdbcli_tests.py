@@ -458,6 +458,93 @@ def status_json_file_region_failover_message():
     assert "may have data loss" not in stdout
 
 
+def status_json_degraded_multi_region_message():
+    # A multi-region cluster whose primary region is down while its satellite survives recovers without data
+    # loss: the log generation that lost its primary set still has an intact synchronous satellite copy, so
+    # the server reports possibly_losing_data=false for it. Status must warn about availability loss, explain
+    # that the surviving region is expected to hold all committed data, and must not claim data loss.
+    status_json = {
+        "client": {
+            "cluster_file": {"path": "fdb.cluster", "up_to_date": True},
+            "coordinators": {"coordinators": [], "quorum_reachable": True},
+            "database_status": {"available": True, "healthy": False},
+            "messages": [],
+            "timestamp": 1417807090,
+        },
+        "cluster": {
+            "configuration": {
+                "redundancy_mode": "double",
+                "storage_engine": "ssd-2",
+                "coordinators_count": 3,
+                "excluded_servers": [],
+            },
+            "data": {"state": {"name": "healthy", "healthy": True}},
+            "degraded_multi_region": True,
+            "fault_tolerance": {
+                "max_zone_failures_without_losing_availability": -1,
+                "max_zone_failures_without_losing_data": -1,
+            },
+            "logs": [
+                {
+                    "epoch": 2,
+                    "current": True,
+                    "begin_version": 100,
+                    "possibly_losing_data": False,
+                    "log_interfaces": [],
+                },
+                {
+                    "epoch": 1,
+                    "current": False,
+                    "begin_version": 1,
+                    "end_version": 100,
+                    "possibly_losing_data": False,
+                    "log_fault_tolerance": -1,
+                    "satellite_log_replication_factor": 1,
+                    "satellite_log_fault_tolerance": 0,
+                    "log_interfaces": [
+                        {
+                            "id": "aaaaaaaaaaaaaaaa",
+                            "healthy": False,
+                            "address": "1.1.1.1:4500",
+                        }
+                    ],
+                },
+            ],
+            "machines": {},
+            "processes": {},
+        },
+    }
+
+    def render(status):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as status_file:
+            json.dump(status, status_file)
+            status_file.flush()
+            result = subprocess.run(
+                [command_template[0], "--status-from-json", status_file.name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=fdbcli_env,
+            )
+        assert result.returncode == 0, result.stderr.decode("utf-8")
+        return result.stdout.decode("utf-8")
+
+    stdout = render(status_json)
+    assert "Warning: the database may have availability loss." in stdout
+    assert "may have data loss" not in stdout
+    assert (
+        "One region is unavailable; committed data is expected to remain safe in the surviving region."
+        in stdout
+    )
+    # The unavailable interfaces of the generation whose data is safe are still listed, so that the operator
+    # knows what has to come back for the cluster to finish recovering.
+    assert "missing log interfaces(id,address): aaaaaaaaaaaaaaaa,1.1.1.1:4500" in stdout
+
+    # The region note is only printed when the cluster explicitly reports an unavailable region.
+    del status_json["cluster"]["degraded_multi_region"]
+    stdout = render(status_json)
+    assert "One region is unavailable" not in stdout
+
+
 @enable_logging()
 def status_excluded_processes_message(logger):
     # get all coordinators' address
@@ -1107,6 +1194,7 @@ if __name__ == "__main__":
         integer_options()
         tls_address_suffix()
         status_json_file_region_failover_message()
+        status_json_degraded_multi_region_message()
         idempotency_ids()
         cdc_operator_commands()
         audit_status_arguments()

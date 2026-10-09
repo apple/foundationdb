@@ -711,9 +711,14 @@ void printStatus(StatusObjectReader statusObj,
 							outputString += format(" (%d without data loss)", dataLoss);
 						}
 
+						// Both verdicts are evaluated before the branching below so that region availability can
+						// be reported independently of how the log state is classified.
+						const bool possiblyLosingData = logEpochsMayBeLosingData(statusObjCluster);
+						bool degradedMultiRegion = false;
+						statusObjCluster.get("degraded_multi_region", degradedMultiRegion);
+
 						if (dataLoss == -1) {
 							ASSERT_WE_THINK(availLoss == -1);
-							const bool possiblyLosingData = logEpochsMayBeLosingData(statusObjCluster);
 							if (possiblyLosingData) {
 								outputString += format(
 								    "\n\n  Warning: the database may have data loss and availability loss. Please "
@@ -726,18 +731,14 @@ void printStatus(StatusObjectReader statusObj,
 							}
 							if (statusObjCluster.has("logs")) {
 								for (StatusObjectReader logEpoch : statusObjCluster.last().get_array()) {
-									bool logEpochPossiblyLosingData;
-									if (logEpoch.get("possibly_losing_data", logEpochPossiblyLosingData) &&
-									    !logEpochPossiblyLosingData) {
-										continue;
-									}
-									// Current epoch doesn't have an end version.
-									int64_t epoch, beginVersion, endVersion = invalidVersion;
-									bool current;
-									logEpoch.get("epoch", epoch);
-									logEpoch.get("begin_version", beginVersion);
-									logEpoch.get("end_version", endVersion);
-									logEpoch.get("current", current);
+									// Unknown means "assume at risk": the field is absent on servers that predate it.
+									bool logEpochPossiblyLosingData = true;
+									const bool dataAtRisk =
+									    !logEpoch.get("possibly_losing_data", logEpochPossiblyLosingData) ||
+									    logEpochPossiblyLosingData;
+									// Unavailable log interfaces are the ones that must come back for the cluster to
+									// finish recovering, so an epoch is reported when either its data is at risk or any
+									// of its log interfaces is unavailable.
 									std::string missing_log_interfaces;
 									if (logEpoch.has("log_interfaces")) {
 										for (StatusObjectReader logInterface : logEpoch.last().get_array()) {
@@ -750,6 +751,16 @@ void printStatus(StatusObjectReader statusObj,
 											}
 										}
 									}
+									if (!dataAtRisk && missing_log_interfaces.empty()) {
+										continue;
+									}
+									// Current epoch doesn't have an end version.
+									int64_t epoch, beginVersion, endVersion = invalidVersion;
+									bool current;
+									logEpoch.get("epoch", epoch);
+									logEpoch.get("begin_version", beginVersion);
+									logEpoch.get("end_version", endVersion);
+									logEpoch.get("current", current);
 									outputString += format(
 									    "  %s log epoch: %lld begin: %lld end: %s, missing "
 									    "log interfaces(id,address): %s\n",
@@ -760,6 +771,16 @@ void printStatus(StatusObjectReader statusObj,
 									    missing_log_interfaces.c_str());
 								}
 							}
+						}
+						// Region availability is orthogonal to the data-loss verdict above: report it whenever the
+						// cluster says a region is unavailable, whichever way the log state was classified. The
+						// statement about committed data is only made when the log state does not indicate data loss.
+						if (degradedMultiRegion) {
+							outputString += possiblyLosingData
+							                    ? "\n  One region is unavailable; data in the surviving region may be "
+							                      "incomplete.\n"
+							                    : "\n  One region is unavailable; committed data is expected to remain "
+							                      "safe in the surviving region.\n";
 						}
 					}
 				}

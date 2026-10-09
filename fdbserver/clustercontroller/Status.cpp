@@ -1164,13 +1164,55 @@ static JsonBuilderObject clientStatusFetcher(
 	return clientStatus;
 }
 
+// Parse the recovery-provided remote-region-stall event into a boolean. The event is emitted by
+// trackTlogRecovery when the remote region's log set could not be recruited (allLogs == false with
+// usableRegions > 1). An absent or empty event (e.g. an older server that does not emit it yet) means the
+// signal is not present, so the cluster is not flagged as degraded.
+static bool parseRemoteRegionLogsMissing(const TraceEventFields& remoteRegionStallEvent) {
+	if (remoteRegionStallEvent.size() == 0) {
+		return false;
+	}
+	return remoteRegionStallEvent.getInt("RemoteRegionLogsMissing") != 0;
+}
+
+// Parse how long (in seconds) the remote-region-stall signal has been active. The recovery side carries
+// the absolute time the stall began ("RemoteRegionStallStartSeconds") rather than a pre-computed duration:
+// the event is (re)emitted on core-state changes, so a duration field would go stale between emissions,
+// whereas the start timestamp lets status compute the elapsed time from this event on every request. An
+// absent event, an event reporting that the logs are not missing, or any malformed value conservatively
+// reports 0, which keeps the cluster from being flagged as degraded.
+static double parseRemoteRegionStallSeconds(const TraceEventFields& remoteRegionStallEvent) {
+	try {
+		if (remoteRegionStallEvent.size() == 0) {
+			return 0.0;
+		}
+		if (remoteRegionStallEvent.getInt("RemoteRegionLogsMissing") == 0) {
+			return 0.0;
+		}
+		double stallStartSeconds = remoteRegionStallEvent.getDouble("RemoteRegionStallStartSeconds");
+		return stallStartSeconds > 0.0 ? std::max(0.0, now() - stallStartSeconds) : 0.0;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		return 0.0;
+	} catch (std::exception&) {
+		// Malformed numeric fields fail safe to "no sustained stall".
+		return 0.0;
+	}
+}
+
 static AsyncResult<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
                                                                  WorkerDetails ccWorker,
                                                                  WorkerDetails mWorker,
                                                                  int workerCount,
                                                                  std::set<std::string>* incomplete_reasons,
-                                                                 int* statusCode) {
+                                                                 int* statusCode,
+                                                                 bool* remoteRegionLogsMissing,
+                                                                 double* remoteRegionStallSeconds) {
 	JsonBuilderObject message;
+	*remoteRegionLogsMissing = false;
+	*remoteRegionStallSeconds = 0.0;
 	Transaction tr(cx);
 	try {
 		Future<TraceEventFields> mdActiveGensF =
@@ -1185,10 +1227,24 @@ static AsyncResult<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 		    timeoutError(ccWorker.interf.eventLogRequest.getReply(EventLogRequest(StringRef(
 		                     getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME)))),
 		                 1.0);
+		Future<TraceEventFields> remoteRegionStallF =
+		    timeoutError(ccWorker.interf.eventLogRequest.getReply(EventLogRequest(StringRef(getRecoveryEventName(
+		                     ClusterRecoveryEventType::CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME)))),
+		                 1.0);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		Future<ErrorOr<Version>> rvF = errorOr(timeoutError(tr.getReadVersion(), 1.0));
 
-		co_await (success(mdActiveGensF) && success(mdF) && success(rvF) && success(mDBAvailableF));
+		co_await (success(mdActiveGensF) && success(mdF) && success(rvF) && success(mDBAvailableF) &&
+		          success(remoteRegionStallF));
+
+		// Precisely report whether recovery is stalled because the remote region's log set could not be
+		// recruited (allLogs == false with usableRegions > 1). This replaces the coarser heuristic of matching
+		// on the accepting_commits recovery state, which would also flag a normal transient pass through
+		// accepting_commits as degraded. Additionally report how long the stall has been active, because the
+		// signal is also transiently true during a normal (non-initial) recovery of a healthy multi-region
+		// cluster until the remote epoch is recruited.
+		*remoteRegionLogsMissing = parseRemoteRegionLogsMissing(remoteRegionStallF.get());
+		*remoteRegionStallSeconds = parseRemoteRegionStallSeconds(remoteRegionStallF.get());
 
 		const TraceEventFields& md = mdF.get();
 		int mStatusCode = md.getInt("StatusCode");
@@ -1767,6 +1823,7 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 
 static AsyncResult<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
                                                         DatabaseConfiguration configuration,
+                                                        bool degradedMultiRegion,
                                                         int* minStorageReplicasRemaining) {
 	JsonBuilderObject statusObjData;
 
@@ -1793,7 +1850,9 @@ static AsyncResult<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 		if (startingStats.size() && startingStats.getValue("State") != "Active") {
 			JsonBuilderObject stateSectionObj;
 			stateSectionObj["name"] = "initializing";
-			stateSectionObj["description"] = "(Re)initializing automatic data distribution";
+			stateSectionObj["description"] = degradedMultiRegion
+			                                     ? "Degraded multiregional (Re)initializing automatic data distribution"
+			                                     : "(Re)initializing automatic data distribution";
 			statusObjData["state"] = stateSectionObj;
 			co_return statusObjData;
 		}
@@ -2388,6 +2447,23 @@ static AsyncResult<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 	co_return statusObj;
 }
 
+// A satellite log set carries a synchronous copy of its region's mutation stream, and a commit is acknowledged
+// only after the satellite quorum has made it durable. A log generation whose local primary set has been lost
+// is therefore still fully recoverable (its storage servers can still catch up) as long as its local satellite
+// set still satisfies its replication policy, even though the fault-tolerance counters of the lost primary set
+// are negative. This is deliberately conservative in the other direction: a generation with no satellite set,
+// or with a satellite set that no longer satisfies its policy, stays marked as possibly losing data.
+static bool computePossiblyLosingData(int minFaultTolerance,
+                                      Optional<int32_t> logFaultTolerance,
+                                      Optional<int32_t> satLogFaultTolerance) {
+	if (minFaultTolerance >= 0) {
+		return false;
+	}
+	const bool primarySetLost = logFaultTolerance.present() && logFaultTolerance.get() < 0;
+	const bool satelliteCopyIntact = satLogFaultTolerance.present() && satLogFaultTolerance.get() >= 0;
+	return !(primarySetLost && satelliteCopyIntact);
+}
+
 static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
                                      const std::vector<TLogSet>& tLogs,
                                      std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
@@ -2462,8 +2538,10 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
 	*logFaultTolerance = std::min(*logFaultTolerance, minFaultTolerance);
 	statusObj["log_interfaces"] = logsObj;
 	// We may lose logs in this log generation, storage servers may never be able to catch up this log
-	// generation.
-	statusObj["possibly_losing_data"] = minFaultTolerance < 0;
+	// generation, unless its synchronous satellite copy is still intact: in that case the committed mutations
+	// remain recoverable from the satellite.
+	statusObj["possibly_losing_data"] =
+	    computePossiblyLosingData(minFaultTolerance, log_fault_tolerance, sat_log_fault_tolerance);
 
 	if (sat_log_replication_factor.present())
 		statusObj["satellite_log_replication_factor"] = sat_log_replication_factor.get();
@@ -3032,9 +3110,17 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 
 		// construct status information for cluster subsections
 		int statusCode = (int)RecoveryStatus::END;
+		bool remoteRegionLogsMissing = false;
+		double remoteRegionStallSeconds = 0.0;
 		std::vector<AsyncResult<ErrorOr<JsonBuilderObject>>> clusterSubsectionFetchers;
-		clusterSubsectionFetchers.push_back(errorOr(recoveryStateStatusFetcher(
-		    cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode)));
+		clusterSubsectionFetchers.push_back(errorOr(recoveryStateStatusFetcher(cx,
+		                                                                       ccWorker,
+		                                                                       mWorker,
+		                                                                       workers.size(),
+		                                                                       &status_incomplete_reasons,
+		                                                                       &statusCode,
+		                                                                       &remoteRegionLogsMissing,
+		                                                                       &remoteRegionStallSeconds)));
 		clusterSubsectionFetchers.push_back(errorOr(timeoutError(getIdmpKeyStatus(cx), 5.0)));
 		clusterSubsectionFetchers.push_back(errorOr(versionEpochStatusFetcher(cx, &status_incomplete_reasons)));
 
@@ -3172,9 +3258,22 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 			int fullyReplicatedRegions = -1;
 			// NOTE: here we should start all the transaction before wait in order to overlay latency
 			Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
+			// The cluster is "degraded multi-region" when recovery explicitly reports that it is stalled because
+			// the remote region's log set could not be recruited (allLogs == false with usableRegions > 1) after
+			// accepting commits, and the stall has persisted for a while. Committed data is still safe in the
+			// surviving region (and its satellite), so this is a degraded-but-not-data-losing state. Requiring
+			// the recovery state to be at (or past) accepting_commits avoids the transient phases before the
+			// cluster is actually accepting commits. The sustained-stall requirement avoids the transient window
+			// during a normal (non-initial) recovery of a healthy multi-region cluster, where the remote log set
+			// is legitimately absent at accepting_commits until the remote epoch finishes recruiting.
+			bool degradedMultiRegion =
+			    configuration.present() && statusCode >= RecoveryStatus::accepting_commits &&
+			    configuration.get().usableRegions > 1 && remoteRegionLogsMissing &&
+			    remoteRegionStallSeconds >= SERVER_KNOBS->DEGRADED_MULTI_REGION_MIN_STALL_SECONDS;
+			statusObj["degraded_multi_region"] = degradedMultiRegion;
 			std::vector<AsyncResult<JsonBuilderObject>> statusSectionFetchers;
 			statusSectionFetchers.push_back(
-			    dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
+			    dataStatusFetcher(ddWorker, configuration.get(), degradedMultiRegion, &minStorageReplicasRemaining));
 			statusSectionFetchers.push_back(workloadStatusFetcher(
 			    db, workers, mWorker, rkWorker, &qos, &dataOverlay, &status_incomplete_reasons, storageServerFuture));
 			statusSectionFetchers.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
@@ -3511,10 +3610,15 @@ StatusReply clusterGetFaultToleranceStatus(const std::string& statusStr) {
 		json_spirit::mValue mv = readJSONStrictly(statusStr);
 		JSONDoc jsonDoc(mv);
 
-		std::string faultToleranceRelatedFields[] = {
-			"fault_tolerance", "data",    "logs", "maintenance_zone", "maintenance_seconds_remaining", "qos",
-			"recovery_state",  "messages"
-		};
+		std::string faultToleranceRelatedFields[] = { "fault_tolerance",
+			                                          "data",
+			                                          "logs",
+			                                          "maintenance_zone",
+			                                          "maintenance_seconds_remaining",
+			                                          "qos",
+			                                          "recovery_state",
+			                                          "messages",
+			                                          "degraded_multi_region" };
 
 		JsonBuilderObject statusObj;
 		for (std::string& field : faultToleranceRelatedFields) {
@@ -3913,6 +4017,108 @@ TEST_CASE("/status/json/merging") {
 	}
 
 	return Void();
+}
+
+// Verify the "degraded multi-region" signal parsing and computation, exercising the actual code paths used by
+// recoveryStateStatusFetcher and clusterGetStatusImpl. A cluster is only considered degraded multi-region when
+// recovery explicitly reports that the remote region's log set could not be recruited (allLogs == false with
+// usableRegions > 1) and the stall has persisted long enough to rule out the transient window that occurs
+// during a normal, non-initial recovery of a healthy multi-region cluster.
+TEST_CASE("/fdbserver/clustercontroller/degradedMultiRegionComputation") {
+	// parseRemoteRegionLogsMissing: event carries the signal.
+	{
+		TraceEventFields remoteRegionStallEvent;
+		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "1");
+		ASSERT(parseRemoteRegionLogsMissing(remoteRegionStallEvent));
+	}
+	// parseRemoteRegionLogsMissing: event explicitly says logs are not missing (normal recovery progressing).
+	{
+		TraceEventFields remoteRegionStallEvent;
+		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "0");
+		ASSERT(!parseRemoteRegionLogsMissing(remoteRegionStallEvent));
+	}
+	// parseRemoteRegionLogsMissing: empty event (older server that does not emit the signal) means false.
+	{
+		TraceEventFields remoteRegionStallEvent;
+		ASSERT(!parseRemoteRegionLogsMissing(remoteRegionStallEvent));
+	}
+
+	// Real scenario from production logs: with 2 usable regions, the first region is down, recovery is stalled
+	// and the remote log set has not been recruited (AllLogs=0), while old log generations remain (OldTLogDataSize=2).
+	// This is exactly the "degraded but not data-losing" state the signal is meant to surface.
+	{
+		TraceEventFields remoteRegionStallEvent;
+		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "1");
+		remoteRegionStallEvent.addField("AllLogs", "0");
+		remoteRegionStallEvent.addField("OldTLogDataSize", "2");
+		remoteRegionStallEvent.addField("UsableRegions", "2");
+		ASSERT(parseRemoteRegionLogsMissing(remoteRegionStallEvent));
+	}
+
+	// parseRemoteRegionStallSeconds: logs not missing -> no active stall, regardless of the carried start.
+	{
+		TraceEventFields remoteRegionStallEvent;
+		remoteRegionStallEvent.addField("RemoteRegionStallStartSeconds", format("%.6f", now() - 3600.0));
+		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "0");
+		ASSERT_EQ(parseRemoteRegionStallSeconds(remoteRegionStallEvent), 0.0);
+	}
+	// parseRemoteRegionStallSeconds: empty event -> no active stall.
+	{
+		TraceEventFields remoteRegionStallEvent;
+		ASSERT_EQ(parseRemoteRegionStallSeconds(remoteRegionStallEvent), 0.0);
+	}
+	// parseRemoteRegionStallSeconds: sustained stall -> elapsed time since the reported start exceeds the
+	// threshold, so status computes a duration that keeps growing without the event being re-emitted.
+	{
+		const double threshold = SERVER_KNOBS->DEGRADED_MULTI_REGION_MIN_STALL_SECONDS;
+		TraceEventFields remoteRegionStallEvent;
+		remoteRegionStallEvent.addField("RemoteRegionStallStartSeconds", format("%.6f", now() - (threshold + 5.0)));
+		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "1");
+		ASSERT_GE(parseRemoteRegionStallSeconds(remoteRegionStallEvent), threshold);
+	}
+	{
+		const double threshold = SERVER_KNOBS->DEGRADED_MULTI_REGION_MIN_STALL_SECONDS;
+		TraceEventFields remoteRegionStallEvent;
+		remoteRegionStallEvent.addField("RemoteRegionStallStartSeconds", format("%.6f", now() - 0.1));
+		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "1");
+		ASSERT_LT(parseRemoteRegionStallSeconds(remoteRegionStallEvent), threshold);
+	}
+	// parseRemoteRegionStallSeconds: malformed or non-positive start fails safe to 0 (not degraded).
+	{
+		TraceEventFields remoteRegionStallEvent;
+		remoteRegionStallEvent.addField("RemoteRegionStallStartSeconds", "garbage");
+		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "1");
+		ASSERT_EQ(parseRemoteRegionStallSeconds(remoteRegionStallEvent), 0.0);
+	}
+	{
+		TraceEventFields remoteRegionStallEvent;
+		remoteRegionStallEvent.addField("RemoteRegionStallStartSeconds", "-5.0");
+		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "1");
+		ASSERT_EQ(parseRemoteRegionStallSeconds(remoteRegionStallEvent), 0.0);
+	}
+
+	// computePossiblyLosingData: the primary region's local log set is lost while its satellite set still
+	// satisfies its replication policy, so the committed mutations are recoverable from that synchronous copy.
+	// This is the satellite-survives-a-region-failure case, which must not be reported as data loss.
+	{
+		ASSERT(!computePossiblyLosingData(/*minFaultTolerance=*/-1,
+		                                  /*logFaultTolerance=*/-1,
+		                                  /*satLogFaultTolerance=*/0));
+	}
+	// computePossiblyLosingData: the satellite set is degraded, missing, or there is no primary set to lose,
+	// so the negative fault tolerance does indicate that committed data may be lost.
+	{
+		ASSERT(computePossiblyLosingData(-1, -1, -1));
+		ASSERT(computePossiblyLosingData(-1, -1, Optional<int32_t>()));
+		ASSERT(computePossiblyLosingData(-1, Optional<int32_t>(), 0));
+	}
+	// computePossiblyLosingData: no local set is below its policy (including an epoch with no log sets).
+	{
+		ASSERT(!computePossiblyLosingData(0, 0, 0));
+		ASSERT(!computePossiblyLosingData(0, Optional<int32_t>(), Optional<int32_t>()));
+	}
+
+	co_return;
 }
 
 // Test that clusterGetStatus returns partial results within the specified deadline
