@@ -603,7 +603,9 @@ bool selectTraceClockSource(std::string source);
 bool validateTraceClockSource(std::string source);
 
 void addTraceRole(std::string const& role);
-void removeTraceRole(std::string const& role);
+// `address` must be the one that was current when the matching addTraceRole() ran; in simulation
+// role counts are per-process, and the caller may no longer be running under that process.
+void removeTraceRole(std::string const& role, NetworkAddress const& address);
 void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 void addUniversalTraceField(std::string const& name, std::string const& value);
