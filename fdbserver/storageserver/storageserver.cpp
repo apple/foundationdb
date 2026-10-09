@@ -7233,6 +7233,12 @@ Future<Void> tryGetRangeForBulkLoadFromSST(PromiseStream<RangeResult> results,
 	try {
 		std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader(
 		    keys, SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE, SERVER_KNOBS->FETCH_BLOCK_BYTES);
+		if (reader == nullptr) {
+			TraceEvent(SevWarnAlways, "SSBulkLoadNoSstReader")
+			    .detail("Reason", "Binary was built without RocksDB and cannot read SST files")
+			    .detail("File", sstFilePath);
+			throw unsupported_operation();
+		}
 		// TODO(BulkLoad): this can be a slow task. We will make this as async call.
 		reader->open(abspath(sstFilePath));
 		while (true) {
@@ -7345,6 +7351,12 @@ static Future<Void> processSampleFiles(StorageServer* data,
 						// Store as KeyValueRef to keep the original encoded size value
 						rawSamples.clear();
 						reader = newRocksDBSstFileReader();
+						if (reader == nullptr) {
+							TraceEvent(SevWarnAlways, "StorageServerNoSstReader", data->thisServerID)
+							    .detail("Reason", "Binary was built without RocksDB and cannot read SST files")
+							    .detail("File", sampleFilePath);
+							throw unsupported_operation();
+						}
 						reader->open(abspath(sampleFilePath));
 
 						TraceEvent(SevInfo, "StorageServerProcessingSampleFile", data->thisServerID)
@@ -10786,10 +10798,11 @@ Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* data,
 				}
 				anyFileCreated = false;
 				sstWriter = newRocksDBSstFileWriter();
-				sstWriter->open(bytesSampleFile);
+				// Null when built without RocksDB.
 				if (sstWriter == nullptr) {
 					break;
 				}
+				sstWriter->open(bytesSampleFile);
 				ASSERT(!metaData.ranges.empty());
 				std::sort(metaData.ranges.begin(), metaData.ranges.end(), [](KeyRange a, KeyRange b) {
 					// Debug usage: make sure no overlapping between compared two ranges
