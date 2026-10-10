@@ -1,13 +1,12 @@
 testClass = "Backup"
 
-# An old-generation backup worker only exists when a recovery happens while a partitioned-log backup
-# is draining the previous generation's tail. slow/BackupNewAndOldRestore.toml produces one only when a
-# recovery happens to land in that window: none did in 13 seeds, but it does occur. TriggerRecoveryLoop
-# creates the condition on every run instead of leaving it to chance.
+# An old-generation backup worker only exists when a recovery lands while a partitioned-log backup is
+# draining the previous generation's tail. TriggerRecoveryLoop creates that condition on every run
+# rather than leaving it to chance.
 #
-# Kept to a single phase deliberately. A fork of BackupNewAndOldRestore ran 616-1064 simsec and wrote
-# 205-525 MB of trace, close enough to the line cap that an unlucky run died of TracedTooManyLines
-# with no bug involved.
+# The restore phase is what makes the repair checkable: a replacement recruited behind durable
+# progress would publish a log file advertising coverage it lacks, and a backup-only test cannot see
+# that. The Cycle phases stay small to keep the run clear of the trace line cap.
 
 [configuration]
 
@@ -37,3 +36,29 @@ simBackupAgents = 'BackupToFile'
     # Recover by changing the resolver count, not killAll: rebooting every process is logged as a
     # SevError SimulatedFDBDTerminated, which fails the run on its own.
     killAllProportion = 0.0
+
+# Restore what was backed up. The Restore workload picks between backupTag1 and backupTag2 by
+# coinflip, so both must name the one tag this test takes.
+[[test]]
+testTitle = 'RestoreBackup'
+runConsistencyCheck = false
+waitForQuiescence = false
+simBackupAgents = 'BackupToFile'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Restore'
+    backupTag1 = 'newBackup'
+    backupTag2 = 'newBackup'
+
+# Cycle's own invariant check over the restored data is what actually catches a log file that
+# claimed versions it did not contain.
+[[test]]
+testTitle = 'CycleAfterRestore'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 1000.0
+    testDuration = 10.0
+    skipSetup = true

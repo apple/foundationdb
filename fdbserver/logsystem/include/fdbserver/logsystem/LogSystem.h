@@ -487,8 +487,8 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	// Points an old epoch's backup worker slot at a re-recruited replacement, keeping the entry in
 	// place so the epoch retains its hold on oldestBackupEpoch. Returns false if the dead worker is no
-	// longer tracked, meaning the replacement must not be installed. Takes the interface rather than a
-	// reply so both the partitioned-log and range-partitioned variants can use it.
+	// longer tracked, or if the replacement had already reported done, in either case meaning the
+	// replacement must not be installed.
 	bool replaceBackupWorker(UID deadWorker, const BackupInterface& replacement, LogEpoch backupEpoch);
 
 	// Frees a slot whose durable progress already covers its range, for a worker that died without
@@ -496,9 +496,10 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	// since there is no done request in flight to reconcile with.
 	void releaseBackupWorker(UID worker, LogEpoch backupEpoch);
 
-	// Releasing the last backup worker of an old epoch is what lets oldestBackupEpoch advance, so this
-	// also triggers backupWorkerChanged.
-	void recomputeOldestBackupEpoch();
+	// Erases a backup worker's slot and re-derives oldestBackupEpoch. Returns false if the epoch or
+	// the worker is no longer tracked. Dropping an epoch's last worker is what lets oldestBackupEpoch
+	// advance, so this also triggers backupWorkerChanged.
+	bool dropBackupWorker(UID worker, LogEpoch backupEpoch);
 
 	LogEpoch getOldestBackupEpoch() const;
 

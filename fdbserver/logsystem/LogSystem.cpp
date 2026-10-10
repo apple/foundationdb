@@ -1459,22 +1459,32 @@ void LogSystem::setRangePartitionedBackupWorkers(const std::vector<InitializeRan
 	backupWorkerChanged.trigger();
 }
 
-bool LogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
-	bool removed = false;
-	Reference<LogSet> logset = getEpochLogSet(req.backupEpoch);
-	if (logset.isValid()) {
-		for (auto it = logset->backupWorkers.begin(); it != logset->backupWorkers.end(); it++) {
-			if (it->getPtr()->get().interf().id() == req.workerUID) {
-				logset->backupWorkers.erase(it);
-				removed = true;
-				break;
-			}
-		}
+bool LogSystem::dropBackupWorker(UID worker, LogEpoch backupEpoch) {
+	Reference<LogSet> logset = getEpochLogSet(backupEpoch);
+	if (!logset.isValid()) {
+		return false;
 	}
 
-	if (removed) {
-		recomputeOldestBackupEpoch();
-	} else {
+	for (auto it = logset->backupWorkers.begin(); it != logset->backupWorkers.end(); it++) {
+		if (it->getPtr()->get().interf().id() != worker) {
+			continue;
+		}
+		logset->backupWorkers.erase(it);
+		oldestBackupEpoch = epoch;
+		for (const auto& old : oldLogData) {
+			if (old.epoch < oldestBackupEpoch && !old.tLogs[0]->backupWorkers.empty()) {
+				oldestBackupEpoch = old.epoch;
+			}
+		}
+		backupWorkerChanged.trigger();
+		return true;
+	}
+	return false;
+}
+
+bool LogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
+	const bool removed = dropBackupWorker(req.workerUID, req.backupEpoch);
+	if (!removed) {
 		removedBackupWorkers.insert(req.workerUID);
 	}
 
@@ -1519,32 +1529,12 @@ bool LogSystem::replaceBackupWorker(UID deadWorker, const BackupInterface& repla
 }
 
 void LogSystem::releaseBackupWorker(UID worker, LogEpoch backupEpoch) {
-	Reference<LogSet> logset = getEpochLogSet(backupEpoch);
-	if (!logset.isValid()) {
-		return;
+	if (dropBackupWorker(worker, backupEpoch)) {
+		TraceEvent("ReleaseBackupWorker", dbgid)
+		    .detail("BackupEpoch", backupEpoch)
+		    .detail("WorkerID", worker)
+		    .detail("OldestBackupEpoch", oldestBackupEpoch);
 	}
-
-	for (auto it = logset->backupWorkers.begin(); it != logset->backupWorkers.end(); it++) {
-		if (it->getPtr()->get().interf().id() == worker) {
-			logset->backupWorkers.erase(it);
-			recomputeOldestBackupEpoch();
-			TraceEvent("ReleaseBackupWorker", dbgid)
-			    .detail("BackupEpoch", backupEpoch)
-			    .detail("WorkerID", worker)
-			    .detail("OldestBackupEpoch", oldestBackupEpoch);
-			return;
-		}
-	}
-}
-
-void LogSystem::recomputeOldestBackupEpoch() {
-	oldestBackupEpoch = epoch;
-	for (const auto& old : oldLogData) {
-		if (old.epoch < oldestBackupEpoch && !old.tLogs[0]->backupWorkers.empty()) {
-			oldestBackupEpoch = old.epoch;
-		}
-	}
-	backupWorkerChanged.trigger();
 }
 
 LogEpoch LogSystem::getOldestBackupEpoch() const {

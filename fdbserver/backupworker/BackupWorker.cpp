@@ -950,16 +950,20 @@ Future<Void> pullAsyncData(BackupData* self) {
 				logSystemChange = self->logSystem.onChange();
 			}
 		}
-		// When TLog sets popped version, it means mutations between popped() and tagAt are unavailable
-		// on the TLog. So, we should stop pulling data from the TLog.
+		// When TLog sets popped version, mutations between popped() and tagAt are gone, so this worker
+		// cannot cover the range it was asked for. Exiting is the only safe answer: continuing would
+		// publish a log file whose advertised begin version precedes its first real mutation, and
+		// restore prefers a containing file over the smaller valid one it supersedes (filterDuplicates
+		// in BackupContainerFileSystem.cpp), so the gap would be silently restored as empty.
 		if (r->popped() > 0) {
-			TraceEvent(SevError, "BackupWorkerPullMissingMutations", self->myId)
+			CODE_PROBE(true, "Backup worker exited rather than cover a popped range", probe::decoration::rare);
+			TraceEvent(SevWarnAlways, "BackupWorkerPullMissingMutations", self->myId)
 			    .detail("Tag", self->tag)
 			    .detail("BackupEpoch", self->backupEpoch)
 			    .detail("Popped", r->popped())
 			    .detail("ExpectedPeekVersion", tagAt)
 			    .detail("RecruitedEpoch", self->recruitedEpoch);
-			ASSERT(true);
+			throw worker_removed();
 		}
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
