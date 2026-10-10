@@ -5039,10 +5039,12 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.code() == error_code_transaction_too_large)
-					dataSizeLimit /= 2;
-				else
+				if (err.code() == error_code_transaction_too_large && dataSizeLimit > 1) {
+					dataSizeLimit = std::max(1, dataSizeLimit / 2);
+					tr->reset();
+				} else {
 					co_await tr->onError(err);
+				}
 			}
 		}
 		if (!originalFileRanges.empty()) {
@@ -5408,10 +5410,12 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.code() == error_code_transaction_too_large)
-				dataSizeLimit /= 2;
-			else
+			if (err.code() == error_code_transaction_too_large && dataSizeLimit > 1) {
+				dataSizeLimit = std::max(1, dataSizeLimit / 2);
+				tr->reset();
+			} else {
 				co_await tr->onError(err);
+			}
 		}
 	}
 
@@ -5663,17 +5667,17 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	}
 
 	// Writes backup mutations to the database
-	static Future<Void> writeMutations(Database cx,
-	                                   std::vector<Standalone<VectorRef<KeyValueRef>>> mutations,
-	                                   Key mutationLogPrefix,
-	                                   Reference<Task> task,
-	                                   Reference<TaskBucket> taskBucket) {
+	static Future<int> writeMutations(Database cx,
+	                                  std::vector<Standalone<VectorRef<KeyValueRef>>> mutations,
+	                                  Key mutationLogPrefix,
+	                                  Reference<Task> task,
+	                                  Reference<TaskBucket> taskBucket,
+	                                  int txBytesLimit) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Standalone<VectorRef<KeyValueRef>> oldFormatMutations;
 		int mutationIndex = 0;
 		int mutationCount = 0;
 		int txBytes = 0;
-		int txBytesLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 		for (const auto& data : mutations) {
 			oldFormatMutations.append(oldFormatMutations.arena(), data.begin(), data.size());
@@ -5715,17 +5719,19 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				    .detail("TotalMutation", totalMutation)
 				    .detail("Bytes", txBytes);
 				mutationIndex += mutationCount; // update mutationIndex after the commit succeeds
+				tr->reset();
 				continue;
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.code() == error_code_transaction_too_large) {
-				txBytesLimit /= 2;
+			if (err.code() == error_code_transaction_too_large && txBytesLimit > 1 && mutationCount > 1) {
+				txBytesLimit = std::max(1, txBytesLimit / 2);
+				tr->reset();
 			} else {
 				co_await tr->onError(err);
 			}
 		}
-		co_return;
+		co_return txBytesLimit;
 	}
 
 	static Future<Void> _execute(Database cx,
@@ -5809,6 +5815,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		Future<Void> reader = readLogData(mutationStream, iterators, begin, end);
 
 		std::vector<Standalone<VectorRef<KeyValueRef>>> mutations;
+		int txBytesLimit = std::max(1, CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE);
 		int64_t totalBytes = 0;
 		Standalone<VectorRef<KeyValueRef>> oneVersionData;
 		while (true) {
@@ -5819,8 +5826,9 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 
 				// batching mutations from multiple versions together before writing to the database
 				int64_t bytes = oneVersionData.expectedSize();
-				if (totalBytes + bytes > CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE) {
-					co_await writeMutations(cx, mutations, restore.mutationLogPrefix(), task, taskBucket);
+				if (totalBytes + bytes > txBytesLimit) {
+					txBytesLimit = co_await writeMutations(
+					    cx, mutations, restore.mutationLogPrefix(), task, taskBucket, txBytesLimit);
 					mutations.clear();
 					totalBytes = 0;
 				}
@@ -5832,7 +5840,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			}
 			if (err.code() == error_code_end_of_stream) {
 				if (!mutations.empty()) {
-					co_await writeMutations(cx, mutations, restore.mutationLogPrefix(), task, taskBucket);
+					txBytesLimit = co_await writeMutations(
+					    cx, mutations, restore.mutationLogPrefix(), task, taskBucket, txBytesLimit);
 				}
 				break;
 			} else {
@@ -5916,34 +5925,44 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 StringRef RestoreLogDataPartitionedTaskFunc::name = "restore_log_data_partitioned"_sr;
 REGISTER_TASKFUNC(RestoreLogDataPartitionedTaskFunc);
 
-// each task can be partitioned to smaller ranges because commit proxy would
-// only start to commit alog/ prefix mutations to original prefix when
-// the final version is set, but do it in a single task for now for simplicity
+// Dispatch each version batch across bounded transactions. Commit proxies apply the loaded mutations only after
+// all range and log tasks in the batch complete.
 struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 	static StringRef name;
-	static constexpr uint32_t version = 1;
+	// Version 2 adds a range-file cursor. Older agents must not run continuation tasks because they would
+	// dispatch the range files again from the beginning of the version batch.
+	static constexpr uint32_t version = 2;
 	StringRef getName() const override { return name; };
 
 	static struct {
 		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
 		static TaskParam<Version> firstVersion() { return __FUNCTION__sr; }
 		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
+		static TaskParam<Version> beginRangeVersion() { return __FUNCTION__sr; }
+		static TaskParam<std::string> beginRangeFile() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> beginRangeBlock() { return __FUNCTION__sr; }
+		static TaskParam<int> dispatchTaskLimit() { return __FUNCTION__sr; }
 	} Params;
 
-	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
-	                            Reference<TaskBucket> taskBucket,
-	                            Reference<FutureBucket> futureBucket,
-	                            Reference<Task> task) {
+	static Future<Void> dispatch(Reference<ReadYourWritesTransaction> tr,
+	                             Reference<TaskBucket> taskBucket,
+	                             Reference<FutureBucket> futureBucket,
+	                             Reference<Task> task,
+	                             int taskBatchSize) {
 		RestoreConfig restore(task);
 
 		Version beginVersion = Params.beginVersion().get(task);
 		Version firstVersion = Params.firstVersion().get(task);
 		Version endVersion = Params.endVersion().get(task);
-		Reference<IBackupContainer> _bc = co_await restore.sourceContainer().getOrThrow(tr);
-		Reference<IBackupContainer> bc = getBackupContainerWithProxy(_bc);
+		// Version 1 tasks have no cursor and start a new batch. A cursor marks a continuation which is joined
+		// to the existing batch future until all range-file blocks have been dispatched.
+		bool addingToExistingBatch = Params.beginRangeVersion().exists(task);
+		Version beginRangeVersion = Params.beginRangeVersion().getOrDefault(task, beginVersion);
+		std::string beginRangeFile = Params.beginRangeFile().getOrDefault(task);
+		int64_t beginRangeBlock = Params.beginRangeBlock().getOrDefault(task);
 		Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
-		Version restoreVersion{ 0 };
+		Version restoreVersion = invalidVersion;
 		int fileLimit = 1000;
 
 		co_await (store(restoreVersion, restore.restoreVersion().getOrThrow(tr)) &&
@@ -5954,7 +5973,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		    std::min(restoreVersion + 1, endVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE);
 		// update the apply mutations end version so the mutations from the previous batch can be applied.
 		// Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
-		if (beginVersion > firstVersion) {
+		if (!addingToExistingBatch && beginVersion > firstVersion) {
 			// if the last file is [80, 100] and the restoreVersion is 90, we should use 90 here
 			// this is an additional taskFunc after last file
 			restore.setApplyEndVersion(tr, std::min(beginVersion, restoreVersion + 1));
@@ -5965,7 +5984,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait
-		if (applyLag > (buggify() ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
+		if (!addingToExistingBatch && applyLag > (buggify() ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
 			// Wait a small amount of time and then re-add this same task.
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 			co_await RestoreDispatchPartitionedTaskFunc::addTask(
@@ -5981,58 +6000,21 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			co_return;
 		}
 
-		// Get a batch of files.  We're targeting batchSize blocks(30k) being dispatched so query for batchSize(150)
-		// files (each of which is 0 or more blocks).
-		// lets say files have [10, 20), [20, 30) then if our range is [15, 25], we need to include both files,
-		// because [15, 20] is included in the first file, and [20, 25] is included in the second file
-		// say we have b and e
-		// as a result, the first file(inclusive): largest file whose begin <= b,
-		// the last file(exclusive): smallest file whose begin > e
-		// because of the encoding, version comes before the type of files(log or range),
-		// begin needs to start from the beginning --
-		// if we have a 3 files, (log,100,200), (range, 180), (log, 200, 300), then if we want to restore[190, 250]
-		// it would stop at (range, 180) and not looking at (log, 100, 200)
-		Optional<RestoreConfig::RestoreFile> beginLogInclude = Optional<RestoreConfig::RestoreFile>{};
-		// because of the encoding of RestoreFile, we use greaterThanOrEqual(end + 1) instead of greaterThan(end)
-		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result
-		// in a end+1
-		Optional<RestoreConfig::RestoreFile> endLogExclude = co_await restore.logFileSet().seekGreaterOrEqual(
-		    tr, RestoreConfig::RestoreFile({ endVersion + 1, "", false }));
-		RestoreConfig::FileSetT::RangeResultType logFiles =
-		    co_await restore.logFileSet().getRange(tr, beginLogInclude, endLogExclude, fileLimit);
-		Optional<RestoreConfig::RestoreFile> beginRangeInclude = co_await restore.rangeFileSet().seekGreaterOrEqual(
-		    tr, RestoreConfig::RestoreFile({ beginVersion, "", true }));
-		// greaterThanOrEqual(end + 1) instead of greaterThan(end)
-		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result
-		// in a end+1
-		Optional<RestoreConfig::RestoreFile> endRangeExclude = co_await restore.rangeFileSet().seekGreaterOrEqual(
-		    tr, RestoreConfig::RestoreFile({ endVersion + 1, "", true }));
+		Optional<RestoreConfig::RestoreFile> beginRangeInclude =
+		    Optional<RestoreConfig::RestoreFile>({ beginRangeVersion, beginRangeFile, true });
+		Optional<RestoreConfig::RestoreFile> endRangeExclude = RestoreConfig::RestoreFile({ endVersion, "", true });
 		RestoreConfig::FileSetT::RangeResultType rangeFiles =
-		    co_await restore.rangeFileSet().getRange(tr, beginRangeInclude, endRangeExclude, fileLimit);
-		int64_t maxTagID = 0;
-		std::vector<RestoreConfig::RestoreFile> logs;
-		std::vector<RestoreConfig::RestoreFile> ranges;
-		for (const auto& f : logFiles.results) {
-			if (f.endVersion > beginVersion) {
-				// skip all files whose endVersion is smaller or equal to beginVersion
-				logs.push_back(f);
-				maxTagID = std::max(maxTagID, f.tagId);
-			}
+		    co_await restore.rangeFileSet().getRange(tr, beginRangeInclude, endRangeExclude, taskBatchSize);
+		const auto& ranges = rangeFiles.results;
+		// Continuation tasks keep the batch future blocked while more range-file tasks are being added.
+		Reference<TaskFuture> allPartsDone;
+		if (addingToExistingBatch) {
+			Key fKey = co_await restore.batchFuture().getD(tr);
+			allPartsDone = makeReference<TaskFuture>(futureBucket, fKey);
+		} else {
+			allPartsDone = futureBucket->future(tr);
+			restore.batchFuture().set(tr, allPartsDone->pack());
 		}
-		for (const auto& f : rangeFiles.results) {
-			// the getRange might get out-of-bound range file because log files need them to work
-			if (f.version >= beginVersion && f.version < endVersion) {
-				ranges.push_back(f);
-			}
-		}
-		// allPartsDone will be set once all block tasks in the current batch are finished.
-		// create a new future for the new batch
-		Reference<TaskFuture> allPartsDone = futureBucket->future(tr);
-		restore.batchFuture().set(tr, allPartsDone->pack());
-
-		// if there are no files, if i am not the last batch, then on to the next batch
-		// if there are no files and i am the last batch, then just wait for applying to finish
-		// do we need this files.results.size() == 0 at all?
 		if (beginVersion > restoreVersion) {
 			if (applyLag == 0) {
 				// i am the last batch
@@ -6064,24 +6046,19 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			co_return;
 		}
 
-		// if we reach here, this batch is not empty(i.e. we have range and/or mutation files in this)
-		// Start moving through the file list and queuing up blocks.  Only queue up to RESTORE_DISPATCH_ADDTASK_SIZE
-		// blocks per Dispatch task and target batchSize total per batch but a batch must end on a complete version
-		// boundary so exceed the limit if necessary to reach the end of a version of files.
+		// Queue a bounded number of range-file blocks in this transaction. The version batch remains open across
+		// continuation tasks, so the next batch cannot advance the apply version until every block is finished.
 		std::vector<Future<Key>> addTaskFutures;
 		int i = 0;
-		// need to process all range files, keep using the same RestoreRangeTaskFunc as non-partitioned restore.
-		// this can be done first, because they are not overlap within a restore uid
-		// each task will read the file, restore those key to their original keys after clear that range
-		// also it will update the keyVersionMap[key -> versionFromRangeFile]
-		// by this time, corresponding mutation files within the same version range has not been applied yet
-		// because they are waiting for the singal of this RestoreDispatchPartitionedTaskFunc
-		// when log are being applied, they will compare version of key to the keyVersionMap updated by range file
-		// after each RestoreDispatchPartitionedTaskFunc, keyVersionMap will be clear if mutation version is larger.
+		int blocksDispatched = 0;
+		// Snapshot blocks update keyVersionMap before the apply version can advance.
 		for (; i < ranges.size(); ++i) {
-			RestoreConfig::RestoreFile& f = ranges[i];
+			const RestoreConfig::RestoreFile& f = ranges[i];
+			beginRangeVersion = f.version;
+			beginRangeFile = f.fileName;
 			// For each block of the file
-			for (int64_t j = 0; j < f.fileSize; j += f.blockSize) {
+			int64_t j = beginRangeBlock * f.blockSize;
+			for (; j < f.fileSize && blocksDispatched < taskBatchSize; j += f.blockSize) {
 				addTaskFutures.push_back(RestoreRangeTaskFunc::addTask(tr,
 				                                                       taskBucket,
 				                                                       task,
@@ -6089,23 +6066,76 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				                                                       j,
 				                                                       std::min<int64_t>(f.blockSize, f.fileSize - j),
 				                                                       TaskCompletionKey::joinWith(allPartsDone)));
+				++beginRangeBlock;
+				++blocksDispatched;
+				co_await addTaskFutures.back();
+				if (tr->getApproximateSize() >= CLIENT_KNOBS->RESTORE_DISPATCH_TX_SIZE) {
+					j += f.blockSize;
+					break;
+				}
+			}
+			if (j < f.fileSize) {
+				break;
+			}
+			// The next query must start after this file, including when the file was empty.
+			beginRangeFile += '\x00';
+			beginRangeBlock = 0;
+			if (blocksDispatched == taskBatchSize ||
+			    tr->getApproximateSize() >= CLIENT_KNOBS->RESTORE_DISPATCH_TX_SIZE) {
+				break;
 			}
 		}
-		addTaskFutures.push_back(RestoreLogDataPartitionedTaskFunc::addTask(
-		    tr, taskBucket, task, maxTagID, logs, beginVersion, endVersion, TaskCompletionKey::joinWith(allPartsDone)));
-		// even if file exsists, but they are empty, in this case just start the next batch
-
-		addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(tr,
-		                                                                     taskBucket,
-		                                                                     task,
-		                                                                     firstVersion,
-		                                                                     endVersion,
-		                                                                     nextEndVersion,
-		                                                                     TaskCompletionKey::noSignal(),
-		                                                                     allPartsDone));
+		if (!ranges.empty()) {
+			CODE_PROBE(true, "Partitioned restore dispatch continued");
+			// Query again from the saved cursor even if this page was fully consumed. An empty page proves all
+			// range files in the version batch have been dispatched, including batches with more than one page of
+			// files.
+			addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(
+			    tr,
+			    taskBucket,
+			    task,
+			    firstVersion,
+			    beginVersion,
+			    endVersion,
+			    TaskCompletionKey::joinWith(allPartsDone),
+			    Reference<TaskFuture>(),
+			    Optional<RestoreConfig::RestoreFile>({ beginRangeVersion, beginRangeFile, true }),
+			    beginRangeBlock));
+		} else {
+			Optional<RestoreConfig::RestoreFile> endLogExclude = RestoreConfig::RestoreFile({ endVersion, "", false });
+			RestoreConfig::FileSetT::RangeResultType logFiles =
+			    co_await restore.logFileSet().getRange(tr, {}, endLogExclude, fileLimit);
+			int64_t maxTagID = 0;
+			std::vector<RestoreConfig::RestoreFile> logs;
+			for (const auto& f : logFiles.results) {
+				if (f.endVersion > beginVersion) {
+					logs.push_back(f);
+					maxTagID = std::max(maxTagID, f.tagId);
+				}
+			}
+			addTaskFutures.push_back(
+			    RestoreLogDataPartitionedTaskFunc::addTask(tr,
+			                                               taskBucket,
+			                                               task,
+			                                               maxTagID,
+			                                               logs,
+			                                               beginVersion,
+			                                               endVersion,
+			                                               TaskCompletionKey::joinWith(allPartsDone)));
+			addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(tr,
+			                                                                     taskBucket,
+			                                                                     task,
+			                                                                     firstVersion,
+			                                                                     endVersion,
+			                                                                     nextEndVersion,
+			                                                                     TaskCompletionKey::noSignal(),
+			                                                                     allPartsDone));
+		}
 
 		co_await waitForAll(addTaskFutures);
-		co_await taskBucket->finish(tr, task);
+		// Add the next blocker before releasing this continuation's blocker, in case all block tasks finished.
+		Future<Void> setDone = addingToExistingBatch ? onDone->set(tr, taskBucket) : Void();
+		co_await (setDone && taskBucket->finish(tr, task));
 
 		TraceEvent("FileRestorePartitionDispatch")
 		    .detail("RestoreUID", restore.getUid())
@@ -6113,7 +6143,10 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		    .detail("EndVersion", endVersion)
 		    .detail("NextEndVersion", nextEndVersion)
 		    .detail("ApplyLag", applyLag)
-		    .detail("Decision", "dispatch_batch_complete");
+		    .detail("Decision", ranges.empty() ? "dispatch_batch_complete" : "dispatch_range_chunk")
+		    .detail("BlocksDispatched", blocksDispatched)
+		    .detail("TaskLimit", taskBatchSize)
+		    .detail("TransactionBytes", tr->getApproximateSize());
 
 		co_return;
 	}
@@ -6125,11 +6158,13 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 	                           Version beginVersion,
 	                           Version endVersion,
 	                           TaskCompletionKey completionKey = TaskCompletionKey::noSignal(),
-	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
+	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>(),
+	                           Optional<RestoreConfig::RestoreFile> rangeStart = Optional<RestoreConfig::RestoreFile>(),
+	                           int64_t beginRangeBlock = 0) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
 
 		// Use high priority for dispatch tasks that have to queue more blocks for the current batch
-		unsigned int priority = 0;
+		unsigned int priority = rangeStart.present() ? 1 : 0;
 		auto task = makeReference<Task>(
 		    RestoreDispatchPartitionedTaskFunc::name, RestoreDispatchPartitionedTaskFunc::version, doneKey, priority);
 
@@ -6138,6 +6173,13 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		Params.firstVersion().set(task, firstVersion);
 		Params.beginVersion().set(task, beginVersion);
 		Params.endVersion().set(task, endVersion);
+		Params.dispatchTaskLimit().set(
+		    task, Params.dispatchTaskLimit().getOrDefault(parentTask, CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE));
+		if (rangeStart.present()) {
+			Params.beginRangeVersion().set(task, rangeStart.get().version);
+			Params.beginRangeFile().set(task, rangeStart.get().fileName);
+			Params.beginRangeBlock().set(task, beginRangeBlock);
+		}
 
 		if (!waitFor) {
 			co_return taskBucket->addTask(tr, task);
@@ -6147,18 +6189,63 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		co_return "OnSetAddTask"_sr;
 	}
 
+	static Future<Void> dispatchWithRetry(Database cx,
+	                                      Reference<TaskBucket> taskBucket,
+	                                      Reference<FutureBucket> futureBucket,
+	                                      Reference<Task> task) {
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
+		int taskBatchSize =
+		    std::max(1, Params.dispatchTaskLimit().getOrDefault(task, CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE));
+		// Dispatch commits also retire the task. Keep its timeout key stable until the commit is resolved.
+		co_await task->extendMutex.take();
+		FlowLock::Releaser releaser(task->extendMutex, 1);
+		while (true) {
+			Error err;
+			try {
+				taskBucket->setOptions(tr);
+				// A previous attempt may have committed despite returning commit_unknown_result.
+				if (co_await taskBucket->isFinished(tr, task)) {
+					co_return;
+				}
+				co_await taskBucket->keepRunning(tr, task);
+				Params.dispatchTaskLimit().set(task, taskBatchSize);
+				co_await dispatch(tr, taskBucket, futureBucket, task, taskBatchSize);
+				if (taskBatchSize > 1 && buggify()) {
+					throw transaction_too_large();
+				}
+				co_await tr->commit();
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.code() == error_code_transaction_too_large && taskBatchSize > 1) {
+				int oldLimit = taskBatchSize;
+				taskBatchSize = std::max(1, taskBatchSize / 2);
+				tr->reset();
+				CODE_PROBE(true, "Partitioned restore dispatch shrank after transaction_too_large");
+				TraceEvent("FileRestorePartitionDispatchResize")
+				    .detail("RestoreUID", RestoreConfig(task).getUid())
+				    .detail("OldTaskLimit", oldLimit)
+				    .detail("NewTaskLimit", taskBatchSize);
+			} else {
+				co_await tr->onError(err);
+			}
+		}
+	}
+
 	Future<Void> execute(Database cx,
 	                     Reference<TaskBucket> tb,
 	                     Reference<FutureBucket> fb,
 	                     Reference<Task> task) override {
-		return Void();
-	};
+		return dispatchWithRetry(cx, tb, fb, task);
+	}
 	Future<Void> finish(Reference<ReadYourWritesTransaction> tr,
 	                    Reference<TaskBucket> tb,
 	                    Reference<FutureBucket> fb,
 	                    Reference<Task> task) override {
-		return _finish(tr, tb, fb, task);
-	};
+		// Dispatch and task retirement are committed together by execute().
+		return Void();
+	}
 };
 StringRef RestoreDispatchPartitionedTaskFunc::name = "restore_dispatch_partitioned"_sr;
 REGISTER_TASKFUNC(RestoreDispatchPartitionedTaskFunc);
