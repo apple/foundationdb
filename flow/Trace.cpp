@@ -314,7 +314,7 @@ public:
 		                  processName.c_str(),
 		                  timestamp.c_str(),
 		                  deterministicRandom()->randomAlphaNumeric(6).c_str());
-		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(
+		logWriter = makeReference<FileTraceLogWriter>(
 		    directory,
 		    processName,
 		    basename,
@@ -322,7 +322,7 @@ public:
 		    tracePartialFileSuffix,
 		    maxLogsSize,
 		    [this]() { barriers->triggerAll(); },
-		    issues));
+		    issues);
 
 		if (g_network->isSimulated())
 			writer = makeReference<DummyThreadPool>();
