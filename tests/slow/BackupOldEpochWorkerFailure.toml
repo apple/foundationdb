@@ -1,0 +1,64 @@
+testClass = "Backup"
+
+# An old-generation backup worker only exists when a recovery lands while a partitioned-log backup is
+# draining the previous generation's tail. TriggerRecoveryLoop creates that condition on every run
+# rather than leaving it to chance.
+#
+# The restore phase is what makes the repair checkable: a replacement recruited behind durable
+# progress would publish a log file advertising coverage it lacks, and a backup-only test cannot see
+# that. The Cycle phases stay small to keep the run clear of the trace line cap.
+
+[configuration]
+
+[[test]]
+testTitle = 'OldEpochBackupWorkerFailure'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 1000.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Backup'
+    mutationLogType = 1 # partitioned-log-experimental
+    backupTag = 'newBackup'
+    backupAfter = 5.0
+    restoreAfter = 35.0
+
+    [[test.workload]]
+    testName = 'TriggerRecoveryLoop'
+    startTime = 8.0
+    numRecoveries = 2
+    delayBetweenRecoveries = 6.0
+    # Recover by changing the resolver count, not killAll: rebooting every process is logged as a
+    # SevError SimulatedFDBDTerminated, which fails the run on its own.
+    killAllProportion = 0.0
+
+# Restore what was backed up. The Restore workload picks between backupTag1 and backupTag2 by
+# coinflip, so both must name the one tag this test takes.
+[[test]]
+testTitle = 'RestoreBackup'
+runConsistencyCheck = false
+waitForQuiescence = false
+simBackupAgents = 'BackupToFile'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Restore'
+    backupTag1 = 'newBackup'
+    backupTag2 = 'newBackup'
+
+# Cycle's own invariant check over the restored data is what actually catches a log file that
+# claimed versions it did not contain.
+[[test]]
+testTitle = 'CycleAfterRestore'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 1000.0
+    testDuration = 10.0
+    skipSetup = true

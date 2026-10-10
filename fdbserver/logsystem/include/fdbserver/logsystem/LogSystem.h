@@ -289,7 +289,8 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	bool remoteLogsWrittenToCoreState;
 	bool hasRemoteServers;
 	AsyncTrigger backupWorkerChanged;
-	std::set<UID> removedBackupWorkers; // Workers that are removed before setting them.
+	// Workers whose done request found no slot holding them; a later install must drop them.
+	std::set<UID> removedBackupWorkers;
 	std::map<uint8_t, std::vector<uint16_t>> knownLockedTLogIds;
 
 	Optional<Version> recoverAt;
@@ -484,6 +485,26 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	void setRangePartitionedBackupWorkers(const std::vector<InitializeRangePartitionedBackupReply>& replies);
 
 	bool removeBackupWorker(const BackupWorkerDoneRequest& req);
+
+	// Points an old epoch's backup worker slot at a re-recruited replacement, keeping the entry in
+	// place so the epoch retains its hold on oldestBackupEpoch. Returns false if the dead worker is no
+	// longer tracked, or if the replacement had already reported done, in either case meaning the
+	// replacement must not be installed.
+	bool replaceBackupWorker(UID deadWorker, const BackupInterface& replacement, LogEpoch backupEpoch);
+
+	// Frees a slot whose durable progress already covers its range, for a worker that died without
+	// reporting done. Unlike removeBackupWorker this records nothing for a later setBackupWorkers,
+	// since there is no done request in flight to reconcile with.
+	void releaseBackupWorker(UID worker, LogEpoch backupEpoch);
+
+	// Erases a backup worker's slot and re-derives oldestBackupEpoch. Returns false if the epoch or
+	// the worker is no longer tracked. Dropping an epoch's last worker is what lets oldestBackupEpoch
+	// advance, so this also triggers backupWorkerChanged.
+	bool dropBackupWorker(UID worker, LogEpoch backupEpoch);
+
+	// Whether an epoch still holds a slot for this worker. A caller about to spend a re-recruitment on
+	// the slot can check first, since a slot released in the meantime has nothing to install into.
+	bool hasBackupWorker(UID worker, LogEpoch backupEpoch) const;
 
 	LogEpoch getOldestBackupEpoch() const;
 

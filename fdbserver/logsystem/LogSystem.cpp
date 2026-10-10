@@ -1459,20 +1459,17 @@ void LogSystem::setRangePartitionedBackupWorkers(const std::vector<InitializeRan
 	backupWorkerChanged.trigger();
 }
 
-bool LogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
-	bool removed = false;
-	Reference<LogSet> logset = getEpochLogSet(req.backupEpoch);
-	if (logset.isValid()) {
-		for (auto it = logset->backupWorkers.begin(); it != logset->backupWorkers.end(); it++) {
-			if (it->getPtr()->get().interf().id() == req.workerUID) {
-				logset->backupWorkers.erase(it);
-				removed = true;
-				break;
-			}
-		}
+bool LogSystem::dropBackupWorker(UID worker, LogEpoch backupEpoch) {
+	Reference<LogSet> logset = getEpochLogSet(backupEpoch);
+	if (!logset.isValid()) {
+		return false;
 	}
 
-	if (removed) {
+	for (auto it = logset->backupWorkers.begin(); it != logset->backupWorkers.end(); it++) {
+		if (it->getPtr()->get().interf().id() != worker) {
+			continue;
+		}
+		logset->backupWorkers.erase(it);
 		oldestBackupEpoch = epoch;
 		for (const auto& old : oldLogData) {
 			if (old.epoch < oldestBackupEpoch && !old.tLogs[0]->backupWorkers.empty()) {
@@ -1480,7 +1477,14 @@ bool LogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
 			}
 		}
 		backupWorkerChanged.trigger();
-	} else {
+		return true;
+	}
+	return false;
+}
+
+bool LogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
+	const bool removed = dropBackupWorker(req.workerUID, req.backupEpoch);
+	if (!removed) {
 		removedBackupWorkers.insert(req.workerUID);
 	}
 
@@ -1490,6 +1494,59 @@ bool LogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
 	    .detail("WorkerID", req.workerUID)
 	    .detail("OldestBackupEpoch", oldestBackupEpoch);
 	return removed;
+}
+
+bool LogSystem::replaceBackupWorker(UID deadWorker, const BackupInterface& replacement, LogEpoch backupEpoch) {
+	Reference<LogSet> logset = getEpochLogSet(backupEpoch);
+	if (!logset.isValid()) {
+		return false;
+	}
+
+	// A replacement that finished before this call found no entry to erase and only recorded its UID.
+	// Honour that now, or the epoch keeps a slot for a worker that will never report again.
+	if (removedBackupWorkers.contains(replacement.id())) {
+		removedBackupWorkers.erase(replacement.id());
+		releaseBackupWorker(deadWorker, backupEpoch);
+		return false;
+	}
+
+	for (auto& worker : logset->backupWorkers) {
+		if (worker->get().interf().id() != deadWorker) {
+			continue;
+		}
+		// Keeping the entry in place leaves the epoch's count unchanged, so it retains its hold on
+		// oldestBackupEpoch and no TLog data becomes collectable while its work is outstanding.
+		worker->setUnconditional(OptionalInterface<BackupInterface>(replacement));
+		TraceEvent("ReplaceBackupWorker", dbgid)
+		    .detail("BackupEpoch", backupEpoch)
+		    .detail("DeadWorkerID", deadWorker)
+		    .detail("WorkerID", replacement.id());
+		backupWorkerChanged.trigger();
+		return true;
+	}
+	return false;
+}
+
+void LogSystem::releaseBackupWorker(UID worker, LogEpoch backupEpoch) {
+	if (dropBackupWorker(worker, backupEpoch)) {
+		TraceEvent("ReleaseBackupWorker", dbgid)
+		    .detail("BackupEpoch", backupEpoch)
+		    .detail("WorkerID", worker)
+		    .detail("OldestBackupEpoch", oldestBackupEpoch);
+	}
+}
+
+bool LogSystem::hasBackupWorker(UID worker, LogEpoch backupEpoch) const {
+	Reference<LogSet> logset = getEpochLogSet(backupEpoch);
+	if (!logset.isValid()) {
+		return false;
+	}
+	for (const auto& it : logset->backupWorkers) {
+		if (it->get().interf().id() == worker) {
+			return true;
+		}
+	}
+	return false;
 }
 
 LogEpoch LogSystem::getOldestBackupEpoch() const {

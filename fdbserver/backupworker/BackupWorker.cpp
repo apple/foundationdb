@@ -36,6 +36,7 @@
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/core/WorkerInterface.h"
+#include "flow/Buggify.h"
 #include "flow/Error.h"
 
 #include "flow/IRandom.h"
@@ -114,6 +115,9 @@ struct BackupData {
 	LogEpoch oldestBackupEpoch = 0; // oldest epoch that still has data on tLogs for backup to pull
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
+	// savedVersion is raised in memory for an old epoch before anything is committed, so only this
+	// answers whether a replacement would resume any further along than this worker started.
+	bool progressSavedDurably = false;
 	AsyncVar<Reference<LogSystemConsumer>> logSystem;
 	Database cx;
 	std::vector<VersionedMessage> messages;
@@ -641,6 +645,7 @@ Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 			tr.set(key, backupProgressValue(status));
 			tr.addReadConflictRange(singleKeyRange(key));
 			co_await tr.commit();
+			self->progressSavedDurably = true;
 			co_return;
 		} catch (Error& e) {
 			err = e;
@@ -945,16 +950,25 @@ Future<Void> pullAsyncData(BackupData* self) {
 				logSystemChange = self->logSystem.onChange();
 			}
 		}
-		// When TLog sets popped version, it means mutations between popped() and tagAt are unavailable
-		// on the TLog. So, we should stop pulling data from the TLog.
+		// Mutations between popped() and tagAt are gone, so this worker cannot cover its range. For a
+		// draining old epoch that is the replacement race: a predecessor only suspected dead keeps
+		// popping past the snapshot its replacement was recruited from. Exiting is then the only safe
+		// answer, because a published file's begin version is the requested start, not the first real
+		// mutation, and filterDuplicates prefers a containing file over the smaller valid one it
+		// supersedes, so the gap would restore as empty. Nothing pops ahead of a current-epoch worker,
+		// so there it is a defect.
 		if (r->popped() > 0) {
-			TraceEvent(SevError, "BackupWorkerPullMissingMutations", self->myId)
+			const bool draining = self->backupEpoch != self->recruitedEpoch;
+			CODE_PROBE(draining, "Backup worker exited rather than cover a popped range", probe::decoration::rare);
+			TraceEvent(draining ? SevWarnAlways : SevError, "BackupWorkerPullMissingMutations", self->myId)
 			    .detail("Tag", self->tag)
 			    .detail("BackupEpoch", self->backupEpoch)
 			    .detail("Popped", r->popped())
 			    .detail("ExpectedPeekVersion", tagAt)
 			    .detail("RecruitedEpoch", self->recruitedEpoch);
-			ASSERT(true);
+			if (draining) {
+				throw worker_removed();
+			}
 		}
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
@@ -1048,6 +1062,26 @@ Future<Void> monitorBackupPause(Database cx,
 	}
 }
 
+// Nothing in simulation fails a worker draining an older generation's range on its own, so neither
+// losing such a range nor repairing it is otherwise exercised.
+//
+// Only a death before the first commit is interesting: a replacement resumes at savedVersion + 1, so a
+// range whose worker committed nothing is handed back identical. `savedVersion` cannot detect that --
+// onBackupChanges raises it in memory for an old epoch before any commit. The delay must outlast
+// setBackupWorkers, or the death is reported through recruitBackupWorkers and aborts recovery instead.
+static Future<Void> buggifyOldEpochWorkerFailureBeforeProgress(BackupData* self) {
+	co_await delay(0.2 + deterministicRandom()->random01() * 0.2);
+	if (self->progressSavedDurably) {
+		co_return;
+	}
+	CODE_PROBE(true, "Killed an old-generation backup worker before it committed any progress");
+	TraceEvent("BuggifyOldEpochWorkerPreProgressFailure", self->myId)
+	    .detail("BackupEpoch", self->backupEpoch)
+	    .detail("Tag", self->tag.toString())
+	    .detail("StartVersion", self->startVersion);
+	throw io_error().asInjectedFault();
+}
+
 Future<Void> backupWorker(BackupInterface interf,
                           InitializeBackupRequest req,
                           Reference<AsyncVar<ServerDBInfo> const> db) {
@@ -1077,6 +1111,10 @@ Future<Void> backupWorker(BackupInterface interf,
 		                                 &self.paused,
 		                                 /*pausedEvent=*/"BackupWorkerPaused",
 		                                 /*resumedEvent=*/"BackupWorkerResumed"));
+
+		if (req.backupEpoch != req.recruitedEpoch && buggify()) {
+			addActor.send(buggifyOldEpochWorkerFailureBeforeProgress(&self));
+		}
 
 		// If the worker is on an old epoch and all backups starts a version >= the endVersion
 		bool exitEarly = co_await shouldBackupWorkerExitEarly(&self);
