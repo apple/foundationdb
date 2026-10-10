@@ -8,13 +8,14 @@ The monitor is controlled by these server knobs:
 | --- | --- | --- |
 | `CLUSTER_HEALTH_METRIC_ENABLE` | `false` | Enables the cluster controller monitor. When disabled, the monitor exits immediately and does not emit `ClusterHealthMetric`. Simulation buggification can set this to `true`. |
 | `CLUSTER_HEALTH_METRIC_POLL_INTERVAL` | `5.0` seconds | Time between monitor evaluations after the first evaluation. |
+| `CLUSTER_HEALTH_METRIC_PROCESS_ERROR_MAX_AGE` | `3600.0` seconds | Maximum age of a latest worker error that affects `ProcessErrors`. Negative values disable expiration. |
 | `CLUSTER_HEALTH_METRIC_STORAGE_INTERVENTION_THRESHOLD` | `0.20` | Storage server free-space warning threshold. This is a ratio, not a percentage: `0.20` means 20% free space. |
 | `CLUSTER_HEALTH_METRIC_STORAGE_CRITICAL_THRESHOLD` | `0.10` | Storage server free-space critical threshold. This should be less than or equal to the storage intervention threshold. |
 | `CLUSTER_HEALTH_METRIC_TLOG_INTERVENTION_THRESHOLD` | `0.20` | TLog queue-disk free-space warning threshold. This is a ratio, not a percentage: `0.20` means 20% free space. |
 | `CLUSTER_HEALTH_METRIC_TLOG_CRITICAL_THRESHOLD` | `0.10` | TLog queue-disk free-space critical threshold. This should be less than or equal to the TLog intervention threshold. |
 | `CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD` | `1.2` | Ratekeeper critical throttling threshold for `TPSLimit / ReleasedTPS`. With the default, ratekeeper is critical when the current TPS limit is less than 120% of recently released TPS. |
 
-Threshold comparisons are strict: a value equal to a threshold does not trigger that threshold's health level.
+Space and ratekeeper threshold comparisons are strict: a value equal to a threshold does not trigger that threshold's health level.
 
 ## Health Levels
 
@@ -123,12 +124,15 @@ Source event:
 - latest worker error event, fetched with `EventLogRequest()`
 
 Fields used:
-- none are parsed directly; the factor only checks whether a non-empty latest-error trace event exists.
+- `Time`: the trace timestamp of the latest worker error.
 
 Behavior:
-- Returns `CRITICAL_INTERVENTION_REQUIRED` if any worker reports a non-empty latest error.
-- Returns `HEALTHY` if all non-failed latest-error records are empty and at least one latest-error request succeeded.
+- Ignores errors strictly older than `CLUSTER_HEALTH_METRIC_PROCESS_ERROR_MAX_AGE` seconds. An error exactly at the age limit still counts. Negative knob values disable expiration.
+- Returns `CRITICAL_INTERVENTION_REQUIRED` if any worker reports a non-empty latest error that has not expired. Errors with missing, malformed, non-finite, or future timestamps still count.
+- Returns `HEALTHY` if all non-failed latest-error records are empty or expired and at least one latest-error request succeeded.
 - Returns `METRICS_MISSING` only if every latest-error request fails.
+
+For example, `--knob-cluster_health_metric_process_error_max_age=3600` makes an error stop affecting this factor after one hour, on the next monitor evaluation. Expiration does not remove the cached error from diagnostic status output. The aggregate health level still depends on the other factors.
 
 ### `RkThrottling`
 

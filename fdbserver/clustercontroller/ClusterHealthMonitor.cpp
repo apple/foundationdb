@@ -311,7 +311,7 @@ Monitor Monitor::create(Reference<IWorkerEventProvider const> workerEventProvide
 	factors.push_back(std::make_unique<StorageReplicationFactor>());
 	factors.push_back(std::make_unique<RecoveryStateFactor>());
 	factors.push_back(std::make_unique<CoordinatorReachabilityFactor>());
-	factors.push_back(std::make_unique<ProcessErrorsFactor>());
+	factors.push_back(std::make_unique<ProcessErrorsFactor>(SERVER_KNOBS->CLUSTER_HEALTH_METRIC_PROCESS_ERROR_MAX_AGE));
 	factors.push_back(std::make_unique<RkThrottlingFactor>(
 	    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD));
 	return Monitor(std::move(factors), workerEventProvider);

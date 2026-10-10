@@ -935,6 +935,8 @@ public:
 	                                                    // intilization timeouts above do not apply.
 	bool CLUSTER_HEALTH_METRIC_ENABLE; // Enables periodic cluster-health metric evaluation in CC.
 	double CLUSTER_HEALTH_METRIC_POLL_INTERVAL; // Seconds between cluster-health monitor polls.
+	double CLUSTER_HEALTH_METRIC_PROCESS_ERROR_MAX_AGE; // Maximum age in seconds of process errors affecting health.
+	                                                    // Negative values disable expiration.
 	double CLUSTER_HEALTH_METRIC_STORAGE_INTERVENTION_THRESHOLD; // SS free-space ratio below this needs intervention.
 	double CLUSTER_HEALTH_METRIC_STORAGE_CRITICAL_THRESHOLD; // SS free-space ratio below this is critical.
 	double CLUSTER_HEALTH_METRIC_TLOG_INTERVENTION_THRESHOLD; // TLog queue-disk free-space ratio below this needs
