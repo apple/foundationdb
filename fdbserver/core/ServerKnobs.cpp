@@ -1037,6 +1037,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TRACK_TLOG_RECOVERY,                                  true ); if ( randomize && buggify() ) TRACK_TLOG_RECOVERY = deterministicRandom()->coinflip();
 	init( CC_RERECRUIT_LOG_ROUTER_TIMEOUT,                       5.0 );
 	init( CC_RERECRUIT_LOG_ROUTER_ENABLED,                      true ); if ( randomize && buggify() ) CC_RERECRUIT_LOG_ROUTER_ENABLED = deterministicRandom()->coinflip();
+	init( CC_RERECRUIT_BACKUP_WORKER_ENABLED,                   true );
 
 	//Move Keys
 	init( SHARD_READY_DELAY,                                    0.25 ); if( randomize && buggify() ) SHARD_READY_DELAY = 5.0;

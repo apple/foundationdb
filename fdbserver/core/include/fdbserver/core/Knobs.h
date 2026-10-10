@@ -965,6 +965,9 @@ public:
 	// recoveries. Note this feature only covers the period when the cluster is in fully_recovered state. Before that
 	// state, log router failures will trigger a new recovery.
 	bool CC_RERECRUIT_LOG_ROUTER_ENABLED;
+	// If enabled, Cluster Controller re-recruits an old epoch's backup worker that dies before finishing its range.
+	// Otherwise the epoch stays pinned until the next recovery.
+	bool CC_RERECRUIT_BACKUP_WORKER_ENABLED;
 
 	// Move Keys
 	double SHARD_READY_DELAY;

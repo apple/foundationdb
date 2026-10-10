@@ -756,8 +756,6 @@ static Future<bool> backupWorkerSavedProgress(Database cx, UID worker) {
 // Repairing here rather than raising backup_worker_failed keeps a repeatedly failing worker
 // affordable. Nothing but actor_cancelled may escape: this runs in the recovery's actor collection.
 // A monitor cannot outlive the generation that recruited it; the next recovery starts fresh ones.
-//
-// Templated because the two Backup V2 variants differ only in progress keyspace and endpoint.
 template <class Request>
 static Future<Void> monitorOldEpochBackupWorker(Reference<ClusterRecoveryData> self,
                                                 Database cx,
@@ -773,11 +771,22 @@ static Future<Void> monitorOldEpochBackupWorker(Reference<ClusterRecoveryData> s
 	UID progressCredited;
 	// An old-epoch request always carries an end version.
 	const Version endVersion = req.endVersion.get();
+	// Simulates a gray failure, replacing a worker that is still running. Real failure detection is slower
+	// than a simulated drain, so simulation never produces one otherwise.
+	bool falselySuspect = buggify();
 	while (true) {
-		co_await waitFailureClient(interf.waitFailure,
-		                           SERVER_KNOBS->BACKUP_TIMEOUT,
-		                           -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-		                           /*trace=*/true);
+		Future<Void> suspected = falselySuspect ? delay(deterministicRandom()->random01()) : Never();
+		auto detected = co_await race(
+		    waitFailureClient(interf.waitFailure,
+		                      SERVER_KNOBS->BACKUP_TIMEOUT,
+		                      -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+		                      /*trace=*/true),
+		    suspected);
+		if (detected.index() == 1) {
+			CODE_PROBE(true, "Replacing an old epoch backup worker that is still running");
+			TraceEvent("BackupWorkerFalselySuspected", self->dbgid).detail("WorkerID", interf.id());
+		}
+		falselySuspect = false;
 
 		bool credited = false;
 		Version savedVersion = invalidVersion;
@@ -805,6 +814,7 @@ static Future<Void> monitorOldEpochBackupWorker(Reference<ClusterRecoveryData> s
 				    .detail("MinVersion", minVersion.orDefault(invalidVersion))
 				    .detail("EndVersion", endVersion);
 				self->logSystem->releaseBackupWorker(interf.id(), req.backupEpoch);
+				self->registrationTrigger.trigger();
 				break;
 			}
 
@@ -819,6 +829,7 @@ static Future<Void> monitorOldEpochBackupWorker(Reference<ClusterRecoveryData> s
 				    .detail("SavedVersion", savedVersion)
 				    .detail("EndVersion", endVersion);
 				self->logSystem->releaseBackupWorker(interf.id(), req.backupEpoch);
+				self->registrationTrigger.trigger();
 				break;
 			}
 
@@ -853,12 +864,15 @@ static Future<Void> monitorOldEpochBackupWorker(Reference<ClusterRecoveryData> s
 			    .detail("Epoch", replacement.recruitedEpoch)
 			    .detail("BackupEpoch", replacement.backupEpoch)
 			    .detail("StartVersion", replacement.startVersion)
-			    .detail("EndVersion", replacement.endVersion.get())
+			    .detail("EndVersion", endVersion)
 			    .detail("DeadWorkerID", interf.id());
 
 			auto reply = co_await throwErrorOr(backupRecruitStream<Request>(worker).getReplyUnlessFailedFor(
 			    replacement, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY));
-			if (!self->logSystem->replaceBackupWorker(interf.id(), reply.interf, reply.backupEpoch)) {
+			const bool installed = self->logSystem->replaceBackupWorker(interf.id(), reply.interf, reply.backupEpoch);
+			// Publishing the slot change is what fences a predecessor that is still running.
+			self->registrationTrigger.trigger();
+			if (!installed) {
 				break;
 			}
 			interf = reply.interf;
@@ -989,7 +1003,7 @@ static Future<Void> recruitRangePartitionedBackupWorkers(Reference<ClusterRecove
 	self->registrationTrigger.trigger();
 
 	ASSERT(newRecruits.size() == rangePartitionedBackupTags + oldEpochRequests.size());
-	for (int j = 0; j < oldEpochRequests.size(); j++) {
+	for (int j = 0; SERVER_KNOBS->CC_RERECRUIT_BACKUP_WORKER_ENABLED && j < oldEpochRequests.size(); j++) {
 		self->addActor.send(monitorOldEpochBackupWorker(
 		    self, cx, oldEpochRequests[j], newRecruits[rangePartitionedBackupTags + j].interf));
 	}
@@ -1084,7 +1098,7 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 	self->registrationTrigger.trigger();
 
 	ASSERT(newRecruits.size() == logRouterTags + oldEpochRequests.size());
-	for (int j = 0; j < oldEpochRequests.size(); j++) {
+	for (int j = 0; SERVER_KNOBS->CC_RERECRUIT_BACKUP_WORKER_ENABLED && j < oldEpochRequests.size(); j++) {
 		self->addActor.send(
 		    monitorOldEpochBackupWorker(self, cx, oldEpochRequests[j], newRecruits[logRouterTags + j].interf));
 	}

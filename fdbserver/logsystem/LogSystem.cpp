@@ -1483,8 +1483,15 @@ bool LogSystem::dropBackupWorker(UID worker, LogEpoch backupEpoch) {
 }
 
 bool LogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
-	const bool removed = dropBackupWorker(req.workerUID, req.backupEpoch);
-	if (!removed) {
+	// A replaced worker that was only suspected dead can still finish the range, which frees the slot
+	// from whichever replacement holds it now.
+	UID holder = req.workerUID;
+	for (auto it = replacedBackupWorkers.find(holder); it != replacedBackupWorkers.end();
+	     it = replacedBackupWorkers.find(holder)) {
+		holder = it->second;
+	}
+	const bool removed = dropBackupWorker(holder, req.backupEpoch);
+	if (!removed && holder == req.workerUID) {
 		removedBackupWorkers.insert(req.workerUID);
 	}
 
@@ -1492,6 +1499,7 @@ bool LogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
 	    .detail("Removed", removed)
 	    .detail("BackupEpoch", req.backupEpoch)
 	    .detail("WorkerID", req.workerUID)
+	    .detail("SlotHolder", holder)
 	    .detail("OldestBackupEpoch", oldestBackupEpoch);
 	return removed;
 }
@@ -1517,6 +1525,7 @@ bool LogSystem::replaceBackupWorker(UID deadWorker, const BackupInterface& repla
 		// Keeping the entry in place leaves the epoch's count unchanged, so it retains its hold on
 		// oldestBackupEpoch and no TLog data becomes collectable while its work is outstanding.
 		worker->setUnconditional(OptionalInterface<BackupInterface>(replacement));
+		replacedBackupWorkers[deadWorker] = replacement.id();
 		TraceEvent("ReplaceBackupWorker", dbgid)
 		    .detail("BackupEpoch", backupEpoch)
 		    .detail("DeadWorkerID", deadWorker)

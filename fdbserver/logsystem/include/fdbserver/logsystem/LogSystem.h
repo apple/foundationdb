@@ -291,6 +291,8 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	AsyncTrigger backupWorkerChanged;
 	// Workers whose done request found no slot holding them; a later install must drop them.
 	std::set<UID> removedBackupWorkers;
+	// Replaced worker -> the replacement installed in its slot.
+	std::map<UID, UID> replacedBackupWorkers;
 	std::map<uint8_t, std::vector<uint16_t>> knownLockedTLogIds;
 
 	Optional<Version> recoverAt;
@@ -492,9 +494,9 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	// replacement must not be installed.
 	bool replaceBackupWorker(UID deadWorker, const BackupInterface& replacement, LogEpoch backupEpoch);
 
-	// Frees a slot whose durable progress already covers its range, for a worker that died without
-	// reporting done. Unlike removeBackupWorker this records nothing for a later setBackupWorkers,
-	// since there is no done request in flight to reconcile with.
+	// Frees the slot of a worker that will not report done, once nothing remains to recruit for its
+	// range: durable progress covers it, no backup needs it, or its replacement has already finished.
+	// Unlike removeBackupWorker this records nothing for a later setBackupWorkers to reconcile.
 	void releaseBackupWorker(UID worker, LogEpoch backupEpoch);
 
 	// Erases a backup worker's slot and re-derives oldestBackupEpoch. Returns false if the epoch or
@@ -502,8 +504,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	// advance, so this also triggers backupWorkerChanged.
 	bool dropBackupWorker(UID worker, LogEpoch backupEpoch);
 
-	// Whether an epoch still holds a slot for this worker. A caller about to spend a re-recruitment on
-	// the slot can check first, since a slot released in the meantime has nothing to install into.
+	// Whether an epoch still holds a slot for this worker.
 	bool hasBackupWorker(UID worker, LogEpoch backupEpoch) const;
 
 	LogEpoch getOldestBackupEpoch() const;
