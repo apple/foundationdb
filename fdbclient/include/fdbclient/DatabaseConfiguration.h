@@ -317,21 +317,19 @@ struct DatabaseConfiguration {
 	}
 
 	bool operator==(DatabaseConfiguration const& rhs) const {
-		const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();
-		const_cast<DatabaseConfiguration*>(&rhs)->makeConfigurationImmutable();
-		return rawConfiguration == rhs.rawConfiguration;
+		return configurationSnapshot() == rhs.configurationSnapshot();
 	}
 	bool operator!=(DatabaseConfiguration const& rhs) const { return !(*this == rhs); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if (!ar.isDeserializing)
-			makeConfigurationImmutable();
-		serializer(ar, rawConfiguration);
 		if (ar.isDeserializing) {
-			for (auto c = rawConfiguration.begin(); c != rawConfiguration.end(); ++c)
-				setInternal(c->key, c->value);
-			setDefaultReplicationPolicy();
+			Standalone<VectorRef<KeyValueRef>> snapshot;
+			serializer(ar, snapshot);
+			fromKeyValues(std::move(snapshot));
+		} else {
+			auto snapshot = configurationSnapshot();
+			serializer(ar, snapshot);
 		}
 	}
 
@@ -342,7 +340,7 @@ private:
 	Standalone<VectorRef<KeyValueRef>> rawConfiguration; // sorted by key
 
 	void makeConfigurationMutable();
-	void makeConfigurationImmutable();
+	Standalone<VectorRef<KeyValueRef>> configurationSnapshot() const;
 
 	bool setInternal(KeyRef key, ValueRef value);
 	void resetInternal();
