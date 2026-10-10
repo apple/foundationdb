@@ -467,18 +467,38 @@ def status_excluded_processes_message(logger):
             True, "client", "coordinators", "coordinators"
         )
     }
-    candidates = [a for a in get_fdb_process_addresses(logger) if a not in coordinators]
+    # Excluding the cluster controller's process forces a failover, and the new CC omits that process from status
+    # until it re-registers.
+    processes = get_value_from_status_json(True, "cluster", "processes")
+    cluster_controllers = {
+        p["address"]
+        for p in processes.values()
+        if any(r["role"] == "cluster_controller" for r in p.get("roles", []))
+    }
+    candidates = [
+        a
+        for a in get_fdb_process_addresses(logger)
+        if a not in coordinators and a not in cluster_controllers
+    ]
     # make sure that we do not exclude any coordinator process because excluding coordinator will print the warning
-    assert candidates, "Need a non-coordinator process to exclude"
+    assert candidates, "Need a process that is not a coordinator or the CC to exclude"
     excluded_address = random.choice(candidates)
     run_fdbcli_command("exclude", "FORCE", excluded_address)
     try:
-        status_output = run_fdbcli_command("status")
-        logger.debug(status_output)
-        assert "(excluded processes: 1; processes with errors: " in status_output
+        # The exclusion can trigger a recovery, during which status may be incomplete; retry until it settles.
+        expected = "(excluded processes: 1; processes with errors: "
+        deadline = time.time() + 20
+        while True:
+            status_output = run_fdbcli_command("status")
+            logger.debug(status_output)
+            if expected in status_output or time.time() > deadline:
+                break
+            time.sleep(1)
+        assert expected in status_output
         assert "less " not in status_output
     finally:
         run_fdbcli_command("include", excluded_address)
+        wait_for_database_fully_recovered(logger)
 
 
 @enable_logging()
