@@ -289,7 +289,8 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	bool remoteLogsWrittenToCoreState;
 	bool hasRemoteServers;
 	AsyncTrigger backupWorkerChanged;
-	std::set<UID> removedBackupWorkers; // Workers that are removed before setting them.
+	// Workers whose done request found no slot holding them; a later install must drop them.
+	std::set<UID> removedBackupWorkers;
 	std::map<uint8_t, std::vector<uint16_t>> knownLockedTLogIds;
 
 	Optional<Version> recoverAt;
@@ -500,6 +501,10 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	// the worker is no longer tracked. Dropping an epoch's last worker is what lets oldestBackupEpoch
 	// advance, so this also triggers backupWorkerChanged.
 	bool dropBackupWorker(UID worker, LogEpoch backupEpoch);
+
+	// Whether an epoch still holds a slot for this worker. A caller about to spend a re-recruitment on
+	// the slot can check first, since a slot released in the meantime has nothing to install into.
+	bool hasBackupWorker(UID worker, LogEpoch backupEpoch) const;
 
 	LogEpoch getOldestBackupEpoch() const;
 

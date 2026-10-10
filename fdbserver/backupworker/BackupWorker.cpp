@@ -645,6 +645,7 @@ Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 			tr.set(key, backupProgressValue(status));
 			tr.addReadConflictRange(singleKeyRange(key));
 			co_await tr.commit();
+			self->progressSavedDurably = true;
 			co_return;
 		} catch (Error& e) {
 			err = e;
@@ -894,7 +895,6 @@ Future<Void> uploadData(BackupData* self) {
 
 		if (popVersion > self->savedVersion) {
 			co_await saveProgress(self, popVersion);
-			self->progressSavedDurably = true;
 			TraceEvent("BackupWorkerSavedProgress", self->myId)
 			    .detail("Tag", self->tag.toString())
 			    .detail("Version", popVersion)
@@ -950,20 +950,25 @@ Future<Void> pullAsyncData(BackupData* self) {
 				logSystemChange = self->logSystem.onChange();
 			}
 		}
-		// When TLog sets popped version, mutations between popped() and tagAt are gone, so this worker
-		// cannot cover the range it was asked for. Exiting is the only safe answer: continuing would
-		// publish a log file whose advertised begin version precedes its first real mutation, and
-		// restore prefers a containing file over the smaller valid one it supersedes (filterDuplicates
-		// in BackupContainerFileSystem.cpp), so the gap would be silently restored as empty.
+		// Mutations between popped() and tagAt are gone, so this worker cannot cover its range. For a
+		// draining old epoch that is the replacement race: a predecessor only suspected dead keeps
+		// popping past the snapshot its replacement was recruited from. Exiting is then the only safe
+		// answer, because a published file's begin version is the requested start, not the first real
+		// mutation, and filterDuplicates prefers a containing file over the smaller valid one it
+		// supersedes, so the gap would restore as empty. Nothing pops ahead of a current-epoch worker,
+		// so there it is a defect.
 		if (r->popped() > 0) {
-			CODE_PROBE(true, "Backup worker exited rather than cover a popped range", probe::decoration::rare);
-			TraceEvent(SevWarnAlways, "BackupWorkerPullMissingMutations", self->myId)
+			const bool draining = self->backupEpoch != self->recruitedEpoch;
+			CODE_PROBE(draining, "Backup worker exited rather than cover a popped range", probe::decoration::rare);
+			TraceEvent(draining ? SevWarnAlways : SevError, "BackupWorkerPullMissingMutations", self->myId)
 			    .detail("Tag", self->tag)
 			    .detail("BackupEpoch", self->backupEpoch)
 			    .detail("Popped", r->popped())
 			    .detail("ExpectedPeekVersion", tagAt)
 			    .detail("RecruitedEpoch", self->recruitedEpoch);
-			throw worker_removed();
+			if (draining) {
+				throw worker_removed();
+			}
 		}
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 

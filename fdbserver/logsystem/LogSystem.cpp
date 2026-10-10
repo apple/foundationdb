@@ -1502,6 +1502,14 @@ bool LogSystem::replaceBackupWorker(UID deadWorker, const BackupInterface& repla
 		return false;
 	}
 
+	// A replacement that finished before this call found no entry to erase and only recorded its UID.
+	// Honour that now, or the epoch keeps a slot for a worker that will never report again.
+	if (removedBackupWorkers.contains(replacement.id())) {
+		removedBackupWorkers.erase(replacement.id());
+		releaseBackupWorker(deadWorker, backupEpoch);
+		return false;
+	}
+
 	for (auto& worker : logset->backupWorkers) {
 		if (worker->get().interf().id() != deadWorker) {
 			continue;
@@ -1513,15 +1521,6 @@ bool LogSystem::replaceBackupWorker(UID deadWorker, const BackupInterface& repla
 		    .detail("BackupEpoch", backupEpoch)
 		    .detail("DeadWorkerID", deadWorker)
 		    .detail("WorkerID", replacement.id());
-
-		// A replacement that finished before this call found no entry to erase and only recorded its
-		// UID. Honour that now, or the epoch keeps a slot for a worker that will never report again.
-		if (removedBackupWorkers.contains(replacement.id())) {
-			removedBackupWorkers.erase(replacement.id());
-			releaseBackupWorker(replacement.id(), backupEpoch);
-			return false;
-		}
-
 		backupWorkerChanged.trigger();
 		return true;
 	}
@@ -1535,6 +1534,19 @@ void LogSystem::releaseBackupWorker(UID worker, LogEpoch backupEpoch) {
 		    .detail("WorkerID", worker)
 		    .detail("OldestBackupEpoch", oldestBackupEpoch);
 	}
+}
+
+bool LogSystem::hasBackupWorker(UID worker, LogEpoch backupEpoch) const {
+	Reference<LogSet> logset = getEpochLogSet(backupEpoch);
+	if (!logset.isValid()) {
+		return false;
+	}
+	for (const auto& it : logset->backupWorkers) {
+		if (it->get().interf().id() == worker) {
+			return true;
+		}
+	}
+	return false;
 }
 
 LogEpoch LogSystem::getOldestBackupEpoch() const {

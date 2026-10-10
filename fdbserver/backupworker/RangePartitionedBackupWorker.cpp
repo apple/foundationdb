@@ -642,7 +642,12 @@ Future<Void> pullAsyncData(RangePartitionedBackupData* self) {
 		}
 
 		if (cursor->popped() > 0) {
-			TraceEvent(SevError, "RangePartitionedBWDataPopped", self->myId)
+			// For a draining old epoch this is the replacement race and exiting is the intended
+			// outcome; nothing pops ahead of a current-epoch worker, so there it is a defect.
+			const bool draining = self->backupEpoch != self->recruitedEpoch;
+			TraceEvent(draining ? SevWarnAlways : SevError, "RangePartitionedBWDataPopped", self->myId)
+			    .detail("BackupEpoch", self->backupEpoch)
+			    .detail("RecruitedEpoch", self->recruitedEpoch)
 			    .detail("Popped", cursor->popped())
 			    .detail("Expected", tagAt);
 			throw worker_removed();

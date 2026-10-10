@@ -731,27 +731,46 @@ static const RequestStream<Request>& backupRecruitStream(const WorkerInterface& 
 	}
 }
 
+// BackupProgress collapses records by tag, so only the raw key shows whether one worker committed.
+static Future<bool> backupWorkerSavedProgress(Database cx, UID worker) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> value = co_await tr.get(backupProgressKeyFor(worker));
+			co_return value.present();
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 // Re-recruits an old epoch's backup worker when it dies before finishing its range. Recovery is
-// otherwise the only code that replaces one, so without this the dead worker's slot pins
-// oldestBackupEpoch indefinitely: TLog data for that generation is never popped and the cluster never
-// re-reaches FULLY_RECOVERED.
+// otherwise the only code that replaces one, so the slot would pin oldestBackupEpoch indefinitely:
+// the generation's TLog data is never popped and FULLY_RECOVERED is never re-reached.
 //
 // Repairing here rather than raising backup_worker_failed keeps a repeatedly failing worker
-// affordable, and errors are retried rather than thrown because escaping would fail recovery.
+// affordable. Nothing but actor_cancelled may escape: this runs in the recovery's actor collection.
+// A monitor cannot outlive the generation that recruited it; the next recovery starts fresh ones.
 //
-// A monitor never outlives the generation that recruited it; the next recovery starts fresh ones.
 // Templated because the two Backup V2 variants differ only in progress keyspace and endpoint.
 template <class Request>
 static Future<Void> monitorOldEpochBackupWorker(Reference<ClusterRecoveryData> self,
                                                 Database cx,
                                                 Request req,
                                                 BackupInterface interf) {
-	int nextWorker = 0;
 	constexpr int attemptsBeforeStallWarning = 10;
 	constexpr double maxReplacementDelay = 30.0;
+	// Ranges usually fail together; a shared starting index would pile every first attempt on one host.
+	uint32_t nextWorker = req.tag.id;
 	int attemptsWithoutProgress = 0;
-	Version lastSavedVersion = invalidVersion;
-	bool recruitedBehindProgress = false;
+	// Whose progress already reset the backoff. A failed recruitment leaves interf unchanged, so one
+	// record must not be credited twice.
+	UID progressCredited;
 	// An old-epoch request always carries an end version.
 	const Version endVersion = req.endVersion.get();
 	while (true) {
@@ -760,100 +779,87 @@ static Future<Void> monitorOldEpochBackupWorker(Reference<ClusterRecoveryData> s
 		                           -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 		                           /*trace=*/true);
 
-		// A worker that completed its range also stops answering, so only durable progress can say
-		// whether work remains.
-		Reference<BackupProgress> progress(new BackupProgress(self->dbgid, {}));
-		co_await getBackupProgress(cx, self->dbgid, progress, SevDebug);
-
-		// One progress map covers both variants; the Tag's locality disambiguates.
-		std::map<Tag, Version> status = progress->getEpochStatus(req.backupEpoch);
-		auto it = status.find(req.tag);
-		Version savedVersion = it == status.end() ? invalidVersion : it->second;
-
-		// Progress alone cannot distinguish a range that still owes mutations from one no backup wants:
-		// a worker whose range starts beyond every live backup exits early via
-		// shouldBackupWorkerExitEarly and so never writes progress at all. Without this check such a
-		// range is re-recruited forever.
-		Optional<Version> minVersion = co_await getMinBackupVersion(self, cx);
-		if (!minVersion.present() || minVersion.get() >= endVersion) {
-			CODE_PROBE(true, "Released an old epoch backup worker slot no backup needs");
-			TraceEvent("BackupWorkerReplacementUnneeded", self->dbgid)
-			    .detail("BackupEpoch", req.backupEpoch)
-			    .detail("Tag", req.tag.toString())
-			    .detail("WorkerID", interf.id())
-			    .detail("MinVersion", minVersion.present() ? minVersion.get() : invalidVersion)
-			    .detail("EndVersion", endVersion);
-			self->logSystem->releaseBackupWorker(interf.id(), req.backupEpoch);
-			co_return;
-		}
-
-		if (savedVersion >= endVersion) {
-			// Durable progress covers the whole range, so those mutations reached the container and the
-			// slot can be released even though the worker died before reporting done.
-			CODE_PROBE(true, "Released an old epoch backup worker slot from durable progress");
-			TraceEvent("BackupWorkerReplacementDone", self->dbgid)
-			    .detail("BackupEpoch", req.backupEpoch)
-			    .detail("Tag", req.tag.toString())
-			    .detail("WorkerID", interf.id())
-			    .detail("SavedVersion", savedVersion)
-			    .detail("EndVersion", endVersion);
-			self->logSystem->releaseBackupWorker(interf.id(), req.backupEpoch);
-			co_return;
-		}
-
-		Request replacement(deterministicRandom()->randomUniqueID());
-		replacement.recruitedEpoch = req.recruitedEpoch;
-		replacement.backupEpoch = req.backupEpoch;
-		replacement.tag = req.tag;
-		replacement.totalTags = req.totalTags;
-		replacement.startVersion = std::max(req.startVersion, savedVersion + 1);
-		replacement.endVersion = req.endVersion;
-
-		// A predecessor only suspected dead keeps saving and popping, so its replacement can be
-		// recruited below what is already popped; reaching that for real needs a partition. Recruiting
-		// behind durable progress is the same condition, and the replacement must then exit rather than
-		// publish a file whose advertised begin version precedes its first real mutation.
-		if (!recruitedBehindProgress && savedVersion > req.startVersion && buggify()) {
-			CODE_PROBE(true, "Recruited an old epoch backup worker behind durable progress", probe::decoration::rare);
-			recruitedBehindProgress = true;
-			replacement.startVersion = req.startVersion;
-		}
-
-		// Advancing the target each attempt keeps a single unhealthy host from capturing the range.
-		const auto& worker = self->backupWorkers[nextWorker++ % self->backupWorkers.size()];
-		if (savedVersion > lastSavedVersion) {
-			lastSavedVersion = savedVersion;
-			attemptsWithoutProgress = 0;
-		} else if (++attemptsWithoutProgress == attemptsBeforeStallWarning) {
-			CODE_PROBE(true, "Old epoch backup worker replacement is not making progress", probe::decoration::rare);
-			TraceEvent(SevWarnAlways, "BackupWorkerReplacementStalled", self->dbgid)
-			    .detail("BackupEpoch", req.backupEpoch)
-			    .detail("Tag", req.tag.toString())
-			    .detail("Attempts", attemptsWithoutProgress)
-			    .detail("SavedVersion", savedVersion)
-			    .detail("EndVersion", endVersion);
-		}
-		// Back off only for attempts that achieved nothing, and never past the cap, so a transient fault
-		// that clears is still repaired without another recovery. There is no attempt budget:
-		// abandoning the range would pin the generation, which is what this monitor exists to repair.
-		const double replacementDelay =
-		    std::min(maxReplacementDelay, std::ldexp(SERVER_KNOBS->BACKUP_TIMEOUT, attemptsWithoutProgress));
-		CODE_PROBE(true, "Re-recruiting an old epoch backup worker that died before finishing");
-		TraceEvent("BackupWorkerReplacement", self->dbgid)
-		    .detail("RequestID", replacement.reqId)
-		    .detail("Tag", replacement.tag.toString())
-		    .detail("Epoch", replacement.recruitedEpoch)
-		    .detail("BackupEpoch", replacement.backupEpoch)
-		    .detail("StartVersion", replacement.startVersion)
-		    .detail("EndVersion", replacement.endVersion.get())
-		    .detail("DeadWorkerID", interf.id());
-
+		bool credited = false;
+		Version savedVersion = invalidVersion;
 		Error err;
 		try {
+			// A worker that finished its range also stops answering, so only durable progress says
+			// whether work remains.
+			Reference<BackupProgress> progress(new BackupProgress(self->dbgid, {}));
+			co_await getBackupProgress(cx, self->dbgid, progress, SevDebug);
+
+			// One progress map covers both variants; the Tag's locality disambiguates.
+			std::map<Tag, Version> status = progress->getEpochStatus(req.backupEpoch);
+			auto it = status.find(req.tag);
+			savedVersion = it == status.end() ? invalidVersion : it->second;
+
+			// A range beyond every live backup exits early via shouldBackupWorkerExitEarly and never
+			// writes progress, so progress alone cannot tell it from one that still owes mutations.
+			Optional<Version> minVersion = co_await getMinBackupVersion(self, cx);
+			if (!minVersion.present() || minVersion.get() >= endVersion) {
+				CODE_PROBE(true, "Released an old epoch backup worker slot no backup needs");
+				TraceEvent("BackupWorkerReplacementUnneeded", self->dbgid)
+				    .detail("BackupEpoch", req.backupEpoch)
+				    .detail("Tag", req.tag.toString())
+				    .detail("WorkerID", interf.id())
+				    .detail("MinVersion", minVersion.orDefault(invalidVersion))
+				    .detail("EndVersion", endVersion);
+				self->logSystem->releaseBackupWorker(interf.id(), req.backupEpoch);
+				break;
+			}
+
+			if (savedVersion >= endVersion) {
+				// Those mutations reached the container, so the slot can go even though the worker
+				// never reported done.
+				CODE_PROBE(true, "Old epoch backup worker slot already covered by durable progress");
+				TraceEvent("BackupWorkerReplacementDone", self->dbgid)
+				    .detail("BackupEpoch", req.backupEpoch)
+				    .detail("Tag", req.tag.toString())
+				    .detail("WorkerID", interf.id())
+				    .detail("SavedVersion", savedVersion)
+				    .detail("EndVersion", endVersion);
+				self->logSystem->releaseBackupWorker(interf.id(), req.backupEpoch);
+				break;
+			}
+
+			// Only this worker's own commits prove a replacement achieves anything. A predecessor
+			// merely suspected dead keeps advancing the epoch's progress, so crediting that would hold
+			// the retry rate at BACKUP_TIMEOUT while every replacement exits on popped data.
+			if (interf.id() != progressCredited && co_await backupWorkerSavedProgress(cx, interf.id())) {
+				progressCredited = interf.id();
+				credited = true;
+			}
+
+			// Nothing to install a replacement into once the slot is gone, and recruiting one anyway
+			// leaves a worker nothing tracks.
+			if (!self->logSystem->hasBackupWorker(interf.id(), req.backupEpoch)) {
+				break;
+			}
+
+			Request replacement = req;
+			replacement.reqId = deterministicRandom()->randomUniqueID();
+			// getReply asserts an unset reply promise, and the copy carries req's fulfilled one.
+			replacement.reply = decltype(replacement.reply)();
+			// getEpochStatus skips the cross-epoch consolidation recruitment does, so savedVersion can
+			// come back below req.startVersion, which also carries recruitment's adjusted begin version.
+			replacement.startVersion = std::max(req.startVersion, savedVersion + 1);
+
+			// Advancing the target each attempt keeps one unhealthy host from capturing the range.
+			const auto& worker = self->backupWorkers[nextWorker++ % self->backupWorkers.size()];
+			CODE_PROBE(true, "Re-recruiting an old epoch backup worker that died before finishing");
+			TraceEvent("BackupWorkerReplacement", self->dbgid)
+			    .detail("RequestID", replacement.reqId)
+			    .detail("Tag", replacement.tag.toString())
+			    .detail("Epoch", replacement.recruitedEpoch)
+			    .detail("BackupEpoch", replacement.backupEpoch)
+			    .detail("StartVersion", replacement.startVersion)
+			    .detail("EndVersion", replacement.endVersion.get())
+			    .detail("DeadWorkerID", interf.id());
+
 			auto reply = co_await throwErrorOr(backupRecruitStream<Request>(worker).getReplyUnlessFailedFor(
 			    replacement, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY));
 			if (!self->logSystem->replaceBackupWorker(interf.id(), reply.interf, reply.backupEpoch)) {
-				co_return;
+				break;
 			}
 			interf = reply.interf;
 		} catch (Error& e) {
@@ -861,6 +867,20 @@ static Future<Void> monitorOldEpochBackupWorker(Reference<ClusterRecoveryData> s
 				throw;
 			}
 			err = e;
+		}
+
+		if (credited) {
+			attemptsWithoutProgress = 0;
+		} else if (++attemptsWithoutProgress >= attemptsBeforeStallWarning) {
+			// The cap rate-limits this, so past the threshold it repeats rather than firing once and
+			// going quiet: a range nothing can repair holds its generation pinned indefinitely.
+			CODE_PROBE(true, "Old epoch backup worker replacement is not making progress", probe::decoration::rare);
+			TraceEvent(SevWarnAlways, "BackupWorkerReplacementStalled", self->dbgid)
+			    .detail("BackupEpoch", req.backupEpoch)
+			    .detail("Tag", req.tag.toString())
+			    .detail("Attempts", attemptsWithoutProgress)
+			    .detail("SavedVersion", savedVersion)
+			    .detail("EndVersion", endVersion);
 		}
 		if (err.isValid()) {
 			CODE_PROBE(true, "Old epoch backup worker re-recruitment failed", probe::decoration::rare);
@@ -870,7 +890,11 @@ static Future<Void> monitorOldEpochBackupWorker(Reference<ClusterRecoveryData> s
 			    .detail("Tag", req.tag.toString())
 			    .detail("DeadWorkerID", interf.id());
 		}
-		co_await delay(replacementDelay);
+		// Back off only for attempts that achieved nothing, and never past the cap, so a transient
+		// fault that clears is still repaired. No attempt budget: abandoning the range would pin the
+		// generation this exists to unpin.
+		co_await delay(
+		    std::min(maxReplacementDelay, std::ldexp(SERVER_KNOBS->BACKUP_TIMEOUT, attemptsWithoutProgress)));
 	}
 }
 
