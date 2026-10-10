@@ -832,10 +832,15 @@ struct BusiestWriteTagContext {
 	UID ratekeeperID;
 	Reference<EventCacheHolder> busiestWriteTagEventHolder;
 	double lastUpdateTime;
+	// True once an idle (reported=false) update has already been logged, so we don't repeat it
+	// every TAG_MEASUREMENT_INTERVAL while nothing changes. Cleared as soon as a real busy tag is
+	// reported again, or the ratekeeper changes.
+	bool wasIdleLastUpdate;
 
 	explicit BusiestWriteTagContext(const UID& thisServerID)
 	  : busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"), ratekeeperID(UID()),
-	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
+	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1),
+	    wasIdleLastUpdate(false) {}
 };
 
 struct SSBulkLoadMetrics {
@@ -12762,6 +12767,7 @@ Future<Void> serveUpdateCommitCostRequests(StorageServer* self,
 			    .detail("LastUpdateTime", req.postTime);
 			self->busiestWriteTagContext.ratekeeperID = req.ratekeeperID;
 			self->busiestWriteTagContext.lastUpdateTime = -1;
+			self->busiestWriteTagContext.wasIdleLastUpdate = false;
 		}
 		// In case we received an old request/duplicate request, due to, e.g. network problem
 		ASSERT(req.postTime > 0);
@@ -12770,14 +12776,17 @@ Future<Void> serveUpdateCommitCostRequests(StorageServer* self,
 		}
 
 		self->busiestWriteTagContext.lastUpdateTime = req.postTime;
-		TraceEvent("BusiestWriteTag", self->thisServerID)
-		    .detail("Elapsed", req.elapsed)
-		    .detail("Tag", req.busiestTag)
-		    .detail("TagOps", req.opsSum)
-		    .detail("TagCost", req.costSum)
-		    .detail("TotalCost", req.totalWriteCosts)
-		    .detail("Reported", req.reported)
-		    .trackLatest(self->busiestWriteTagContext.busiestWriteTagTrackingKey);
+		if (req.reported || !self->busiestWriteTagContext.wasIdleLastUpdate) {
+			TraceEvent("BusiestWriteTag", self->thisServerID)
+			    .trackLatest(self->busiestWriteTagContext.busiestWriteTagTrackingKey)
+			    .detail("Elapsed", req.elapsed)
+			    .detail("Tag", req.busiestTag)
+			    .detail("TagOps", req.opsSum)
+			    .detail("TagCost", req.costSum)
+			    .detail("TotalCost", req.totalWriteCosts)
+			    .detail("Reported", req.reported);
+		}
+		self->busiestWriteTagContext.wasIdleLastUpdate = !req.reported;
 
 		req.reply.send(Void());
 	}
