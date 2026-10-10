@@ -29,6 +29,7 @@
 #include "Ratekeeper.h"
 #include "TagThrottler.h"
 #include "flow/OwningResource.h"
+#include "flow/UnitTest.h"
 
 #include "flow/CoroUtils.h"
 
@@ -929,6 +930,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 	int64_t worstFreeSpaceTLog = std::numeric_limits<int64_t>::max();
 	int64_t worstStorageQueueTLog = 0;
+	// Detailed and aggregate TLog queues must use the same valid trackers.
+	healthMetrics.tLogQueue.clear();
 	int tlcount = 0;
 	for (auto& it : tlogQueueInfo) {
 		auto const& tl = it.value;
@@ -1277,4 +1280,65 @@ void TLogQueueInfo::update(TLogQueuingMetricsReply const& reply, Smoother& smoot
 	lastReply = reply;
 	queueMetrics.update(
 	    reply.instanceID, reply.bytesDurable, reply.bytesInput, reply.storageBytes, smoothTotalDurableBytes);
+}
+
+class RatekeeperUnitTest {
+public:
+	static void testTLogHealthMetrics() {
+		Database database = DatabaseContext::create(
+		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
+		Ratekeeper ratekeeper(UID(1, 1), database);
+		const UID firstLog(2, 1);
+		const UID secondLog(3, 1);
+
+		auto updateTLog = [&](UID id, int64_t queue, int64_t instanceID) {
+			auto it = ratekeeper.tlogQueueInfo.find(id);
+			if (it == ratekeeper.tlogQueueInfo.end()) {
+				ratekeeper.tlogQueueInfo.insert(mapPair(id, TLogQueueInfo(id)));
+				it = ratekeeper.tlogQueueInfo.find(id);
+			}
+			TLogQueuingMetricsReply reply;
+			reply.localTime = now();
+			reply.instanceID = instanceID;
+			reply.bytesDurable = 100;
+			reply.bytesInput = reply.bytesDurable + queue;
+			reply.storageBytes = StorageBytes(100'000'000'000, 100'000'000'000, 0, 100'000'000'000);
+			reply.v = 1;
+			it->value.update(reply, ratekeeper.smoothTotalDurableBytes);
+		};
+
+		auto check = [&](std::map<UID, int64_t> const& expectedQueues, int64_t expectedWorst) {
+			for (RatekeeperLimits* limits : { &ratekeeper.normalLimits, &ratekeeper.batchLimits }) {
+				ratekeeper.updateRate(limits);
+				ASSERT_EQ(ratekeeper.healthMetrics.tLogQueue.size(), expectedQueues.size());
+				for (auto const& [id, queue] : expectedQueues) {
+					auto it = ratekeeper.healthMetrics.tLogQueue.find(id);
+					ASSERT(it != ratekeeper.healthMetrics.tLogQueue.end());
+					ASSERT_EQ(it->second, queue);
+				}
+				ASSERT_EQ(ratekeeper.healthMetrics.worstTLogQueue, expectedWorst);
+			}
+		};
+
+		updateTLog(firstLog, 500, 1);
+		updateTLog(secondLog, 100, 1);
+		check({ { firstLog, 500 }, { secondLog, 100 } }, 500);
+
+		ratekeeper.tlogQueueInfo.find(firstLog)->value.valid = false;
+		check({ { secondLog, 100 } }, 100);
+
+		updateTLog(firstLog, 300, 2);
+		check({ { firstLog, 300 }, { secondLog, 100 } }, 300);
+
+		ratekeeper.tlogQueueInfo.erase(secondLog);
+		check({ { firstLog, 300 } }, 300);
+
+		ratekeeper.tlogQueueInfo.erase(firstLog);
+		check({}, 0);
+	}
+};
+
+TEST_CASE("/fdbserver/Ratekeeper/TLogHealthMetrics") {
+	RatekeeperUnitTest::testTLogHealthMetrics();
+	return Void();
 }

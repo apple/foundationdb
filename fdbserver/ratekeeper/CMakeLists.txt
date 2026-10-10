@@ -4,6 +4,9 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_ratekeeper SRCS ${FDBSERVER_RATEKE
 add_fdbserver_link_test(fdbserver_ratekeeperlinktest
   fdbserver_ratekeeper
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_ratekeeper_test ratekeeper
+  fdbserver_ratekeeper
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_ratekeeper)
 target_include_directories(fdbserver_ratekeeper

@@ -144,6 +144,8 @@ struct RatekeeperLimits {
 };
 
 class Ratekeeper {
+	friend class RatekeeperUnitTest;
+
 	struct GrvProxyInfo {
 		int64_t totalTransactions{ 0 };
 		int64_t batchTransactions{ 0 };
