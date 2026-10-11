@@ -1091,12 +1091,11 @@ Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> ch
 			std::vector<NetworkAddress> oldCoordinators = co_await oldClusterConnectionString.tryResolveHostnames();
 			CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 			if (desiredCoordinators.empty()) {
-				std::vector<NetworkAddress> _desiredCoordinators = co_await change->getDesiredCoordinators(
+				desiredCoordinators = co_await change->getDesiredCoordinators(
 				    &tr,
 				    oldCoordinators,
 				    makeReference<ClusterConnectionMemoryRecord>(oldClusterConnectionString),
 				    result);
-				desiredCoordinators = _desiredCoordinators;
 			}
 
 			if (result == CoordinatorsResult::NOT_ENOUGH_MACHINES && notEnoughMachineResults < 1) {
@@ -1279,8 +1278,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		std::vector<AddressExclusion> excl = co_await getAllExcludedServers(tr);
 		std::set<AddressExclusion> excluded(excl.begin(), excl.end());
 
-		std::vector<ProcessData> _workers = co_await getWorkers(tr);
-		std::vector<ProcessData> workers = _workers;
+		std::vector<ProcessData> workers = co_await getWorkers(tr);
 
 		std::map<NetworkAddress, LocalityData> addr_locality;
 		for (const auto& w : workers)

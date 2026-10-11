@@ -415,8 +415,7 @@ public:
 
 		// fall back to original fields if the new field is empty
 		if (ranges.empty()) {
-			std::vector<KeyRange> _ranges = co_await restoreRanges().getD(tr);
-			ranges = _ranges;
+			ranges = co_await restoreRanges().getD(tr);
 			if (ranges.empty()) {
 				KeyRange range = co_await restoreRange().getD(tr);
 				ranges.push_back(range);
