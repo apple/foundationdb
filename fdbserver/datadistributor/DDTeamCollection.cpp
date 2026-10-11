@@ -8121,6 +8121,8 @@ TEST_CASE("/DataDistribution/Maintenance/ConcurrentWriterPreservesCommittedStart
 	const Optional<Key> newZone(Key("zone-b"_sr));
 	State maintenanceState(oldZone);
 
+	ASSERT(maintenanceState.reconcile(oldZone, Optional<Version>(50), 75) == State::Action::Preserve);
+	maintenanceState.committed();
 	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(50), 100) == State::Action::Record);
 	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(50), 200) == State::Action::Record);
 	ASSERT_EQ(maintenanceState.startVersion(), 100);
@@ -8139,22 +8141,6 @@ TEST_CASE("/DataDistribution/Maintenance/FailedClearRetriesWithoutLocalZone") {
 	ASSERT_EQ(maintenanceState.startVersion(), invalidVersion);
 	ASSERT(maintenanceState.reconcile(Optional<Key>{}, Optional<Version>(100), 400) == State::Action::Clear);
 	ASSERT(maintenanceState.reconcile(Optional<Key>{}, Optional<Version>{}, 500) == State::Action::Preserve);
-	return Void();
-}
-
-TEST_CASE("/DataDistribution/Maintenance/ZoneChangeReplacesStaleStart") {
-	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
-	const Optional<Key> oldZone(Key("zone-a"_sr));
-	const Optional<Key> newZone(Key("zone-b"_sr));
-	State maintenanceState(oldZone);
-
-	ASSERT(maintenanceState.reconcile(oldZone, Optional<Version>(100), 200) == State::Action::Preserve);
-	maintenanceState.committed();
-	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(100), 300) == State::Action::Record);
-	ASSERT_EQ(maintenanceState.startVersion(), 300);
-	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(100), 400) == State::Action::Record);
-	ASSERT_EQ(maintenanceState.startVersion(), 300);
-	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(300), 500) == State::Action::Preserve);
 	return Void();
 }
 
