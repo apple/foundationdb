@@ -19,6 +19,7 @@
  */
 
 #include <algorithm>
+#include <iterator>
 
 #include "fdbserver/core/BackupProgress.h"
 
@@ -112,10 +113,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 			}
 			updateTagVersions(&tagVersions, &tags, progressIt->second, info.epochEnd, adjustedBeginVersion, epoch);
 		} else {
-			auto rit = std::find_if(
-			    progress.rbegin(),
-			    progress.rend(),
-			    [epoch = epoch](const std::pair<LogEpoch, std::map<Tag, Version>>& p) { return p.first < epoch; });
+			auto rit = std::make_reverse_iterator(progressIt);
 			while (!(rit == progress.rend())) {
 				// A partial recovery can result in empty epoch that copies previous
 				// epoch's version range. In this case, we should check previous
@@ -216,5 +214,36 @@ TEST_CASE("/BackupProgress/Unfinished") {
 		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == saved1 + 1);
 	}
 
+	return Void();
+}
+
+TEST_CASE("/BackupProgress/MissingEpoch") {
+	const LogEpoch epoch = 2;
+	const Version begin = 1, end = 100, earlierSaved = 25, laterSaved = 75;
+	for (int8_t locality : { tagLocalityLogRouter, tagLocalityRangePartitionedBackup }) {
+		const Tag tag(locality, 0);
+		for (bool hasEarlier : { false, true }) {
+			for (bool hasLater : { false, true }) {
+				BackupProgress progress(UID(0, 0), { { epoch, EpochTagsVersionsInfo(1, begin, end) } });
+				progress.setBackupStartedValue(Optional<Value>("1"_sr));
+				if (hasEarlier) {
+					progress.addBackupStatus(WorkerBackupStatus(epoch - 1, earlierSaved, tag, 1));
+				}
+				if (hasLater) {
+					progress.addBackupStatus(WorkerBackupStatus(epoch + 1, laterSaved, tag, 1));
+				}
+
+				const auto unfinished = locality == tagLocalityLogRouter
+				                            ? progress.getUnfinishedPartitionedBackup()
+				                            : progress.getUnfinishedRangePartitionedBackup();
+				ASSERT(unfinished.size() == 1);
+				ASSERT(unfinished.begin()->first == std::make_tuple(epoch, end, 1));
+				const auto& tagVersions = unfinished.begin()->second;
+				ASSERT(tagVersions.size() == 1);
+				ASSERT(tagVersions.begin()->first == tag);
+				ASSERT(tagVersions.begin()->second == (hasEarlier ? earlierSaved + 1 : begin));
+			}
+		}
+	}
 	return Void();
 }
