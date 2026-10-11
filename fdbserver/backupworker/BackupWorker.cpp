@@ -969,6 +969,25 @@ Future<std::vector<CompletedMutationLogFile>> MutationLogBatch::write(std::vecto
 	co_return completedFiles;
 }
 
+static Future<Void> waitForMutationLogUploadRetry(BackupData* self,
+                                                  bool oldEpoch,
+                                                  double waitSeconds,
+                                                  Future<Void> configChanged,
+                                                  Error err) {
+	Future<Void> backoff = delay(waitSeconds);
+	if (oldEpoch) {
+		co_await (backoff || self->doneTrigger.onTrigger());
+	} else {
+		while (!backoff.isReady()) {
+			co_await (backoff || self->doneTrigger.onTrigger() || configChanged);
+			if (self->stopped || configChanged.isReady()) {
+				throw err;
+			}
+		}
+		co_await backoff;
+	}
+}
+
 Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
 	ASSERT(self->backupEpoch == self->recruitedEpoch || self->endVersion.present());
 	bool startedBatch = false;
@@ -1020,7 +1039,7 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 				    return info == self->backups.end() || info->second.stopped;
 			    });
 		    },
-		    [&](Error err) -> Future<Void> {
+		    [&](Error err) {
 			    const double waitSeconds =
 			        oldEpoch ? retryDelay : retryDelay * (0.5 + 0.5 * deterministicRandom()->random01());
 			    retryDelay = std::min(retryDelay * 2, maxRetryDelay);
@@ -1032,18 +1051,7 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 			        .detail("Version", popVersion)
 			        .detail("Retries", retries)
 			        .detail("Delay", waitSeconds);
-			    Future<Void> backoff = delay(waitSeconds);
-			    if (oldEpoch) {
-				    co_await (backoff || self->doneTrigger.onTrigger());
-			    } else {
-				    while (!backoff.isReady()) {
-					    co_await (backoff || self->doneTrigger.onTrigger() || configChanged);
-					    if (self->stopped || configChanged.isReady()) {
-						    throw err;
-					    }
-				    }
-				    co_await backoff;
-			    }
+			    return waitForMutationLogUploadRetry(self, oldEpoch, waitSeconds, configChanged, err);
 		    },
 		    configChanged);
 		if (!completedFiles.empty()) {
