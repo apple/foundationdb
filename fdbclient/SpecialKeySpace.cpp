@@ -1331,8 +1331,7 @@ Future<RangeResult> ExclusionInProgressRangeImpl::getRange(ReadYourWritesTransac
 
 Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
 	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
-	std::vector<ProcessData> _workers = co_await getWorkers(&ryw->getTransaction());
-	auto workers = _workers; // strip const
+	std::vector<ProcessData> workers = co_await getWorkers(&ryw->getTransaction());
 	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
@@ -1455,8 +1454,7 @@ void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& 
 
 Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
 	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
-	std::vector<ProcessData> _workers = co_await getWorkers(&ryw->getTransaction());
-	auto workers = _workers; // strip const
+	std::vector<ProcessData> workers = co_await getWorkers(&ryw->getTransaction());
 	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);

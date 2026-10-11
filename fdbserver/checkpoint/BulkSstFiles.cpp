@@ -39,6 +39,12 @@ void writeKVSToSSTFile(std::string filePath, std::map<Key, Value>& sortedKVS, UI
 	}
 	// Dump data to file
 	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+	if (sstWriter == nullptr) {
+		TraceEvent(SevWarnAlways, "SSBulkDumpNoSstWriter", logId)
+		    .detail("Reason", "Binary was built without RocksDB and cannot write SST files")
+		    .detail("DataFilePathLocal", absFilePath);
+		throw unsupported_operation();
+	}
 	sstWriter->open(absFilePath);
 	for (const auto& [key, value] : sortedKVS) {
 		sstWriter->write(key, value); // assuming sorted
@@ -127,9 +133,16 @@ Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // input fi
 		Error err;
 		try {
 			std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+			std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
+			if (sstWriter == nullptr || reader == nullptr) {
+				TraceEvent(SevWarnAlways, "SSBulkLoadNoSstWriterOrReader", logId)
+				    .detail("Reason", "Binary was built without RocksDB and cannot read or write SST files")
+				    .detail("DataFilePath", dataFileFullPath)
+				    .detail("ByteSampleFilePath", byteSampleFileFullPath);
+				throw unsupported_operation();
+			}
 			sstWriter->open(abspath(byteSampleFileFullPath));
 			bool anySampled = false;
-			std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
 			reader->open(abspath(dataFileFullPath));
 			while (reader->hasNext()) {
 				KeyValue kv = reader->next();
@@ -159,6 +172,10 @@ Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // input fi
 			err = e;
 		}
 		if (err.code() == error_code_actor_cancelled) {
+			throw err;
+		}
+		if (err.code() == error_code_unsupported_operation) {
+			// A build without RocksDB has no SST writer or reader; retrying cannot change that.
 			throw err;
 		}
 		TraceEvent(SevWarn, "SSBulkLoadTaskSamplingError", logId)
