@@ -77,7 +77,7 @@ struct HTTPData {
 };
 
 // computes the sum in base-64 for http
-std::string computeMD5Sum(std::string content);
+std::string computeMD5Sum(const std::string& content);
 
 // class methods on template type classes are weird
 bool verifyMD5(HTTPData<std::string>* data,
