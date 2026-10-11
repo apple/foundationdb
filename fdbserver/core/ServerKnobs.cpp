@@ -947,6 +947,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BACKUP_FILE_BLOCK_BYTES,                       1024 * 1024 );
 	init( BACKUP_WORKER_LOCK_BYTES,                              3e9 ); if(randomize && buggify()) BACKUP_WORKER_LOCK_BYTES = deterministicRandom()->randomInt(2048, 4096) * 4096LL;
 	init( BACKUP_UPLOAD_DELAY,                                  10.0 ); if(randomize && buggify()) BACKUP_UPLOAD_DELAY = deterministicRandom()->random01() * 60;
+	init( BACKUP_WORKER_UPLOAD_RETRY_LIMIT,                         5 );
+	init( BACKUP_WORKER_UPLOAD_RETRY_DELAY,                       1.0 );
+	init( BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY,                  10.0 );
 
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
