@@ -1658,7 +1658,7 @@ public:
 	// must eventually give them back with moveIn() or remove them with reclaim().
 	class Evictor : NonCopyable {
 	public:
-		explicit(false) Evictor(int64_t sizeLimit = 0) : sizeLimit(sizeLimit) {}
+		explicit Evictor(int64_t sizeLimit = 0) : sizeLimit(sizeLimit) {}
 
 		// Evictors are normally singletons, either one per real process or one per virtual process in simulation
 		static Evictor* getEvictor() {
@@ -1791,7 +1791,7 @@ public:
 		int64_t movedOutCount = 0;
 	};
 
-	explicit(false) ObjectCache(Evictor* evictor = nullptr) : pEvictor(evictor) {
+	explicit ObjectCache(Evictor* evictor = nullptr) : pEvictor(evictor) {
 		if (pEvictor == nullptr) {
 			pEvictor = Evictor::getEvictor();
 		}
@@ -2061,9 +2061,9 @@ public:
 
 	struct RemappedPage {
 		enum Type { NONE = 'N', REMAP = 'R', FREE = 'F', DETACH = 'D' };
-		explicit(false) RemappedPage(Version v = invalidVersion,
-		                             LogicalPageID o = invalidLogicalPageID,
-		                             LogicalPageID n = invalidLogicalPageID)
+		explicit RemappedPage(Version v = invalidVersion,
+		                      LogicalPageID o = invalidLogicalPageID,
+		                      LogicalPageID n = invalidLogicalPageID)
 		  : version(v), originalPageID(o), newPageID(n) {}
 
 		Version version;
@@ -5333,7 +5333,7 @@ private:
 		// Clear
 		SingleKeyMutation() : op(MutationRef::ClearRange) {}
 		// Set
-		explicit(false) SingleKeyMutation(Value val) : op(MutationRef::SetValue), value(val) {}
+		explicit SingleKeyMutation(Value val) : op(MutationRef::SetValue), value(val) {}
 		// Atomic Op
 		SingleKeyMutation(MutationRef::Type op, Value val) : op(op), value(val) {}
 
@@ -9745,18 +9745,8 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 			}
 			IntIntPair q = items[newPos];
 			++q.v;
-			if (old) {
-				if (useHint) {
-					// s.seekLessThanOrEqualOld(q, 0, &s, newPos - pos);
-				} else {
-					// s.seekLessThanOrEqualOld(q, 0, nullptr, 0);
-				}
-			} else {
-				if (useHint) {
-					// s.seekLessThanOrEqual(q, 0, &s, newPos - pos);
-				} else {
-					s2.seekLessThanOrEqual(q);
-				}
+			if (!old && !useHint) {
+				s2.seekLessThanOrEqual(q);
 			}
 			pos = newPos;
 		}
@@ -11172,7 +11162,7 @@ struct KVSource {
 	// TODO there is probably a better way to do this
 	Prefix extraRangePrefix;
 
-	explicit(false) KVSource(const std::vector<PrefixSegment>& desc, int numPrefixes = 0) : desc(desc) {
+	explicit KVSource(const std::vector<PrefixSegment>& desc, int numPrefixes = 0) : desc(desc) {
 		if (numPrefixes == 0) {
 			numPrefixes = 1;
 			for (auto& p : desc) {

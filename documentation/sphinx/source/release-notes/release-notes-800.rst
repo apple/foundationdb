@@ -1,8 +1,8 @@
-.. _release-notes-800:
+.. _release-notes:
 
-###################
-Release Notes (8.0)
-###################
+#############
+Release Notes
+#############
 
 8.0.0
 =====
@@ -222,4 +222,5 @@ Earlier release notes
 ----------------------
 
 * :doc:`7.4 (API Version 740) </release-notes/release-notes-740>`
+* :doc:`7.3 (API Version 730) </release-notes/release-notes-730>`
 * :doc:`All earlier releases </earlier-release-notes>`

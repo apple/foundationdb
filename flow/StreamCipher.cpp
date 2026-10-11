@@ -23,31 +23,49 @@
 #include "flow/IRandom.h"
 #include "flow/ITrace.h"
 #include "flow/UnitTest.h"
+#include "flow/network.h"
 #include <memory>
+#include <vector>
 
-UID StreamCipherKey::globalKeyId;
 std::unordered_map<UID, EVP_CIPHER_CTX*> StreamCipher::ctxs;
 std::unordered_map<UID, StreamCipherKey*> StreamCipherKey::cipherKeys;
-std::unique_ptr<StreamCipherKey> StreamCipherKey::globalKey;
+
+namespace {
+
+// Owns the global keys, one per network, and nothing else: the network global below stores a bare
+// pointer and frees nothing, so the objects have to live somewhere. Keys are never looked up here,
+// only appended, and they stay until the process exits.
+std::vector<std::unique_ptr<StreamCipherKey>> globalCipherKeys;
+
+// The current network's global key, or null if it has none yet.
+//
+// Keying on the network is the point. The simulator scopes network globals per process, so each
+// simulated process gets a key of its own instead of all of them sharing one buffer. They need
+// their own because a process reads a backup's encryption key into this key, and concurrent backups
+// can be using different keys.
+StreamCipherKey* currentGlobalCipherKey() {
+	return static_cast<StreamCipherKey*>(g_network->global(INetwork::enGlobalCipherKey));
+}
+
+} // namespace
 
 bool StreamCipherKey::isGlobalKeyPresent() {
-	return StreamCipherKey::globalKey.get() != nullptr;
+	return currentGlobalCipherKey() != nullptr;
 }
 
 void StreamCipherKey::allocGlobalCipherKey() {
 	if (StreamCipherKey::isGlobalKeyPresent()) {
 		return;
 	}
-	StreamCipherKey::globalKeyId = deterministicRandom()->randomUniqueID();
-	StreamCipherKey::globalKey = std::make_unique<StreamCipherKey>(AES_256_KEY_LENGTH);
-	StreamCipherKey::cipherKeys[StreamCipherKey::globalKeyId] = StreamCipherKey::globalKey.get();
+	auto& key = globalCipherKeys.emplace_back(std::make_unique<StreamCipherKey>(AES_256_KEY_LENGTH));
+	g_network->setGlobal(INetwork::enGlobalCipherKey, static_cast<flowGlobalType>(key.get()));
 }
 
 void StreamCipherKey::initializeGlobalRandomTestKey() {
 	if (!StreamCipherKey::isGlobalKeyPresent()) {
 		StreamCipherKey::allocGlobalCipherKey();
 	}
-	StreamCipherKey::globalKey.get()->initializeRandomTestKey();
+	currentGlobalCipherKey()->initializeRandomTestKey();
 }
 
 StreamCipherKey const* StreamCipherKey::getGlobalCipherKey() {
@@ -55,7 +73,7 @@ StreamCipherKey const* StreamCipherKey::getGlobalCipherKey() {
 		StreamCipherKey::allocGlobalCipherKey();
 	}
 	ASSERT(StreamCipherKey::isGlobalKeyPresent());
-	return globalKey.get();
+	return currentGlobalCipherKey();
 }
 
 void StreamCipherKey::cleanup() noexcept {

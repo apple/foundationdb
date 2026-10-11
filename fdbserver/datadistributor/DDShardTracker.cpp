@@ -152,7 +152,7 @@ std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
 }
 
 Future<Void> shardUsableRegions(DataDistributionTracker::SafeAccessor self, KeyRange keys) {
-	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(self()->shardEncodeLocationMetadata);
 	ASSERT(SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE > 0);
 	co_await yieldedFuture(self()->readyToStart.getFuture());
 	double expectedCompletionSeconds = self()->shards->size() * 1.0 / SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE;
@@ -975,7 +975,7 @@ void restartShardTrackers(DataDistributionTracker* self,
 		data.trackShard = shardTracker(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
 		data.trackBytes =
 		    trackShardMetrics(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics, whenDDInit);
-		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE > 0 &&
+		if (self->shardEncodeLocationMetadata && SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE > 0 &&
 		    self->usableRegions != -1) {
 			data.trackUsableRegion = shardUsableRegions(DataDistributionTracker::SafeAccessor(self), ranges[i]);
 		}
@@ -1237,7 +1237,8 @@ DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitPara
     output(params.output), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     physicalShardCollection(params.physicalShardCollection), bulkLoadTaskCollection(params.bulkLoadTaskCollection),
     readyToStart(params.readyToStart), anyZeroHealthyTeams(params.anyZeroHealthyTeams),
-    trackerCancelled(params.trackerCancelled), usableRegions(params.usableRegions) {}
+    trackerCancelled(params.trackerCancelled), usableRegions(params.usableRegions),
+    shardEncodeLocationMetadata(params.shardEncodeLocationMetadata) {}
 
 DataDistributionTracker::~DataDistributionTracker() {
 	if (trackerCancelled) {
@@ -1365,7 +1366,7 @@ Future<Void> DataDistributionTracker::run(
 	self->triggerStorageQueueRebalance = triggerStorageQueueRebalance;
 	self->triggerShardBulkLoading = triggerShardBulkLoading;
 	self->userRangeConfig = initData->userRangeConfig;
-	self->bulkLoadEnabled = bulkLoadIsEnabled(initData->bulkLoadMode);
+	self->bulkLoadEnabled = bulkLoadIsEnabled(initData->bulkLoadMode, self->shardEncodeLocationMetadata);
 	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }
 

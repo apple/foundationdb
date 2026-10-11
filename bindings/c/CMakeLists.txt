@@ -55,6 +55,7 @@ if(OPEN_FOR_IDE)
 else()
   add_library(fdb_c SHARED ${FDB_C_SRCS} ${fdb_c_apiversion_file} ${asm_file})
   strip_debug_symbols(fdb_c)
+  add_custom_target(stripped_fdb_c ALL DEPENDS strip_only_fdb_c)
 endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 add_dependencies(fdbclient fdb_c_options)
@@ -237,9 +238,7 @@ if(NOT WIN32)
     target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
     if(NOT OPEN_FOR_IDE)
       strip_debug_symbols(mako)
-      if(NOT GENERATE_DEBUG_PACKAGES)
-        add_custom_target(prepare_mako_install ALL DEPENDS strip_only_mako)
-      endif()
+      add_custom_target(prepare_mako_install ALL DEPENDS strip_only_mako)
     endif()
   endif()
 
@@ -354,15 +353,17 @@ if(NOT WIN32)
       )
     endforeach()
 
-    add_python_venv_test(NAME fdb_c_upgrade_to_future_version
-      COMMAND python -m fdb_test_runner.upgrade_test
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-      --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
-      --process-number 3
-      )
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      add_python_venv_test(NAME fdb_c_upgrade_to_future_version
+        COMMAND python -m fdb_test_runner.upgrade_test
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
+        --process-number 3
+        )
+    endif()
 
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
       add_python_venv_test(NAME fdb_c_client_config_tests
         COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_client_config_tests.py
         --build-dir ${CMAKE_BINARY_DIR}

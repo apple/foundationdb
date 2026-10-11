@@ -433,7 +433,7 @@ public:
 				if (io->owner->lastFileSize != io->owner->nextFileSize) {
 					++ctx.countPreSubmitTruncate;
 					int64_t truncateSize = io->owner->nextFileSize - io->owner->lastFileSize;
-					ASSERT(truncateSize > 0);
+					ASSERT_GT(truncateSize, 0);
 					ctx.preSubmitTruncateBytes += truncateSize;
 					largestTruncate = std::max(largestTruncate, truncateSize);
 					io->owner->truncate(io->owner->nextFileSize);

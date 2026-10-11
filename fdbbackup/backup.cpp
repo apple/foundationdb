@@ -328,8 +328,6 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	BACKUP_CLUSTER_FILE_OPTIONS,
-	{ OPT_ERRORLIMIT, "-e", SO_REQ_SEP },
-	{ OPT_ERRORLIMIT, "--errorlimit", SO_REQ_SEP },
 	BACKUP_TAG_OPTIONS,
 	BACKUP_LOG_OPTIONS,
 	BACKUP_QUIET_OPTIONS,
@@ -675,6 +673,7 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	BACKUP_MEMORY_OPTIONS,
 	BACKUP_HELP_OPTIONS,
+	{ OPT_JSON, "--json", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -932,7 +931,6 @@ static void printBackupUsage(bool devhelp) {
 	       "                 Specifies a UID to verify against the BackupUID of the running backup.  If provided, the "
 	       "UID is verified in the same transaction\n"
 	       "                 which sets the new backup parameters (if the UID matches).\n");
-	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup or to filter the backup in query operations.\n"
 	       "                 If not specified, the entire database will be backed up or no filter will be applied.\n");
 	printf("  --keys-file FILE\n"
@@ -1141,7 +1139,9 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("  -s, --source CONNFILE\n"
 	       "                 The path of a file containing the connection string for the\n"
 	       "                 source FoundationDB cluster.\n");
-	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
+	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 20).\n");
+	printf("  --json         Emit status as a JSON document instead of text. Reports every error\n"
+	       "                 rather than the -e maximum, which applies to the text output only.\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 	       "                 If not specified, the entire database will be backed up.\n");
 	printf("  --keys-file FILE\n"
@@ -2003,11 +2003,12 @@ Future<Void> switchDBBackup(Database src,
 	}
 }
 
-Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, int errorLimit) {
+Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, int errorLimit, bool json) {
 	try {
 		DatabaseBackupAgent backupAgent(src);
 
-		std::string statusText = co_await backupAgent.getStatus(dest, errorLimit, StringRef(tagName));
+		std::string statusText = co_await (json ? backupAgent.getStatusJSON(dest, StringRef(tagName))
+		                                        : backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -4398,7 +4399,7 @@ int main(int argc, char* argv[]) {
 				f = stopAfter(submitDBBackup(sourceDb, db, backupKeys, tagName));
 				break;
 			case DBType::STATUS:
-				f = stopAfter(statusDBBackup(sourceDb, db, tagName, maxErrors));
+				f = stopAfter(statusDBBackup(sourceDb, db, tagName, maxErrors, jsonOutput));
 				break;
 			case DBType::SWITCH:
 				f = stopAfter(switchDBBackup(sourceDb, db, backupKeys, tagName, forceAction));

@@ -43,6 +43,8 @@
 #include "DDTeamCollection.h"
 #include "DataDistribution.h"
 #include "DDRelocationQueue.h"
+#include "NativeCdcBalancer.h"
+#include "NativeCdcRetagCleanup.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.h"
@@ -137,7 +139,7 @@ enum class DDAuditContext : uint8_t {
 };
 
 struct DDAudit {
-	explicit(false) DDAudit(AuditStorageState coreState)
+	explicit DDAudit(AuditStorageState coreState)
 	  : coreState(coreState), actors(true), foundError(false), auditStorageAnyChildFailed(false), retryCount(0),
 	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0), overallSkippedDoAuditCount(0),
 	    remainingBudgetForAuditTasks(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX), context(DDAuditContext::INVALID) {}
@@ -501,7 +503,8 @@ public:
 		                 lock,
 		                 configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
 		                 context->ddEnabledState.get(),
-		                 SkipDDModeCheck::False));
+		                 SkipDDModeCheck::False,
+		                 configuration));
 	}
 
 	void initDcInfo() {
@@ -645,9 +648,25 @@ public:
 			    .setMaxFieldLength(-1)
 			    .detail("Conf", self->configuration.toString());
 
+			// Resolve the effective shard-location-metadata encoding target for
+			// this DD incarnation: DatabaseConfiguration is authoritative, with
+			// the legacy SHARD_ENCODE_LOCATION_METADATA knob as the fallback
+			// only when shard_metadata_format is UNSET. Publish it on
+			// ddEnabledState so every downstream write/move path reads one
+			// resolved value instead of the raw knob.
+			bool shardEncodeLocationMetadata = self->configuration.shardMetadataFormatIsEncoded().orDefault(
+			    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+			self->context->ddEnabledState->setShardEncodeLocationMetadata(shardEncodeLocationMetadata);
+			TraceEvent("DDInitShardEncodeTarget", self->ddId)
+			    .detail("ShardEncodeLocationMetadata", shardEncodeLocationMetadata)
+			    .detail("ConfigFormatUnset",
+			            self->configuration.shardMetadataFormat == DatabaseConfiguration::ShardMetadataFormat::UNSET)
+			    .detail("Knob", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+
 			if (self->configuration.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
-			    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			    !shardEncodeLocationMetadata) {
 				TraceEvent(SevError, "PhysicalShardNotEnabledForShardedRocks", self->ddId)
+				    .detail("Reason", "sharded-rocksdb requires new-format shard-location metadata")
 				    .detail("EnableServerKnob", "SHARD_ENCODE_LOCATION_METADATA");
 				throw internal_error();
 			}
@@ -714,6 +733,7 @@ public:
 			    .detail("TotalBytes", 0)
 			    .detail("UnhealthyServers", 0)
 			    .detail("HighestPriority", 0)
+			    .detail("HighestTeamPriority", -1)
 			    .trackLatest(self->totalDataInFlightEventHolder->trackingKey);
 			TraceEvent("TotalDataInFlight", self->ddId)
 			    .detail("Primary", false)
@@ -778,7 +798,8 @@ public:
 		}
 
 		std::vector<Key> customBoundaries;
-		if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+		if (bulkLoadIsEnabled(self->initData->bulkLoadMode,
+		                      self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 			// Bulk load does not allow boundary change
 			TraceEvent(SevInfo, "DDInitCustomRangeConfigDisabledByBulkLoadMode", self->ddId);
 		} else {
@@ -913,7 +934,7 @@ public:
 				    .detail("DataMove", meta.toString());
 				cancelledMoves++;
 			} else if (it.value()->isCancelled() ||
-			           (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
+			           (it.value()->valid && !self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
@@ -1111,34 +1132,31 @@ Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<Data
 	}
 }
 
-// Replace a task with two tasks covering the same manifests, halving the key range each covers.
+// Derive the two tasks that replace an unplaceable one, each covering half its key range and the manifests
+// belonging to that half. Returns an empty Optional if the task cannot be narrowed: it holds a single
+// manifest, or no manifest boundary falls strictly inside its range.
 //
 // This is the recovery for a placement failure the task's range itself causes: src is the union of the
 // owners of every shard the range spans, and a destination team must be disjoint from src, so a range
 // spanning enough of the fleet has no legal destination. Re-dispatch cannot clear that, because every
 // attempt presents the same range and recomputes the same src. Narrower ranges span fewer shards and so
-// have narrower src.
+// have narrower src. Halving bounds recursion without a counter.
 //
-// The children's ranges tile the parent's and both writes land in one transaction, so no version exists in
-// which the parent's range is unowned, or owned by anything but tasks whose union is the parent. That is
-// the difference from erasing the task and relying on something to rebuild it, which drops the range's data
-// if nothing does. Because the job's manifests tile the key space, splitting the manifest list at the same
-// key that splits the range gives each child exactly the manifests covering its own range.
-//
-// Returns false without writing anything if the task cannot be narrowed -- it holds a single manifest, or no
-// manifest boundary falls inside its range -- and also if the parent turns out to be no longer ours, which is
-// not a statement about the range. Halving bounds recursion without a counter.
-Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskState parent) {
+// The children's ranges tile the parent's, so the caller must write both in a single transaction: then no
+// version exists in which the parent's range is unowned, or owned by anything but tasks whose union is the
+// parent -- that is the difference from erasing the task and relying on something to rebuild it, which drops
+// the range's data if nothing does.
+Optional<std::vector<BulkLoadTaskState>> deriveSplitBulkLoadTasks(const BulkLoadTaskState& parent, UID logId) {
 	std::vector<BulkLoadManifest> manifests = parent.getManifests();
 	if (manifests.size() < 2) {
 		// A single manifest is as narrow as a task gets, and a manifest can span an arbitrarily wide range,
 		// so this is reachable with a range covering the whole key space. Nothing here can place it: the
 		// cluster needs servers outside src, or the manifest needs to have been dumped more finely.
-		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", self->ddId)
+		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", logId)
 		    .detail("Reason", "Task holds a single manifest and cannot be narrowed")
 		    .detail("TaskRange", parent.getRange())
 		    .detail("TaskID", parent.getTaskId());
-		co_return false;
+		return {};
 	}
 	std::sort(manifests.begin(), manifests.end(), [](BulkLoadManifest const& a, BulkLoadManifest const& b) {
 		return a.getBeginKey() < b.getBeginKey();
@@ -1169,12 +1187,12 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	}
 	if (insideBoundaries.empty()) {
 		// Every manifest boundary is outside the parent's clipped range, so the range cannot be cut at one.
-		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", self->ddId)
+		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", logId)
 		    .detail("Reason", "No manifest split point lies inside the task's range")
 		    .detail("TaskRange", parent.getRange())
 		    .detail("TaskID", parent.getTaskId())
 		    .detail("ManifestCount", manifests.size());
-		co_return false;
+		return {};
 	}
 	int const half = insideBoundaries[insideBoundaries.size() / 2];
 	// The parent's range starts at or after its first manifest's begin key, so that key can never be
@@ -1201,7 +1219,7 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	ASSERT(children[0].getRange().begin == parent.getRange().begin);
 	ASSERT(children[0].getRange().end == children[1].getRange().begin);
 	ASSERT(children[1].getRange().end == parent.getRange().end);
-	// The writes below must be issued in ascending key order, so keep the guard next to the reason.
+	// The caller must issue the writes in ascending key order, so keep the guard next to the reason.
 	// krmSetRange reads oldValue at Snapshot::True on a plain Transaction, which has no read-your-writes,
 	// so each call is blind to the previous one's mutations and only their order makes the result correct.
 	// Each call emits clear(range); set(begin, value); set(end, oldValue). Ascending, the second call's
@@ -1210,6 +1228,18 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	// lands last and republishes the parent over the second child's range -- precisely the state the
 	// tiling comment above says cannot exist.
 	ASSERT(children[0].getRange().begin < children[1].getRange().begin);
+	return children;
+}
+
+// Install the derived children in place of the parent, in one transaction. Returns false without writing
+// anything if the task cannot be narrowed, and also if the parent turns out to be no longer ours, which is
+// not a statement about the range.
+Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskState parent) {
+	Optional<std::vector<BulkLoadTaskState>> derived = deriveSplitBulkLoadTasks(parent, self->ddId);
+	if (!derived.present()) {
+		co_return false;
+	}
+	std::vector<BulkLoadTaskState> const& children = derived.get();
 
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
@@ -1230,7 +1260,7 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 			    .detail("CommitVersion", tr.getCommittedVersion())
 			    .detail("TaskRange", parent.getRange())
 			    .detail("TaskID", parent.getTaskId())
-			    .detail("ManifestCount", manifests.size())
+			    .detail("ManifestCount", parent.getManifests().size())
 			    .detail("FirstRange", children[0].getRange())
 			    .detail("FirstTaskID", children[0].getTaskId())
 			    .detail("SecondRange", children[1].getRange())
@@ -2233,8 +2263,7 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 						// No matter whether the task range is aligned with the manifest entry range, the task
 						// begin key must be in the manifestEntryMap. See manifestEntryMap definition for more
 						// details.
-						ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->find(task.getRange().begin) !=
-						       self->bulkLoadJobManager.get().manifestEntryMap->end());
+						ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->contains(task.getRange().begin));
 						if (task.onAnyPhase(
 						        { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error })) {
 							ASSERT(task.getRange().end == res[i + 1].key);
@@ -2580,10 +2609,11 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 		co_return;
 	}
 
-	// Only monitor if SHARD_ENCODE_LOCATION_METADATA is enabled (required for bulkload)
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	// Only monitor if the effective shard-location-metadata target is new
+	// format (required for bulkload)
+	if (!self->context->ddEnabledState->shardEncodeLocationMetadata()) {
 		TraceEvent(SevInfo, "DDBulkLoadModeMonitorSkipped", self->ddId)
-		    .detail("Reason", "SHARD_ENCODE_LOCATION_METADATA is disabled");
+		    .detail("Reason", "effective shard_metadata target is original");
 		co_return;
 	}
 
@@ -2608,7 +2638,8 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 				rd >> mode;
 			}
 
-			if (bulkLoadIsEnabled(mode) && !self->bulkLoadEnabled) {
+			if (bulkLoadIsEnabled(mode, self->context->ddEnabledState->shardEncodeLocationMetadata()) &&
+			    !self->bulkLoadEnabled) {
 				TraceEvent(SevInfo, "DDBulkLoadModeDynamicallyEnabled", self->ddId)
 				    .detail("UsableRegions", self->configuration.usableRegions);
 				self->bulkLoadEnabled = true;
@@ -3041,7 +3072,11 @@ Future<Void> bulkDumpCore(Reference<DataDistributor> self, Future<Void> readyToS
 }
 
 void addDataDistributionActors(Reference<DataDistributor> self, std::vector<Future<Void>>& actors) {
-	if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+	actors.push_back(nativeCdcRetagCleanup(
+	    self->txnProcessor->context(), self->lock, self->context->ddEnabledState.get(), self->initialized.getFuture()));
+	actors.push_back(nativeCdcBalancer(
+	    self->txnProcessor->context(), self->lock, self->context->ddEnabledState.get(), self->initialized.getFuture()));
+	if (bulkLoadIsEnabled(self->initData->bulkLoadMode, self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 		TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
 		    .detail("UsableRegions", self->configuration.usableRegions);
 		self->bulkLoadEnabled = true;
@@ -3148,18 +3183,19 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			actors.push_back(self->pollMoveKeysLock());
 			actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
 
-			self->context->tracker = makeReference<DataDistributionTracker>(
-			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
-			                                       .distributorId = self->ddId,
-			                                       .readyToStart = self->initialized,
-			                                       .output = self->relocationProducer,
-			                                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
-			                                       .physicalShardCollection = self->physicalShardCollection,
-			                                       .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
-			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
-			                                       .shards = &shards,
-			                                       .trackerCancelled = &self->context->trackerCancelled,
-			                                       .usableRegions = self->configuration.usableRegions });
+			self->context->tracker = makeReference<DataDistributionTracker>(DataDistributionTrackerInitParams{
+			    .db = self->txnProcessor,
+			    .distributorId = self->ddId,
+			    .readyToStart = self->initialized,
+			    .output = self->relocationProducer,
+			    .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			    .physicalShardCollection = self->physicalShardCollection,
+			    .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
+			    .anyZeroHealthyTeams = anyZeroHealthyTeams,
+			    .shards = &shards,
+			    .trackerCancelled = &self->context->trackerCancelled,
+			    .usableRegions = self->configuration.usableRegions,
+			    .shardEncodeLocationMetadata = self->context->ddEnabledState->shardEncodeLocationMetadata() });
 			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(self->context->tracker,
 			                                                                 self->initData,
 			                                                                 getShardMetrics.getFuture(),
@@ -3394,9 +3430,9 @@ Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stream, Wo
 			    .detail("PeerAddress", stream.getEndpoint().getPrimaryAddress())
 			    .detail("Retry", snapReqRetry);
 			if (reply.getError().code() != error_code_request_maybe_delivered ||
-			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
+			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT) {
 				co_return ErrorOr<Void>(reply.getError());
-			else {
+			} else {
 				// retry for network failures with same snap UID to avoid snapshot twice
 				req = WorkerSnapRequest(req.snapPayload, req.snapUID, req.role);
 				co_await delay(snapRetryBackoff);
@@ -3484,7 +3520,7 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 
 			for (const auto& tlog : *tlogs) {
 				TraceEvent(SevDebug, "GetStatefulWorkersTLog").detail("Addr", tlog.address());
-				if (workersMap.find(tlog.address()) == workersMap.end()) {
+				if (!workersMap.contains(tlog.address())) {
 					TraceEvent(SevWarn, "MissingTLogWorkerInterface").detail("TlogAddress", tlog.address());
 					throw snap_tlog_failed();
 				}
@@ -3509,8 +3545,8 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 				// as we use primary addresses from storage and tlog interfaces above
 				NetworkAddress primary = worker.interf.address();
 				Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
-				if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end() ||
-				    (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
+				if (coordinatorsAddrSet.contains(primary) ||
+				    (secondary.present() && coordinatorsAddrSet.contains(secondary.get()))) {
 					if (result.contains(primary)) {
 						ASSERT(workersMap[primary].id() == result[primary].first.id());
 						result[primary].second.append(",coord");
@@ -3844,9 +3880,9 @@ Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 			rep.storageMetricsList = result.get();
 		} else {
 			auto& metricVec = result.get();
-			if (metricVec.empty())
+			if (metricVec.empty()) {
 				rep.midShardSize = 0;
-			else {
+			} else {
 				rep.midShardSize = getMedianShardSize(metricVec.contents());
 			}
 		}
@@ -4482,18 +4518,15 @@ void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAud
 	    .detail("AuditType", audit->coreState.getType())
 	    .detail("AuditRange", audit->coreState.range);
 
-	if (audit->coreState.getType() == AuditType::ValidateHA) {
-		audit->actors.add(dispatchAuditStorage(self, audit));
-	} else if (audit->coreState.getType() == AuditType::ValidateReplica) {
+	if (audit->coreState.getType() == AuditType::ValidateHA ||
+	    audit->coreState.getType() == AuditType::ValidateReplica ||
+	    audit->coreState.getType() == AuditType::ValidateRestore ||
+	    audit->coreState.getType() == AuditType::RangeDigest) {
 		audit->actors.add(dispatchAuditStorage(self, audit));
 	} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
 		audit->actors.add(dispatchAuditLocationMetadata(self, audit, allKeys));
 	} else if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
 		audit->actors.add(dispatchAuditStorageServerShard(self, audit));
-	} else if (audit->coreState.getType() == AuditType::ValidateRestore) {
-		audit->actors.add(dispatchAuditStorage(self, audit));
-	} else if (audit->coreState.getType() == AuditType::RangeDigest) {
-		audit->actors.add(dispatchAuditStorage(self, audit));
 	} else {
 		UNREACHABLE();
 	}
@@ -5961,4 +5994,108 @@ TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
 	self->shardsAffectedByTeamFailure->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
 	self->shardsAffectedByTeamFailure->check();
 	co_return;
+}
+
+namespace {
+
+// Only the key range matters to deriveSplitBulkLoadTasks(). The remaining fields are whatever satisfies
+// BulkLoadManifest::isValid(), which the constructor asserts.
+BulkLoadManifest splitTestManifest(KeyRef begin, KeyRef end) {
+	return BulkLoadManifest(BulkLoadFileSet("root", "relative", "0-manifest.txt", "0-data.sst", "", {}),
+	                        begin,
+	                        end,
+	                        /*version=*/1,
+	                        /*bytes=*/1,
+	                        /*keyCount=*/1,
+	                        BulkLoadByteSampleSetting(0, "hashlittle2", 250, 100, 0.5),
+	                        BulkLoadType::SST,
+	                        BulkLoadTransportMethod::CP);
+}
+
+BulkLoadTaskState splitTestTask(const std::vector<KeyRange>& manifestRanges, const KeyRange& taskRange) {
+	BulkLoadManifestSet set(manifestRanges.size());
+	for (const auto& range : manifestRanges) {
+		ASSERT(set.addManifest(splitTestManifest(range.begin, range.end)));
+	}
+	return BulkLoadTaskState(deterministicRandom()->randomUniqueID(), set, taskRange);
+}
+
+} // namespace
+
+TEST_CASE("/DataDistribution/BulkLoad/DeriveSplitTasks") {
+	// The children tile the parent and partition its manifests, and inherit its job.
+	{
+		auto parent = splitTestTask({ KeyRangeRef("a"_sr, "c"_sr),
+		                              KeyRangeRef("c"_sr, "e"_sr),
+		                              KeyRangeRef("e"_sr, "g"_sr),
+		                              KeyRangeRef("g"_sr, "i"_sr) },
+		                            KeyRangeRef("a"_sr, "i"_sr));
+		auto children = deriveSplitBulkLoadTasks(parent, UID()).get();
+		ASSERT_EQ(children.size(), 2);
+		ASSERT(children[0].getRange().begin == parent.getRange().begin);
+		ASSERT(children[0].getRange().end == children[1].getRange().begin);
+		ASSERT(children[1].getRange().end == parent.getRange().end);
+		ASSERT_EQ(children[0].getManifests().size() + children[1].getManifests().size(), parent.getManifests().size());
+		ASSERT(children[0].getJobId() == parent.getJobId());
+		ASSERT(children[1].getJobId() == parent.getJobId());
+	}
+
+	// The cut falls on a manifest boundary, so neither child is handed a range whose data lives in the
+	// other's manifests.
+	{
+		auto parent =
+		    splitTestTask({ KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("c"_sr, "e"_sr) }, KeyRangeRef("a"_sr, "e"_sr));
+		auto children = deriveSplitBulkLoadTasks(parent, UID()).get();
+		ASSERT(children[0].getRange() == KeyRangeRef("a"_sr, "c"_sr));
+		ASSERT(children[1].getRange() == KeyRangeRef("c"_sr, "e"_sr));
+	}
+
+	// A single manifest is as narrow as a task gets. Declining is terminal for the task -- the caller marks
+	// it Error rather than re-dispatching it.
+	{
+		auto parent = splitTestTask({ KeyRangeRef("a"_sr, "z"_sr) }, KeyRangeRef("a"_sr, "z"_sr));
+		ASSERT(!deriveSplitBulkLoadTasks(parent, UID()).present());
+	}
+
+	// REGRESSION: a task at a job-range edge holds manifests whose boundaries lie outside its clipped
+	// range. The cut must come from the boundaries strictly inside that range: here the manifest midpoint
+	// is "c", below the parent's own begin key.
+	{
+		auto parent =
+		    splitTestTask({ KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("c"_sr, "e"_sr), KeyRangeRef("e"_sr, "g"_sr) },
+		                  KeyRangeRef("d"_sr, "f"_sr));
+		auto children = deriveSplitBulkLoadTasks(parent, UID()).get();
+		ASSERT(children[0].getRange() == KeyRangeRef("d"_sr, "e"_sr));
+		ASSERT(children[1].getRange() == KeyRangeRef("e"_sr, "f"_sr));
+	}
+
+	// Every boundary outside the clipped range leaves nothing to cut at, so the task declines rather than
+	// producing an empty child.
+	{
+		auto parent =
+		    splitTestTask({ KeyRangeRef("a"_sr, "e"_sr), KeyRangeRef("e"_sr, "i"_sr) }, KeyRangeRef("f"_sr, "h"_sr));
+		ASSERT(!deriveSplitBulkLoadTasks(parent, UID()).present());
+	}
+
+	// Halving terminates: each child holds strictly fewer manifests than its parent, so repeated splitting
+	// of the lower child reaches a single manifest and declines.
+	{
+		StringRef const boundaries = "abcdefghi"_sr;
+		std::vector<KeyRange> ranges;
+		for (int i = 0; i + 1 < boundaries.size(); i++) {
+			ranges.push_back(KeyRangeRef(boundaries.substr(i, 1), boundaries.substr(i + 1, 1)));
+		}
+		BulkLoadTaskState task = splitTestTask(ranges, KeyRangeRef(ranges.front().begin, ranges.back().end));
+		while (true) {
+			Optional<std::vector<BulkLoadTaskState>> children = deriveSplitBulkLoadTasks(task, UID());
+			if (!children.present()) {
+				break;
+			}
+			ASSERT_LT(children.get()[0].getManifests().size(), task.getManifests().size());
+			task = children.get()[0];
+		}
+		ASSERT_EQ(task.getManifests().size(), 1);
+	}
+
+	return Void();
 }

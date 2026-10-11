@@ -37,7 +37,8 @@
 struct DDRangeConfig {
 	constexpr static FileIdentifier file_identifier = 9193856;
 
-	explicit(false) DDRangeConfig(Optional<int> replicationFactor = {}, Optional<int> teamID = {})
+	DDRangeConfig() = default;
+	explicit DDRangeConfig(Optional<int> replicationFactor, Optional<int> teamID = {})
 	  : replicationFactor(replicationFactor), teamID(teamID) {}
 
 	Optional<int> replicationFactor;

@@ -24,15 +24,12 @@
 
 #include "fdbclient/NativeCdc.h"
 
-// Durable metadata operations used by CDC server roles. Registration is
-// feature gated; drain and cleanup operations remain available for streams
-// persisted before native CDC is disabled.
-Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys, UID proxyId);
-// Persists per-tag final-pop watermarks before removing stream metadata.
-Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, UID proxyId);
+// Shared admission and metadata identity checks for native CDC operations.
+void validateNativeCdcEnabled(bool enabled);
+void normalizeNativeCdcStreamRanges(KeyRef const& name, std::vector<KeyRange>& ranges);
+bool nativeCdcNameMatchesStream(Optional<Value> const& currentId, CDCStreamId streamId);
+
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx);
-// Atomically moves any streams assigned to a failed proxy to its replacement.
-Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyId);
 // Persists the exclusive unpopped watermark after consuming through a version.
 // knownAvailableThrough permits a consumer to acknowledge log data it has
 // already received before that version is visible at a transaction read version.

@@ -1752,13 +1752,14 @@ Future<Void> postResolution(CommitBatchContext* self) {
 			// @todo probably there is no need to get the (entire) version vector from the sequencer
 			// in this case, and if so, consider adding a flag to the request to tell the sequencer
 			// to not send the version vector information.
+			// Receive master replies at socket priority so incoming commits cannot starve an already-arrived reply.
 			auto res =
 			    co_await race(pProxyCommitData->committedVersion.whenAtLeast(
 			                      self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS),
 			                  pProxyCommitData->cx->onProxiesChanged(),
 			                  pProxyCommitData->master.getLiveCommittedVersion.getReply(
 			                      GetRawCommittedVersionRequest(waitVersionSpan.context, debugID, invalidVersion),
-			                      TaskPriority::GetLiveCommittedVersionReply));
+			                      TaskPriority::ReadSocket));
 			if (res.index() == 0) {
 				co_await yield();
 				break;
@@ -2208,9 +2209,7 @@ Future<Void> commitBatch(ProxyCommitData* pCommitData,
 		if (err.code() == error_code_actor_cancelled) {
 			throw;
 		}
-		TraceEvent(SevInfo, "CommitBatchFailed", pCommitData->dbgid)
-		    .detail("Stage", context.stage)
-		    .detail("ErrorCode", err.code());
+		TraceEvent(SevInfo, "CommitBatchFailed", pCommitData->dbgid).error(err).detail("Stage", context.stage);
 		throw failed_to_progress();
 	}
 }
@@ -2304,10 +2303,9 @@ static Future<Void> readRequestServer(CommitProxyInterface proxy,
 	while (true) {
 		GetKeyServerLocationsRequest req = co_await proxy.getKeyServersLocations.getFuture();
 		// WARNING: this code is run at a high priority, so it needs to do as little work as possible
-		if (req.limit != CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && // Always do data distribution requests
-		    (commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
-		         SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE ||
-		     (g_network->isSimulated() && buggify(0.001)))) {
+		if (commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
+		        SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE ||
+		    (g_network->isSimulated() && buggify(0.001))) {
 			++commitData->stats.keyServerLocationErrors;
 			req.reply.sendError(commit_proxy_memory_limit_exceeded());
 			TraceEvent(SevWarnAlways, "ProxyLocationRequestThresholdExceeded").suppressFor(60);

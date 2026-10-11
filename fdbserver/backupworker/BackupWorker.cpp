@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "BackupWorkerPause.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
@@ -739,29 +740,59 @@ private:
 	KeyRangeMap<std::set<int>> keyRangeMap;
 };
 
+static bool retryableBackupFileError(Error error) {
+	switch (error.code()) {
+	case error_code_io_error:
+	case error_code_io_timeout:
+	case error_code_platform_error:
+	case error_code_timed_out:
+	case error_code_connection_failed:
+	case error_code_lookup_failed:
+	case error_code_http_request_failed:
+	case error_code_http_bad_response:
+		return true;
+	default:
+		return false;
+	}
+}
+
 template <class WriteFiles, class WaitRetry>
-static Future<std::vector<CompletedMutationLogFile>> retryMutationLogUpload(LogEpoch backupEpoch,
-                                                                            LogEpoch recruitedEpoch,
-                                                                            const bool* stopped,
-                                                                            WriteFiles writeFiles,
-                                                                            WaitRetry waitRetry) {
+static Future<std::vector<CompletedMutationLogFile>> retryMutationLogUpload(
+    LogEpoch backupEpoch,
+    LogEpoch recruitedEpoch,
+    const bool* stopped,
+    WriteFiles writeFiles,
+    WaitRetry waitRetry,
+    Future<Void> configChanged = Never(),
+    int retryLimit = SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_LIMIT) {
+	int retries = 0;
+	Optional<Error> lastError;
+	bool oldEpochRetry = false;
 	while (true) {
 		Error err;
 		try {
-			co_return co_await writeFiles();
+			auto completed = co_await writeFiles();
+			if (lastError.present() && !oldEpochRetry && configChanged.isReady()) {
+				throw lastError.get();
+			}
+			co_return completed;
 		} catch (Error& e) {
 			// Blob-store requests can exhaust their own bounded retries before the destination recovers.
 			const bool destinationError = e.code() == error_code_io_error || e.code() == error_code_io_timeout ||
 			                              e.code() == error_code_http_request_failed ||
 			                              e.code() == error_code_connection_failed ||
 			                              e.code() == error_code_timed_out || e.code() == error_code_lookup_failed;
-			if (!destinationError || backupEpoch >= recruitedEpoch || *stopped) {
+			oldEpochRetry = backupEpoch < recruitedEpoch && destinationError;
+			if (!retryableBackupFileError(e) || *stopped ||
+			    (!oldEpochRetry && (retries >= retryLimit || configChanged.isReady()))) {
 				throw;
 			}
 			err = e;
+			lastError = e;
 		}
+		++retries;
 		co_await waitRetry(err);
-		if (*stopped) {
+		if (*stopped || (!oldEpochRetry && configChanged.isReady())) {
 			throw err;
 		}
 	}
@@ -870,7 +901,7 @@ Future<std::vector<CompletedMutationLogFile>> MutationLogBatch::write(std::vecto
 
 	std::vector<int64_t> blockEnds(logFiles.size(), 0);
 	for (int idx = 0; idx < numMessages; idx++) {
-		auto& message = (*messages)[idx];
+		auto message = (*messages)[idx];
 		MutationRef m;
 		if (!message.isCandidateBackupMessage(&m)) {
 			continue;
@@ -970,11 +1001,15 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 		                       numMsg,
 		                       SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES,
 		                       std::move(backups));
-		const double maxRetryDelay = std::max(1.0, CLIENT_KNOBS->BACKUP_ERROR_DELAY);
-		double retryDelay = 1.0;
+		const bool oldEpoch = self->backupEpoch < self->recruitedEpoch;
+		const double maxRetryDelay = oldEpoch ? std::max(1.0, CLIENT_KNOBS->BACKUP_ERROR_DELAY)
+		                                      : std::max(0.0, SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY);
+		double retryDelay =
+		    oldEpoch ? 1.0 : std::max(0.0, std::min(SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_DELAY, maxRetryDelay));
+		Future<Void> configChanged = self->changedTrigger.onTrigger();
 		int retries = 0;
-		// Current-epoch failures still drive transaction-system recovery. Old-epoch
-		// failures do not, so retain ownership and retry transient destination I/O.
+		// Current-epoch failures drive recovery after bounded retries. Old-epoch failures
+		// do not, so retain ownership and retry transient destination I/O indefinitely.
 		std::vector<CompletedMutationLogFile> completedFiles = co_await retryMutationLogUpload(
 		    self->backupEpoch,
 		    self->recruitedEpoch,
@@ -985,8 +1020,9 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 				    return info == self->backups.end() || info->second.stopped;
 			    });
 		    },
-		    [&](Error err) {
-			    const double waitSeconds = retryDelay;
+		    [&](Error err) -> Future<Void> {
+			    const double waitSeconds =
+			        oldEpoch ? retryDelay : retryDelay * (0.5 + 0.5 * deterministicRandom()->random01());
 			    retryDelay = std::min(retryDelay * 2, maxRetryDelay);
 			    ++retries;
 			    TraceEvent(SevWarn, "BackupWorkerUploadRetry", self->myId)
@@ -996,8 +1032,20 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 			        .detail("Version", popVersion)
 			        .detail("Retries", retries)
 			        .detail("Delay", waitSeconds);
-			    return delay(waitSeconds) || self->doneTrigger.onTrigger();
-		    });
+			    Future<Void> backoff = delay(waitSeconds);
+			    if (oldEpoch) {
+				    co_await (backoff || self->doneTrigger.onTrigger());
+			    } else {
+				    while (!backoff.isReady()) {
+					    co_await (backoff || self->doneTrigger.onTrigger() || configChanged);
+					    if (self->stopped || configChanged.isReady()) {
+						    throw err;
+					    }
+				    }
+				    co_await backoff;
+			    }
+		    },
+		    configChanged);
 		if (!completedFiles.empty()) {
 			co_await updateLogBytesWritten(self, completedFiles);
 			advanceMutationLogVersions(self->backups, completedFiles, popVersion);
@@ -1187,8 +1235,12 @@ Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db, LogEpoch r
 	}
 }
 
-static Future<Void> monitorWorkerPause(BackupData* self) {
-	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
+Future<Void> monitorBackupPause(Database cx,
+                                UID workerId,
+                                AsyncVar<bool>* pauseState,
+                                const char* pausedEvent,
+                                const char* resumedEvent) {
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	Future<Void> watch;
 
 	while (true) {
@@ -1200,9 +1252,9 @@ static Future<Void> monitorWorkerPause(BackupData* self) {
 
 			Optional<Value> value = co_await tr->get(backupPausedKey);
 			bool paused = value.present() && value.get() == "1"_sr;
-			if (self->paused.get() != paused) {
-				TraceEvent(paused ? "BackupWorkerPaused" : "BackupWorkerResumed", self->myId).log();
-				self->paused.set(paused);
+			if (pauseState->get() != paused) {
+				TraceEvent(paused ? pausedEvent : resumedEvent, workerId).log();
+				pauseState->set(paused);
 			}
 
 			watch = tr->watch(backupPausedKey);
@@ -1241,7 +1293,11 @@ Future<Void> backupWorker(BackupInterface interf,
 		if (req.recruitedEpoch == req.backupEpoch && req.tag.id == 0) {
 			addActor.send(monitorBackupProgress(&self));
 		}
-		addActor.send(monitorWorkerPause(&self));
+		addActor.send(monitorBackupPause(self.cx,
+		                                 self.myId,
+		                                 &self.paused,
+		                                 /*pausedEvent=*/"BackupWorkerPaused",
+		                                 /*resumedEvent=*/"BackupWorkerResumed"));
 
 		// If the worker is on an old epoch and all backups starts a version >= the endVersion
 		bool exitEarly = co_await shouldBackupWorkerExitEarly(&self);
@@ -1544,7 +1600,9 @@ TEST_CASE("/BackupWorker/MutationLogUpload/ChangingRecipients") {
 TEST_CASE("/BackupWorker/MutationLogUpload/PreserveFailurePolicy") {
 	const std::pair<Error, bool> cases[] = { { io_error(), true },
 		                                     { io_timeout(), true },
+		                                     { platform_error(), true },
 		                                     { http_request_failed(), true },
+		                                     { http_bad_response(), true },
 		                                     { connection_failed(), true },
 		                                     { timed_out(), true },
 		                                     { lookup_failed(), true },
@@ -1558,7 +1616,7 @@ TEST_CASE("/BackupWorker/MutationLogUpload/PreserveFailurePolicy") {
 	for (const auto& [error, retryable] : cases) {
 		for (bool oldEpoch : { false, true }) {
 			for (bool stopped : { false, true }) {
-				const bool shouldRetry = oldEpoch && !stopped && retryable;
+				const bool shouldRetry = !stopped && retryable;
 				int attempts = 0;
 				int retries = 0;
 				auto result = retryMutationLogUpload(
@@ -1575,7 +1633,9 @@ TEST_CASE("/BackupWorker/MutationLogUpload/PreserveFailurePolicy") {
 					    ASSERT_EQ(err.code(), error.code());
 					    ++retries;
 					    return Void();
-				    });
+				    },
+				    Never(),
+				    1);
 				ASSERT(result.isReady());
 				ASSERT_EQ(result.isError(), !shouldRetry);
 				ASSERT_EQ(attempts, shouldRetry ? 2 : 1);
@@ -1583,6 +1643,87 @@ TEST_CASE("/BackupWorker/MutationLogUpload/PreserveFailurePolicy") {
 				if (result.isError()) {
 					ASSERT_EQ(result.getError().code(), error.code());
 				}
+			}
+		}
+	}
+	return Void();
+}
+
+TEST_CASE("/BackupWorker/MutationLogUpload/RetryLimit") {
+	const std::pair<Error, bool> cases[] = { { io_error(), true },
+		                                     { platform_error(), false },
+		                                     { http_bad_response(), false } };
+	for (const auto& [error, unbounded] : cases) {
+		for (bool oldEpoch : { false, true }) {
+			bool stopped = false;
+			int attempts = 0;
+			int retries = 0;
+			auto result = retryMutationLogUpload(
+			    oldEpoch ? 4 : 5,
+			    5,
+			    &stopped,
+			    [&]() -> Future<std::vector<CompletedMutationLogFile>> {
+				    if (++attempts <= 3) {
+					    return error;
+				    }
+				    return std::vector<CompletedMutationLogFile>();
+			    },
+			    [&](Error err) -> Future<Void> {
+				    ASSERT_EQ(err.code(), error.code());
+				    ++retries;
+				    return Void();
+			    },
+			    Never(),
+			    1);
+			const bool shouldSucceed = oldEpoch && unbounded;
+			ASSERT(result.isReady());
+			ASSERT_EQ(result.isError(), !shouldSucceed);
+			ASSERT_EQ(attempts, shouldSucceed ? 4 : 2);
+			ASSERT_EQ(retries, shouldSucceed ? 3 : 1);
+			if (result.isError()) {
+				ASSERT_EQ(result.getError().code(), error.code());
+			}
+		}
+	}
+	return Void();
+}
+
+TEST_CASE("/BackupWorker/MutationLogUpload/ConfigurationChange") {
+	for (bool oldEpoch : { false, true }) {
+		for (int changeDuring = 0; changeDuring < 3; ++changeDuring) {
+			bool stopped = false;
+			int attempts = 0;
+			int retries = 0;
+			Promise<Void> configChanged;
+			auto result = retryMutationLogUpload(
+			    oldEpoch ? 4 : 5,
+			    5,
+			    &stopped,
+			    [&]() -> Future<std::vector<CompletedMutationLogFile>> {
+				    ++attempts;
+				    if ((attempts == 1 && changeDuring == 0) || (attempts == 2 && changeDuring == 2)) {
+					    configChanged.send(Void());
+				    }
+				    if (attempts == 1) {
+					    return io_error();
+				    }
+				    return std::vector<CompletedMutationLogFile>();
+			    },
+			    [&](Error) -> Future<Void> {
+				    ++retries;
+				    if (changeDuring == 1) {
+					    configChanged.send(Void());
+				    }
+				    return Void();
+			    },
+			    configChanged.getFuture(),
+			    1);
+			ASSERT(result.isReady());
+			ASSERT_EQ(result.isError(), !oldEpoch);
+			ASSERT_EQ(attempts, oldEpoch || changeDuring == 2 ? 2 : 1);
+			ASSERT_EQ(retries, oldEpoch || changeDuring != 0 ? 1 : 0);
+			if (result.isError()) {
+				ASSERT_EQ(result.getError().code(), error_code_io_error);
 			}
 		}
 	}

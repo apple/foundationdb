@@ -34,21 +34,13 @@ struct ExtStringRef {
 
 	Standalone<StringRef> toStandaloneStringRef() const {
 		auto s = makeString(size());
-		if (!base.empty()) {
-			memcpy(mutateString(s), base.begin(), base.size());
-		}
-		memset(mutateString(s) + base.size(), 0, extra_zero_bytes);
+		copyTo(mutateString(s));
 		return s;
 	};
 
 	StringRef toArenaOrRef(Arena& a) const {
 		if (extra_zero_bytes) {
-			StringRef dest = StringRef(new (a) uint8_t[size()], size());
-			if (!base.empty()) {
-				memcpy(mutateString(dest), base.begin(), base.size());
-			}
-			memset(mutateString(dest) + base.size(), 0, extra_zero_bytes);
-			return dest;
+			return toArena(a);
 		} else {
 			return base;
 		}
@@ -62,10 +54,7 @@ struct ExtStringRef {
 	StringRef toArena(Arena& a) const {
 		if (extra_zero_bytes) {
 			StringRef dest = StringRef(new (a) uint8_t[size()], size());
-			if (!base.empty()) {
-				memcpy(mutateString(dest), base.begin(), base.size());
-			}
-			memset(mutateString(dest) + base.size(), 0, extra_zero_bytes);
+			copyTo(mutateString(dest));
 			return dest;
 		} else {
 			return StringRef(a, base);
@@ -115,6 +104,13 @@ struct ExtStringRef {
 	ExtStringRef keyAfter() const { return ExtStringRef(base, extra_zero_bytes + 1); }
 
 private:
+	void copyTo(uint8_t* dest) const {
+		if (!base.empty()) {
+			memcpy(dest, base.begin(), base.size());
+		}
+		memset(dest + base.size(), 0, extra_zero_bytes);
+	}
+
 	friend struct Traceable<ExtStringRef>;
 	StringRef base;
 	int extra_zero_bytes;

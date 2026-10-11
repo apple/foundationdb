@@ -368,7 +368,13 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	// Convert LogSystem to DBCoreState and override input newState as return value
 	void toCoreState(DBCoreState& newState) const;
 
+	// The storage/backup recovery policy can be satisfied before remote logs have copied their old generations' data.
+	// This permits STORAGE_RECOVERED under anti-quorum, but does not make old log history safe to discard.
+	bool storageRecovered() const;
 	bool remoteStorageRecovered() const;
+	// Waits for durable remote TLog progress through the current local start version, not remote storage recovery.
+	// Requires every expected current log set. The returned future is shared by this recovery.
+	Future<Void> onRemoteLogPrefixDurable();
 
 	// Removes no-longer-needed older TLog generations from the outgoing core state.
 	void purgeOldRecoveredGenerationsCoreState(DBCoreState&);
@@ -376,6 +382,10 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	Future<Void> onCoreStateChanged() const;
 
 	void coreStateWritten(DBCoreState const& newState);
+
+	// Requires the successfully committed terminal recovery state with every expected current log set.
+	// Finalizing a partial state for a coordinator change is insufficient.
+	void retireOldLogRoles(DBCoreState const& finalState);
 
 	Future<Void> onError() const;
 
@@ -547,6 +557,11 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	static Future<TLogLockResult> lockTLog(UID myID, Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog);
 	template <class T>
 	static std::vector<T> getReadyNonError(std::vector<Future<T>> const& futures);
+
+private:
+	bool remoteLogPrefixRecovered() const;
+	Future<Void> remoteLogPrefixComplete;
+	bool oldLogRolesRetired = false;
 };
 
 // Recovery version calculation for version vector unicast

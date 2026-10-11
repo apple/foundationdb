@@ -213,7 +213,8 @@ typedef enum {
 typedef struct cdc_stream_info {
 	FDBKey name;
 	uint64_t stream_id;
-	FDBKeyRange key_range;
+	const FDBKeyRange* ranges;
+	int range_count;
 	int64_t min_version;
 } FDBCdcStreamInfo;
 
@@ -273,65 +274,6 @@ typedef struct readgranulecontext {
 	/* Number of granules to load in parallel */
 	int granuleParallelism;
 } FDBReadBlobGranuleContext;
-
-typedef enum { FDB_BG_MUTATION_TYPE_SET_VALUE = 0, FDB_BG_MUTATION_TYPE_CLEAR_RANGE = 1 } FDBBGMutationType;
-
-#pragma pack(push, 4)
-
-typedef struct bgtenantprefix {
-	fdb_bool_t present;
-	FDBKey prefix;
-} FDBBGTenantPrefix;
-
-/* encryption structs correspond to similar ones in BlobGranuleCommon.h */
-typedef struct bgencryptionkey {
-	int64_t domain_id;
-	uint64_t base_key_id;
-	uint32_t base_kcv;
-	uint64_t random_salt;
-	FDBKey base_key;
-} FDBBGEncryptionKey;
-
-typedef struct bgencryptionctx {
-	fdb_bool_t present;
-	FDBBGEncryptionKey textKey;
-	uint32_t textKCV;
-	FDBBGEncryptionKey headerKey;
-	uint32_t headerKCV;
-	FDBKey iv;
-} FDBBGEncryptionCtx;
-
-typedef struct bgfilepointer {
-	const uint8_t* filename_ptr;
-	int filename_length;
-	int64_t file_offset;
-	int64_t file_length;
-	int64_t full_file_length;
-	int64_t file_version;
-	FDBBGEncryptionCtx encryption_ctx;
-} FDBBGFilePointer;
-
-typedef struct bgmutation {
-	/* FDBBGMutationType */ uint8_t type;
-	int64_t version;
-	const uint8_t* param1_ptr;
-	int param1_length;
-	const uint8_t* param2_ptr;
-	int param2_length;
-} FDBBGMutation;
-
-typedef struct bgfiledescription {
-	FDBKeyRange key_range;
-	fdb_bool_t snapshot_present;
-	FDBBGFilePointer snapshot_file_pointer;
-	int delta_file_count;
-	FDBBGFilePointer* delta_files;
-	int memory_mutation_count;
-	FDBBGMutation* memory_mutations;
-	FDBBGTenantPrefix tenant_prefix;
-} FDBBGFileDescription;
-
-#pragma pack(pop)
 
 /*
  * TODO: end of section of blob granule and tenant related
@@ -437,10 +379,16 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_create_transaction(FDBData
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* db,
                                                                          uint8_t const* name,
                                                                          int name_length,
-                                                                         uint8_t const* begin_key,
-                                                                         int begin_key_length,
-                                                                         uint8_t const* end_key,
-                                                                         int end_key_length);
+                                                                         FDBKeyRange const* ranges,
+                                                                         int range_count);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_register_cdc_ordered_stream(FDBDatabase* db,
+                                                                                 uint8_t const* name,
+                                                                                 int name_length,
+                                                                                 FDBKeyRange const* ranges,
+                                                                                 int range_count,
+                                                                                 FDBKey const* split_points,
+                                                                                 int split_point_count);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* db,
                                                                        uint8_t const* name,
@@ -458,6 +406,8 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_resume_cdc_consumer(FDBData
 
 DLLEXPORT void fdb_cdc_consumer_destroy(FDBCdcConsumer* consumer);
 
+/* Ordered consumes report server_overloaded when a complete version exceeds a reply limit or
+ * unacknowledged proxy buffers block another partition's read. The durable group acknowledgement is unchanged. */
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_cdc_consumer_consume(FDBCdcConsumer* consumer);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_cdc_consumer_acknowledge(FDBCdcConsumer* consumer);

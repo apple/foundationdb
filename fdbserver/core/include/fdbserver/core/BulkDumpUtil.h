@@ -104,7 +104,7 @@ Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod,
 
 class ParallelismLimitor {
 public:
-	explicit(false) ParallelismLimitor(int maxParallelism) : maxParallelism(maxParallelism) {}
+	explicit ParallelismLimitor(int maxParallelism) : maxParallelism(maxParallelism) {}
 
 	inline void decrementTaskCounter() {
 		ASSERT(numRunningTasks.get() <= maxParallelism);

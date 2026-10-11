@@ -458,6 +458,169 @@ def status_json_file_region_failover_message():
     assert "may have data loss" not in stdout
 
 
+def status_json_file_missing_data_remote_region_message():
+    primary_line = "UNHEALTHY: No replicas remain of some data"
+    missing_data = {
+        "healthy": False,
+        "name": "missing_data",
+        "description": "No replicas remain of some data",
+        "min_replicas_remaining": 0,
+    }
+
+    def team_tracker(is_primary, name, healthy, state=None):
+        if state is None:
+            state = {"healthy": healthy, "name": name, "min_replicas_remaining": 3}
+        return {
+            "primary": is_primary,
+            "in_flight_bytes": 0,
+            "unhealthy_servers": 0,
+            "state": state,
+        }
+
+    def get_status_text(usable_regions, team_trackers, data_state=missing_data):
+        configuration = {
+            "redundancy_mode": "double",
+            "storage_engine": "ssd-2",
+            "coordinators_count": 1,
+            "excluded_servers": [],
+        }
+        if usable_regions is not None:
+            configuration["usable_regions"] = usable_regions
+        status_json = {
+            "client": {
+                "cluster_file": {"path": "fdb.cluster", "up_to_date": True},
+                "coordinators": {"coordinators": [], "quorum_reachable": True},
+                "database_status": {"available": True, "healthy": False},
+                "messages": [],
+                "timestamp": 1417807090,
+            },
+            "cluster": {
+                "configuration": configuration,
+                "data": {"state": data_state, "team_trackers": team_trackers},
+                "fault_tolerance": {
+                    "max_zone_failures_without_losing_availability": 1,
+                    "max_zone_failures_without_losing_data": 1,
+                },
+                "logs": [
+                    {
+                        "epoch": 1,
+                        "current": True,
+                        "begin_version": 1,
+                        "possibly_losing_data": False,
+                        "log_interfaces": [],
+                    }
+                ],
+                "machines": {},
+                "processes": {},
+            },
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as status_file:
+            json.dump(status_json, status_file)
+            status_file.flush()
+            result = subprocess.run(
+                [command_template[0], "--status-from-json", status_file.name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=fdbcli_env,
+            )
+        assert result.returncode == 0, result.stderr.decode("utf-8")
+        return result.stdout.decode("utf-8")
+
+    def expected_line(remote_summary):
+        return primary_line + " (primary); " + remote_summary + " (remote)"
+
+    def assert_no_remote_summary(output):
+        assert primary_line in output, output
+        assert "(primary)" not in output, output
+
+    primary_tracker = team_tracker(True, "missing_data", False, missing_data)
+
+    remote_cases = [
+        # (remote state name, remote healthy, expected summary)
+        ("healthy", True, "Healthy replicas"),
+        # A busy remote still holds a healthy copy.
+        ("healthy_rebalancing", True, "Healthy replicas"),
+        ("healing", False, "Healing replicas"),
+        # Reports healthy before it holds a full copy.
+        ("healthy_populating_region", True, "Populating replicas"),
+        # The remote lost data too.
+        ("missing_data", False, "No replicas remain of some data"),
+    ]
+    for name, healthy, summary in remote_cases:
+        output = get_status_text(
+            2, [primary_tracker, team_tracker(False, name, healthy)]
+        )
+        assert expected_line(summary) in output, (name, output)
+
+    # Remote listed before the primary: order must not matter.
+    output = get_status_text(2, [team_tracker(False, "healthy", True), primary_tracker])
+    assert expected_line("Healthy replicas") in output, output
+
+    # Single region with no remote entry: message unchanged.
+    output = get_status_text(1, [primary_tracker])
+    assert_no_remote_summary(output)
+
+    # Primary healing (not missing_data): other branches are untouched.
+    healing = {
+        "healthy": False,
+        "name": "healing",
+        "description": "Only one replica remains of some data",
+        "min_replicas_remaining": 1,
+    }
+    output = get_status_text(
+        2,
+        [
+            team_tracker(True, "healing", False, healing),
+            team_tracker(False, "healthy", True),
+        ],
+        healing,
+    )
+    assert "HEALING: Only one replica remains of some data" in output, output
+
+
+@enable_logging()
+def status_excluded_processes_message(logger):
+    # get all coordinators' address
+    coordinators = {
+        c["address"]
+        for c in get_value_from_status_json(
+            True, "client", "coordinators", "coordinators"
+        )
+    }
+    # Excluding the cluster controller's process forces a failover, and the new CC omits that process from status
+    # until it re-registers.
+    processes = get_value_from_status_json(True, "cluster", "processes")
+    cluster_controllers = {
+        p["address"]
+        for p in processes.values()
+        if any(r["role"] == "cluster_controller" for r in p.get("roles", []))
+    }
+    candidates = [
+        a
+        for a in get_fdb_process_addresses(logger)
+        if a not in coordinators and a not in cluster_controllers
+    ]
+    # make sure that we do not exclude any coordinator process because excluding coordinator will print the warning
+    assert candidates, "Need a process that is not a coordinator or the CC to exclude"
+    excluded_address = random.choice(candidates)
+    run_fdbcli_command("exclude", "FORCE", excluded_address)
+    try:
+        # The exclusion can trigger a recovery, during which status may be incomplete; retry until it settles.
+        expected = "(excluded processes: 1; processes with errors: "
+        deadline = time.time() + 20
+        while True:
+            status_output = run_fdbcli_command("status")
+            logger.debug(status_output)
+            if expected in status_output or time.time() > deadline:
+                break
+            time.sleep(1)
+        assert expected in status_output
+        assert "less " not in status_output
+    finally:
+        run_fdbcli_command("include", excluded_address)
+        wait_for_database_fully_recovered(logger)
+
+
 @enable_logging()
 def consistencycheck(logger):
     consistency_check_on_output = "ConsistencyCheck is on"
@@ -937,6 +1100,37 @@ def cdc_operator_commands():
     assert b"Retired cleanup may still be pending" in result.stdout, result.stdout
 
 
+def audit_status_arguments():
+    invalid_commands = [
+        "get_audit_status",
+        "get_audit_status ha",
+        "get_audit_status ha id",
+        "get_audit_status ha progress",
+        "get_audit_status ha phase",
+    ]
+    for command in invalid_commands:
+        result = subprocess.run(
+            command_template + [command], capture_output=True, env=fdbcli_env
+        )
+        assert result.returncode != 0, (command, result.stdout, result.stderr)
+        assert result.stdout.startswith(b"Usage: get_audit_status "), (
+            command,
+            result.stdout,
+            result.stderr,
+        )
+
+    for command in [
+        "get_audit_status ha recent",
+        "get_audit_status ha recent 0",
+        "get_audit_status ha phase running",
+        "get_audit_status ha phase running 0",
+    ]:
+        result = subprocess.run(
+            command_template + [command], capture_output=True, env=fdbcli_env
+        )
+        assert result.returncode == 0, (command, result.stdout, result.stderr)
+
+
 def client_threads_per_version_env_ignored():
     test_env = fdbcli_env.copy()
     test_env["FDB_NETWORK_OPTION_CLIENT_THREADS_PER_VERSION"] = "not_an_integer"
@@ -1053,13 +1247,16 @@ if __name__ == "__main__":
         integer_options()
         tls_address_suffix()
         status_json_file_region_failover_message()
+        status_json_file_missing_data_remote_region_message()
         idempotency_ids()
         cdc_operator_commands()
+        audit_status_arguments()
         client_threads_per_version_env_ignored()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
         exclude()
+        status_excluded_processes_message()
         killall()
         # TODO: fix the failure where one process is not available after setclass call
         # setclass()

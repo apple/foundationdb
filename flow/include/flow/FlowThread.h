@@ -218,6 +218,9 @@ public:
 	}
 
 	void operator=(const ThreadFutureStream& rhs) {
+		if (this == &rhs) {
+			return;
+		}
 		rhs.queue->addFutureRef();
 		if (queue)
 			queue->delFutureRef();
@@ -271,6 +274,8 @@ public:
 		return ThreadFutureStream<T>(queue);
 	}
 
+	// The incoming queue reference is acquired before the old one is released.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const ThreadReturnPromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)

@@ -362,7 +362,7 @@ public:
 	// A factory of a table property collector that marks a SST file as need-compaction when the number of range
 	// deletions exceeds the threshold.
 	// @param numRangeDeletionsAllowed,  triggers compaction range deletion count exceeds numRangeDeletionsAllowed.
-	explicit(false) CompactOnRangeDeletionCollectorFactory(uint64_t numRangeDeletionsAllowed)
+	explicit CompactOnRangeDeletionCollectorFactory(uint64_t numRangeDeletionsAllowed)
 	  : threshold(numRangeDeletionsAllowed), numFilesMarkedForCompaction(0) {}
 
 	~CompactOnRangeDeletionCollectorFactory() override = default;
@@ -730,6 +730,8 @@ rocksdb::DBOptions getOptions() {
 	options.max_open_files = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_OPEN_FILES;
 	options.delete_obsolete_files_period_micros = SERVER_KNOBS->ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD * 1000000;
 	options.max_total_wal_size = SERVER_KNOBS->ROCKSDB_MAX_TOTAL_WAL_SIZE;
+	// Preallocating WAL space for many simulated databases can exhaust the test tmpfs before the data is written.
+	options.allow_fallocate = !g_network->isSimulated();
 	options.max_subcompactions = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS;
 	options.max_background_jobs = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
 
@@ -759,7 +761,6 @@ rocksdb::DBOptions getOptions() {
 	options.keep_log_file_num = SERVER_KNOBS->ROCKSDB_KEEP_LOG_FILE_NUM;
 
 	options.skip_stats_update_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
-	options.skip_checking_sst_file_sizes_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 	options.max_manifest_file_size = SERVER_KNOBS->ROCKSDB_MAX_MANIFEST_FILE_SIZE;
 
 	if (SERVER_KNOBS->ROCKSDB_FULLFILE_CHECKSUM) {
@@ -1267,7 +1268,9 @@ public:
 		}
 
 		std::vector<rocksdb::ColumnFamilyHandle*> handles;
-		status = rocksdb::DB::Open(dbOptions, path, descriptors, &handles, &db);
+		std::unique_ptr<rocksdb::DB> dbPtr;
+		status = rocksdb::DB::Open(dbOptions, path, descriptors, &handles, &dbPtr);
+		db = dbPtr.release();
 		if (!status.ok()) {
 			logRocksDBError(status, "Open");
 			return status;
@@ -2515,7 +2518,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		struct DeleteVisitor : public rocksdb::WriteBatch::Handler {
 			std::vector<std::pair<uint32_t, KeyRange>>* deletes;
 
-			explicit(false) DeleteVisitor(std::vector<std::pair<uint32_t, KeyRange>>* deletes) : deletes(deletes) {
+			explicit DeleteVisitor(std::vector<std::pair<uint32_t, KeyRange>>* deletes) : deletes(deletes) {
 				ASSERT(deletes);
 			}
 
@@ -2947,7 +2950,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				while (i < fetchedRanges.size() && j < intendedRanges.size()) {
 					if (fetchedRanges[i].begin != intendedRanges[j].begin) {
 						break;
-					} else if (fetchedRanges[i] == intendedRanges[j]) {
+					}
+					if (fetchedRanges[i] == intendedRanges[j]) {
 						++i;
 						++j;
 					} else if (fetchedRanges[i].contains(intendedRanges[j])) {
@@ -4688,10 +4692,11 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/RocksDBSstFileWriter") {
 	// Check: sst only contains kv of kvs3
 	rocksdb::Status status;
 	rocksdb::IngestExternalFileOptions ingestOptions;
-	rocksdb::DB* db;
 	rocksdb::Options options;
 	options.create_if_missing = true;
-	status = rocksdb::DB::Open(options, "testdb", &db);
+	std::unique_ptr<rocksdb::DB> dbPtr;
+	status = rocksdb::DB::Open(options, "testdb", &dbPtr);
+	rocksdb::DB* db = dbPtr.release();
 	ASSERT(status.ok());
 	status = db->IngestExternalFile({ localFile }, ingestOptions);
 	ASSERT(status.ok());

@@ -118,18 +118,6 @@ void onReady(FutureStream<T>&& f, Func&& func, ErrFunc&& errFunc) {
 	}
 }
 
-static Future<Void> emptyVoidActor(Uncancellable = Uncancellable()) {
-	co_return;
-}
-
-static Future<Void> emptyActor() {
-	return Void();
-}
-
-static Future<Void> oneWaitVoidActor(Future<Void> f, Uncancellable = Uncancellable()) {
-	co_await f;
-}
-
 static Future<Void> oneWaitActor(Future<Void> f) {
 	co_await f;
 }
@@ -1027,301 +1015,114 @@ TEST_CASE("/flow/flow/chooseTwoActor") {
 	return Void();
 }
 
-TEST_CASE("#flow/flow/perf/actor patterns") {
-	double start;
-	int N = 1000000;
+TEST_CASE("/flow/flow/actor patterns/wait") {
+	Future<Void> ready = oneWaitActor(Void());
+	ASSERT(ready.isReady() && !ready.isError());
 
-	start = timer();
-	for (int i = 0; i < N; i++)
-		emptyVoidActor();
-	printf("emptyVoidActor(): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-
-	start = timer();
-	for (int i = 0; i < N; i++) {
-		emptyActor();
+	Promise<Void> input;
+	{
+		Future<Void> cancelled = oneWaitActor(input.getFuture());
+		ASSERT(!cancelled.isReady() && input.getFutureReferenceCount() > 0);
 	}
-	printf("emptyActor(): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-
-	Promise<Void> neverSet;
-	Future<Void> never = neverSet.getFuture();
-	Future<Void> already = Void();
-
-	start = timer();
-	for (int i = 0; i < N; i++)
-		oneWaitVoidActor(already);
-	printf("oneWaitVoidActor(already): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-
-	/*start = timer();
-	for (int i = 0; i < N; i++)
-	    oneWaitVoidActor(never);
-	printf("oneWaitVoidActor(never): %0.1f M/sec\n", N / 1e6 / (timer() - start));*/
+	ASSERT(input.getFutureReferenceCount() == 0);
 
 	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = oneWaitActor(already);
-			ASSERT(f.isReady());
-		}
-		printf("oneWaitActor(already): %0.1f M/sec\n", N / 1e6 / (timer() - start));
+		Future<Void> completed = oneWaitActor(input.getFuture());
+		ASSERT(!completed.isReady());
+		input.send(Void());
+		ASSERT(completed.isReady() && !completed.isError());
 	}
+	ASSERT(input.getFutureReferenceCount() == 0);
+	return Void();
+}
+
+TEST_CASE("/flow/flow/actor patterns/race") {
+	Promise<Void> pending;
+	{
+		Future<Void> ready = Void();
+		Future<Void> bothReady = chooseTwoActor(ready, ready);
+		Future<Void> firstReady = chooseTwoActor(ready, pending.getFuture());
+		Future<Void> secondReady = chooseTwoActor(pending.getFuture(), ready);
+		ASSERT(bothReady.isReady() && !bothReady.isError());
+		ASSERT(firstReady.isReady() && !firstReady.isError());
+		ASSERT(secondReady.isReady() && !secondReady.isError());
+	}
+	ASSERT(pending.getFutureReferenceCount() == 0);
 
 	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = oneWaitActor(never);
-			ASSERT(!f.isReady());
-		}
-		printf("(cancelled) oneWaitActor(never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
+		Future<Void> cancelled = chooseTwoActor(pending.getFuture(), pending.getFuture());
+		ASSERT(!cancelled.isReady() && pending.getFutureReferenceCount() > 0);
 	}
+	ASSERT(pending.getFutureReferenceCount() == 0);
 
 	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Promise<Void> p;
-			Future<Void> f = oneWaitActor(p.getFuture());
-			p.send(Void());
-			ASSERT(f.isReady());
-		}
-		printf("oneWaitActor(after): %0.1f M/sec\n", N / 1e6 / (timer() - start));
+		Future<Void> sharedInput = chooseTwoActor(pending.getFuture(), pending.getFuture());
+		ASSERT(!sharedInput.isReady());
+		pending.send(Void());
+		ASSERT(sharedInput.isReady() && !sharedInput.isError());
 	}
+	ASSERT(pending.getFutureReferenceCount() == 0);
+	return Void();
+}
 
+TEST_CASE("/flow/flow/actor patterns/composition") {
+	const int batchSize = 4;
+	for (bool lifo : { false, true }) {
+		Promise<Void> never;
+		std::vector<Promise<Void>> inputs(batchSize);
+		{
+			std::vector<Future<Void>> waits(batchSize);
+			std::vector<Future<Void>> sharedRaces(batchSize);
+			std::vector<Future<Void>> nestedRaces(batchSize);
+			std::vector<Future<Void>> firstOutputs(batchSize);
+			std::vector<Future<Void>> secondOutputs(batchSize);
+			for (int i = 0; i < batchSize; ++i) {
+				waits[i] = oneWaitActor(inputs[i].getFuture());
+				sharedRaces[i] = chooseTwoActor(inputs[i].getFuture(), inputs[i].getFuture());
+				nestedRaces[i] =
+				    chooseTwoActor(chooseTwoActor(inputs[i].getFuture(), never.getFuture()), never.getFuture());
+				Future<Void> fanout = chooseTwoActor(oneWaitActor(inputs[i].getFuture()), never.getFuture());
+				firstOutputs[i] = oneWaitActor(fanout);
+				secondOutputs[i] = oneWaitActor(fanout);
+				ASSERT(!waits[i].isReady() && !sharedRaces[i].isReady() && !nestedRaces[i].isReady() &&
+				       !firstOutputs[i].isReady() && !secondOutputs[i].isReady());
+			}
+			for (int i = 0; i < batchSize; ++i) {
+				const int index = lifo ? batchSize - 1 - i : i;
+				inputs[index].send(Void());
+				for (int j = 0; j < batchSize; ++j) {
+					const bool completed = lifo ? j >= index : j <= index;
+					ASSERT(waits[j].isReady() == completed && sharedRaces[j].isReady() == completed &&
+					       nestedRaces[j].isReady() == completed && firstOutputs[j].isReady() == completed &&
+					       secondOutputs[j].isReady() == completed);
+				}
+				ASSERT(!waits[index].isError() && !sharedRaces[index].isError() && !nestedRaces[index].isError() &&
+				       !firstOutputs[index].isError() && !secondOutputs[index].isError());
+			}
+		}
+		ASSERT(never.getFutureReferenceCount() == 0);
+		for (const auto& input : inputs) {
+			ASSERT(input.getFutureReferenceCount() == 0);
+		}
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/flow/actor patterns/global input") {
+	Promise<Void> original, replacement;
 	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			out[i] = oneWaitActor(pipe[i].getFuture());
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out[i].isReady());
-		}
-		printf("oneWaitActor(fifo): %0.1f M/sec\n", N / 1e6 / (timer() - start));
+		g_cheese = original.getFuture();
+		Future<Void> first = cheeseWaitActor();
+		g_cheese = replacement.getFuture();
+		Future<Void> second = cheeseWaitActor();
+		g_cheese = Future<Void>();
+		ASSERT(!first.isReady() && !second.isReady());
+		original.send(Void());
+		ASSERT(first.isReady() && !first.isError() && !second.isReady());
+		replacement.send(Void());
+		ASSERT(second.isReady() && !second.isError());
 	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			out[i] = oneWaitActor(pipe[i].getFuture());
-		}
-		for (int i = N - 1; i >= 0; i--) {
-			pipe[i].send(Void());
-			ASSERT(out[i].isReady());
-		}
-		printf("oneWaitActor(lifo): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = chooseTwoActor(already, already);
-			ASSERT(f.isReady());
-		}
-		printf("chooseTwoActor(already, already): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = chooseTwoActor(already, never);
-			ASSERT(f.isReady());
-		}
-		printf("chooseTwoActor(already, never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = chooseTwoActor(never, already);
-			ASSERT(f.isReady());
-		}
-		printf("chooseTwoActor(never, already): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = chooseTwoActor(never, never);
-			ASSERT(!f.isReady());
-		}
-		printf("(cancelled) chooseTwoActor(never, never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Promise<Void> p;
-			Future<Void> f = chooseTwoActor(p.getFuture(), never);
-			p.send(Void());
-			ASSERT(f.isReady());
-		}
-		printf("chooseTwoActor(after, never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			out[i] = chooseTwoActor(pipe[i].getFuture(), never);
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out[i].isReady());
-		}
-		printf("chooseTwoActor(fifo, never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			out[i] = chooseTwoActor(pipe[i].getFuture(), pipe[i].getFuture());
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out[i].isReady());
-		}
-		printf("chooseTwoActor(fifo, fifo): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			out[i] = chooseTwoActor(chooseTwoActor(pipe[i].getFuture(), never), never);
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out[i].isReady());
-		}
-		printf("chooseTwoActor^2((fifo, never), never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Promise<Void> p;
-			Future<Void> f = oneWaitActor(chooseTwoActor(p.getFuture(), never));
-			p.send(Void());
-			ASSERT(f.isReady());
-		}
-		printf("oneWaitActor(chooseTwoActor(after, never)): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			out[i] = oneWaitActor(chooseTwoActor(pipe[i].getFuture(), never));
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out[i].isReady());
-		}
-		printf("oneWaitActor(chooseTwoActor(fifo, never)): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Promise<Void> p;
-			Future<Void> f = chooseTwoActor(p.getFuture(), never);
-			Future<Void> a = oneWaitActor(f);
-			Future<Void> b = oneWaitActor(f);
-			p.send(Void());
-			ASSERT(f.isReady());
-		}
-		printf("2xoneWaitActor(chooseTwoActor(after, never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out1(N);
-		std::vector<Future<Void>> out2(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = chooseTwoActor(pipe[i].getFuture(), never);
-			out1[i] = oneWaitActor(f);
-			out2[i] = oneWaitActor(f);
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out2[i].isReady());
-		}
-		printf("2xoneWaitActor(chooseTwoActor(fifo, never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out1(N);
-		std::vector<Future<Void>> out2(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = chooseTwoActor(oneWaitActor(pipe[i].getFuture()), never);
-			out1[i] = oneWaitActor(f);
-			out2[i] = oneWaitActor(f);
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out2[i].isReady());
-		}
-		printf("2xoneWaitActor(chooseTwoActor(oneWaitActor(fifo), never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out1(N);
-		std::vector<Future<Void>> out2(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			g_cheese = pipe[i].getFuture();
-			Future<Void> f = chooseTwoActor(cheeseWaitActor(), never);
-			g_cheese = f;
-			out1[i] = cheeseWaitActor();
-			out2[i] = cheeseWaitActor();
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out2[i].isReady());
-		}
-		printf("2xcheeseActor(chooseTwoActor(cheeseActor(fifo), never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		PromiseStream<int> data;
-		start = timer();
-		Future<int> sum = sumActor(data.getFuture());
-		for (int i = 0; i < N; i++)
-			data.send(1);
-		data.sendError(end_of_stream());
-		ASSERT(sum.get() == N);
-		printf("sumActor: %0.2f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		std::vector<Promise<Void>> ps(3);
-		std::vector<Future<Void>> fs(3);
-
-		for (int i = 0; i < N; i++) {
-			ps.clear();
-			ps.resize(3);
-			for (int j = 0; j < ps.size(); j++)
-				fs[j] = ps[j].getFuture();
-
-			Future<Void> q = quorum(fs, 2);
-			for (auto& p : ps)
-				p.send(Void());
-		}
-		printf("quorum(2/3): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
+	ASSERT(original.getFutureReferenceCount() == 0 && replacement.getFutureReferenceCount() == 0);
 	return Void();
 }
 

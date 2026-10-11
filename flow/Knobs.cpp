@@ -56,7 +56,9 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ENABLE_COORDINATOR_DNS_CACHE,                      false ); if( randomize && buggify() ) ENABLE_COORDINATOR_DNS_CACHE = true;
 	init( COORDINATOR_DNS_CACHE_REFRESH_INTERVAL,             3.0 );
 	init( COORDINATOR_DNS_CACHE_TTL,                         30.0 );
+	init( STALE_PEER_OBSERVABILITY,                          false );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
+	init( PERSISTENT_CONNECT_FAILED_COUNT_TTL, isSimulated ? 120.0 : 600.0 );
 
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
 	init( DELAY_JITTER_RANGE,                                  0.2 );
@@ -122,6 +124,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY,         2.0 );
 
 	//FlowTransport
+	init( CONNECTION_EVENT_SUPPRESS_FOR,                       2.0 );
 	init( CONNECTION_REJECTED_MESSAGE_DELAY,                   1.0 );
 	init( CONNECTION_ID_TIMEOUT,                             600.0 ); if( randomize && buggify() ) CONNECTION_ID_TIMEOUT = 60.0;
 	init( CONNECTION_CLEANUP_DELAY,                          100.0 );

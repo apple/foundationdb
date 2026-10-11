@@ -45,7 +45,7 @@
 
 namespace {
 struct MetricsRule {
-	explicit(false) MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
+	explicit MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
 	  : namePattern(name), enabled(enabled), minLevel(minLevel) {}
 
 	Standalone<StringRef> typePattern;

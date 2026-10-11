@@ -207,7 +207,7 @@ Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditId, Key
 }
 
 Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens) {
-	if (tokens.size() < 2 || tokens.size() > 5) {
+	if (tokens.size() < 3 || tokens.size() > 5) {
 		printUsage(tokens[0]);
 		co_return false;
 	}
@@ -270,6 +270,10 @@ Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> toke
 			fmt::println("Audit result is:\n{}", it.toString());
 		}
 	} else if (tokencmp(tokens[2], "phase")) {
+		if (tokens.size() < 4) {
+			printUsage(tokens[0]);
+			co_return false;
+		}
 		AuditPhase phase = stringToAuditPhase(tokens[3].toString());
 		if (phase == AuditPhase::Invalid) {
 			printUsage(tokens[0]);
