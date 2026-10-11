@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbclient/StatusClient.h"

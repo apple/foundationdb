@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/tester/workloads.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
 struct ProtocolVersionWorkload : TestWorkload {

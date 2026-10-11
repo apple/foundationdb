@@ -65,10 +65,16 @@ thread_local std::size_t gForceSampleBytes = static_cast<std::size_t>(-1);
 // Starts false so the first allocation on each thread reaches the slow path to
 // read the knob; set true there if sampling is off (see memTrackerSampleAlloc).
 thread_local bool gMemTrackerOff = false;
+// Set (nest-safe, via MemTrackerInternalAlloc) only around the tracker's own
+// bookkeeping allocations, so those fail open instead of tripping the fatal OOM
+// handler on failure. See flow/include/flow/MemoryTracker.h.
+thread_local bool gInMemTrackerAlloc = false;
 
-// Test-only one-shot: when set, the next sampled allocation throws to simulate a
-// tracker metadata-allocation failure (see memTrackerFailNextSampleForTest).
-static thread_local bool gFailNextSampleForTest = false;
+// Test-only one-shot, read by mallocWithNewHandler (fdbserver/GlobalNewDelete.cpp):
+// when set, the next tracker-internal allocation is forced to fail, exercising the
+// fail-open path end-to-end (real map/report allocation, real operator new) without
+// a genuine OOM. See memTrackerFailNextInternalAllocForTest.
+thread_local bool gMemTrackerFailNextInternalAllocForTest = false;
 
 // Definition of the cache-line-isolated enabled flag declared in the header.
 MemTrackerEnabledFlag g_memTrackerEnabled;
@@ -143,17 +149,20 @@ __attribute__((no_instrument_function, noinline)) int captureFramesFP(void** out
 		initStackBoundsForThread();
 	}
 	void** fp = static_cast<void**>(__builtin_frame_address(0));
-	// Fallback for threads where pthread_getattr_np failed: ±8 MB around
-	// the initial frame.
-	// Caveat: this may need to be constrained more tightly to deal with
-	// smaller stacks.
-	uintptr_t lo = gStackLow ? gStackLow : reinterpret_cast<uintptr_t>(fp);
-	uintptr_t hi = gStackHigh ? gStackHigh : reinterpret_cast<uintptr_t>(fp) + (8u << 20);
+	uintptr_t base = reinterpret_cast<uintptr_t>(fp);
+	// gStackLow spans all of RLIMIT_STACK, mostly unmapped for the main thread; the walk only ascends.
+	uintptr_t lo = std::max(gStackLow, base);
+	// Fallback for threads where pthread_getattr_np failed: 8 MB above the initial frame.
+	uintptr_t hi = gStackHigh ? gStackHigh : base + (8u << 20);
+	if (hi < 16) {
+		return 0;
+	}
 	int n = 0;
 	while (fp && n < max) {
 		uintptr_t a = reinterpret_cast<uintptr_t>(fp);
-		// Reject out-of-stack or misaligned fp before dereferencing.
-		if (a < lo || a + 16 > hi) {
+		// Reject out-of-stack or misaligned fp before dereferencing. Subtraction, not
+		// `a + 16 > hi`: that addition wraps for an fp near the top of the address space.
+		if (a < lo || a > hi - 16) {
 			break;
 		}
 		if (a & (sizeof(void*) - 1)) {
@@ -272,10 +281,6 @@ void memTrackerInit() {
 }
 
 static void memTrackerSampleAllocImpl(void* p, std::size_t n) {
-	if (gFailNextSampleForTest) {
-		gFailNextSampleForTest = false;
-		throw std::bad_alloc(); // simulate a tracker metadata-allocation failure (test only)
-	}
 	int inverse = 0;
 	int frames = 6;
 	bool liveTracking = true;
@@ -347,6 +352,12 @@ static void memTrackerSampleAllocImpl(void* p, std::size_t n) {
 	std::uint64_t fp = (kept == 0) ? 0 : fnv64(keep, static_cast<std::size_t>(kept) * sizeof(void*));
 
 	ThreadSpinLockHolder lk(g_mtLock);
+	// Everything below that allocates is tracker-owned bookkeeping (map
+	// construction, node inserts, rehash). Mark it so a heap-allocation failure
+	// here fails open — throws std::bad_alloc, caught by memTrackerSampleAlloc,
+	// dropping the sample — rather than invoking the fatal OOM handler after the
+	// caller's real allocation already succeeded. See MemTrackerInternalAlloc.
+	MemTrackerInternalAlloc _internal;
 	ensureMaps();
 
 	auto nBytes = static_cast<std::int64_t>(n);
@@ -436,8 +447,10 @@ static void memTrackerSampleAllocImpl(void* p, std::size_t n) {
 
 void memTrackerSampleAlloc(void* p, std::size_t n) {
 	// Fail open: the tracker is a diagnostic; a std::bad_alloc from its own map
-	// growth (or the test injection) must never propagate into the caller's
-	// allocation path, which has already handed out the underlying block.
+	// growth must never propagate into the caller's allocation path, which has
+	// already handed out the underlying block. Tracker-internal allocations are
+	// marked (MemTrackerInternalAlloc) so the global operator new throws here
+	// instead of running the fatal OOM handler — so this catch actually runs.
 	try {
 		memTrackerSampleAllocImpl(p, n);
 	} catch (...) {
@@ -496,6 +509,8 @@ void memTrackerForEachSite(std::function<void(const MemoryTrackerCallSite&)> cb)
 	std::vector<MemoryTrackerCallSite> snapshot;
 	{
 		ThreadSpinLockHolder lk(g_mtLock);
+		// The snapshot copy below is tracker-owned; fail open if it can't allocate.
+		MemTrackerInternalAlloc _internal;
 		if (g_aggMap) {
 			snapshot.reserve(g_aggMap->size());
 			for (auto& kv : *g_aggMap) {
@@ -531,16 +546,21 @@ void memTrackerResetForTest() {
 	// Publish the enabled flag and arm this thread from the current knob value
 	// (a test typically sets MEMORY_TRACKING_SAMPLE_INVERSE via KnobOverride just
 	// before calling this), mirroring memTrackerInit at process startup.
-	gFailNextSampleForTest = false;
+	gMemTrackerFailNextInternalAllocForTest = false;
 	memTrackerArmFromKnobs();
 }
 
-void memTrackerFailNextSampleForTest() {
-	gFailNextSampleForTest = true;
+void memTrackerFailNextInternalAllocForTest() {
+	gMemTrackerFailNextInternalAllocForTest = true;
 }
 
 static void memTrackerDumpImpl(int64_t bytesThreshold) {
 	MemTrackerSuppress _suppress;
+	// The report's scratch (sites/qualifying vectors, addr2line strings) and the
+	// TraceEvents it emits are all tracker-owned; fail open on allocation failure
+	// (caught by memTrackerDump) rather than crashing the server while building a
+	// diagnostic report. See MemTrackerInternalAlloc.
+	MemTrackerInternalAlloc _internal;
 
 	std::vector<MemoryTrackerCallSite> sites;
 	int aggSize = 0;

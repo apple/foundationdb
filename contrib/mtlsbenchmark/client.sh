@@ -9,9 +9,8 @@
 # knob_disable_mainthread_tls_handshake is enabled to use background threads for TLS handshakes only
 # knob_tls_handshake_flowlock_priority is set to 8900 for enabling TLS flowlock priority as high as the handshake priority. Default is 7000.
 
-taskset -c 0-0 /root/build_output/bin/fdbserver \
-	-r unittests \
-	-f :/network/p2ptest \
+taskset -c 0-0 "${FDBRPC_NETWORK_TEST:-/root/build_output/bin/fdbrpc_network_test}" \
+	--mode p2p \
 	--test_remoteAddresses=127.0.0.1:4500:tls \
 	--test_targetDuration=10 \
 	--test_connectionsOut=10 \

@@ -38,7 +38,7 @@
 #include "fdbclient/DataDistributionConfig.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/WorkerInterface.h"

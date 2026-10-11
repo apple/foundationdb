@@ -84,6 +84,7 @@
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
@@ -105,6 +106,13 @@ extern std::atomic<int> g_bulkLoadRestoreTaskCompleteCount;
 // S3-specific backup correctness workload - see file header for differences from BackupAndRestoreCorrectness
 struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	static constexpr auto NAME = "BackupS3BlobCorrectness";
+
+	// Inside normalKeys but below every alphanumeric key, so these sort outside any range this workload
+	// generates while still being ordinary user keys. The '_' after the escape keeps \x01 from swallowing
+	// a following hex digit.
+	static inline const StringRef SENTINEL_PREFIX = "\x01_bs3bc_outside/"_sr;
+	static inline const ValueRef SENTINEL_BEFORE_BACKUP = "before_backup"_sr;
+	static inline const ValueRef SENTINEL_AFTER_BACKUP = "after_backup"_sr;
 	double backupAfter, restoreAfter, abortAndRestartAfter;
 	double minBackupAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
@@ -113,6 +121,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	bool differentialBackup, performRestore, agentRequest;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	std::vector<KeyRange> skippedRestoreRanges;
+	std::vector<Key> outOfRangeSentinels;
 	Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 	static int backupAgentRequests;
 	LockDB locked{ false };
@@ -136,6 +145,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	// performValidation: if true, validates backup by restoring with prefix and running audit_storage validate_restore
 	// This must happen BEFORE clearing the database so we can compare original vs restored data
 	bool performValidation;
+	// expectRestoreFailure: the bulkload restore is expected NOT to complete, so the workload asserts the
+	// failure is reported and recovered from rather than that the data arrived.
+	bool expectRestoreFailure;
 
 	// Chaos testing options
 	bool enableChaos;
@@ -194,6 +206,10 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		// performValidation: Validates backup by comparing original data vs restored data
 		// Uses audit_storage validate_restore - must happen BEFORE clearing database
 		performValidation = getOption(options, "performValidation"_sr, false);
+		// Mutually exclusive with performValidation, whose audit compares restored contents that by
+		// definition do not exist when the restore is expected to fail.
+		expectRestoreFailure = getOption(options, "expectRestoreFailure"_sr, false);
+		ASSERT(!(expectRestoreFailure && performValidation));
 
 		// Chaos testing options
 		enableChaos = getOption(options, "enableChaos"_sr, false);
@@ -309,9 +325,37 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		// Backup everything
-		self->backupRanges.push_back_deep(self->backupRanges.arena(), normalKeys);
-		self->restoreRanges.push_back_deep(self->restoreRanges.arena(), normalKeys);
+		// Keys planted outside the backup ranges, each holding SENTINEL_BEFORE_BACKUP. Once the backup has
+		// stopped they are rewritten to SENTINEL_AFTER_BACKUP, so a restore that widens beyond the backup
+		// ranges reverts them and is caught. The rewrite has to follow the backup rather than precede it:
+		// a value the backup captured would be restored to the value the check expects, and the widening
+		// would pass unnoticed. When the ranges cover all of normalKeys there is no outside and the set is
+		// empty.
+		for (int i = 0; i < 3; i++) {
+			Key candidate(SENTINEL_PREFIX.toString() + std::to_string(i));
+			bool covered = false;
+			for (const auto& range : self->backupRanges) {
+				if (range.contains(candidate)) {
+					covered = true;
+					break;
+				}
+			}
+			if (!covered) {
+				self->outOfRangeSentinels.push_back(candidate);
+			}
+		}
+
+		if (!self->outOfRangeSentinels.empty()) {
+			co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				for (const auto& key : self->outOfRangeSentinels) {
+					tr->set(key, SENTINEL_BEFORE_BACKUP);
+				}
+				return Void();
+			});
+			TraceEvent("BS3BCW_PlantedOutOfRangeSentinels").detail("Count", self->outOfRangeSentinels.size());
+		}
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -326,6 +370,21 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	static Future<Void> checkOutOfRangeSentinels(Reference<ReadYourWritesTransaction> tr, std::vector<Key> sentinels) {
+		for (const auto& key : sentinels) {
+			Optional<Value> value = co_await tr->get(key);
+			bool intact = value.present() && value.get() == SENTINEL_AFTER_BACKUP;
+			if (!intact) {
+				TraceEvent(SevError, "BS3BCW_RestoreWroteOutsideBackupRanges")
+				    .detail("Key", printable(key))
+				    .detail("Expected", printable(SENTINEL_AFTER_BACKUP))
+				    .detail("Actual", value.present() ? printable(value.get()) : std::string("<missing>"));
+			}
+			ASSERT(intact);
+		}
+		co_return;
+	}
 
 	static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
 		while (true) {
@@ -745,6 +804,19 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						});
 					}
 
+					// The backup has stopped, so this value cannot reach the snapshot or the mutation logs.
+					if (!outOfRangeSentinels.empty()) {
+						co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							for (const auto& key : outOfRangeSentinels) {
+								tr->set(key, SENTINEL_AFTER_BACKUP);
+							}
+							return Void();
+						});
+						TraceEvent("BS3BCW_BumpedOutOfRangeSentinels").detail("Count", outOfRangeSentinels.size());
+					}
+
 					// Step 3: Perform the restore (with BulkLoad if configured)
 					TraceEvent("BS3BCW_Restore")
 					    .detail("LastBackupContainer", lastBackupContainer->getURL())
@@ -755,25 +827,70 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					Standalone<StringRef> restoreTag(backupTag.toString() + "_restore");
 					// Pass lockDB=False since we already locked, unlockDB=True to release when done,
 					// and our lockUID so restore uses the same lock for checkDatabaseLock calls
-					Version v = co_await backupAgent.restore(cx,
-					                                         cx,
-					                                         restoreTag,
-					                                         KeyRef(lastBackupContainer->getURL()),
-					                                         lastBackupContainer->getProxy(),
-					                                         restoreRanges,
-					                                         WaitForComplete::True,
-					                                         ::invalidVersion,
-					                                         Verbose::True,
-					                                         Key(),
-					                                         Key(),
-					                                         LockDB::False,
-					                                         UnlockDB::True,
-					                                         OnlyApplyMutationLogs::False,
-					                                         InconsistentSnapshotOnly::False,
-					                                         ::invalidVersion,
-					                                         lastBackupContainer->getEncryptionKeyFileName(),
-					                                         lockUID,
-					                                         useRangeFileRestore);
+					Version v = ::invalidVersion;
+					Error restoreError;
+					try {
+						v = co_await backupAgent.restore(cx,
+						                                 cx,
+						                                 restoreTag,
+						                                 KeyRef(lastBackupContainer->getURL()),
+						                                 lastBackupContainer->getProxy(),
+						                                 restoreRanges,
+						                                 WaitForComplete::True,
+						                                 ::invalidVersion,
+						                                 Verbose::True,
+						                                 Key(),
+						                                 Key(),
+						                                 LockDB::False,
+						                                 UnlockDB::True,
+						                                 OnlyApplyMutationLogs::False,
+						                                 InconsistentSnapshotOnly::False,
+						                                 ::invalidVersion,
+						                                 lastBackupContainer->getEncryptionKeyFileName(),
+						                                 lockUID,
+						                                 useRangeFileRestore);
+					} catch (Error& e) {
+						if (e.code() == error_code_actor_cancelled || !expectRestoreFailure) {
+							throw;
+						}
+						restoreError = e;
+					}
+
+					if (expectRestoreFailure) {
+						// A restore that cannot confirm every task was ingested must fail rather than report
+						// success; that silent success is the data loss this guard exists to catch. The client
+						// sees restore_error because FileBackupAgentImpl::restore turns any non-COMPLETED
+						// final state into it, so restore_bulkload_failed reaches only the restore's own
+						// lastErrorPerType.
+						TraceEvent("BS3BCW_RestoreFailedAsExpected")
+						    .error(restoreError)
+						    .detail("BackupTag", printable(backupTag));
+						ASSERT(restoreError.code() == error_code_restore_error);
+						FileBackupAgent::ERestoreState finalState =
+						    co_await backupAgent.waitRestore(cx, restoreTag, Verbose::False);
+						ASSERT(finalState == FileBackupAgent::ERestoreState::ABORTED);
+
+						// The failure must leave the database usable. ABORTED puts the restore outside
+						// isRunnable(), so abortRestore() returns before its own unlockDatabase() and the abort
+						// path has to release the lock itself. Assert on the lock key: unlockDatabase() returns
+						// silently when the key is already absent, so calling it would prove nothing.
+						Transaction lockTr(cx);
+						while (true) {
+							Error lockErr;
+							try {
+								lockTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+								lockTr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+								Optional<Value> lockVal = co_await lockTr.get(databaseLockedKey);
+								TraceEvent("BS3BCW_LockStateAfterFailedRestore").detail("Locked", lockVal.present());
+								ASSERT(!lockVal.present());
+								break;
+							} catch (Error& e) {
+								lockErr = e;
+							}
+							co_await lockTr.onError(lockErr);
+						}
+						co_return;
+					}
 
 					TraceEvent("BS3BCW_RestoreComplete")
 					    .detail("BackupTag", printable(backupTag))
@@ -787,6 +904,15 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						    .detail("BulkLoadRestoreTaskCompleteCount", bulkLoadCount);
 						// FAIL if BulkLoad didn't run
 						ASSERT(bulkLoadCount > 0);
+					}
+
+					// A restore confined to the backup ranges cannot have touched these keys.
+					if (!outOfRangeSentinels.empty()) {
+						co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							return checkOutOfRangeSentinels(tr, outOfRangeSentinels);
+						});
 					}
 
 					// Step 4: Run audit to compare BulkLoad-restored vs traditional-restored

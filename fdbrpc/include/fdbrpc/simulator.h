@@ -60,14 +60,6 @@ public:
 	using KillType = simulator::KillType;
 	using ProcessInfo = simulator::ProcessInfo;
 
-	enum class Capability {
-		WarnOnStorageMismatch,
-		StorageReplicaFaultInjection,
-		StorageReplicaDelay,
-		StorageReplicaMutationDrop,
-		LimitStorageServerReadBytes
-	};
-
 	virtual bool shouldProtectNewProcess(ProcessInfo const&) const { return false; }
 	virtual bool shouldIncludeInAvailabilityCheck(ProcessInfo const&) const { return true; }
 	virtual bool isAvailable(std::vector<ProcessInfo*> const&,
@@ -81,7 +73,6 @@ public:
 	virtual bool shouldRunVersionValidation() const { return true; }
 	virtual bool canSwapToMachine(Optional<Standalone<StringRef>> const&) const { return true; }
 	virtual bool checkInjectedCorruption(NetworkAddress const&) const { return false; }
-	virtual bool hasCapability(Capability) const { return false; }
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
 	                              std::vector<ProcessInfo*> const& deadProcesses,
 	                              KillType kt,
@@ -239,13 +230,11 @@ public:
 		clearedAddresses[address]++;
 		TraceEvent("ClearAddress").detail("Address", address).detail("Value", clearedAddresses[address]);
 	}
-	bool isCleared(NetworkAddress const& address) const {
-		return clearedAddresses.find(address) != clearedAddresses.end();
-	}
+	bool isCleared(NetworkAddress const& address) const { return clearedAddresses.contains(address); }
 
 	void switchCluster(NetworkAddress const& address) { switchedCluster[address] = !switchedCluster[address]; }
 	bool hasSwitchedCluster(NetworkAddress const& address) const {
-		return switchedCluster.find(address) != switchedCluster.end() ? switchedCluster.at(address) : false;
+		return switchedCluster.contains(address) ? switchedCluster.at(address) : false;
 	}
 	void toggleGlobalSwitchCluster() { globalSwitchedCluster = !globalSwitchedCluster; }
 	bool globalHasSwitchedCluster() const { return globalSwitchedCluster; }
@@ -276,9 +265,7 @@ public:
 		TraceEvent("IncludeAddressAll").detail("AddressTotal", excludedAddresses.size());
 		excludedAddresses.clear();
 	}
-	bool isExcluded(NetworkAddress const& address) const {
-		return excludedAddresses.find(address) != excludedAddresses.end();
-	}
+	bool isExcluded(NetworkAddress const& address) const { return excludedAddresses.contains(address); }
 
 	void disableSwapToMachine(Optional<Standalone<StringRef>> zoneId) { swapsDisabled.insert(zoneId); }
 	void enableSwapToMachine(Optional<Standalone<StringRef>> zoneId) {
@@ -383,15 +370,8 @@ private:
 
 extern ISimulator* g_simulator;
 
-inline bool simulationPolicyHasCapability(ISimulationPolicy::Capability capability) {
-	if (!g_network || !g_network->isSimulated() || !g_simulator || !g_simulator->getSimulationPolicy()) {
-		return false;
-	}
-	return g_simulator->getSimulationPolicy()->hasCapability(capability);
-}
-
 void startNewSimulator(bool printSimTime);
-Future<Void> startUnitTestSimulator();
+Future<Void> startUnitTestSimulator(int wellKnownEndpointCount);
 
 // Parameters used to simulate disk performance
 struct DiskParameters : ReferenceCounted<DiskParameters> {

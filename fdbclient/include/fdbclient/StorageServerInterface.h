@@ -22,6 +22,8 @@
 #define FDBCLIENT_STORAGESERVERINTERFACE_H
 #pragma once
 
+#include <utility>
+
 #include "fdbclient/Audit.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/FDBTypes.h"
@@ -31,10 +33,10 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/LoadBalance.actor.h"
+#include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
-#include "fdbrpc/TSSComparison.h"
+#include "fdbclient/TSSComparison.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tracing.h"
@@ -86,6 +88,7 @@ struct UpdateCommitCostRequest {
 
 struct StorageServerInterface {
 	constexpr static FileIdentifier file_identifier = 15302073;
+	constexpr static int kNumAdjustedEndpoints = 26;
 	enum { BUSY_ALLOWED = 0, BUSY_FORCE = 1, BUSY_LOCAL = 2 };
 
 	enum { LocationAwareLoadBalance = 1 };
@@ -141,6 +144,17 @@ public:
 	UID id() const { return uniqueID; }
 	bool isAcceptingRequests() const { return acceptingRequests; }
 	void startAcceptingRequests() { acceptingRequests = true; }
+
+	std::vector<UID> getEndpointTokens() const {
+		// Token at index 0 is the base `getValue` endpoint; adjusted endpoints start at 1.
+		std::vector<UID> tokens;
+		tokens.reserve(kNumAdjustedEndpoints + 1);
+		tokens.push_back(getValue.getEndpoint().token);
+		for (int i = 1; i <= kNumAdjustedEndpoints; ++i) {
+			tokens.push_back(getValue.getEndpoint().getAdjustedEndpoint(i).token);
+		}
+		return tokens;
+	}
 	void stopAcceptingRequests() { acceptingRequests = false; }
 	bool isTss() const { return tssPairID.present(); }
 	std::string toString() const { return id().shortString(); }
@@ -158,6 +172,10 @@ public:
 
 		if (Ar::isDeserializing) {
 			initEndpointsFromGetValue();
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && g_network && g_network->global(INetwork::enFlowTransport)) {
+				FlowTransport::transport().interfaceTracker.created(
+				    getValue.getEndpoint().getPrimaryAddress(), "SS", getEndpointTokens());
+			}
 		}
 	}
 	bool operator==(StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
@@ -204,7 +222,7 @@ struct GetValueReply : public LoadBalancedReply {
 	bool cached;
 
 	GetValueReply() : cached(false) {}
-	GetValueReply(Optional<Value> value, bool cached) : value(value), cached(cached) {}
+	GetValueReply(Optional<Value> value, bool cached) : value(std::move(value)), cached(cached) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -233,8 +251,8 @@ struct GetValueRequest : TimedRequest {
 	                Optional<TagSet> tags,
 	                Optional<ReadOptions> options,
 	                VersionVector latestCommitVersions)
-	  : spanContext(spanContext), key(key), version(ver), tags(tags), options(options),
-	    ssLatestCommitVersions(latestCommitVersions) {}
+	  : spanContext(spanContext), key(key), version(ver), tags(std::move(tags)), options(options),
+	    ssLatestCommitVersions(std::move(latestCommitVersions)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -496,8 +514,8 @@ struct GetKeyRequest : TimedRequest {
 	              Optional<TagSet> tags,
 	              Optional<ReadOptions> options,
 	              VersionVector latestCommitVersions)
-	  : spanContext(spanContext), sel(sel), version(version), tags(tags), options(options),
-	    ssLatestCommitVersions(latestCommitVersions) {}
+	  : spanContext(spanContext), sel(sel), version(version), tags(std::move(tags)), options(options),
+	    ssLatestCommitVersions(std::move(latestCommitVersions)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1268,5 +1286,7 @@ inline int mvccStorageBytes(int mutationBytes) {
 	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 +
 	       (mutationBytes + MutationRef::OVERHEAD_BYTES) * 2;
 }
+
+#include "fdbclient/StorageServerLoadBalance.h"
 
 #endif

@@ -282,6 +282,8 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens);
 Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens);
 // Range lock management command
 Future<bool> rangeLockCommandActor(Database cx, std::vector<StringRef> tokens);
+// Native CDC management command
+Future<bool> cdcCommandActor(Database cx, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens);
 // include command

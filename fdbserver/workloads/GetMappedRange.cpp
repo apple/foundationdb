@@ -63,20 +63,20 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	Future<Void> start(Database const& cx) override {
 		// This workload is generated different from typical ApiWorkload. So don't use ApiWorkload::_start.
 		if (enabled) {
-			return GetMappedRangeWorkload::_start(cx, this);
+			return _start(cx);
 		}
 		return Void();
 	}
 
-	Future<Void> performSetup(Database cx, GetMappedRangeWorkload* self) {
+	Future<Void> performSetupImpl(Database cx) {
 		std::vector<TransactionType> types;
 		types.push_back(NATIVE);
 		types.push_back(READ_YOUR_WRITES);
 
-		co_await self->chooseTransactionFactory(cx, types);
+		co_await chooseTransactionFactory(cx, types);
 	}
 
-	Future<Void> performSetup(Database const& cx) override { return performSetup(cx, this); }
+	Future<Void> performSetup(Database const& cx) override { return performSetupImpl(cx); }
 
 	Future<Void> performTest(Database const& cx, Standalone<VectorRef<KeyValueRef>> const& data) override {
 		// Ignore this because we are not using ApiWorkload's default ::start.
@@ -94,7 +94,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	static Value recordValue(int i) { return Tuple::makeTuple(dataOfRecord(i)).pack(); }
 	static Value recordValue(int i, int split) { return Tuple::makeTuple(dataOfRecord(i, split)).pack(); }
 
-	Future<Void> fillInRecords(Database cx, int n, GetMappedRangeWorkload* self) {
+	Future<Void> fillInRecords(Database cx, int n) {
 		Transaction tr(cx);
 		while (true) {
 			std::cout << "start fillInRecords n=" << n << std::endl;
@@ -105,7 +105,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				Error err;
 				try {
 					for (int i = 0; i < n; i++) {
-						if (self->SPLIT_RECORDS) {
+						if (SPLIT_RECORDS) {
 							for (int split = 0; split < SPLIT_SIZE; split++) {
 								tr.set(recordKey(i, split), recordValue(i, split));
 								if (i == 0) {
@@ -163,17 +163,14 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	}
 
 	// Return true if need to retry.
-	static bool validateRecord(int expectedId,
-	                           const MappedKeyValueRef* it,
-	                           GetMappedRangeWorkload* self,
-	                           bool allMissing) {
+	bool validateRecord(int expectedId, const MappedKeyValueRef* it, bool allMissing) {
 		// std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key)
 		//           << " indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId)) << std::endl;
 
 		ASSERT(it->key == indexEntryKey(expectedId));
 		ASSERT(it->value == EMPTY);
 
-		if (self->SPLIT_RECORDS) {
+		if (SPLIT_RECORDS) {
 			ASSERT(std::holds_alternative<GetRangeReqAndResultRef>(it->reqAndResult));
 			auto& getRange = std::get<GetRangeReqAndResultRef>(it->reqAndResult);
 			auto& rangeResult = getRange.result;
@@ -215,7 +212,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                                    int limit,
 	                                                    int byteLimit,
 	                                                    int expectedBeginId,
-	                                                    GetMappedRangeWorkload* self,
 	                                                    bool allMissing) {
 
 		std::cout << "start scanMappedRangeWithLimits beginSelector:" << beginSelector.toString()
@@ -224,18 +220,14 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		          << " STRICTLY_ENFORCE_BYTE_LIMIT: " << SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT << " allMissing "
 		          << allMissing << std::endl;
 		while (true) {
-			Reference<TransactionWrapper> tr = self->createTransaction();
+			Reference<TransactionWrapper> tr = createTransaction();
 			{
 				Error err;
 				try {
-					MappedRangeResult result = co_await tr->getMappedRange(beginSelector,
-					                                                       endSelector,
-					                                                       mapper,
-					                                                       GetRangeLimits(limit, byteLimit),
-					                                                       self->snapshot,
-					                                                       Reverse::False);
+					MappedRangeResult result = co_await tr->getMappedRange(
+					    beginSelector, endSelector, mapper, GetRangeLimits(limit, byteLimit), snapshot, Reverse::False);
 					//			showResult(result);
-					if (self->BAD_MAPPER) {
+					if (BAD_MAPPER) {
 						TraceEvent("GetMappedRangeWorkloadShouldNotReachable").detail("ResultSize", result.size());
 					}
 					std::cout << "result.size()=" << result.size() << std::endl;
@@ -246,7 +238,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					int cnt = 0;
 					const MappedKeyValueRef* it = result.begin();
 					for (; cnt < result.size(); cnt++, it++) {
-						if (validateRecord(expectedId, it, self, allMissing)) {
+						if (validateRecord(expectedId, it, allMissing)) {
 							needRetry = true;
 							break;
 						}
@@ -260,7 +252,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				} catch (Error& e) {
 					err = e;
 				}
-				if ((self->BAD_MAPPER && err.code() == error_code_mapper_bad_index) ||
+				if ((BAD_MAPPER && err.code() == error_code_mapper_bad_index) ||
 				    (!SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK && err.code() == error_code_quick_get_value_miss) ||
 				    (!SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK &&
 				     err.code() == error_code_quick_get_key_values_miss)) {
@@ -282,11 +274,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 	// if sendFirstRequestIndefinitely is true, then this method would send the first request indefinitely
 	// it is in order to test the metric
-	Future<Void> submitSmallRequestIndefinitely(Database cx,
-	                                            int beginId,
-	                                            int endId,
-	                                            Key mapper,
-	                                            GetMappedRangeWorkload* self) {
+	Future<Void> submitSmallRequestIndefinitely(Database cx, int beginId, int endId, Key mapper) {
 		Key beginTuple = Tuple().append(prefix).append(INDEX).append(indexKey(beginId)).getDataAsStandalone();
 		KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
 		Key endTuple = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
@@ -294,8 +282,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		int limit = 1;
 		int byteLimit = 10000;
 		while (true) {
-			MappedRangeResult result = co_await self->scanMappedRangeWithLimits(
-			    cx, beginSelector, endSelector, mapper, limit, byteLimit, beginId, self, false);
+			MappedRangeResult result = co_await scanMappedRangeWithLimits(
+			    cx, beginSelector, endSelector, mapper, limit, byteLimit, beginId, false);
 			if (result.empty()) {
 				TraceEvent("EmptyResult");
 			}
@@ -304,12 +292,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
-	Future<Void> scanMappedRange(Database cx,
-	                             int beginId,
-	                             int endId,
-	                             Key mapper,
-	                             GetMappedRangeWorkload* self,
-	                             bool allMissing = false) {
+	Future<Void> scanMappedRange(Database cx, int beginId, int endId, Key mapper, bool allMissing = false) {
 		Key beginTuple = Tuple::makeTuple(prefix, INDEX, indexKey(beginId)).getDataAsStandalone();
 		KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
 		Key endTuple = Tuple::makeTuple(prefix, INDEX, indexKey(endId)).getDataAsStandalone();
@@ -321,8 +304,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		          << " FRACTION_INDEX_BYTELIMIT_PREFETCH: " << SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH
 		          << " MAX_PARALLEL_QUICK_GET_VALUE: " << SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE << std::endl;
 		while (true) {
-			MappedRangeResult result = co_await self->scanMappedRangeWithLimits(
-			    cx, beginSelector, endSelector, mapper, limit, byteLimit, expectedBeginId, self, allMissing);
+			MappedRangeResult result = co_await scanMappedRangeWithLimits(
+			    cx, beginSelector, endSelector, mapper, limit, byteLimit, expectedBeginId, allMissing);
 			expectedBeginId += result.size();
 			if (result.more) {
 				if (result.empty()) {
@@ -360,16 +343,14 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		ASSERT(expectedBeginId == endId);
 	}
 
-	static void conflictWriteOnRecord(int conflictRecordId,
-	                                  Reference<TransactionWrapper>& tr,
-	                                  GetMappedRangeWorkload* self) {
+	void conflictWriteOnRecord(int conflictRecordId, Reference<TransactionWrapper>& tr) {
 		Key writeKey;
 		if (deterministicRandom()->random01() < 0.5) {
 			// Concurrent write to the primary scanned range
 			writeKey = indexEntryKey(conflictRecordId);
 		} else {
 			// Concurrent write to the underlying scanned ranges/keys
-			if (self->SPLIT_RECORDS) {
+			if (SPLIT_RECORDS) {
 				// Update one of the splits is sufficient.
 				writeKey = recordKey(conflictRecordId, 0);
 			} else {
@@ -396,11 +377,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 	// If another transaction writes to our read set (the scanned ranges) before we commit, the transaction should
 	// fail.
-	Future<Void> testSerializableConflicts(GetMappedRangeWorkload* self) {
+	Future<Void> testSerializableConflicts() {
 		std::cout << "testSerializableConflicts" << std::endl;
 
 		while (true) {
-			Reference<TransactionWrapper> tr1 = self->createTransaction();
+			Reference<TransactionWrapper> tr1 = createTransaction();
 			{
 				Error err;
 				try {
@@ -408,11 +389,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 					// Commit another transaction that has conflict writes.
 					while (true) {
-						Reference<TransactionWrapper> tr2 = self->createTransaction();
+						Reference<TransactionWrapper> tr2 = createTransaction();
 						{
 							Error err;
 							try {
-								conflictWriteOnRecord(7, tr2, self);
+								conflictWriteOnRecord(7, tr2);
 								co_await tr2->commit();
 								break;
 							} catch (Error& e) {
@@ -486,15 +467,15 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 	// If the same transaction writes to the read set (the scanned ranges) before reading, it should throw read your
 	// write exception.
-	Future<Void> testRYW(GetMappedRangeWorkload* self) {
+	Future<Void> testRYW() {
 		std::cout << "testRYW" << std::endl;
 		while (true) {
-			Reference<TransactionWrapper> tr1 = self->createTransaction();
+			Reference<TransactionWrapper> tr1 = createTransaction();
 			{
 				Error err;
 				try {
 					// Write something that will be read in getMappedRange.
-					conflictWriteOnRecord(7, tr1, self);
+					conflictWriteOnRecord(7, tr1);
 					MappedRangeResult result = co_await runGetMappedRange(5, 10, tr1);
 					UNREACHABLE();
 				} catch (Error& e) {
@@ -514,8 +495,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 	Future<Void> testMetric(Database cx, int beginId, int endId, Key mapper, int seconds) {
 		while (true) {
-			auto choice = co_await race(
-			    reportMetric(cx), submitSmallRequestIndefinitely(cx, 10, 490, mapper, this), delay(seconds));
+			auto choice =
+			    co_await race(reportMetric(cx), submitSmallRequestIndefinitely(cx, 10, 490, mapper), delay(seconds));
 			if (choice.index() == 0) {
 
 				TraceEvent(SevError, "Error: ReportMetric has ended");
@@ -562,7 +543,34 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
-	Future<Void> checkMappedSelectorBoundaries(Database cx, Key mapper, GetMappedRangeWorkload* self) {
+	Future<Void> checkUnsupportedMappedRange(Database cx,
+	                                         Key begin,
+	                                         Key end,
+	                                         Key mapper,
+	                                         Snapshot snapshot,
+	                                         bool readYourWritesDisabled) {
+		bool rejected = false;
+		try {
+			ReadYourWritesTransaction tr(cx);
+			if (readYourWritesDisabled) {
+				tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+			}
+			co_await tr.getMappedRange(KeySelector(firstGreaterOrEqual(begin), begin.arena()),
+			                           KeySelector(firstGreaterOrEqual(end), end.arena()),
+			                           mapper,
+			                           GetRangeLimits(/*rowLimit=*/100, /*byteLimit=*/100000),
+			                           snapshot,
+			                           Reverse::False);
+		} catch (Error& e) {
+			if (e.code() != error_code_unsupported_operation) {
+				throw;
+			}
+			rejected = true;
+		}
+		ASSERT(rejected);
+	}
+
+	Future<Void> checkMappedSelectorBoundaries(Database cx, Key mapper) {
 		Key begin = indexEntryKey(10);
 		Key end = indexEntryKey(20);
 		co_await checkMappedSelectorRange(cx,
@@ -570,15 +578,13 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		                                  KeySelector(firstGreaterThan(end), end.arena()),
 		                                  mapper,
 		                                  /*expectedBeginId=*/11,
-		                                  /*expectedEndId=*/21,
-		                                  self);
+		                                  /*expectedEndId=*/21);
 		co_await checkMappedSelectorRange(cx,
 		                                  KeySelector(firstGreaterOrEqual(begin) + 2, begin.arena()),
 		                                  KeySelector(firstGreaterOrEqual(end) - 2, end.arena()),
 		                                  mapper,
 		                                  /*expectedBeginId=*/12,
-		                                  /*expectedEndId=*/18,
-		                                  self);
+		                                  /*expectedEndId=*/18);
 
 		co_await checkEmptyMappedRangeDoesNotConflict(cx,
 		                                              KeySelector(firstGreaterOrEqual(begin), begin.arena()),
@@ -590,6 +596,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		                                              KeySelector(firstGreaterOrEqual(begin), begin.arena()),
 		                                              mapper,
 		                                              GetRangeLimits(/*rowLimit=*/100, /*byteLimit=*/100000));
+
+		co_await checkUnsupportedMappedRange(cx, begin, end, mapper, Snapshot::True, /*readYourWritesDisabled=*/false);
+		co_await checkUnsupportedMappedRange(cx, begin, end, mapper, Snapshot::False, /*readYourWritesDisabled=*/true);
 
 		bool specialKeyRejected = false;
 		try {
@@ -615,8 +624,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                      KeySelector end,
 	                                      Key mapper,
 	                                      int expectedBeginId,
-	                                      int expectedEndId,
-	                                      GetMappedRangeWorkload* self) {
+	                                      int expectedEndId) {
 		int expectedId = expectedBeginId;
 		while (true) {
 			MappedRangeResult result = co_await scanMappedRangeWithLimits(cx,
@@ -626,7 +634,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			                                                              /*limit=*/100,
 			                                                              /*byteLimit=*/100000,
 			                                                              expectedId,
-			                                                              self,
 			                                                              /*allMissing=*/false);
 			expectedId += result.size();
 			ASSERT_LE(expectedId, expectedEndId);
@@ -643,23 +650,23 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		ASSERT_EQ(expectedId, expectedEndId);
 	}
 
-	Future<Void> _start(Database cx, GetMappedRangeWorkload* self) {
-		TraceEvent("GetMappedRangeWorkloadConfig").detail("BadMapper", self->BAD_MAPPER);
+	Future<Void> _start(Database cx) {
+		TraceEvent("GetMappedRangeWorkloadConfig").detail("BadMapper", BAD_MAPPER);
 
 		// TODO: Use toml to config
-		co_await self->fillInRecords(cx, 500, self);
+		co_await fillInRecords(cx, 500);
 
-		if (self->transactionType == NATIVE) {
-			self->snapshot = Snapshot::True;
-		} else if (self->transactionType == READ_YOUR_WRITES) {
-			self->snapshot = Snapshot::False;
-			co_await self->checkMappedSelectorBoundaries(cx, getMapper(false), self);
+		if (transactionType == NATIVE) {
+			snapshot = Snapshot::True;
+		} else if (transactionType == READ_YOUR_WRITES) {
+			snapshot = Snapshot::False;
+			co_await checkMappedSelectorBoundaries(cx, getMapper(false));
 			const double rand = deterministicRandom()->random01();
 			if (rand < 0.1) {
-				co_await self->testSerializableConflicts(self);
+				co_await testSerializableConflicts();
 				co_return;
 			} else if (rand < 0.2) {
-				co_await self->testRYW(self);
+				co_await testRYW();
 				co_return;
 			} else {
 				// Test the happy path where there is no conflicts or RYW
@@ -667,20 +674,20 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		} else {
 			UNREACHABLE();
 		}
-		if (self->transactionType == NATIVE) {
-			co_await self->checkMappedSelectorBoundaries(cx, getMapper(false), self);
+		if (transactionType == NATIVE) {
+			co_await checkMappedSelectorBoundaries(cx, getMapper(false));
 		}
 
-		std::cout << "Test configuration: transactionType:" << self->transactionType << " snapshot:" << self->snapshot
-		          << "bad_mapper:" << self->BAD_MAPPER << std::endl;
+		std::cout << "Test configuration: transactionType:" << transactionType << " snapshot:" << snapshot
+		          << "bad_mapper:" << BAD_MAPPER << std::endl;
 
 		Key mapper = getMapper(false);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
 		bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
 		(const_cast<ServerKnobs*>(SERVER_KNOBS))->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
-		co_await self->scanMappedRange(cx, 10, 490, mapper, self);
-		co_await testMetric(cx, 10, 490, mapper, self->checkStorageQueueSeconds);
+		co_await scanMappedRange(cx, 10, 490, mapper);
+		co_await testMetric(cx, 10, 490, mapper, checkStorageQueueSeconds);
 
 		// reset it to default
 		(const_cast<ServerKnobs*>(SERVER_KNOBS))->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;

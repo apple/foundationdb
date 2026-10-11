@@ -9,7 +9,7 @@ The benchmark suite is split into three executables:
 
 These binaries can be used to microbenchmark parts of the FoundationDB code without always pulling in higher-level dependencies. Specifically, they can be used to:
 
-- Test the performance effects of changes to the actor compiler or to the `flow` and `fdbrpc` libraries
+- Test the performance effects of changes to the `flow` and `fdbrpc` libraries
 - Test the performance of various uses of the `flow` and `fdbrpc` libraries
 - Find areas for improvement in the `flow` and `fdbrpc` libraries
 - Compare `flow`/`fdbrpc` primitives to alternatives provided by the standard library or other third-party libraries.
@@ -55,7 +55,25 @@ Existing Benchmarks
 - `bench_stream` measures the performance of writing to and reading from a `PromiseStream`
 - `bench_random` measures the performance of `DeterministicRandom`.
 - `bench_timer` measures the performance of FoundationDB timers.
+- `actor_patterns` measures ready futures, coroutine waits and cancellation, races, nested and shared-input graphs, stream consumption, and quorum completion.
 - `Memcpy` compares `rte_memcpy_noinline` and `memcpy` across aligned/unaligned and cached/uncached copy cases.
+
+Actor patterns
+==============
+
+Run the actor-pattern suite with `bin/flow_bench --benchmark_filter='^actor_patterns/'`.
+Use `--benchmark_repetitions=5 --benchmark_out=actor-patterns.json --benchmark_out_format=json`
+to retain repeated measurements. Batch cases cover 64, 4096, 65536, and 1000000 inputs;
+for a shorter run, select one size, for example `--benchmark_filter='^actor_patterns/batch_.*/4096/'`.
+
+These benchmarks report wall-clock time and items per second. One item is a complete
+actor graph, including both outputs for fan-out cases, or one consumed value for
+`stream_sum`. Scalar cases include construction, completion or cancellation, and
+destruction. Batch cases measure graph construction and FIFO/LIFO completion with
+all graphs outstanding together; input-promise/vector setup, result checks, and
+final cleanup are excluded. Stream cases include consumer startup and end-of-stream
+handling. `ready_future` returns an already-ready `Future` without a coroutine;
+`empty_uncancellable` executes an uncancellable coroutine.
 
 Future use cases
 ================

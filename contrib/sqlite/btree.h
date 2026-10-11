@@ -150,6 +150,7 @@ int sqlite3BtreeMovetoUnpacked(BtCursor*, UnpackedRecord* pUnKey, i64 intKey, in
 int sqlite3BtreeCursorHasMoved(BtCursor*, int*);
 int sqlite3BtreeDelete(BtCursor*);
 int sqlite3BtreeDeleteRange(BtCursor*, BtCursor*, int* stackBegin, int* stackEnd);
+// Counts reclaimed overflow pages too; completing one B-tree page may exceed desiredPages.
 int sqlite3BtreeLazyDelete(BtCursor*, int* stackBegin, int* stackEnd, int desiredPages, int* pagesDeleted);
 int sqlite3BtreeInsert(BtCursor*,
                        const void* pKey,

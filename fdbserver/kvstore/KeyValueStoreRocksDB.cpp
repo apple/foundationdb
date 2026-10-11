@@ -68,7 +68,7 @@
 
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
+#include "fdbserver/checkpoint/RocksDBCheckpointUtils.h"
 #include "RocksDBCommon.h"
 
 #include "flow/CoroUtils.h"
@@ -1432,6 +1432,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::ColumnFamilyOptions cfOptions = sharedState->getCfOptions();
 			std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+			descriptors.reserve(columnFamilies.size());
 			for (const std::string& name : columnFamilies) {
 				descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
 			}
@@ -1445,7 +1446,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			std::vector<rocksdb::ColumnFamilyHandle*> handles;
-			status = rocksdb::DB::Open(options, a.path, descriptors, &handles, &db);
+			std::unique_ptr<rocksdb::DB> dbPtr;
+			status = rocksdb::DB::Open(options, a.path, descriptors, &handles, &dbPtr);
+			db = dbPtr.release();
 			cfHandles.insert(handles.begin(), handles.end());
 
 			if (!status.ok()) {
@@ -1648,7 +1651,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				std::set<std::string> columnFamilies{ "default" };
 				columnFamilies.insert(SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY);
 				std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
-				for (const std::string name : columnFamilies) {
+				descriptors.reserve(columnFamilies.size());
+				for (const std::string& name : columnFamilies) {
 					descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, sharedState->getCfOptions() });
 				}
 				s = rocksdb::DestroyDB(a.path, sharedState->getOptions(), descriptors);
@@ -2211,9 +2215,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (self->closePromise.canBeSet()) {
 			self->closePromise.send(Void());
 		}
-		if (self->db != nullptr) {
-			delete self->db;
-		}
+		delete self->db;
 		delete self;
 	}
 
@@ -2576,7 +2578,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			for (const LiveFileMetaData& file : rocksCF.sstFiles) {
 				dirs.insert(file.db_path);
 			}
-			for (const std::string dir : dirs) {
+			for (const std::string& dir : dirs) {
 				platform::eraseDirectoryRecursive(dir);
 				TraceEvent("DeleteCheckpointRemovedDir", id)
 				    .detail("CheckpointID", checkpoint.checkpointID)
@@ -2717,15 +2719,11 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 		    .detail("RocksSequenceNumber", debugCheckpointSeq)
 		    .detail("CheckpointDir", checkpointDir);
 	} else {
-		if (checkpoint != nullptr) {
-			delete checkpoint;
-		}
+		delete checkpoint;
 		throw not_implemented();
 	}
 
-	if (checkpoint != nullptr) {
-		delete checkpoint;
-	}
+	delete checkpoint;
 	res.setState(CheckpointMetaData::Complete);
 	a.reply.send(res);
 }

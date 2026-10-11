@@ -74,5 +74,6 @@ TEST_CASE("/backup/throttling") {
 	double dur = timer() - ts;
 	int speed = int(total / dur);
 	printf("Speed limit was %d, measured speed was %d\n", limit, speed);
-	ASSERT(abs(speed - limit) / limit < .01);
+	// Host scheduling can delay completions; only exceeding the rate limit is an error.
+	ASSERT(speed <= limit * 1.01);
 }

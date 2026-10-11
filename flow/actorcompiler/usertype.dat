@@ -1,7 +1,0 @@
-ACTOR
-loop
-state
-choose
-when
-wait
-waitNext

@@ -31,7 +31,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
@@ -89,7 +89,8 @@ Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, A
 			cx = openDBOnServer(dbInfo);
 			AuditStorageState auditState_ = co_await getAuditState(cx, auditType, auditId);
 			auditState = auditState_;
-			if (auditState.getPhase() == AuditPhase::Complete) {
+			if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Error ||
+			    auditState.getPhase() == AuditPhase::Failed) {
 				break;
 			} else if (auditState.getPhase() == AuditPhase::Running) {
 				TraceEvent("AuditStorageCorrectnessWait")
@@ -105,10 +106,6 @@ Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, A
 				}
 				retryCount++;
 				continue;
-			} else if (auditState.getPhase() == AuditPhase::Error) {
-				break;
-			} else if (auditState.getPhase() == AuditPhase::Failed) {
-				break;
 			} else {
 				UNREACHABLE();
 			}

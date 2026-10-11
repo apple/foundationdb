@@ -57,8 +57,13 @@ public:
 	TLogVersion tLogVersion;
 	Reference<IReplicationPolicy> tLogPolicy;
 	Reference<LocalitySet> logServerSet;
+
+private:
+	// The locality map stores pointers to these indices; only updateLocalitySet may resize them.
 	std::vector<int> logIndexArray;
 	std::vector<LocalityEntry> logEntryArray;
+
+public:
 	bool isLocal;
 	int8_t locality;
 	Version startVersion;
@@ -83,6 +88,7 @@ public:
 	void checkSatelliteTagLocations();
 	int bestLocationFor(Tag tag);
 	void updateLocalitySet(std::vector<LocalityData> const& localities);
+	LocalityEntry getLogEntry(int location) const { return logEntryArray[location]; }
 	bool satisfiesPolicy(const std::vector<LocalityEntry>& locations);
 	void getPushLocations(
 	    VectorRef<Tag> tags,

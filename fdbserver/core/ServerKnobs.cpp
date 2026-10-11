@@ -176,6 +176,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DESIRED_UPDATE_BYTES,                2*DESIRED_TOTAL_BYTES );
 	init( UPDATE_DELAY,                                        0.001 );
 	init( MAXIMUM_PEEK_BYTES,                                   10e6 );
+	init( NATIVE_CDC_BATCH_TARGET_BYTES,                   512 << 10 );
 	init( CDC_PROXY_CONSUME_REPLY_BYTES,                         10e6 );
 	init( CDC_PROXY_BUFFER_BYTES,                                1e9 );
 	if (randomize && buggify()) {
@@ -188,6 +189,21 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CDC_PROXY_FAILURE_COALESCE_DELAY,                       0.0 );
 	init( CDC_PROXY_POP_MIN_INTERVAL,                             0.1 ); if( randomize && buggify() ) CDC_PROXY_POP_MIN_INTERVAL = 0.01;
 	init( CDC_PROXY_POP_SCAN_INTERVAL,                            5.0 ); if( randomize && buggify() ) CDC_PROXY_POP_SCAN_INTERVAL = 0.1;
+	init( CDC_PROXY_REBALANCE_ENABLED,                           false ); if( randomize && buggify() ) CDC_PROXY_REBALANCE_ENABLED = true;
+	init( CDC_PROXY_REBALANCE_INTERVAL,                           60.0 ); if( randomize && buggify() ) CDC_PROXY_REBALANCE_INTERVAL = deterministicRandom()->randomInt(10, 121);
+	init( NATIVE_CDC_RETAG_CLEANUP_INTERVAL,                     30.0 ); if( randomize && buggify() ) NATIVE_CDC_RETAG_CLEANUP_INTERVAL = 0.1;
+	init( NATIVE_CDC_TAG_BALANCING_ENABLED,                      true );
+	init( NATIVE_CDC_LIVE_RETAGGING_ENABLED,                    false );
+	init( NATIVE_CDC_TAG_SAMPLE_INTERVAL,                        30.0 );
+	init( NATIVE_CDC_TAG_SAMPLE_TIMEOUT,                          5.0 );
+	init( NATIVE_CDC_TAG_SAMPLE_MAX_AGE,                         90.0 );
+	init( NATIVE_CDC_TAG_MOVE_COOLDOWN,                         300.0 );
+	init( NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT,                0.2 );
+	init( NATIVE_CDC_TAG_MIN_BYTES_PER_SECOND_IMPROVEMENT,      10000 );
+	init( NATIVE_CDC_TAG_MAX_STREAMS,                            1000 );
+	init( NATIVE_CDC_TAG_MODEL_MAX_ENTRIES,                   2000000 );
+	init( NATIVE_CDC_TAG_SAMPLE_CONCURRENCY,                        8 );
+	init( NATIVE_CDC_TAG_SAMPLE_SHARD_LIMIT,                     1000 );
 	init( APPLY_MUTATION_BYTES,                                  1e6 );
 	init( BUGGIFY_RECOVER_MEMORY_LIMIT,                          1e6 );
 	init( BUGGIFY_WORKER_REMOVED_MAX_LAG,                         30 );
@@ -278,13 +294,16 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MERGE_RELOCATION_PARALLELISM_PER_TEAM,                   6 ); if (randomize && buggify() ) MERGE_RELOCATION_PARALLELISM_PER_TEAM = 1;
 	init( DD_QUEUE_MAX_KEY_SERVERS,                              100 ); // Do not buggify
 	init( DD_REBALANCE_PARALLELISM,                               50 );
-	// Hard cap on total relocations DD tracks (queued + in-flight). 1000 corresponds to a 500-server
-	// cluster with two concurrent shard moves per storage server.  We have observed large clusters doing
-	// 25-30GB in flight, or closer to 100 shards at a time, so this has plenty of margin of safety
-	// built in.  For simulation, we don't really know how many servers there are, but 10 seems like a good
-	// guess (thus 20 moves).  Do not buggify this too small: testing under artificial scarcity results in
-	// uninteresting degenerate cases.
-	init( DD_MAX_PIPELINE_MOVES,                                1000 ); if( randomize && buggify() ) DD_MAX_PIPELINE_MOVES = 20;
+	// Global admission control for DD relocations is OFF by default. The default limit is set high
+	// enough that pipelineSize() can never reach it, so pipelineFull never becomes true and the
+	// relocation gate in pipelineGateActor() never holds anything back. To turn the feature on, set
+	// this to a real cap: 1000 corresponds to a 500-server cluster with two concurrent shard moves
+	// per storage server. We have observed large clusters doing 25-30GB in flight, or closer to 100
+	// shards at a time, so 1000 would have plenty of margin of safety built in. Simulation still
+	// exercises the gate via the buggify value below. For simulation, we don't really know how many
+	// servers there are, but 10 seems like a good guess (thus 20 moves). Do not buggify this too
+	// small: testing under artificial scarcity results in uninteresting degenerate cases.
+	init( DD_MAX_PIPELINE_MOVES, std::numeric_limits<int>::max() ); if( randomize && buggify() ) DD_MAX_PIPELINE_MOVES = 20;
 	init( DD_REBALANCE_RESET_AMOUNT,                              30 );
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
 	init( INFLIGHT_PENALTY_UNHEALTHY,                          500.0 );
@@ -332,6 +351,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ALLOW_LARGE_SHARD,                                   false ); if( randomize && buggify() )  ALLOW_LARGE_SHARD = true;
 	init( MAX_LARGE_SHARD_BYTES,                          1000000000 ); // 1G
 	init( SHARD_ENCODE_LOCATION_METADATA,                      false ); if( isSimulated ) { bool v = deterministicRandom()->random01() < 0.75; if( !explicitlySetKnobs.contains("shard_encode_location_metadata") ) SHARD_ENCODE_LOCATION_METADATA = v; }
+	init( SHARD_ENCODE_REWRITE_KS_BATCH_SIZE,                   1000 ); if( randomize && buggify() ) SHARD_ENCODE_REWRITE_KS_BATCH_SIZE = deterministicRandom()->randomInt(1, 11); // small batch forces multi-page Phase 2 pagination in sim
 	init( ENABLE_DD_PHYSICAL_SHARD,                            false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
 	init( DD_PHYSICAL_SHARD_MOVE_PROBABILITY,                    0.0 ); // FIXME: re-enable after ShardedRocksDB is well tested by simulation
 	init( ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT,               false ); // FIXME: re-enable after ShardedRocksDB is well tested by simulation
@@ -445,6 +465,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TSS_RECRUITMENT_TIMEOUT,       3*STORAGE_RECRUITMENT_DELAY ); if (randomize && buggify() ) TSS_RECRUITMENT_TIMEOUT = 1.0; // Super low timeout should cause tss recruitments to fail
 	init( TSS_DD_CHECK_INTERVAL,                                60.0 ); if (randomize && buggify() ) TSS_DD_CHECK_INTERVAL = 1.0;    // May kill all TSS quickly
 	init( DATA_DISTRIBUTION_LOGGING_INTERVAL,                    5.0 );
+	init( DD_SERVER_ELIGIBILITY_LOGGING_INTERVAL,              300.0 );
 	init( DD_ENABLED_CHECK_DELAY,                                1.0 );
 	init( DD_STALL_CHECK_DELAY,                                  0.4 ); //Must be larger than 2*MAX_BUGGIFIED_DELAY
 	init( DD_LOW_BANDWIDTH_DELAY,         isSimulated ? 15.0 : 240.0 ); if( randomize && buggify() ) DD_LOW_BANDWIDTH_DELAY = 0; //Because of delayJitter, this should be less than 0.9 * DD_MERGE_COALESCE_DELAY
@@ -521,6 +542,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE,            1024*1024 ); if (isSimulated) BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE = deterministicRandom()->randomInt(1024, 10240);
 	init( MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK,                   10 ); if (isSimulated) MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK = deterministicRandom()->randomInt(1, 11);
 	init( BULKLOAD_SIM_FAILURE_INJECTION,                      false ); if (isSimulated) BULKLOAD_SIM_FAILURE_INJECTION = true;
+	init( BULKLOAD_SIM_INJECT_DEST_TEAM_FAILURES,                   0 );
+	init( DD_BULKLOAD_MAX_RETRYABLE_REDISPATCH,                    20 ); if( randomize && buggify() ) DD_BULKLOAD_MAX_RETRYABLE_REDISPATCH = deterministicRandom()->randomInt(1, 4);
 	init( DD_BULKLOAD_POWER_OF_D_RATIO,                          2.0 ); if (isSimulated) DD_BULKLOAD_POWER_OF_D_RATIO = deterministicRandom()->randomInt(1, 11);
 	init( DD_BULKLOAD_TASK_SUBMISSION_INTERVAL_SEC,             0.01 );
 
@@ -750,7 +773,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Does manual flushes at regular intervals(seconds), incase rocksdb did not flush. Feature disabled if the value is 0.
 	init( ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL,                    600 ); if( isSimulated ) ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL = deterministicRandom()->randomInt(4, 1200);
 	init( ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                    true );
-	init( ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                 true );
 	init( ROCKSDB_FULLFILE_CHECKSUM,                           false ); if ( randomize && buggify() ) ROCKSDB_FULLFILE_CHECKSUM = true;
 	// Enabling the below three PROTECTION_BYTES_PER_KEY knobs will have overhead(memory and performance). Be cautious to enable in prod.
 	// Writebatch key-value checksum
@@ -925,6 +947,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BACKUP_FILE_BLOCK_BYTES,                       1024 * 1024 );
 	init( BACKUP_WORKER_LOCK_BYTES,                              3e9 ); if(randomize && buggify()) BACKUP_WORKER_LOCK_BYTES = deterministicRandom()->randomInt(2048, 4096) * 4096LL;
 	init( BACKUP_UPLOAD_DELAY,                                  10.0 ); if(randomize && buggify()) BACKUP_UPLOAD_DELAY = deterministicRandom()->random01() * 60;
+	init( BACKUP_WORKER_UPLOAD_RETRY_LIMIT,                         5 );
+	init( BACKUP_WORKER_UPLOAD_RETRY_DELAY,                       1.0 );
+	init( BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY,                  10.0 );
 
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
@@ -1162,7 +1187,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FETCH_KEYS_PARALLELISM,                                  2 );
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
-	init( SERVE_AUDIT_STORAGE_PARALLELISM,                         1 );
+	init( SERVE_AUDIT_STORAGE_PARALLELISM,                         4 ); if ( isSimulated ) SERVE_AUDIT_STORAGE_PARALLELISM = deterministicRandom()->randomInt(1, SERVE_AUDIT_STORAGE_PARALLELISM+1);
 	init( PERSIST_FINISH_AUDIT_COUNT,                             10 ); if ( isSimulated ) PERSIST_FINISH_AUDIT_COUNT = deterministicRandom()->randomInt(1, PERSIST_FINISH_AUDIT_COUNT+1);
 	init( AUDIT_RETRY_COUNT_MAX,                               10000 ); if ( isSimulated ) AUDIT_RETRY_COUNT_MAX = 10;
 	init( CONCURRENT_AUDIT_TASK_COUNT_MAX,                        20 ); if ( isSimulated ) CONCURRENT_AUDIT_TASK_COUNT_MAX = deterministicRandom()->randomInt(1, CONCURRENT_AUDIT_TASK_COUNT_MAX+1);
@@ -1172,6 +1197,36 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX,              50 );
 	init( AUDIT_STORAGE_RATE_PER_SERVER_MAX,                    50e6 ); // per second
 	init( AUDIT_RESTORE_BATCH_KEY_LIMIT,                      100000 ); // 100K keys per batch (was hardcoded 10K)
+	// An audit divides its range into TASKS; each task is handled by one storage server, which walks it in
+	// BATCHES of reads. The knobs below bound those two units independently:
+	//   AUDIT_TASK_MAX_BYTES     -- how much keyspace one task covers
+	//   AUDIT_RESTORE_BATCH_*    -- how much one read inside a task fetches (validate_restore, RangeDigest)
+
+	// Max bytes one comparison batch fetches from each side. This is an upper bound, not the size used:
+	// the actual budget moves between AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN and this value, halving whenever a
+	// read fails and growing back on success (see nextAuditBatchBytes).
+	//
+	// It adapts because the real constraint is a deadline, not a size: a batch reads at a pinned version
+	// that expires after MAX_READ_TRANSACTION_LIFE_VERSIONS, so what a server can fetch in one go depends
+	// on current load, and overshooting fails with transaction_too_old and is re-read from the start.
+	//
+	// Raise for fewer, larger round trips. Lower if audits provoke transaction_too_old, or to cut memory:
+	// a server holds ~4 x this x SERVE_AUDIT_STORAGE_PARALLELISM in flight.
+	init( AUDIT_RESTORE_BATCH_BYTE_LIMIT,                        4e6 ); if( randomize && buggify() ) AUDIT_RESTORE_BATCH_BYTE_LIMIT = 80000;
+	// Smallest the adaptive batch above may shrink to, so a run of failed reads cannot leave the audit
+	// crawling through tiny batches.
+	init( AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN,                  256e3 ); if( randomize && buggify() ) AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN = 1000;
+	// Max bytes of keyspace one audit task covers, for every audit type (ValidateHA, ValidateReplica,
+	// ValidateRestore, RangeDigest). Tasks default to one keyServers shard, and a shard bigger than this
+	// is subdivided so that no single task dominates.
+	//
+	// This bounds the audit phase's wall-clock: a task is scanned start to finish by one storage server,
+	// so the phase cannot end before its largest task does, and making individual tasks faster cannot help.
+	//
+	// Lower for a shorter tail at the cost of more tasks. 0 disables subdivision. A target, not a hard
+	// bound -- splitStorageMetrics jitters piece sizes and the client merges a trailing piece under
+	// STORAGE_METRICS_UNFAIR_SPLIT_LIMIT back into its predecessor, so a task can reach ~1.4x this.
+	init( AUDIT_TASK_MAX_BYTES,                                128e6 ); if( randomize && buggify() ) AUDIT_TASK_MAX_BYTES = deterministicRandom()->coinflip() ? 0 : 1e6;
 	init( AUDIT_PROGRESS_PERSIST_BYTES_INTERVAL,           100000000 ); // 100MB - only persist progress after this many bytes
 	init( ENABLE_AUDIT_VERBOSE_TRACE,                          false );
 	// Disabled in simulation: audit_storage locationmetadata already runs at controlled times in sim,

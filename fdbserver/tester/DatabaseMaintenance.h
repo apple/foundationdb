@@ -23,7 +23,8 @@
 #include <string>
 #include <vector>
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbrpc/PerfMetric.h"
 
 struct TesterConsistencyScanState {
 	bool enabled = false;

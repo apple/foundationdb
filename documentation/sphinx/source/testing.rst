@@ -10,7 +10,7 @@ Rigorous testing is central to our engineering process. The :doc:`features of ou
 Simulation
 ==========
 
-Simulation is a powerful tool for testing system correctness. Our simulation technology, called Simulation, is enabled by and tightly integrated with :doc:`flow`, our programming language for actor-based concurrency. In addition to generating efficient production code, Flow works with Simulation for simulated execution.
+Simulation is a powerful tool for testing system correctness. Our simulation technology, called Simulation, is enabled by and tightly integrated with :doc:`flow`, our asynchronous runtime for C++ coroutines. Flow supports both production execution and deterministic simulated execution.
 
 The major goal of Simulation is to make sure that we find and diagnose issues in simulation rather than the real world. Simulation runs tens of thousands of simulations every night, each one simulating large numbers of component failures. Based on the volume of tests that we run and the increased intensity of the failures in our scenarios, we estimate that we have run the equivalent of roughly one trillion CPU-hours of simulation on FoundationDB.
 
@@ -25,6 +25,49 @@ We use Simulation to simulate failures modes at the network, machine, and datace
 For a while, there was an informal competition within the engineering team to design failures that found the toughest bugs and issues the most easily. After a period of one-upsmanship, the reigning champion is called "swizzle-clogging". To swizzle-clog, you first pick a random subset of nodes in the cluster. Then, you "clog" (stop) each of their network connections one by one over a few seconds. Finally, you unclog them in a random order, again one by one, until they are all up. This pattern seems to be particularly good at finding deep issues that only happen in the rarest real-world cases.
 
 Simulation's success has surpassed our expectation and has been vital to our engineering team. It seems unlikely that we would have been able to build FoundationDB without this technology.
+
+Running C++ unit tests
+----------------------
+
+CTest runs the standalone unit suites once per supported runtime mode. With
+``BUILD_TESTING=ON`` (the default), the normal build and the ``fdbserver`` target
+build these executables. To build and run only the unit suites from a configured
+build directory:
+
+.. code-block:: bash
+
+   cmake --build . --target unit_tests
+   ctest -L unit --output-on-failure -j 2
+
+Each entry is named ``unit/<target>/native`` or
+``unit/<target>/simulation`` and has ``unit``, runtime-mode, and target-name
+labels. For example, ``ctest -L native`` selects the native suites and
+``ctest -L '^fdbclient_test$'`` selects both client modes. Flow has only a native
+entry. The memory-tracker suite is available when ``FDB_MEMORY_TRACKER=ON``.
+
+``UNIT_TEST_SEED`` is a decimal seed shared by these entries, independent of
+the cluster simulation seed. It defaults to ``1``; set it to ``0`` to choose a
+random seed, which each runner prints. ``UNIT_TEST_TIMEOUT`` defaults to 600
+wall-clock seconds per suite. Each runner uses a separate temporary directory,
+so CTest can run suites concurrently. To reproduce an individual failure:
+
+.. code-block:: bash
+
+   ./bin/fdbclient_test --seed 1 --filter /fdbclient/example
+
+``ENABLE_UNIT_TESTS=OFF`` or ``BUILD_TESTING=OFF`` disables this registration and
+its default build dependencies; the individual executable targets and the
+explicit ``unit_tests`` build target remain available. IDE and cross-compiling
+configurations also omit these registrations and default dependencies.
+
+The former ``AUTO_DISCOVER_UNIT_TESTS`` source-scanning option is deprecated.
+The standalone suites replace its per-case registrations and the focused
+``multiversion_client/unit_tests`` and
+``threadsafe_threadfuture_to_future/unit_tests`` entries. CI should invoke
+CTest once instead of also invoking these binaries directly. Randomized
+``RandomUnitTests`` cluster workloads and correctness packages remain in place:
+they exercise different seeds and schedules, including cases that standalone
+runners exclude.
 
 Running unit tests in simulation
 --------------------------------

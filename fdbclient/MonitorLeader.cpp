@@ -21,7 +21,8 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbclient/NativeAPI.h"
 #include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.h"
@@ -276,6 +277,7 @@ Future<std::vector<NetworkAddress>> tryResolveHostnamesImpl(ClusterConnectionStr
 		allCoordinatorsSet.insert(coord);
 	}
 	std::vector<Future<Void>> fs;
+	fs.reserve(self->hostnames.size());
 	for (auto& hostname : self->hostnames) {
 		fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
 			if (addr.present()) {
@@ -471,6 +473,23 @@ ClientCoordinators::ClientCoordinators(Key clusterKey, std::vector<NetworkAddres
 		clientLeaderServers.push_back(ClientLeaderRegInterface(coord));
 	}
 	ccr = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(coordinators, clusterKey));
+}
+
+std::vector<Future<Optional<LeaderInfo>>> ClientCoordinators::getLeaderReplies() const {
+	std::vector<Future<Optional<LeaderInfo>>> replies;
+	replies.reserve(clientLeaderServers.size());
+	for (const auto& server : clientLeaderServers) {
+		if (server.hostname.present()) {
+			replies.push_back(retryGetReplyFromHostname(GetLeaderRequest(clusterKey, UID()),
+			                                            server.hostname.get(),
+			                                            WLTOKEN_CLIENTLEADERREG_GETLEADER,
+			                                            TaskPriority::CoordinationReply));
+		} else {
+			replies.push_back(retryBrokenPromise(
+			    server.getLeader, GetLeaderRequest(clusterKey, UID()), TaskPriority::CoordinationReply));
+		}
+	}
+	return replies;
 }
 
 ClientLeaderRegInterface::ClientLeaderRegInterface(NetworkAddress remote)
@@ -887,7 +906,11 @@ void shrinkProxyList(ClientDBInfo& ni,
                      std::vector<UID>& lastGrvProxyUIDs,
                      std::vector<GrvProxyInterface>& lastGrvProxies) {
 	if (ni.commitProxies.size() > CLIENT_KNOBS->MAX_COMMIT_PROXY_CONNECTIONS) {
+		// Cache the sampled subset to prevent proxy churn: while above MAX, we keep
+		// talking to the same subset across ClientDBInfo updates instead of reshuffling
+		// on every update.
 		std::vector<UID> commitProxyUIDs;
+		commitProxyUIDs.reserve(ni.commitProxies.size());
 		for (auto& commitProxy : ni.commitProxies) {
 			commitProxyUIDs.push_back(commitProxy.id());
 		}
@@ -902,9 +925,42 @@ void shrinkProxyList(ClientDBInfo& ni,
 		}
 		ni.firstCommitProxy = ni.commitProxies[0];
 		ni.commitProxies = lastCommitProxies;
+	} else if (CLIENT_KNOBS->SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD) {
+		// Why clear here: say MAX=5 and we recruited 6 CPs, so we sampled+cached 5 of
+		// them above. Now a CP is killed, a recovery occurs, but the new recruited count
+		// is 5 (6 -> 5), which falls at/below MAX so we land in this branch and never
+		// re-enter the shrink path. The cached list still holds the pre-recovery sample
+		// -- including the killed CP's interface -- so it keeps that CP's RequestStreams
+		// (and their peer references), which causes stale peer issues
+		// (see StalePeerTest.toml with killRole=commit_proxy).
+		//
+		// Clearing is safe:
+		//   - Below MAX the cache is not used at all (we talk to every recruited proxy),
+		//     so clearing has zero effect on churn or perf here.
+		//   - The one case where the cache could have helped is 6 -> 5 -> 6 returning
+		//     to the *same* set: baseline would reuse, we re-sample. But crossing MAX
+		//     again means a recovery, which recruits CPs with new UIDs, so the set is
+		//     not the same and baseline would re-sample too.
+		//     Either way it is a one-time reshuffle, not steady-state, and
+		//     the knob means we can experiment and have it be off in case of performance concerns.
+		if (!lastCommitProxyUIDs.empty()) {
+			CODE_PROBE(true,
+			           "commit proxy recruited count dropped to at/below MAX_COMMIT_PROXY_CONNECTIONS, clearing cache");
+			TraceEvent("ShrinkProxyListCacheCleared")
+			    .detail("PeerRole", "commit_proxy")
+			    .detail("PrevCachedCount", lastCommitProxyUIDs.size())
+			    .detail("RecruitedCount", ni.commitProxies.size())
+			    .detail("MaxConnections", CLIENT_KNOBS->MAX_COMMIT_PROXY_CONNECTIONS);
+			lastCommitProxyUIDs.clear();
+			lastCommitProxies.clear();
+		}
 	}
 	if (ni.grvProxies.size() > CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS) {
+		// Cache the sampled subset to prevent proxy churn: while above MAX, we keep
+		// talking to the same subset across ClientDBInfo updates instead of reshuffling
+		// on every update.
 		std::vector<UID> grvProxyUIDs;
+		grvProxyUIDs.reserve(ni.grvProxies.size());
 		for (auto& grvProxy : ni.grvProxies) {
 			grvProxyUIDs.push_back(grvProxy.id());
 		}
@@ -918,6 +974,21 @@ void shrinkProxyList(ClientDBInfo& ni,
 			}
 		}
 		ni.grvProxies = lastGrvProxies;
+	} else if (CLIENT_KNOBS->SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD) {
+		// Same as the commit-proxy branch above (see that comment for the why and the
+		// no-perf-cost reasoning): a GP is killed, a recovery occurs, but the new
+		// recruited count drops to at/below MAX, so we clear the cache to avoid
+		// pinning the pre-recovery GP interfaces.
+		if (!lastGrvProxyUIDs.empty()) {
+			CODE_PROBE(true, "grv proxy recruited count dropped to at/below MAX_GRV_PROXY_CONNECTIONS, clearing cache");
+			TraceEvent("ShrinkProxyListCacheCleared")
+			    .detail("PeerRole", "grv_proxy")
+			    .detail("PrevCachedCount", lastGrvProxyUIDs.size())
+			    .detail("RecruitedCount", ni.grvProxies.size())
+			    .detail("MaxConnections", CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS);
+			lastGrvProxyUIDs.clear();
+			lastGrvProxies.clear();
+		}
 	}
 }
 

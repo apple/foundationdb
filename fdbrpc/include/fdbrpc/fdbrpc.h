@@ -39,13 +39,19 @@ class FlowReceiver : public NetworkMessageReceiver, public NonCopyable {
 	Endpoint endpoint;
 	bool m_isLocalEndpoint;
 	bool m_stream;
+	int64_t m_flowReceiverId;
 
 protected:
-	FlowReceiver() : m_isLocalEndpoint(false), m_stream(false) {}
+	FlowReceiver() : m_isLocalEndpoint(false), m_stream(false), m_flowReceiverId(-1) {}
 
 	FlowReceiver(Endpoint const& remoteEndpoint, bool stream)
-	  : endpoint(remoteEndpoint), m_isLocalEndpoint(false), m_stream(stream) {
+	  : endpoint(remoteEndpoint), m_isLocalEndpoint(false), m_stream(stream), m_flowReceiverId(-1) {
 		FlowTransport::transport().addPeerReference(endpoint, m_stream);
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_stream && endpoint.getPrimaryAddress().isValid() &&
+		    endpoint.getPrimaryAddress().isPublic()) {
+			m_flowReceiverId = FlowTransport::transport().interfaceTracker.flowReceiverCreated(
+			    endpoint.getPrimaryAddress(), endpoint.token);
+		}
 	}
 
 	~FlowReceiver() {
@@ -53,6 +59,10 @@ protected:
 			FlowTransport::transport().removeEndpoint(endpoint, this);
 		} else {
 			FlowTransport::transport().removePeerReference(endpoint, m_stream);
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_flowReceiverId >= 0) {
+				FlowTransport::transport().interfaceTracker.flowReceiverDestroyed(endpoint.getPrimaryAddress(),
+				                                                                  m_flowReceiverId);
+			}
 		}
 	}
 
@@ -66,6 +76,11 @@ public:
 		endpoint = remoteEndpoint;
 		m_stream = stream;
 		FlowTransport::transport().addPeerReference(endpoint, m_stream);
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_stream && endpoint.getPrimaryAddress().isValid() &&
+		    endpoint.getPrimaryAddress().isPublic()) {
+			m_flowReceiverId = FlowTransport::transport().interfaceTracker.flowReceiverCreated(
+			    endpoint.getPrimaryAddress(), endpoint.token);
+		}
 	}
 
 	// If already a remote endpoint, returns that.  Otherwise makes this
@@ -86,6 +101,7 @@ public:
 	}
 
 	void setPeerCompatibilityPolicy(const PeerCompatibilityPolicy& policy) { peerCompatibilityPolicy_ = policy; }
+	bool hasPeerCompatibilityPolicy() const { return peerCompatibilityPolicy_.present(); }
 
 	PeerCompatibilityPolicy peerCompatibilityPolicy() const override {
 		return peerCompatibilityPolicy_.orDefault(NetworkMessageReceiver::peerCompatibilityPolicy());
@@ -120,7 +136,7 @@ struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 		if (message.isError()) {
 			SAV<T>::sendErrorAndDelPromiseRef(message.getError());
 		} else {
-			SAV<T>::sendAndDelPromiseRef(message.get().asUnderlyingType());
+			SAV<T>::sendAndDelPromiseRef(std::move(message.get().asUnderlyingType()));
 		}
 	}
 
@@ -134,18 +150,16 @@ public:
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
-    // Swift can't call method that takes in a universal references (U&&),
-    // so provide a callable `send` method that copies the value.
-    void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) {
-        sav->send(valueCopy);
-    }
+	// Swift can't call method that takes in a universal references (U&&),
+	// so provide a callable `send` method that copies the value.
+	void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) { sav->send(valueCopy); }
 	template <class E>
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
 	}
 
 	void send(Never) { sendError(never_reply()); }
-  // SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
+	// SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
 	void sendNever() const { send(Never()); }
 
 	Future<T> getFuture() const {
@@ -158,8 +172,8 @@ public:
 	explicit ReplyPromise(const PeerCompatibilityPolicy& policy) : ReplyPromise() {
 		sav->setPeerCompatibilityPolicy(policy);
 	}
-	explicit(false) ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
-	explicit(false) ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
+	ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
+	ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 	~ReplyPromise() {
 		if (sav)
 			sav->delPromiseRef();
@@ -169,7 +183,21 @@ public:
 	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint) const {
 		return sav->getEndpoint(taskID);
 	}
+	void loadRemoteEndpoint(const Endpoint& endpoint) {
+		// Request deserialization first creates an unused local reply state. Reuse it when it has no observers,
+		// aliases, endpoint, or compatibility policy; all other states retain the original replacement semantics.
+		if (sav != nullptr && sav->canBeSet() && sav->getFutureReferenceCount() == 0 &&
+		    sav->getPromiseReferenceCount() == 1 && !sav->isLocalEndpoint() && !sav->isRemoteEndpoint() &&
+		    !sav->hasPeerCompatibilityPolicy()) {
+			sav->setRemoteEndpoint(endpoint, false);
+		} else {
+			*this = ReplyPromise<T>(endpoint);
+		}
+		networkSender(Uncancellable(), getFuture(), &sav->getRawEndpoint());
+	}
 
+	// Acquiring each incoming reference before releasing its old reference preserves self-assignment.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const ReplyPromise& rhs) {
 		if (rhs.sav)
 			rhs.sav->addPromiseRef();
@@ -214,8 +242,7 @@ void load(Ar& ar, ReplyPromise<T>& value) {
 	UID token;
 	ar >> token;
 	Endpoint endpoint = FlowTransport::transport().loadedEndpoint(token);
-	value = ReplyPromise<T>(endpoint);
-	networkSender(Uncancellable(), value.getFuture(), endpoint);
+	value.loadRemoteEndpoint(endpoint);
 }
 
 template <class T>
@@ -226,8 +253,7 @@ struct serializable_traits<ReplyPromise<T>> : std::true_type {
 			UID token;
 			serializer(ar, token);
 			auto endpoint = FlowTransport::transport().loadedEndpoint(token);
-			p = ReplyPromise<T>(endpoint);
-			networkSender(Uncancellable(), p.getFuture(), endpoint);
+			p.loadRemoteEndpoint(endpoint);
 		} else {
 			const auto& ep = p.getEndpoint().token;
 			serializer(ar, ep);
@@ -237,6 +263,8 @@ struct serializable_traits<ReplyPromise<T>> : std::true_type {
 
 template <class Reply>
 ReplyPromise<Reply> const& getReplyPromise(ReplyPromise<Reply> const& p) {
+	// The returned reference borrows p without changing its promise reference count.
+	// NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
 	return p;
 }
 
@@ -476,7 +504,7 @@ public:
 			value.sequence = queue->acknowledgements.sequence++;
 			queue->acknowledgements.bytesSent += value.expectedSize();
 			FlowTransport::transport().sendUnreliable(
-			    SerializeSource<ErrorOr<EnsureTable<T>>>(value), getEndpoint(), false);
+			    SerializeSource<ErrorOr<NetworkSenderTableT<T>>>(value), getEndpoint(), false);
 		} else {
 			queue->send(std::forward<U>(value));
 		}
@@ -503,13 +531,13 @@ public:
 		return FutureStream<T>(queue);
 	}
 	ReplyPromiseStream() : queue(new NetNotifiedQueueWithAcknowledgements<T>(0, 1)), errors(new SAV<Void>(0, 1)) {}
-	explicit(false) ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) {
+	ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) {
 		queue->addPromiseRef();
 		if (errors) {
 			errors->addPromiseRef();
 		}
 	}
-	explicit(false) ReplyPromiseStream(ReplyPromiseStream&& rhs) noexcept : queue(rhs.queue), errors(rhs.errors) {
+	ReplyPromiseStream(ReplyPromiseStream&& rhs) noexcept : queue(rhs.queue), errors(rhs.errors) {
 		rhs.queue = nullptr;
 		rhs.errors = nullptr;
 	}
@@ -586,7 +614,7 @@ public:
 	// Must be called on the server before sending results on the stream to ratelimit the amount of data outstanding to
 	// the client
 	Future<Void> onReady() const {
-		ASSERT(queue->acknowledgements.bytesLimit > 0);
+		ASSERT_GT(queue->acknowledgements.bytesLimit, 0);
 		if (queue->acknowledgements.failures.isError()) {
 			return queue->acknowledgements.failures.getError();
 		}
@@ -607,6 +635,8 @@ public:
 	// client
 	void setByteLimit(int64_t byteLimit) const { queue->acknowledgements.bytesLimit = byteLimit; }
 
+	// Acquiring each incoming reference before releasing its old reference preserves self-assignment.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const ReplyPromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)
@@ -755,7 +785,7 @@ public:
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value) const {
 		// Ensure the same request isn't used multiple times
-		ASSERT(!getReplyPromise(value).getFuture().isReady());
+		ASSERT(!getReplyPromise(value).isSet());
 		if (queue->isRemoteEndpoint()) {
 			return sendCanceler(getReplyPromise(value),
 			                    FlowTransport::transport().sendReliable(SerializeSource<T>(value), getEndpoint()),
@@ -800,7 +830,7 @@ public:
 			Reference<Peer> peer =
 			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
 			auto& p = getReplyPromise(value);
-			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(taskID), p, peer);
+			return waitValueOrSignal(p.getFuture(), std::move(disc), getEndpoint(taskID), p, std::move(peer));
 		}
 		send(value);
 		auto& p = getReplyPromise(value);
@@ -821,7 +851,7 @@ public:
 			Reference<Peer> peer =
 			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 			auto& p = getReplyPromise(value);
-			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(), p, peer);
+			return waitValueOrSignal(p.getFuture(), std::move(disc), getEndpoint(), p, std::move(peer));
 		} else {
 			send(value);
 			auto& p = getReplyPromise(value);
@@ -897,35 +927,88 @@ public:
 		return getReplyUnlessFailedFor(ReplyPromise<X>(), sustainedFailureDuration, sustainedFailureSlope);
 	}
 
-	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)) {}
+	explicit RequestStream(const Endpoint& endpoint)
+	  : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)), m_promiseRefTrackingId(-1) {
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && queue->isRemoteEndpoint() && g_network &&
+		    g_network->global(INetwork::enFlowTransport)) {
+			m_promiseRefTrackingId = FlowTransport::transport().interfaceTracker.promiseRefAdded(
+			    endpoint.getPrimaryAddress(), endpoint.token);
+		}
+	}
 
 	SWIFT_CXX_IMPORT_UNSAFE FutureStream<T> getFuture() const {
 		queue->addFutureRef();
-		return FutureStream<T>(queue);
+		int64_t trackingId = -1;
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && queue->isRemoteEndpoint() && g_network &&
+		    g_network->global(INetwork::enFlowTransport)) {
+			const auto& ep = queue->getEndpoint(TaskPriority::DefaultEndpoint);
+			trackingId = FlowTransport::transport().interfaceTracker.futureRefAdded(ep.getPrimaryAddress(), ep.token);
+		}
+		return FutureStream<T>(queue, trackingId);
 	}
-	RequestStream() : queue(new NetNotifiedQueue<T, IsPublic>(0, 1)) {}
+	RequestStream() : queue(new NetNotifiedQueue<T, IsPublic>(0, 1)), m_promiseRefTrackingId(-1) {}
 	explicit RequestStream(PeerCompatibilityPolicy policy) : RequestStream() {
 		queue->setPeerCompatibilityPolicy(policy);
 	}
-	explicit(false) RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	explicit(false) RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	RequestStream(const RequestStream& rhs) : queue(rhs.queue), m_promiseRefTrackingId(-1) {
+		queue->addPromiseRef();
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && queue->isRemoteEndpoint() && g_network &&
+		    g_network->global(INetwork::enFlowTransport)) {
+			const auto& ep = queue->getEndpoint(TaskPriority::DefaultEndpoint);
+			m_promiseRefTrackingId =
+			    FlowTransport::transport().interfaceTracker.promiseRefAdded(ep.getPrimaryAddress(), ep.token);
+		}
+	}
+	RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue), m_promiseRefTrackingId(rhs.m_promiseRefTrackingId) {
+		rhs.queue = 0;
+		// Transfer promise-ref tracking ownership to the moved-to object: clear rhs's id so its
+		// destructor does not release a tracking record now owned by *this (avoids double-release).
+		rhs.m_promiseRefTrackingId = -1;
+	}
+	// Acquiring each incoming reference before releasing its old reference preserves self-assignment.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const RequestStream& rhs) {
 		rhs.queue->addPromiseRef();
-		if (queue)
+		int64_t newTrackingId = -1;
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.queue->isRemoteEndpoint() && g_network &&
+		    g_network->global(INetwork::enFlowTransport)) {
+			const auto& ep = rhs.queue->getEndpoint(TaskPriority::DefaultEndpoint);
+			newTrackingId =
+			    FlowTransport::transport().interfaceTracker.promiseRefAdded(ep.getPrimaryAddress(), ep.token);
+		}
+		if (queue) {
 			queue->delPromiseRef();
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_promiseRefTrackingId >= 0 && g_network &&
+			    g_network->global(INetwork::enFlowTransport)) {
+				FlowTransport::transport().interfaceTracker.promiseRefReleased(m_promiseRefTrackingId);
+			}
+		}
 		queue = rhs.queue;
+		m_promiseRefTrackingId = newTrackingId;
 	}
 	void operator=(RequestStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
-			if (queue)
+			if (queue) {
 				queue->delPromiseRef();
+				if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_promiseRefTrackingId >= 0 && g_network &&
+				    g_network->global(INetwork::enFlowTransport)) {
+					FlowTransport::transport().interfaceTracker.promiseRefReleased(m_promiseRefTrackingId);
+				}
+			}
 			queue = rhs.queue;
+			m_promiseRefTrackingId = rhs.m_promiseRefTrackingId;
 			rhs.queue = 0;
+			rhs.m_promiseRefTrackingId = -1;
 		}
 	}
 	~RequestStream() {
-		if (queue)
+		if (queue) {
 			queue->delPromiseRef();
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_promiseRefTrackingId >= 0 && g_network &&
+			    g_network->global(INetwork::enFlowTransport)) {
+				FlowTransport::transport().interfaceTracker.promiseRefReleased(m_promiseRefTrackingId);
+			}
+		}
 		// queue = (NetNotifiedQueue<T>*)0xdeadbeef;
 	}
 
@@ -948,6 +1031,11 @@ public:
 
 private:
 	NetNotifiedQueue<T, IsPublic>* queue;
+	// InterfaceTracker id for this stream's promise-ref, or -1 when not tracked. It stays -1
+	// whenever STALE_PEER_OBSERVABILITY is off (the gated *RefAdded blocks never run), so the
+	// plain transfers of this member in the copy/move/assignment paths are no-ops in that case
+	// and need no knob guard; only the tracker calls (promiseRefAdded/promiseRefReleased) are gated.
+	int64_t m_promiseRefTrackingId;
 };
 
 // Public request streams require T::verify() and reject unauthorized messages.

@@ -280,7 +280,7 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 	}
 	g_network = newNet2(tlsConfig);
 	openTraceFile({}, 10 << 20, 10 << 20, ".", IsServer ? "authz_tls_unittest_server" : "authz_tls_unittest_client");
-	FlowTransport::createInstance(!IsServer, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(!IsServer, 1, WLTOKEN_FIRST_AVAILABLE);
 	auto& transport = FlowTransport::transport();
 	if constexpr (IsServer) {
 		auto addr = NetworkAddress::parse(noTls ? "127.0.0.1:0" : "127.0.0.1:0:tls");

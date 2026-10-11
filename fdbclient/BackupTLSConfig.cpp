@@ -20,7 +20,7 @@
 
 #include <iostream>
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/network.h"

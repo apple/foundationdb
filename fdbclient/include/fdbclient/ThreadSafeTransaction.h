@@ -58,7 +58,10 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
-	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) override;
+	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const std::vector<KeyRange>& ranges) override;
+	ThreadFuture<CDCStreamId> registerNativeCdcOrderedStream(const KeyRef& name,
+	                                                         const std::vector<KeyRange>& ranges,
+	                                                         const std::vector<Key>& splitPoints) override;
 	ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) override;
 	ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() override;
 	ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) override;
@@ -163,7 +166,7 @@ public:
 	// These are to permit use as state variables in actors:
 	ThreadSafeTransaction() : tr(nullptr), initialized(std::make_shared<std::atomic_bool>(false)) {}
 	void operator=(ThreadSafeTransaction&& r) noexcept;
-	explicit(false) ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept;
+	ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept;
 
 	void reset() override;
 

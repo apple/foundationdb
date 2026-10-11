@@ -273,14 +273,8 @@ bool validateAllCombinations(std::vector<LocalityData>& offendingCombo,
                              bool bCheckIfValid) {
 	bool bValid = true;
 
-	if (newItems.size() < nCombinationSize) {
-		bValid = false;
-	}
-	// Ensure that the current set alone does not satisfy the
-	// specified policy
-	else if ((bCheckIfValid) && (!localitySet.validate(policy))) {
-		bValid = false;
-	} else if ((!bCheckIfValid) && (localitySet.validate(policy))) {
+	// Check the current set's validity before adding combinations.
+	if (newItems.size() < nCombinationSize || localitySet.validate(policy) != bCheckIfValid) {
 		bValid = false;
 	} else {
 		bool bIsValidGroup;
@@ -881,7 +875,7 @@ void filterLocalityDataForPolicy(const std::set<std::string>& keys, LocalityData
 	for (auto iter = ld->_data.begin(); iter != ld->_data.end();) {
 		auto prev = iter;
 		iter++;
-		if (keys.find(prev->first.toString()) == keys.end()) {
+		if (!keys.contains(prev->first.toString())) {
 			ld->_data.erase(prev);
 		}
 	}

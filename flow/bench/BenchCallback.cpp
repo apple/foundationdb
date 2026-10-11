@@ -1,5 +1,5 @@
 /*
- * BenchCallback.cpp - Coroutine version of callback benchmarks
+ * BenchCallback.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,49 +20,46 @@
 
 #include "benchmark/benchmark.h"
 
-#include "flow/IRandom.h"
+#include <array>
+#include <cstdint>
+#include <vector>
+
 #include "flow/flow.h"
-#include "flow/DeterministicRandom.h"
-#include "flow/network.h"
 #include "flow/ThreadHelper.h"
 
-// C++20 coroutine version of callback benchmarks (matches BenchNet2.cpp pattern)
-
 template <size_t Size>
-static Future<Void> incrementCoro(Future<Void> f, uint32_t* sum) {
-	uint8_t arr[Size];
+static Future<Void> increment(Future<Void> f, uint32_t* sum) {
+	std::array<uint8_t, Size> arr;
 	co_await f;
 	benchmark::DoNotOptimize(arr);
 	++(*sum);
 }
 
 template <size_t Size>
-static Future<Void> benchCallbackCoro(benchmark::State* benchState) {
-	size_t actorCount = benchState->range(0);
-	uint32_t sum;
+static Future<Void> runCallbackBenchmark(benchmark::State* benchState) {
+	size_t futureCount = benchState->range(0);
+	uint32_t sum{ 0 };
 	while (benchState->KeepRunning()) {
 		sum = 0;
 		Promise<Void> trigger;
 		std::vector<Future<Void>> futures;
-		futures.reserve(actorCount);
-		for (int i = 0; i < actorCount; ++i) {
-			futures.push_back(incrementCoro<Size>(trigger.getFuture(), &sum));
+		futures.reserve(futureCount);
+		for (int i = 0; i < futureCount; ++i) {
+			futures.push_back(increment<Size>(trigger.getFuture(), &sum));
 		}
 		trigger.send(Void());
 		co_await waitForAll(futures);
 		benchmark::DoNotOptimize(sum);
 	}
-	benchState->SetItemsProcessed(actorCount * static_cast<long>(benchState->iterations()));
-	benchState->SetBytesProcessed(actorCount * Size * static_cast<long>(benchState->iterations()));
-	co_return;
+	benchState->SetItemsProcessed(futureCount * static_cast<long>(benchState->iterations()));
+	benchState->SetBytesProcessed(futureCount * Size * static_cast<long>(benchState->iterations()));
 }
 
 template <size_t Size>
-static void coroutine_callback(benchmark::State& benchState) {
-	onMainThread([&benchState] { return benchCallbackCoro<Size>(&benchState); }).blockUntilReady();
+static void bench_callback(benchmark::State& benchState) {
+	onMainThread([&benchState]() { return runCallbackBenchmark<Size>(&benchState); }).blockUntilReady();
 }
 
-// Match the actor benchmark template sizes and ranges exactly
-BENCHMARK_TEMPLATE(coroutine_callback, 1)->Range(1, 1 << 8)->ReportAggregatesOnly(true);
-BENCHMARK_TEMPLATE(coroutine_callback, 32)->Range(1, 1 << 8)->ReportAggregatesOnly(true);
-BENCHMARK_TEMPLATE(coroutine_callback, 1024)->Range(1, 1 << 8)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_callback, 1)->Range(1, 1 << 8)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_callback, 32)->Range(1, 1 << 8)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_callback, 1024)->Range(1, 1 << 8)->ReportAggregatesOnly(true);

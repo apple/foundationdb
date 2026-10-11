@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/core/CoordinationInterface.h"
+#include "fdbclient/WellKnownEndpoints.h"
 
 GenerationRegInterface::GenerationRegInterface(NetworkAddress const& remote)
   : read(Endpoint::wellKnown({ remote }, WLTOKEN_GENERATIONREG_READ)),

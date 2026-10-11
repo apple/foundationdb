@@ -31,6 +31,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <thread>
 #include <unordered_map>
 
 #ifdef WIN32
@@ -309,10 +310,10 @@ namespace keepalive_allocator {
 
 namespace detail {
 
-std::set<void*> g_allocatedSet;
-std::set<void*> g_freedSet;
-std::vector<std::pair<const uint8_t*, int>> g_wipedSet;
-bool g_active = false;
+thread_local std::set<void*> g_allocatedSet;
+thread_local std::set<void*> g_freedSet;
+thread_local std::vector<std::pair<const uint8_t*, int>> g_wipedSet;
+thread_local bool g_active = false;
 
 } // namespace detail
 
@@ -369,6 +370,33 @@ std::vector<std::pair<const uint8_t*, int>> const& getWipedAreaSet() {
 
 } // namespace keepalive_allocator
 
+TEST_CASE("/flow/FastAlloc/KeepaliveScopeThreadIsolation") {
+	std::atomic<bool> start{ false };
+	std::atomic<bool> allocated{ false };
+	std::atomic<bool> release{ false };
+	std::thread otherThread([&] {
+		while (!start.load(std::memory_order_acquire)) {
+			std::this_thread::yield();
+		}
+		auto* memory = allocateAndMaybeKeepalive(64);
+		allocated.store(true, std::memory_order_release);
+		while (!release.load(std::memory_order_acquire)) {
+			std::this_thread::yield();
+		}
+		freeOrMaybeKeepalive(memory);
+	});
+	{
+		keepalive_allocator::ActiveScope scope;
+		start.store(true, std::memory_order_release);
+		while (!allocated.load(std::memory_order_acquire)) {
+			std::this_thread::yield();
+		}
+	}
+	release.store(true, std::memory_order_release);
+	otherThread.join();
+	return Void();
+}
+
 template <int Size>
 void* FastAllocator<Size>::allocate() {
 	if (keepalive_allocator::isActive()) [[unlikely]]
@@ -384,14 +412,25 @@ void* FastAllocator<Size>::allocate() {
 	bytes->increment(size);
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
-	// Some usages of FastAllocator require 4096 byte alignment.
-	return aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
+	{
+		// Some usages of FastAllocator require 4096 byte alignment.
+		// This path bypasses the freelist and the memTrackerOnAlloc at the bottom
+		// of the function, so track here too — otherwise every FastAllocator size
+		// class (and the small Arena blocks backed by it) would be invisible to the
+		// tracker under gperftools / ASan. Symmetric with release() below. (Braces
+		// scope this `p` so it can't collide with the freelist `p` compiled below.)
+		void* p = aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
+		memTrackerOnAlloc(p, Size);
+		return p;
+	}
 #endif
 
 #if VALGRIND
 	if (valgrindPrecise()) {
 		// Some usages of FastAllocator require 4096 byte alignment
-		return aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
+		void* p = aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
+		memTrackerOnAlloc(p, Size); // track here too (see the gperftools/ASan path above)
+		return p;
 	}
 #endif
 
@@ -459,11 +498,15 @@ void FastAllocator<Size>::release(void* ptr) {
 	bytes->increment(size);
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
+	// Mirror allocate()'s early-return tracking so frees on this path debit the
+	// live table (without this the block would leak in the tracker's accounting).
+	memTrackerOnFree(ptr);
 	return aligned_free(ptr);
 #endif
 
 #if VALGRIND
 	if (valgrindPrecise()) {
+		memTrackerOnFree(ptr); // mirror allocate() (see the gperftools/ASan path above)
 		return aligned_free(ptr);
 	}
 #endif

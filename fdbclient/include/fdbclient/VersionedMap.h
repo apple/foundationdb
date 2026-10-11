@@ -121,7 +121,7 @@ struct PTree : public ReferenceCounted<PTree<T>>, FastAllocated<PTree<T>>, NonCo
 	}
 
 private:
-	explicit(false) PTree(PTree const&);
+	PTree(PTree const&);
 };
 
 template <class T>
@@ -139,10 +139,13 @@ public:
 	PTreeFinger() = default;
 
 	// Explicit copy constructors ensure we copy the live values in entries_.
-	explicit(false) PTreeFinger(PTreeFinger const& f) { *this = f; }
-	explicit(false) PTreeFinger(PTreeFinger&& f) { *this = f; }
+	PTreeFinger(PTreeFinger const& f) { *this = f; }
+	PTreeFinger(PTreeFinger&& f) { *this = f; }
 
 	PTreeFinger& operator=(PTreeFinger const& f) {
+		if (this == &f) {
+			return *this;
+		}
 		size_ = f.size_;
 		bound_sz_ = f.bound_sz_;
 		std::copy(f.entries_, f.entries_ + size_, entries_);
@@ -150,6 +153,9 @@ public:
 	}
 
 	PTreeFinger& operator=(PTreeFinger&& f) {
+		if (this == &f) {
+			return *this;
+		}
 		size_ = std::exchange(f.size_, 0);
 		bound_sz_ = f.bound_sz_;
 		std::copy(f.entries_, f.entries_ + size_, entries_);
@@ -769,7 +775,7 @@ public:
 	VersionedMap() : oldestVersion(0), latestVersion(0), priorityRandom(deterministicRandom()) {
 		roots.emplace_back(0, Tree());
 	}
-	explicit(false) VersionedMap(VersionedMap&& v) noexcept
+	VersionedMap(VersionedMap&& v) noexcept
 	  : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), priorityRandom(std::move(v.priorityRandom)),
 	    roots(std::move(v.roots)) {}
 	void operator=(VersionedMap&& v) noexcept {

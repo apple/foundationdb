@@ -7093,13 +7093,14 @@ SQLITE_PRIVATE int sqlite3BtreeLazyDelete(BtCursor* cursor,
                                           int* pagesDeleted) {
 	int pageNumber, cell, rc, subtree, count;
 	MemPage* page;
-	int empty;
+	int empty, reclaimedPages;
 	const void* ptr;
 	i64 tableKey = 0;
+	u32 freePagesBefore;
 
 	*pagesDeleted = 0;
 
-	while (desiredPages--) {
+	while (*pagesDeleted < desiredPages) {
 		if (!stackBegin[0]) {
 			// Read one or more items from the back of cursor table into stack
 			rc = sqlite3BtreeLast(cursor, &empty);
@@ -7149,6 +7150,8 @@ SQLITE_PRIVATE int sqlite3BtreeLazyDelete(BtCursor* cursor,
 				}
 			}
 
+		// Reclaim a complete B-tree page, charging its overflow pages to the budget too.
+		freePagesBefore = get4byte(&cursor->pBt->pPage1->aData[36]);
 		// Free overflow pages
 		for (cell = 0; cell < page->nCell; cell++) {
 			rc = clearCell(page, findCell(page, cell));
@@ -7166,7 +7169,8 @@ SQLITE_PRIVATE int sqlite3BtreeLazyDelete(BtCursor* cursor,
 		}
 
 		releasePage(page); // Required after getAndInitPage() above
-		++(*pagesDeleted);
+		reclaimedPages = get4byte(&cursor->pBt->pPage1->aData[36]) - freePagesBefore;
+		*pagesDeleted += reclaimedPages;
 	}
 
 	if (stackBegin[0]) {

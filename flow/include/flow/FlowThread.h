@@ -196,8 +196,8 @@ template <class T>
 class ThreadFutureStream {
 public:
 	ThreadFutureStream() : queue(nullptr) {}
-	explicit(false) ThreadFutureStream(const ThreadFutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
-	explicit(false) ThreadFutureStream(ThreadFutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	ThreadFutureStream(const ThreadFutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
+	ThreadFutureStream(ThreadFutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	explicit ThreadFutureStream(ThreadNotifiedQueue<T>* queue) : queue(queue) {}
 	~ThreadFutureStream() {
 		if (queue)
@@ -218,6 +218,9 @@ public:
 	}
 
 	void operator=(const ThreadFutureStream& rhs) {
+		if (this == &rhs) {
+			return;
+		}
 		rhs.queue->addFutureRef();
 		if (queue)
 			queue->delFutureRef();
@@ -256,9 +259,7 @@ class ThreadReturnPromiseStream {
 public:
 	ThreadReturnPromiseStream() : queue(new ThreadNotifiedQueue<T>(0, 1)) {}
 	ThreadReturnPromiseStream(const ThreadReturnPromiseStream& rhs) = delete;
-	explicit(false) ThreadReturnPromiseStream(ThreadReturnPromiseStream&& rhs) noexcept : queue(rhs.queue) {
-		rhs.queue = 0;
-	}
+	ThreadReturnPromiseStream(ThreadReturnPromiseStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	~ThreadReturnPromiseStream() {
 		if (queue)
 			queue->delPromiseRef();
@@ -273,6 +274,8 @@ public:
 		return ThreadFutureStream<T>(queue);
 	}
 
+	// The incoming queue reference is acquired before the old one is released.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const ThreadReturnPromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)
@@ -295,11 +298,5 @@ public:
 private:
 	ThreadNotifiedQueue<T>* queue;
 };
-
-// Fixes IDE build.
-#ifndef NO_INTELLISENSE
-template <class T>
-T waitNext(const ThreadFutureStream<T>&);
-#endif
 
 #endif

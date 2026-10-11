@@ -1,5 +1,5 @@
 /*
- * DataDistributionQueue.actor.cpp
+ * DDRelocationQueue.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -145,6 +145,22 @@ static RelocateShard makeDestinationFailureRetry(RelocateData const& rd, UID ret
 
 static bool shouldRetryDestinationTeamFailure(bool doBulkLoading, RelocateData const&) {
 	return !doBulkLoading;
+}
+
+// See the declaration in DDRelocationQueue.h for why this state lives on the queue.
+bool DDQueue::injectBulkLoadDestinationTeamFailure(bool doBulkLoading, const RelocateData& rd) {
+	if (!doBulkLoading || !g_network->isSimulated() ||
+	    bulkLoadInjectedDestTeamFailures >= SERVER_KNOBS->BULKLOAD_SIM_INJECT_DEST_TEAM_FAILURES) {
+		return false;
+	}
+	UID const taskId = rd.bulkLoadTask.get().coreState.getTaskId();
+	if (!bulkLoadInjectionTargetTaskId.isValid()) {
+		bulkLoadInjectionTargetTaskId = taskId;
+	} else if (bulkLoadInjectionTargetTaskId != taskId) {
+		return false;
+	}
+	++bulkLoadInjectedDestTeamFailures;
+	return true;
 }
 
 static bool shouldYieldDestinationFailureRetry(RelocateData const& retry, RelocateData const& queued) {
@@ -308,6 +324,7 @@ public:
 
 	Future<Void> updateStorageMetrics() override {
 		std::vector<Future<Void>> futures;
+		futures.reserve(teams.size());
 
 		for (auto& team : teams) {
 			futures.push_back(team->updateStorageMetrics());
@@ -631,7 +648,8 @@ void DDQueue::updatePipelineFull() {
 		    .detail("PendingGateRelocations", pendingGateRelocations)
 		    .detail("PipelineLimit", SERVER_KNOBS->DD_MAX_PIPELINE_MOVES);
 		CODE_PROBE(true, "DD Pipeline Full");
-	} else if (pipelineSize() < SERVER_KNOBS->DD_MAX_PIPELINE_MOVES && pipelineFull->get()) {
+	} else if (pipelineMutationDepth == 0 && pipelineSize() < SERVER_KNOBS->DD_MAX_PIPELINE_MOVES &&
+	           pipelineFull->get()) {
 		pipelineFull->set(false);
 		TraceEvent("DDPipelineFullCleared", distributorId)
 		    .suppressFor(30.0)
@@ -846,6 +864,7 @@ void DDQueue::processRelocationComplete(const RelocateData& done) {
 }
 
 void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFrom) {
+	PipelineMutation mutation(*this);
 	//TraceEvent("QueueRelocationBegin").detail("Begin", rd.keys.begin).detail("End", rd.keys.end);
 
 	// remove all items from both queues that are fully contained in the new relocation (i.e. will be overwritten)
@@ -908,9 +927,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		}
 
 		if (rd.keys.contains(rrs.keys)) {
-			if (foundActiveFetching)
+			if (foundActiveFetching) {
 				fetchingSourcesQueue.erase(fetchingSourcesItr);
-			else if (foundActiveRelocation) {
+			} else if (foundActiveRelocation) {
 				firstQueue->erase(firstRelocationItr);
 				for (int i = 1; i < rrs.src.size(); i++)
 					queue[rrs.src[i]].erase(rrs);
@@ -1033,7 +1052,6 @@ void DDQueue::completeSourceFetch(const RelocateData& results) {
 	for (int i = 0; i < results.src.size(); i++) {
 		queue[results.src[i]].insert(results);
 	}
-	updateLastAsSource(results.src);
 	serverCounter.increaseForTeam(results.src, results.reason, ServerCounter::CountType::QueuedSource);
 }
 
@@ -1142,6 +1160,7 @@ bool runPendingBulkLoadTaskWithRelocateData(DDQueue* self, RelocateData& rd) {
 // canceled inflight relocateData. Launch the relocation for the rd.
 void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>> combined,
                                const DDEnabledState* ddEnabledState) {
+	PipelineMutation mutation(*this);
 	[[maybe_unused]] int startedHere = 0;
 	double startTime = now();
 	// kick off relocators from items in the queue as need be
@@ -1255,7 +1274,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		// which leads to conflicts of moving keys
 
 		Future<Void> fCleanup =
-		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
+		    ddEnabledState->shardEncodeLocationMetadata() ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
 		inFlight.insert(rd.keys, rd);
 		for (int r = 0; r < ranges.size(); r++) {
@@ -1271,14 +1290,14 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			}
 			if (rd.keys == ranges[r] && rd.isRestore()) {
 				ASSERT(rd.dataMove != nullptr);
-				ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+				ASSERT(ddEnabledState->shardEncodeLocationMetadata());
 				rrs.dataMoveId = rd.dataMove->meta.id;
 			} else {
 				// Restored data moves can split ordinary relocations, but not other restored data moves.
 				ASSERT_WE_THINK(!rd.isRestore() || !rrs.isRestore());
 				// TODO(psm): The shard id is determined by DD.
 				rrs.dataMove.reset();
-				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				if (ddEnabledState->shardEncodeLocationMetadata()) {
 					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 						rrs.dataMoveId = UID();
 					} else if (rrs.bulkLoadTask.present()) {
@@ -1610,7 +1629,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			self->suppressIntervals = 0;
 		}
 
-		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		if (ddEnabledState->shardEncodeLocationMetadata()) {
 			auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 			ASSERT(inFlightRange.range() == rd.keys);
 			ASSERT(inFlightRange.value().randomId == rd.randomId);
@@ -1661,7 +1680,11 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 						// rd with bulkLoadTask set.
 						// TODO(BulkLoad): reset rd.bulkLoadTask here for the risk of overloading the source
 						// servers.
-						TraceEvent(SevWarn, "DDBulkLoadTaskFallbackToNormalDataMove", self->distributorId)
+						//
+						// An expected race, not a bulkload failure: rd's task snapshot was Triggered/Running, but
+						// the persisted phase has moved on since -- usually to Complete. An ordinary move is then
+						// the correct outcome and loses no bulkload work.
+						TraceEvent(SevInfo, "DDBulkLoadTaskFallbackToNormalDataMove", self->distributorId)
 						    .detail("TrackID", rd.randomId)
 						    .detail("DataMovePriority", rd.priority)
 						    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId())
@@ -1740,7 +1763,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 				bestTeams.clear();
 				// Get team from teamCollections in different DCs and find the best one
 				while (tciIndex < self->teamCollections.size()) {
-					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
+					if (ddEnabledState->shardEncodeLocationMetadata() && rd.isRestore()) {
 						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
 						req.keys = rd.keys;
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
@@ -2038,8 +2061,10 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 						    .detail("Priority", rd.priority)
 						    .detail("DataMoveReason", static_cast<int>(rd.dmReason));
 						if (rd.bulkLoadTask.get().completeAck.canBeSet()) {
-							// Unretriable error. So, we give up the task at this time.
-							rd.bulkLoadTask.get().completeAck.send(BulkLoadAck(/*unretryableError=*/true, rd.priority));
+							// No team is disjoint from src. Terminal for this data move, but the task can
+							// still be narrowed: see BulkLoadAck::Outcome::Unplaceable.
+							rd.bulkLoadTask.get().completeAck.send(
+							    BulkLoadAck(BulkLoadAck::Outcome::Unplaceable, rd.priority));
 							throw data_move_dest_team_not_found();
 							// This relocator should silently exit. Note that if this bulkload data move is
 							// a team unhealthy data move, the bulkload engine will issue a new data move on
@@ -2203,7 +2228,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			Promise<Void> dataMovementComplete;
 			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
 			std::unique_ptr<MoveKeysParams> params;
-			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			if (ddEnabledState->shardEncodeLocationMetadata()) {
 				params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 				                                          std::vector<KeyRange>{ rd.keys },
 				                                          destIds,
@@ -2235,7 +2260,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                                        : Optional<BulkLoadTaskState>());
 			}
 			Future<Void> doMoveKeys = self->txnProcessor->moveKeys(*params);
-			Future<Void> pollHealth = signalledTransferComplete && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA
+			Future<Void> pollHealth = signalledTransferComplete && !ddEnabledState->shardEncodeLocationMetadata()
 			                              ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
 			try {
@@ -2250,7 +2275,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 							extraIds.clear();
 							ASSERT(totalIds == destIds.size()); // Sanity check the destIDs before we move keys
 							std::unique_ptr<MoveKeysParams> params;
-							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (ddEnabledState->shardEncodeLocationMetadata()) {
 								params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 								                                          std::vector<KeyRange>{ rd.keys },
 								                                          destIds,
@@ -2286,7 +2311,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 							doMoveKeys = self->txnProcessor->moveKeys(*params);
 						} else {
 							self->fetchKeysComplete.insert(rd);
-							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (ddEnabledState->shardEncodeLocationMetadata()) {
 								auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(rd.keys);
 								if (ranges.size() == 1 && static_cast<KeyRange>(ranges[0]) == rd.keys &&
 								    ranges[0].value.id == rd.dataMoveId && !ranges[0].value.cancel.isValid()) {
@@ -2299,13 +2324,14 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 							break;
 						}
 					} else if (res.index() == 1) {
-						if (!healthyDestinations.isHealthy()) {
+						if (!healthyDestinations.isHealthy() ||
+						    self->injectBulkLoadDestinationTeamFailure(doBulkLoading, rd)) {
 							if (!signalledTransferComplete) {
 								signalledTransferComplete = true;
 								self->dataTransferComplete.send(rd);
 								ownsDestBusyness = false;
 							}
-							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (ddEnabledState->shardEncodeLocationMetadata()) {
 								CODE_PROBE(true,
 								           "Cancel shard-encoded data move after destination team becomes unhealthy");
 								TraceEvent(SevWarnAlways, "RelocateShardDestinationTeamUnhealthy", distributorId)
@@ -2313,14 +2339,19 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 								    .detail("Range", rd.keys)
 								    .detail("Dest", describe(destIds));
 								if (doBulkLoading && rd.bulkLoadTask.get().completeAck.canBeSet()) {
+									CODE_PROBE(true, "Bulkload data move lost its destination team");
+									// Recoverable: the same task can succeed against a team chosen
+									// later. Terminal here would abandon the task, and its key-values
+									// exist only in the dump until an attempt ingests them, so the
+									// range would simply be missing from the restored database.
 									rd.bulkLoadTask.get().completeAck.send(
-									    BulkLoadAck(/*unretryableError=*/true, rd.priority));
+									    BulkLoadAck(BulkLoadAck::Outcome::Retryable, rd.priority));
 								}
 								retryAfterDestinationTeamFailure = shouldRetryDestinationTeamFailure(doBulkLoading, rd);
 								throw data_move_dest_team_not_found();
 							}
 						}
-						pollHealth = signalledTransferComplete && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA
+						pollHealth = signalledTransferComplete && !ddEnabledState->shardEncodeLocationMetadata()
 						                 ? Never()
 						                 : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
 					} else if (res.index() == 2) {
@@ -2345,9 +2376,30 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			    error.code() != error_code_start_move_keys_too_many_retries) {
 				if (!error.code()) {
 					try {
-						co_await healthyDestinations
-						    .updateStorageMetrics(); // prevent a gap between the polling for an increase in
-						                             // storage metrics and decrementing data in flight
+						// Prevent a gap between the polling for an increase in storage metrics and
+						// decrementing data in flight: until that increase is observed the destination looks
+						// emptier than it is and can attract further moves.
+						//
+						// The refresh is bounded because updateServerMetrics() returns only once the server
+						// replies or leaves the team, and completing this relocation must not depend on
+						// either. Losing it only widens that gap to one STORAGE_METRICS_POLLING_DELAY; the
+						// decrement below is derived from the shard's own metrics and is exact regardless.
+						Optional<Void> refreshed = co_await timeout(healthyDestinations.updateStorageMetrics(),
+						                                            SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT,
+						                                            TaskPriority::DataDistributionLaunch);
+						if (!refreshed.present()) {
+							CODE_PROBE(true,
+							           "Destination metrics refresh timed out after a data move",
+							           probe::decoration::rare);
+							TraceEvent(SevWarn, "RelocateShardDestMetricsTimeout", distributorId)
+							    .suppressFor(5.0)
+							    .detail("TraceID", rd.randomId)
+							    .detail("Range", rd.keys)
+							    .detail("DataMoveID", rd.dataMoveId)
+							    .detail("Priority", rd.priority)
+							    .detail("Dest", describe(destIds))
+							    .detail("Timeout", SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT);
+						}
 					} catch (Error& e) {
 						error = e;
 					}
@@ -2968,6 +3020,7 @@ struct DDQueueImpl {
 			RelocateShard rs = co_await input;
 			co_await state->queueMutationLock.take(TaskPriority::DataDistributionLaunch);
 			FlowLock::Releaser lockGuard(state->queueMutationLock);
+			DDQueue::PipelineMutation mutation(*state->self);
 			state->self->pendingGateRelocations--;
 			state->self->updatePipelineFull();
 			if (rs.isRestore()) {
@@ -3091,9 +3144,25 @@ struct DDQueueImpl {
 
 		auto const highestPriorityRelocation = self->getHighestPriorityRelocation();
 
+		// InFlight and InQueue are counters and have been seen diverging from the work actually present
+		// by an order of magnitude, so also report the structures DD's memory consists of, which cannot
+		// drift. fetchKeysComplete is the known driver of that growth: relocations wait there to be
+		// retired, so it is unbounded whenever completion processing falls behind.
+		int serverQueueEntries = 0;
+		for (auto const& [serverId, serverQueue] : self->queue) {
+			serverQueueEntries += serverQueue.size();
+		}
+
 		TraceEvent("MovingData", self->distributorId)
 		    .detail("InFlight", self->activeRelocations)
 		    .detail("InQueue", self->queuedRelocations)
+		    .detail("FetchKeysComplete", self->fetchKeysComplete.size())
+		    .detail("FetchingSourcesQueue", self->fetchingSourcesQueue.size())
+		    .detail("ServerQueues", self->queue.size())
+		    .detail("ServerQueueEntries", serverQueueEntries)
+		    .detail("BusySourceServers", self->busymap.size())
+		    .detail("BusyDestServers", self->destBusymap.size())
+		    .detail("LastAsSourceEntries", self->lastAsSource.size())
 		    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
 		    .detail("UnhealthyRelocations", self->unhealthyRelocations)
 		    .detail("HighestPriority", highestPriorityRelocation)
@@ -3294,6 +3363,108 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 		}
 	}
 	std::cout << "Finished.";
+}
+
+TEST_CASE("/DataDistribution/DDQueue/ReplacementPreservesPipelineCapacity") {
+	DDQueue self;
+	self.activeRelocations = SERVER_KNOBS->DD_MAX_PIPELINE_MOVES - 1;
+	self.queuedRelocations = 1;
+	self.pendingGateRelocations = 0;
+	self.unhealthyRelocations = 0;
+	self.pipelineFull = makeReference<AsyncVar<bool>>(false);
+	self.rawProcessingUnhealthy = makeReference<AsyncVar<bool>>(false);
+	self.rawProcessingWiggle = makeReference<AsyncVar<bool>>(false);
+	// Keep source discovery pending so this exercises queue replacement without a database.
+	self.fetchSourceLock = makeReference<FlowLock>(0);
+	const int priority = SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE;
+	RelocateShard request(KeyRangeRef("a"_sr, "b"_sr), priority, RelocateReason::OTHER, UID(1, 0));
+	RelocateData queued(request);
+	self.queueMap.insert(queued.keys, queued);
+	self.fetchingSourcesQueue.insert(queued);
+	self.startRelocation(priority, priority);
+	ASSERT(self.pipelineFull->get());
+	Future<Void> capacityChanged = self.pipelineFull->onChange();
+
+	std::set<UID> serversToLaunchFrom;
+	request.traceId = UID(2, 0);
+	self.queueRelocation(request, serversToLaunchFrom);
+
+	ASSERT_EQ(self.queuedRelocations, 1);
+	ASSERT_EQ(self.fetchingSourcesQueue.size(), 1);
+	ASSERT_EQ(self.pipelineSize(), SERVER_KNOBS->DD_MAX_PIPELINE_MOVES);
+	ASSERT(self.pipelineFull->get());
+	// Replacing one queued move must not advertise a slot that another producer can consume.
+	ASSERT(!capacityChanged.isReady());
+
+	RelocateData adjacent(RelocateShard(KeyRangeRef("b"_sr, "c"_sr), priority, RelocateReason::OTHER, UID(3, 0)));
+	self.queueMap.insert(adjacent.keys, adjacent);
+	self.fetchingSourcesQueue.insert(adjacent);
+	self.activeRelocations--;
+	self.queuedRelocations++;
+	self.startRelocation(priority, priority);
+	request.keys = KeyRangeRef("a"_sr, "c"_sr);
+	request.traceId = UID(4, 0);
+	self.queueRelocation(request, serversToLaunchFrom);
+
+	// Coalescing two queued ranges really releases one slot.
+	ASSERT_EQ(self.queuedRelocations, 1);
+	ASSERT_EQ(self.pipelineSize(), SERVER_KNOBS->DD_MAX_PIPELINE_MOVES - 1);
+	ASSERT(!self.pipelineFull->get());
+	ASSERT(capacityChanged.isReady());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/DDQueue/SourceDiscoveryPreservesReadRebalanceCooldown") {
+	DDQueue self;
+	const std::vector<UID> primary{ UID(1, 0), UID(2, 0), UID(3, 0) };
+	const std::vector<UID> remote{ UID(4, 0), UID(5, 0), UID(6, 0) };
+	RelocateData repair(RelocateShard(
+	    KeyRangeRef("a"_sr, "b"_sr), SERVER_KNOBS->PRIORITY_TEAM_2_LEFT, RelocateReason::OTHER, UID(7, 0)));
+	RelocateData read(RelocateShard(KeyRangeRef("b"_sr, "c"_sr),
+	                                DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM,
+	                                RelocateReason::REBALANCE_READ,
+	                                UID(8, 0)));
+	for (RelocateData* results : { &repair, &read }) {
+		results->src = primary;
+		results->src.insert(results->src.end(), remote.begin(), remote.end());
+		results->completeSources = results->src;
+	}
+	auto finishSourceDiscovery = [&self](RelocateData const& results) {
+		self.fetchingSourcesQueue.insert(results);
+		self.completeSourceFetch(results);
+	};
+
+	// Source discovery includes both regions even when only the remote team needs repair.
+	finishSourceDiscovery(repair);
+	ASSERT(self.lastAsSource.empty());
+	ASSERT(!self.timeThrottle(primary));
+	ASSERT(!self.timeThrottle(remote));
+
+	const double cooldown =
+	    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL / SERVER_KNOBS->READ_REBALANCE_SRC_PARALLELISM;
+	const double proposedAt = now() - cooldown / 2;
+	self.updateLastAsSource(primary, proposedAt);
+	ASSERT(self.timeThrottle(primary));
+	ASSERT(!self.timeThrottle(remote));
+	const auto proposalTimestamps = self.lastAsSource;
+
+	// Delayed or repeated source discovery must not extend the proposal's cooldown to either region.
+	for (RelocateData const* results : { &repair, &read }) {
+		finishSourceDiscovery(*results);
+		ASSERT(self.lastAsSource == proposalTimestamps);
+	}
+	ASSERT(self.timeThrottle(primary));
+	ASSERT(!self.timeThrottle(remote));
+
+	self.updateLastAsSource(primary, now() - 2 * cooldown);
+	const auto expiredTimestamps = self.lastAsSource;
+	for (RelocateData const* results : { &repair, &read }) {
+		finishSourceDiscovery(*results);
+		ASSERT(self.lastAsSource == expiredTimestamps);
+	}
+	ASSERT(!self.timeThrottle(primary));
+	ASSERT(!self.timeThrottle(remote));
+	return Void();
 }
 
 TEST_CASE("/DataDistribution/DDQueue/DestinationRetryHelperAccounting") {

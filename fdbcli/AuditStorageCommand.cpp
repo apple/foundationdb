@@ -29,6 +29,7 @@
  *   - audit_storage locationmetadata   : Validate location metadata
  *   - audit_storage ssshard            : Validate storage server shards
  *   - audit_storage validate_restore   : Validate restored backup data
+ *   - audit_storage metadata_encoding  : Report shard-location metadata encoding
  *
  * ============================================================================
  * RESTORE VALIDATION (validate_restore) - Quick Reference
@@ -63,7 +64,7 @@
 #include "fdbclient/IClientApi.h"
 
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/Audit.h"
 
 #include "flow/Arena.h"
@@ -95,6 +96,8 @@ Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> cluster
 			type = AuditType::ValidateStorageServerShard;
 		} else if (tokencmp(tokens[2], "validate_restore")) {
 			type = AuditType::ValidateRestore;
+		} else if (tokencmp(tokens[2], "range_digest")) {
+			type = AuditType::RangeDigest;
 		} else {
 			printUsage(tokens[0]);
 			co_return UID();
@@ -117,6 +120,8 @@ Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> cluster
 			type = AuditType::ValidateRestore;
 		} else if (tokencmp(tokens[1], "metadata_encoding")) {
 			type = AuditType::ValidateMetadataEncoding;
+		} else if (tokencmp(tokens[1], "range_digest")) {
+			type = AuditType::RangeDigest;
 		} else {
 			printUsage(tokens[0]);
 			co_return UID();
@@ -171,7 +176,8 @@ CommandFactory auditStorageFactory(
     CommandHelp("audit_storage <Type> [BeginKey EndKey] <EngineType>",
                 "Start an audit storage",
                 "Specify audit `Type' (only `ha' and `replica' and `locationmetadata' and "
-                "`ssshard' and `validate_restore' and `metadata_encoding' `Type' are supported currently), and\n"
+                "`ssshard' and `validate_restore' and `metadata_encoding' and `range_digest' `Type' are supported "
+                "currently), and\n"
                 "optionally a sub-range with `BeginKey' and `EndKey'.\n"
                 "Specify audit `EngineType' when auditType is `ha' or `replica'\n"
                 "(only `ssd-rocksdb-v1' and `ssd-sharded-rocksdb' and `ssd-2' are supported).\n"

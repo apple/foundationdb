@@ -70,3 +70,7 @@ target_link_libraries(fdbserver_worker
     fdbserver_tester
     fdbserver_tlog
     fdbserver_core)
+
+if(WITH_ROCKSDB)
+  target_compile_definitions(fdbserver_worker PRIVATE WITH_ROCKSDB)
+endif()

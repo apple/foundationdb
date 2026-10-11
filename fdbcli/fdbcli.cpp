@@ -21,7 +21,7 @@
 #include "boost/lexical_cast.hpp"
 #include "fmt/format.h"
 #include "fdbclient/ClusterConnectionFile.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/MultiVersionTransaction.h"
@@ -163,9 +163,9 @@ public:
 	               Optional<StringRef> arg,
 	               bool intrans) {
 		auto transactionItr = transactionOptions.legalOptions.find(optionStr.toString());
-		if (transactionItr != transactionOptions.legalOptions.end())
+		if (transactionItr != transactionOptions.legalOptions.end()) {
 			setTransactionOption(tr, transactionItr->second, enabled, arg, intrans);
-		else {
+		} else {
 			fprintf(stderr,
 			        "ERROR: invalid option '%s'. Try `help options' for a list of available options.\n",
 			        optionStr.toString().c_str());
@@ -246,7 +246,7 @@ private:
 		std::map<std::string, typename T::Option> legalOptions;
 
 		OptionGroup() = default;
-		explicit(false) OptionGroup(OptionGroup<T>& base)
+		OptionGroup(OptionGroup<T>& base)
 		  : options(base.options.begin(), base.options.end()), legalOptions(base.legalOptions) {}
 
 		// Enable or disable an option. Returns true if option value changed
@@ -328,7 +328,7 @@ public:
 			transactionOptions.legalOptions[itr->second.name] = itr->first;
 	}
 
-	explicit(false) FdbOptions(FdbOptions& base) = default;
+	FdbOptions(FdbOptions& base) = default;
 };
 
 static std::string formatStringRef(StringRef item, bool fullEscaping = false) {
@@ -1633,6 +1633,14 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 
 				if (tokencmp(tokens[0], "rangelock")) {
 					bool _result = co_await makeInterruptable(rangeLockCommandActor(localDb, tokens));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "cdc")) {
+					bool _result = co_await makeInterruptable(cdcCommandActor(localDb, tokens));
 					if (!_result) {
 						is_error = true;
 					}

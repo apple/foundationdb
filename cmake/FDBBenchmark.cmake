@@ -13,49 +13,30 @@ function(fdb_setup_googlebenchmark)
 
   find_package(benchmark)
 
-  add_library(fdb_google_benchmark INTERFACE)
-
-  if(benchmark_FOUND)
-    target_link_libraries(fdb_google_benchmark INTERFACE benchmark::benchmark)
-    target_include_directories(
-      fdb_google_benchmark
-      INTERFACE $<TARGET_PROPERTY:benchmark::benchmark,INTERFACE_INCLUDE_DIRECTORIES>)
-    return()
-  endif()
-
-  if(NOT TARGET benchmark)
-    set(googlebenchmark_root ${CMAKE_BINARY_DIR}/googlebenchmark-download)
-
-    configure_file(
-      ${CMAKE_SOURCE_DIR}/cmake/benchmark-download.cmake
-      ${googlebenchmark_root}/CMakeLists.txt
-      COPYONLY)
-
-    execute_process(
-      COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
-      RESULT_VARIABLE results
-      WORKING_DIRECTORY ${googlebenchmark_root})
-    if(results)
-      message(FATAL_ERROR "Configuration step for Benchmark has Failed. ${results}")
-    endif()
-
-    execute_process(
-      COMMAND ${CMAKE_COMMAND} --build . --config Release
-      RESULT_VARIABLE results
-      WORKING_DIRECTORY ${googlebenchmark_root})
-    if(results)
-      message(FATAL_ERROR "Build step for Benchmark has Failed. ${results}")
-    endif()
+  if(NOT benchmark_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+      googlebenchmark
+      GIT_REPOSITORY https://github.com/google/benchmark.git
+      # If you change this, then be sure to also update the directory name (which contains this SHA)
+      # in FDB's build environment and the prebuilt googlebenchmark package.
+      GIT_TAG f91b6b42b1b9854772a90ae9501464a161707d1e # v1.6.0
+      GIT_SHALLOW ON
+      GIT_CONFIG advice.detachedHead=false)
 
     set(BENCHMARK_ENABLE_TESTING OFF)
-    add_subdirectory(
-      ${googlebenchmark_root}/googlebenchmark-src
-      ${googlebenchmark_root}/googlebenchmark-build
-      EXCLUDE_FROM_ALL)
+    set(BENCHMARK_ENABLE_INSTALL OFF)
+    FetchContent_MakeAvailable(googlebenchmark)
+
+    # On modern macOS with modern clang and libcxx, -Wthread-safety-analysis is enabled by default,
+    # and the std::mutex wrapper in googlebenchmark can be a problem for it, so make sure
+    # -Werror is disabled (and avoid any other new-compiler pickyness in this third-party code).
+    foreach(target IN ITEMS benchmark benchmark_main)
+      target_compile_options(${target} PRIVATE -Wno-error)
+      set_target_properties(${target} PROPERTIES EXCLUDE_FROM_ALL ON)
+    endforeach()
   endif()
 
-  target_include_directories(
-    fdb_google_benchmark
-    INTERFACE ${CMAKE_BINARY_DIR}/googlebenchmark-download/googlebenchmark-src/include)
-  target_link_libraries(fdb_google_benchmark INTERFACE benchmark)
+  add_library(fdb_google_benchmark INTERFACE)
+  target_link_libraries(fdb_google_benchmark INTERFACE benchmark::benchmark)
 endfunction()

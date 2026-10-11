@@ -21,7 +21,7 @@
 #pragma once
 
 #include "flow/serialize.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyBackedTypes.h"
@@ -37,7 +37,8 @@
 struct DDRangeConfig {
 	constexpr static FileIdentifier file_identifier = 9193856;
 
-	explicit(false) DDRangeConfig(Optional<int> replicationFactor = {}, Optional<int> teamID = {})
+	DDRangeConfig() = default;
+	explicit DDRangeConfig(Optional<int> replicationFactor, Optional<int> teamID = {})
 	  : replicationFactor(replicationFactor), teamID(teamID) {}
 
 	Optional<int> replicationFactor;

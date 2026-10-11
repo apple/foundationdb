@@ -3,10 +3,10 @@
 ```mermaid
 graph TB
     subgraph ActorSystem["Actor System"]
-        Actor["ACTOR function\n(.actor.cpp source)"]
-        Compiler["Actor Compiler\n(Python preprocessor)"]
-        StateMachine["Generated State Machine\n(.actor.g.h)"]
-        Coro["C++20 Coroutine\n(co_await migration)"]
+        Coro["C++20 Coroutine\n(.cpp / .h source)"]
+        Compiler["C++ Compiler\n(co_await / co_return)"]
+        Frame["Coroutine Frame\n(parameters and locals)"]
+        CoroPromise["CoroPromise / CoroActor\n(Flow integration)"]
     end
 
     subgraph AsyncPrimitives["Async Primitives"]
@@ -38,9 +38,8 @@ graph TB
         Buggify["BUGGIFY\n(fault injection)"]
     end
 
-    Actor --> Compiler --> StateMachine
-    Actor -.->|migrating to| Coro
-    StateMachine --> Future
+    Coro --> Compiler --> Frame
+    Frame --> CoroPromise --> SAV
     Promise --> SAV --> Future
     PS --> FS
 
@@ -64,13 +63,11 @@ sequenceDiagram
     participant Producer as Producer Actor
     participant SAV as SAV (SharedState)
     participant Consumer as Consumer Actor
-    participant Scheduler as Net2 Scheduler
 
     Producer->>SAV: Promise created (SAV allocated)
     Consumer->>SAV: Future obtained (refcount++)
-    Consumer->>SAV: wait(future) — register callback
+    Consumer->>SAV: co_await pendingFuture — register callback
     Note over Consumer: Suspended
     Producer->>SAV: promise.send(value)
-    SAV->>Scheduler: enqueue callback
-    Scheduler->>Consumer: Resume with value
+    SAV->>Consumer: Fire callback and resume coroutine with value
 ```

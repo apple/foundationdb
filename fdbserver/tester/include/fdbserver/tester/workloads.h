@@ -22,7 +22,7 @@
 #define FDBSERVER_TESTER_WORKLOADS_H
 #pragma once
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/TesterInterface.h"
@@ -45,7 +45,7 @@ struct WorkloadContext {
 	std::vector<KeyRange> rangesToCheck; // for urgent consistency checker
 
 	WorkloadContext();
-	explicit(false) WorkloadContext(const WorkloadContext&);
+	WorkloadContext(const WorkloadContext&);
 	~WorkloadContext();
 	WorkloadContext& operator=(const WorkloadContext&) = delete;
 };
@@ -108,7 +108,7 @@ struct TestWorkloadImpl : Workload {
 	static_assert(std::is_same_v<decltype(&TestWorkload::description), decltype(&Workload::description)>,
 	              "Workload must not override TestWorkload::description");
 
-	explicit(false) TestWorkloadImpl(WorkloadContext const& wcx) : Workload(wcx) {}
+	explicit TestWorkloadImpl(WorkloadContext const& wcx) : Workload(wcx) {}
 	template <bool E = isFailureInjectionWorkload>
 	    requires(E)
 	TestWorkloadImpl(WorkloadContext const& wcx, NoOptions o) : Workload(wcx, o) {}
@@ -120,7 +120,7 @@ struct CompoundWorkload;
 class DeterministicRandom;
 
 struct FailureInjectionWorkload : TestWorkload {
-	explicit(false) FailureInjectionWorkload(WorkloadContext const&);
+	explicit FailureInjectionWorkload(WorkloadContext const&);
 	~FailureInjectionWorkload() override = default;
 	virtual void initFailureInjectionMode(DeterministicRandom& random);
 	virtual bool shouldInject(DeterministicRandom& random, const WorkloadRequest& work, const unsigned count) const;
@@ -154,7 +154,7 @@ struct CompoundWorkload : TestWorkload {
 	std::vector<Reference<TestWorkload>> workloads;
 	std::vector<Reference<FailureInjectionWorkload>> failureInjection;
 
-	explicit(false) CompoundWorkload(WorkloadContext& wcx);
+	explicit CompoundWorkload(WorkloadContext& wcx);
 	CompoundWorkload* add(Reference<TestWorkload>&& w);
 	void addFailureInjection(WorkloadRequest& work);
 	bool shouldInjectFailure(DeterministicRandom& random,
@@ -254,7 +254,7 @@ struct WorkloadFactory : IWorkloadFactory {
 	              "Each workload must have a Workload::NAME member");
 	using WorkloadType = TestWorkloadImpl<Workload>;
 	bool runInUntrustedClient;
-	explicit(false) WorkloadFactory(UntrustedMode runInUntrustedClient = UntrustedMode::False)
+	explicit WorkloadFactory(UntrustedMode runInUntrustedClient = UntrustedMode::False)
 	  : runInUntrustedClient(runInUntrustedClient) {
 		auto& f = factories();
 		std::string name = WorkloadType::NAME;

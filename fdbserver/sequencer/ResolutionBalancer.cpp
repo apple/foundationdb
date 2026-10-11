@@ -110,18 +110,19 @@ static std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_res
 }
 
 // Balance key ranges among resolvers so that their load are evenly distributed.
-Future<Void> ResolutionBalancer::resolutionBalancing_impl(ResolutionBalancer* self) {
-	co_await self->triggerResolution.onTrigger();
+Future<Void> ResolutionBalancer::resolutionBalancing() {
+	co_await triggerResolution.onTrigger();
 
 	CoalescedKeyRangeMap<int> key_resolver(
 	    0, SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys.end : allKeys.end);
 	key_resolver.insert(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys : allKeys, 0);
 	while (true) {
 		co_await delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics);
-		while (!self->resolverChanges.get().empty())
-			co_await self->resolverChanges.onChange();
+		while (!resolverChanges.get().empty())
+			co_await resolverChanges.onChange();
 		std::vector<Future<ResolutionMetricsReply>> futures;
-		for (auto& p : self->resolvers)
+		futures.reserve(resolvers.size());
+		for (auto& p : resolvers)
 			futures.push_back(
 			    brokenPromiseToNever(p.metrics.getReply(ResolutionMetricsRequest(), TaskPriority::ResolutionMetrics)));
 		co_await waitForAll(futures);
@@ -137,8 +138,8 @@ Future<Void> ResolutionBalancer::resolutionBalancing_impl(ResolutionBalancer* se
 			try {
 				int src = metrics.lastItem()->second;
 				int dest = metrics.begin()->second;
-				int64_t amount = std::min(metrics.lastItem()->first - total / self->resolvers.size(),
-				                          total / self->resolvers.size() - metrics.begin()->first) /
+				int64_t amount = std::min(metrics.lastItem()->first - total / resolvers.size(),
+				                          total / resolvers.size() - metrics.begin()->first) /
 				                 2;
 				Standalone<VectorRef<ResolverMoveRef>> movedRanges;
 
@@ -150,9 +151,8 @@ Future<Void> ResolutionBalancer::resolutionBalancing_impl(ResolutionBalancer* se
 					req.offset = amount;
 					req.range = range.first;
 
-					ResolutionSplitReply split =
-					    co_await brokenPromiseToNever(self->resolvers[metrics.lastItem()->second].split.getReply(
-					        req, TaskPriority::ResolutionMetrics));
+					ResolutionSplitReply split = co_await brokenPromiseToNever(
+					    resolvers[metrics.lastItem()->second].split.getReply(req, TaskPriority::ResolutionMetrics));
 					KeyRangeRef moveRange = range.second ? KeyRangeRef(range.first.begin, split.key)
 					                                     : KeyRangeRef(split.key, range.first.end);
 					movedRanges.push_back_deep(movedRanges.arena(), ResolverMoveRef(moveRange, dest));
@@ -173,10 +173,10 @@ Future<Void> ResolutionBalancer::resolutionBalancing_impl(ResolutionBalancer* se
 				// for(auto& it : key_resolver.ranges())
 				//	TraceEvent("KeyResolver").detail("Range", it.range()).detail("Value", it.value());
 
-				self->resolverChangesVersion = *self->pVersion + 1;
-				for (auto& p : self->commitProxies)
-					self->resolverNeedingChanges.insert(p.id());
-				self->resolverChanges.set(movedRanges);
+				resolverChangesVersion = *pVersion + 1;
+				for (auto& p : commitProxies)
+					resolverNeedingChanges.insert(p.id());
+				resolverChanges.set(movedRanges);
 			} catch (Error& e) {
 				if (e.code() != error_code_operation_failed)
 					throw;

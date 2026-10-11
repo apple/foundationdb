@@ -54,6 +54,7 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 			Error err;
 			try {
 				std::vector<Future<Key>> futures;
+				futures.reserve(numAllocations);
 				for (int i = 0; i < numAllocations; ++i) {
 					futures.push_back(allocator.allocate(tr));
 				}
@@ -105,6 +106,7 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 		for (int roundNum = 0; roundNum < numRounds; ++roundNum) {
 			std::vector<Future<Void>> futures;
 			int numTransactions = deterministicRandom()->randomInt(1, maxTransactionsPerRound + 1);
+			futures.reserve(numTransactions);
 			for (int i = 0; i < numTransactions; ++i) {
 				futures.push_back(runAllocationTransaction(cx));
 			}

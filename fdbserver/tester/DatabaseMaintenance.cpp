@@ -28,7 +28,7 @@
 #include "flow/Trace.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "DatabaseMaintenance.h"
@@ -67,7 +67,7 @@ Future<Void> clearData(Database cx) {
 			break;
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterClearingDatabaseError", tr.trState->readOptions.get().debugID.get()).error(e);
-			TraceEvent("ClearData_Loop1_Catch").detail("Phase", "Loop1_Error").detail("ErrorCode", e.code());
+			TraceEvent("ClearData_Loop1_Catch").error(e).detail("Phase", "Loop1_Error");
 			err = e;
 		}
 
@@ -109,7 +109,7 @@ Future<Void> clearData(Database cx) {
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterCheckDatabaseClearedError", tr.trState->readOptions.get().debugID.get())
 			    .error(e);
-			TraceEvent("ClearData_Loop2_Catch").detail("Phase", "Loop2_Error").detail("ErrorCode", e.code());
+			TraceEvent("ClearData_Loop2_Catch").error(e).detail("Phase", "Loop2_Error");
 			caughtError = e;
 			needsErrorHandling = true;
 		}

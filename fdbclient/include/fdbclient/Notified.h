@@ -76,7 +76,7 @@ struct Notified {
 
 	void operator=(const ValueType& v) { set(v); }
 
-	explicit(false) Notified(Notified&& r) noexcept : waiting(std::move(r.waiting)), val(std::move(r.val)) {}
+	Notified(Notified&& r) noexcept : waiting(std::move(r.waiting)), val(std::move(r.val)) {}
 	void operator=(Notified&& r) noexcept {
 		waiting = std::move(r.waiting);
 		val = std::move(r.val);

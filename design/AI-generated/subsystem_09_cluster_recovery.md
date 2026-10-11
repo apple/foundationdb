@@ -147,7 +147,7 @@ All old generation TLogs have been fully recruited into the system.
 Monitors TLog set completeness and drives state transitions:
 
 ```
-loop {
+while (true) {
     // Convert current logSystem to DBCoreState
     self->logSystem->toCoreState(newState);
     

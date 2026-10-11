@@ -87,12 +87,13 @@ void printDecodeUsage() {
 	             "  --build-flags  Print build information and exit.\n"
 	             "  --list-only    Print file list and exit.\n"
 	             "  --validate-filters Validate the default RangeMap filtering logic with a slower one.\n"
-	             "  -k KEY_PREFIX  Use a single prefix for filtering mutations.\n"
+	             "  -k KEY_PREFIX  Use a single prefix for filtering mutations and range files.\n"
 	             "  --filters PREFIX_FILTER_FILE\n"
 	             "                 A file containing a list of prefix filters in HEX format separated by \";\",\n"
 	             "                 e.g., \"\\x05\\x01;\\x15\\x2b\"\n"
 	             "  --hex-prefix   HEX_PREFIX\n"
 	             "                 The prefix specified in HEX format, e.g., --hex-prefix \"\\\\x05\\\\x01\".\n"
+	             "                 With none of -k, --filters or --hex-prefix, everything is decoded.\n"
 	             "  --begin-version-filter BEGIN_VERSION\n"
 	             "                 The version range's begin version (inclusive) for filtering.\n"
 	             "  --end-version-filter END_VERSION\n"
@@ -277,7 +278,7 @@ std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
 }
 
 std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err) {
-	std::string line = readFileBytes(filename, 64 * 1024 * 1024);
+	std::string line = readFileBytes(filename, size_t{ 64 } * 1024 * 1024);
 	return parsePrefixesLine(line, err);
 }
 
@@ -505,7 +506,38 @@ public:
 	}
 
 	// Open and loads file into memory
-	Future<Void> openFile(Reference<IBackupContainer> container) { return openFileImpl(this, container); }
+	Future<Void> openFile(Reference<IBackupContainer> container) {
+		fd = co_await container->readFile(file.fileName);
+		Standalone<StringRef> buf = makeString(file.fileSize);
+		int rLen = co_await fd->read(mutateString(buf), file.fileSize, 0);
+		if (rLen != file.fileSize) {
+			throw restore_bad_read();
+		}
+
+		if (save) {
+			std::string dir = file.fileName;
+			std::size_t found = file.fileName.find_last_of('/');
+			if (found != std::string::npos) {
+				std::string path = file.fileName.substr(0, found);
+				if (!directoryExists(path)) {
+					platform::createDirectory(path);
+				}
+			}
+			lfd = open(file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+			if (lfd == -1) {
+				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", file.fileName);
+				throw platform_error();
+			}
+			int wlen = write(lfd, buf.begin(), file.fileSize);
+			if (wlen != file.fileSize) {
+				TraceEvent(SevError, "WriteLocalFileFailed").detail("File", file.fileName).detail("Len", file.fileSize);
+				throw platform_error();
+			}
+			TraceEvent("WriteLocalFile").detail("Name", file.fileName).detail("Len", file.fileSize);
+		}
+
+		decodeFile(buf);
+	}
 
 	// The following are private APIs:
 
@@ -514,10 +546,11 @@ public:
 	// version batch data that are in the next file.
 	Optional<VersionedMutations> getNextBatch() {
 		for (auto& [version, m] : mutationBlocksByVersion) {
-			if (m.isComplete()) {
+			Optional<StringRef> completeMutations = m.getCompleteMutations();
+			if (completeMutations.present()) {
 				VersionedMutations vms;
 				vms.version = version;
-				vms.serializedMutations = m.serializedMutations;
+				vms.serializedMutations = completeMutations.get().toString();
 				vms.mutations = fileBackup::decodeMutationLogValue(vms.serializedMutations);
 				TraceEvent("Decode").detail("Version", vms.version).detail("N", vms.mutations.size());
 				mutationBlocksByVersion.erase(version);
@@ -530,41 +563,6 @@ public:
 			TraceEvent(SevWarn, "UnfishedBlocks").detail("NumberOfVersions", mutationBlocksByVersion.size());
 		}
 		return Optional<VersionedMutations>();
-	}
-
-	static Future<Void> openFileImpl(DecodeProgress* self, Reference<IBackupContainer> container) {
-		self->fd = co_await container->readFile(self->file.fileName);
-		Standalone<StringRef> buf = makeString(self->file.fileSize);
-		int rLen = co_await self->fd->read(mutateString(buf), self->file.fileSize, 0);
-		if (rLen != self->file.fileSize) {
-			throw restore_bad_read();
-		}
-
-		if (self->save) {
-			std::string dir = self->file.fileName;
-			std::size_t found = self->file.fileName.find_last_of('/');
-			if (found != std::string::npos) {
-				std::string path = self->file.fileName.substr(0, found);
-				if (!directoryExists(path)) {
-					platform::createDirectory(path);
-				}
-			}
-			self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-			if (self->lfd == -1) {
-				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", self->file.fileName);
-				throw platform_error();
-			}
-			int wlen = write(self->lfd, buf.begin(), self->file.fileSize);
-			if (wlen != self->file.fileSize) {
-				TraceEvent(SevError, "WriteLocalFileFailed")
-				    .detail("File", self->file.fileName)
-				    .detail("Len", self->file.fileSize);
-				throw platform_error();
-			}
-			TraceEvent("WriteLocalFile").detail("Name", self->file.fileName).detail("Len", self->file.fileSize);
-		}
-
-		self->decodeFile(buf);
 	}
 
 	// Add chunks to mutationBlocksByVersion
@@ -622,44 +620,40 @@ public:
 	}
 
 	// Open and loads file into memory
-	Future<Void> openFile(Reference<IBackupContainer> container) { return openFileImpl(this, container); }
+	Future<Void> openFile(Reference<IBackupContainer> container) {
+		TraceEvent("ReadFile").detail("Name", file.fileName).detail("Len", file.fileSize);
 
-	static Future<Void> openFileImpl(DecodeRangeProgress* self, Reference<IBackupContainer> container) {
-		TraceEvent("ReadFile").detail("Name", self->file.fileName).detail("Len", self->file.fileSize);
-
-		self->fd = co_await container->readFile(self->file.fileName);
-		Standalone<StringRef> buf = makeString(self->file.fileSize);
-		int rLen = co_await self->fd->read(mutateString(buf), self->file.fileSize, 0);
-		if (rLen != self->file.fileSize) {
+		fd = co_await container->readFile(file.fileName);
+		Standalone<StringRef> buf = makeString(file.fileSize);
+		int rLen = co_await fd->read(mutateString(buf), file.fileSize, 0);
+		if (rLen != file.fileSize) {
 			throw restore_bad_read();
 		}
 
-		if (self->save) {
-			std::string dir = self->file.fileName;
-			std::size_t found = self->file.fileName.find_last_of('/');
+		if (save) {
+			std::string dir = file.fileName;
+			std::size_t found = file.fileName.find_last_of('/');
 			if (found != std::string::npos) {
-				std::string path = self->file.fileName.substr(0, found);
+				std::string path = file.fileName.substr(0, found);
 				if (!directoryExists(path)) {
 					platform::createDirectory(path);
 				}
 			}
 
-			self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-			if (self->lfd == -1) {
-				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", self->file.fileName);
+			lfd = open(file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+			if (lfd == -1) {
+				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", file.fileName);
 				throw platform_error();
 			}
-			int wlen = write(self->lfd, buf.begin(), self->file.fileSize);
-			if (wlen != self->file.fileSize) {
-				TraceEvent(SevError, "WriteLocalFileFailed")
-				    .detail("File", self->file.fileName)
-				    .detail("Len", self->file.fileSize);
+			int wlen = write(lfd, buf.begin(), file.fileSize);
+			if (wlen != file.fileSize) {
+				TraceEvent(SevError, "WriteLocalFileFailed").detail("File", file.fileName).detail("Len", file.fileSize);
 				throw platform_error();
 			}
-			TraceEvent("WriteLocalFile").detail("Name", self->file.fileName).detail("Len", self->file.fileSize);
+			TraceEvent("WriteLocalFile").detail("Name", file.fileName).detail("Len", file.fileSize);
 		}
 
-		self->decodeFile(buf);
+		decodeFile(buf);
 	}
 
 	// Reads a file content in the buffer, decodes it into key/value pairs, and stores these pairs.
@@ -696,7 +690,7 @@ public:
 // convert a StringRef to Hex string
 std::string hexStringRef(const StringRef& s) {
 	std::string result;
-	result.reserve(s.size() * 2);
+	result.reserve(static_cast<size_t>(s.size()) * 2);
 	for (int i = 0; i < s.size(); i++) {
 		result.append(format("%02x", s[i]));
 	}
@@ -783,8 +777,14 @@ Future<Void> process_file(Reference<IBackupContainer> container,
 // Use the snapshot metadata to quickly identify relevant range files and
 // then filter by versions.
 Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Reference<DecodeParams> params) {
+	// Only consider snapshots whose version range overlaps the requested filter. Reading a snapshot
+	// means downloading and parsing its entire manifest and checking every file it lists against the
+	// container, so snapshots that getRelevantRangeFiles() would discard below must not be read at
+	// all. A partially expired snapshot outside the filter would otherwise report every expired file
+	// it lists as a SevError, burying the result the caller asked for.
 	std::vector<KeyspaceSnapshotFile> snapshots =
-	    co_await (dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->listKeyspaceSnapshots();
+	    co_await (dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))
+	        ->listKeyspaceSnapshots(params->beginVersionFilter, params->endVersionFilter);
 	std::vector<RangeFile> files;
 
 	for (int i = 0; i < snapshots.size(); i++) {
@@ -792,6 +792,12 @@ Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Ref
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
 			    co_await (dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->readKeyspaceSnapshot(snapshots[i]);
 			for (const auto& rangeFile : results.first) {
+				// No prefix filter, or a manifest with no per-file key ranges (encrypted backups), selects
+				// every file. An empty RangeMapFilters matches nothing, so it cannot answer this.
+				if (params->prefixes.empty() || results.second.empty()) {
+					files.push_back(rangeFile);
+					continue;
+				}
 				const auto& keyRange = results.second.at(rangeFile.fileName);
 				if (params->matchFilters(keyRange)) {
 					files.push_back(rangeFile);

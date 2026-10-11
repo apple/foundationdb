@@ -24,9 +24,14 @@
 
 #include "fdbclient/CDCProxyInterface.h"
 #include "fdbclient/NativeCdcClient.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 
 class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
+	class OrderedState;
+	Reference<OrderedState> ordered;
+	static Future<Void> initialize(Reference<NativeCdcConsumer> self);
+	static Future<CDCConsumeReply> consumeOrdered(Reference<NativeCdcConsumer> self);
+	static Future<Void> acknowledgeOrdered(Reference<NativeCdcConsumer> self);
 	static Future<CDCConsumeReply> consumeImpl(Reference<NativeCdcConsumer> self);
 	static Future<Void> acknowledgeImpl(Reference<NativeCdcConsumer> self);
 
@@ -35,15 +40,19 @@ class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
 	Version knownAvailableThrough = invalidVersion;
 	Version lastAcknowledgedVersion;
 	Optional<UID> deliveryProxyId;
+	UID consumerId = deterministicRandom()->randomUniqueID();
 	bool operationOutstanding = false;
+	bool initialized = false;
+	int64_t replyByteLimit = 0;
 
 public:
-	NativeCdcConsumer(Database cx, CDCCursor position)
-	  : cx(cx), currentPosition(position), lastAcknowledgedVersion(position.lastConsumedVersion) {}
-	NativeCdcConsumer(Database cx, CDCCursor position, Version lastAcknowledgedVersion)
-	  : cx(cx), currentPosition(position), lastAcknowledgedVersion(lastAcknowledgedVersion) {}
+	NativeCdcConsumer(Database cx, CDCCursor position);
+	NativeCdcConsumer(Database cx, CDCCursor position, Version lastAcknowledgedVersion);
+	~NativeCdcConsumer();
 
 	// Operations advance shared delivery state; only one may be outstanding.
+	// Ordered consumes can fail with server_overloaded when a complete version exceeds a reply limit or
+	// unacknowledged proxy buffers block another partition's read. The durable group acknowledgement is unchanged.
 	Future<CDCConsumeReply> consume();
 	Future<Void> acknowledge();
 	const CDCCursor& position() const { return currentPosition; }
@@ -53,10 +62,63 @@ public:
 // registration and the remaining operations stay available so existing durable
 // streams can be drained after the feature is disabled. Requests retry when
 // stream ownership changes.
-Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys);
+// Ranges form an immutable union. Registration normalizes overlap and adjacency
+// so equivalent range sets have the same identity regardless of input order.
+Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, std::vector<KeyRange> ranges);
+// Split points fix physical delivery partitions. Consumption remains one complete,
+// commit-version-ordered feed with one cursor and one durable acknowledgement.
+Future<CDCStreamId> registerNativeCdcOrderedStreamClient(Database cx,
+                                                         Key name,
+                                                         std::vector<KeyRange> ranges,
+                                                         std::vector<Key> splitPoints);
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx);
-// Uses the range registered for this name; consumers do not respecify it. A
+
+struct NativeCdcStreamStatus {
+	NativeCdcStreamInfo info;
+	Optional<UID> owner;
+	bool ownerPublished = false;
+	std::vector<Tag> tags;
+	Optional<CDCStreamId> orderedParent;
+	std::vector<CDCStreamId> partitions;
+};
+
+struct NativeCdcTagStatus {
+	Tag tag;
+	Version safePopVersion = invalidVersion;
+	std::vector<CDCStreamId> blockingStreams;
+	bool pendingRetiredPop = false;
+	Version retiredPopVersion = invalidVersion;
+};
+
+struct NativeCdcProxyStatus {
+	UID id;
+	NetworkAddress address;
+	Optional<CDCProxyStatusReply> sample;
+	Optional<Error> error;
+};
+
+struct NativeCdcStatus {
+	Version readVersion = invalidVersion;
+	bool admissionEnabled = false;
+	int tagCount = 0;
+	bool metadataComplete = true;
+	std::vector<NativeCdcStreamStatus> streams;
+	std::vector<NativeCdcTagStatus> tags;
+	std::vector<NativeCdcProxyStatus> proxies;
+};
+
+// Durable fields share readVersion; proxy samples are advisory and may lag
+// acknowledgement or assignment changes. Missing samples remain explicit.
+Future<NativeCdcStatus> getNativeCdcStatus(Database cx);
+
+enum class NativeCdcRemoveResult { Removed, AlreadyAbsent, StreamReplaced };
+
+// Never removes a same-name replacement, including across retries. Removed
+// means the registration is gone, not that its retained history is reclaimed.
+Future<NativeCdcRemoveResult> removeNativeCdcStreamGuarded(Database cx, Key name, CDCStreamId expectedStreamId);
+
+// Uses the ranges registered for this name; consumers do not respecify them. A
 // CDCCursor remains a serializable position token and does not hold Database.
 Future<Reference<NativeCdcConsumer>> createNativeCdcConsumer(Database cx, Key name);
 Reference<NativeCdcConsumer> resumeNativeCdcConsumer(Database cx, CDCCursor position);

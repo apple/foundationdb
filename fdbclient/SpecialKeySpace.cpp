@@ -29,6 +29,7 @@
 #include <unordered_set>
 
 #include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/Knobs.h"
@@ -728,7 +729,7 @@ Future<RangeResult> DDStatsRangeImpl::getRange(ReadYourWritesTransaction* ryw,
 Key SpecialKeySpace::getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option) {
 	Key prefix = "options/"_sr.withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin);
 	auto pair = command + "/" + option;
-	ASSERT(options.find(pair) != options.end());
+	ASSERT(options.contains(pair));
 	return prefix.withSuffix(pair);
 }
 
@@ -754,8 +755,7 @@ Future<RangeResult> ManagementCommandsOptionsImpl::getRange(ReadYourWritesTransa
 void ManagementCommandsOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 	std::string option = key.removePrefix(getKeyRange().begin).toString();
 	// ignore all invalid keys
-	if (SpecialKeySpace::getManagementApiOptionsSet().find(option) !=
-	    SpecialKeySpace::getManagementApiOptionsSet().end()) {
+	if (SpecialKeySpace::getManagementApiOptionsSet().contains(option)) {
 		TraceEvent(SevDebug, "ManagementApiOption").detail("Option", option).detail("Key", key);
 		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
 	}
@@ -768,8 +768,7 @@ void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const 
 void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	std::string option = key.removePrefix(getKeyRange().begin).toString();
 	// ignore all invalid keys
-	if (SpecialKeySpace::getManagementApiOptionsSet().find(option) !=
-	    SpecialKeySpace::getManagementApiOptionsSet().end()) {
+	if (SpecialKeySpace::getManagementApiOptionsSet().contains(option)) {
 		ryw->getSpecialKeySpaceWriteMap().rawErase(singleKeyRange(key));
 	}
 }
@@ -1061,7 +1060,7 @@ Future<bool> checkExclusion(Database db,
 					if (!excluded) {
 						totalKvStoreUsedBytesNotExcluded += used_bytes;
 
-						if (disk_id.empty() || diskLocalities.find(disk_id) == diskLocalities.end()) {
+						if (disk_id.empty() || !diskLocalities.contains(disk_id)) {
 							totalKvStoreFreeBytesNotExcluded += free_bytes;
 							if (!disk_id.empty()) {
 								diskLocalities.insert(disk_id);
@@ -1072,10 +1071,7 @@ Future<bool> checkExclusion(Database db,
 			}
 		}
 
-	}
-	// NOTE: ActorCompiler only accepts Error& or ... (for std::exception), it is not possible to capture
-	// std::exception&
-	catch (...) {
+	} catch (...) {
 		*msg = ManagementAPIError::toJsonString(
 		    false, markFailed ? "exclude failed" : "exclude", errorString + "General exception raised.\n");
 		co_return false;
@@ -1257,6 +1253,7 @@ Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ryw, Key
 	std::vector<std::string> excludedLocalities = fExcludedLocalities.get();
 	// Decode the excluded localities to check if any server is excluded by locality.
 	std::vector<std::pair<std::string, std::string>> decodedExcludedLocalities;
+	decodedExcludedLocalities.reserve(excludedLocalities.size());
 	for (auto& excludedLocality : excludedLocalities) {
 		decodedExcludedLocalities.push_back(decodeLocality(excludedLocality));
 	}
@@ -1334,8 +1331,7 @@ Future<RangeResult> ExclusionInProgressRangeImpl::getRange(ReadYourWritesTransac
 
 Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
 	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
-	std::vector<ProcessData> _workers = co_await getWorkers(&ryw->getTransaction());
-	auto workers = _workers; // strip const
+	std::vector<ProcessData> workers = co_await getWorkers(&ryw->getTransaction());
 	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
@@ -1458,8 +1454,7 @@ void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& 
 
 Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
 	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
-	std::vector<ProcessData> _workers = co_await getWorkers(&ryw->getTransaction());
-	auto workers = _workers; // strip const
+	std::vector<ProcessData> workers = co_await getWorkers(&ryw->getTransaction());
 	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
@@ -1629,25 +1624,27 @@ Future<RangeResult> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw,
 	RangeResult result;
 	KeyRangeRef modified =
 	    KeyRangeRef(kr.begin.removePrefix(getKeyRange().begin), kr.end.removePrefix(getKeyRange().begin));
-	std::map<KeyRef, Reference<ConfigValue>> values = ryw->getDatabase()->globalConfig->get(modified);
+	std::map<KeyRef, Reference<const ConfigValue>> values = ryw->getDatabase()->globalConfig->get(modified);
 	for (const auto& [key, config] : values) {
 		Key prefixedKey = key.withPrefix(getKeyRange().begin);
-		if (config.isValid() && config->value.has_value()) {
-			if (config->value.type() == typeid(StringRef)) {
-				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::any_cast<StringRef>(config->value).toString()));
-			} else if (config->value.type() == typeid(int64_t)) {
-				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<int64_t>(config->value))));
-			} else if (config->value.type() == typeid(bool)) {
-				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<bool>(config->value))));
-			} else if (config->value.type() == typeid(float)) {
-				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<float>(config->value))));
-			} else if (config->value.type() == typeid(double)) {
-				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(config->value))));
+		if (config.isValid() && config->getValue().has_value()) {
+			if (config->getValue().type() == typeid(StringRef)) {
+				result.push_back_deep(
+				    result.arena(), KeyValueRef(prefixedKey, std::any_cast<StringRef>(config->getValue()).toString()));
+			} else if (config->getValue().type() == typeid(int64_t)) {
+				result.push_back_deep(
+				    result.arena(),
+				    KeyValueRef(prefixedKey, std::to_string(std::any_cast<int64_t>(config->getValue()))));
+			} else if (config->getValue().type() == typeid(bool)) {
+				result.push_back_deep(
+				    result.arena(), KeyValueRef(prefixedKey, std::to_string(std::any_cast<bool>(config->getValue()))));
+			} else if (config->getValue().type() == typeid(float)) {
+				result.push_back_deep(
+				    result.arena(), KeyValueRef(prefixedKey, std::to_string(std::any_cast<float>(config->getValue()))));
+			} else if (config->getValue().type() == typeid(double)) {
+				result.push_back_deep(
+				    result.arena(),
+				    KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(config->getValue()))));
 			} else {
 				ASSERT(false);
 			}
@@ -2889,7 +2886,7 @@ Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTr
 	return excludeLocalityCommitActor(ryw, true);
 }
 
-// Defined in NativeAPI.actor.cpp
+// Defined in NativeAPI.cpp
 Future<bool> verifyInterfaceActor(Reference<FlowLock> const& connectLock, ClientWorkerInterface const& workerInterf);
 
 static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWritesTransaction* ryw,
@@ -2905,7 +2902,7 @@ static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWritesTrans
 	RangeResult result;
 	if (verify) {
 		// if verify option is set, we try to talk to every worker and only returns those we can talk to
-		Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+		auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 		std::vector<Future<bool>> verifyInterfs;
 		for (const auto& [k_, value] : interfs) {
 			auto k = k_.withPrefix(prefix);

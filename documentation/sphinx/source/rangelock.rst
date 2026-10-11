@@ -48,36 +48,36 @@ Put an exclusive read lock on a range. The range must be within the user key spa
 The locking request is rejected with a range_lock_reject error if the range contains any existing lock with a different range, user, or lock type.
 Currently, only the ExclusiveReadLock type is supported, but the design allows for future extension.
 
-``ACTOR Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
+``Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
 
 Release an exclusive read lock on a range. The range must be within the user key space, aka ``"" ~ \xff``.
 The release request is rejected with a range_lock_reject error if the range contains any existing lock with a different range, user, or lock type.
 
-``ACTOR Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
+``Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
 
 Note that takeExclusiveReadLockOnRange and releaseExclusiveReadLockOnRange are transactional. 
 If the execution of the API is successful, all ranges are guaranteed to be locked/unlocked at a single version.
 If the execution is failed, no range is locked/unlocked.
 
-Get exclusive read locks on the input range
+Get exclusive read locks on the input range, optionally filtering by owner.
 
-``ACTOR Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(Database cx, KeyRange range);``
+``Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwnerName> ownerName = Optional<RangeLockOwnerName>());``
 
 Register a range lock owner to database metadata.
 
-``ACTOR Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);``
+``Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);``
 
 Remove an owner from the database metadata
 
-``ACTOR Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
+``Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
 
 Get all registered range lock owners
 
-``ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);``
+``AsyncResult<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);``
 
 Get a range lock owner by uniqueId
 
-``ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
+``Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
 
 
 Using ``fdbcli``
@@ -103,11 +103,11 @@ Example usage
 -------------
 When submitting a bulk load task on a range, we block user write traffic to the range.
 
-``ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask);``
+``Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask);``
 
 Upon a bulk load task completes on a range, we unblock user write traffic on the range.
 
-``ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId);``
+``Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId);``
 
 Range Lock Design (Exclusive Read Lock)
 =======================================

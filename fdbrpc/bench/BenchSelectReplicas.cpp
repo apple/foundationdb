@@ -54,6 +54,7 @@ static void bench_select_replicas(int repCount, benchmark::State& state) {
 
 	// fromServersSet->DisplayEntries();
 
+	localityGroupEntries.reserve(serverCount > 0 ? serverCount : 0);
 	for (int i = 0; i < serverCount; i++) {
 		localityGroupEntries.push_back(fromServersGroup->getEntry(i));
 	}

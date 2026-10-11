@@ -3,22 +3,35 @@ Clang-Tidy
 ##########
 
 ``clang-tidy`` is a static analysis tool that detects common programming errors, enforces coding standards, and suggests modern C++ improvements.
-It runs as part of CI on every pull request targeting a branch that has a ``.clang-tidy`` file (currently only ``main``). Findings are reported in the build log but do not currently fail the build. To enforce failures, add ``WarningsAsErrors: '*'`` to ``.clang-tidy``.
+It runs as part of CI on pull requests targeting ``main`` and ``release-*``. CI checks entire eligible changed C/C++ files with ``--warnings-as-errors='*'``, so findings fail the clang-tidy job even outside changed lines. The workflow currently describes this job as non-required.
 
 This guide explains how to run ``clang-tidy`` locally so you can fix issues before pushing.
 
 What clang-tidy checks
 ======================
 
-FoundationDB enables 33 checks configured in the ``.clang-tidy`` file at the repository root. The
-intent is to enable more as we go forward. Here are some example rules:
+FoundationDB configures 56 named checks in the ``.clang-tidy`` file at the repository root.
+Use clang-tidy 19 to match the Clang 19 build toolchain. CI uses the clang-tidy
+provided by the build image.
+Inspect enabled checks with ``clang-tidy --list-checks``.
+The intent is to enable more as we go forward. Here are some example rules:
 
-* **17 Bugprone rules** -- catch potential runtime errors (e.g., ``bugprone-too-small-loop-variable``, ``bugprone-implicit-widening-of-multiplication-result``)
+* **37 Bugprone rules** -- catch potential runtime errors, including unsafe self-assignment, forwarding constructors that hide copy or move constructors, narrow accumulation initializers, mismatched argument comments, obvious infinite loops, chained comparisons, swapped arguments, integer division in floating-point calculations, missed base-class copy construction, repeated macro argument evaluation, near-miss virtual overrides, dangling returned references, incorrect erase/remove calls, incorrect POSIX error checks, and discarded return values
 * **1 C++ Core Guidelines rule** -- catch unsafe captures in coroutine lambdas (``cppcoreguidelines-avoid-capturing-lambda-coroutines``)
 * **2 Misc rules** -- catch redundant expressions and RAII objects held across coroutine suspension points
 * **4 Modernize rules** -- encourage modern C++ practices (e.g., ``modernize-use-auto``, ``modernize-use-override``)
-* **2 Performance rules** -- avoid unnecessary copies and pointless moves (e.g., ``performance-for-range-copy``, ``performance-move-const-arg``)
-* **7 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
+* **6 Performance rules** -- avoid unnecessary copies, hidden range-loop conversions, repeated vector growth in simple loops, inefficient generic algorithms over associative containers, pointless moves, and move constructors that copy movable members (``performance-for-range-copy``, ``performance-implicit-conversion-in-loop``, ``performance-inefficient-vector-operation``, ``performance-inefficient-algorithm``, ``performance-move-const-arg``, ``performance-move-constructor-init``)
+* **6 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
+
+``misc-coroutine-hostile-raii`` checks Flow's blocking ``MutexHolder`` and
+``ThreadSpinLockHolder`` guards as well as ``std::lock_guard`` and
+``std::scoped_lock``. These guards must leave scope before a coroutine suspension
+point; asynchronous locks designed to span suspension are not included.
+
+``bugprone-unhandled-self-assignment`` retains its default restriction to types
+with suspicious fields. Reference-counted assignments that acquire the incoming
+reference before releasing the old one use documented, check-specific
+``NOLINTNEXTLINE`` annotations where the checker cannot recognize their safety.
 
 Basic examples of ``clang-tidy`` style and performance improvement changes:
 
@@ -85,7 +98,7 @@ Then symlink it to your source root:
 
 .. note::
 
-   A full build is recommended so that generated files (e.g., ``.actor.g.cpp`` headers) exist and include paths resolve correctly. Without a build, ``clang-tidy`` may report false errors on files that depend on generated code. If your ``compile_commands.json`` was generated on a different machine (e.g., Okteto), fix the paths with:
+   A full build is recommended so that generated headers exist and include paths resolve correctly. Without a build, ``clang-tidy`` may report false errors on files that depend on generated code. If your ``compile_commands.json`` was generated on a different machine (e.g., Okteto), fix the paths with:
 
    .. code-block:: shell
 
@@ -100,19 +113,22 @@ On macOS (with Homebrew LLVM):
 
 .. code-block:: shell
 
-   export TIDY_DIFF=$(find $(brew --prefix llvm)/share/clang -name "clang-tidy-diff.py")
+   export PATH="$(brew --prefix llvm@19)/bin:$PATH"
+   export TIDY_DIFF=$(find $(brew --prefix llvm@19)/share/clang -name "clang-tidy-diff.py")
 
 On Linux:
 
 .. code-block:: shell
 
-   export TIDY_DIFF=$(find /usr/lib/llvm-*/share/clang -name "clang-tidy-diff.py" | head -n 1)
+   export PATH="/usr/lib/llvm-19/bin:$PATH"
+   export TIDY_DIFF=$(find /usr/lib/llvm-19/share/clang -name "clang-tidy-diff.py")
 
-To make this permanent, add to your ``~/.bashrc`` or ``~/.zshrc``:
+To make this permanent, add the corresponding ``PATH`` and ``TIDY_DIFF`` exports
+above to your ``~/.bashrc`` or ``~/.zshrc``, followed by:
 
 .. code-block:: shell
 
-   alias fdb-tidy='python3 $(find $(brew --prefix llvm 2>/dev/null || echo "/usr/lib/llvm-*") -name "clang-tidy-diff.py" | head -n 1) -p 1 -path .'
+   alias fdb-tidy='python3 "$TIDY_DIFF" -p 1 -path .'
 
 Step 3: Run against your changes
 ---------------------------------
@@ -121,10 +137,10 @@ Check all changes between your branch and ``main``:
 
 .. code-block:: shell
 
-   git diff -U0 origin/main...HEAD | grep -v -E '\.actor\.cpp' | python3 "$TIDY_DIFF" -p 1 -path .
+   git diff -U0 origin/main...HEAD | python3 "$TIDY_DIFF" -p 1 -path .
 
    # Or with the alias:
-   git diff -U0 origin/main...HEAD | grep -v -E '\.actor\.cpp' | fdb-tidy
+   git diff -U0 origin/main...HEAD | fdb-tidy
 
 Check a specific commit:
 
@@ -170,9 +186,12 @@ Optional CMake variables:
 Known limitations
 -----------------
 
-**``.actor.cpp`` files cannot be analyzed.** These files use FoundationDB's custom actor compiler syntax (``ACTOR``, ``wait()``, ``state``) that ``clang-tidy`` cannot parse. With CMake 3.27 or newer, build-integrated clang-tidy skips generated ``.actor.g.cpp`` outputs using CMake's ``SKIP_LINTING`` property. This automatic suppression is unavailable with the minimum supported CMake version, 3.24.2. Exclude actor inputs from your diff when running locally.
+Build-integrated clang-tidy skips bundled external-library targets, including ``crc32``, ``libb64``, ``md5``, ``libeio``, and ``libcoroutine``.
 
-Build-integrated clang-tidy also skips bundled external-library targets, including ``crc32``, ``libb64``, ``md5``, ``libeio``, and ``libcoroutine``.
+``cppcoreguidelines-slicing`` is not enabled: ``Standalone<T>`` inherits ``T`` and
+owns its bytes in an ``Arena``, while passing a borrowed ``T`` view by value is
+an intentional FoundationDB pattern. The check cannot distinguish those borrows
+from unintended slicing; the borrow must still not outlive its owner.
 
 ``readability-simplify-boolean-expr`` is not enabled because it diagnoses ordinary
 uses of FoundationDB's ``ASSERT`` macro after macro expansion.
@@ -182,7 +201,7 @@ Quick reference
 
 .. code-block:: shell
 
-   git diff -U0 origin/main...HEAD | grep -v -E '\.actor\.cpp' | python3 "$TIDY_DIFF" -p 1 -path .
+   git diff -U0 origin/main...HEAD | python3 "$TIDY_DIFF" -p 1 -path .
 
 **GCC-built compile_commands.json with clang-tidy.** If your ``compile_commands.json`` was generated with GCC, it may contain GCC-specific flags that ``clang-tidy`` (which uses the clang frontend) does not recognize. Add ``-extra-arg=-Wno-unknown-warning-option`` to suppress these errors:
 

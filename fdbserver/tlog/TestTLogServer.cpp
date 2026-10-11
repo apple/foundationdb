@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "fdbrpc/Locality.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/kvstore/IDiskQueue.h"

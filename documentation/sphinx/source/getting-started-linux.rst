@@ -48,6 +48,31 @@ To install on **RHEL/CentOS 7** use the rpm command:
 |simple-installation-mode-warnings|
 
 |networking-clarification|
+
+Installing multiple client versions
+====================================
+
+The regular ``foundationdb-clients`` RPM installs files in shared system paths
+and is intended for a normal install or upgrade. Do not install two regular
+client RPMs with ``rpm -ivh``; they own the same files and RPM will report file
+conflicts.
+
+For multi-version client support, use the separately named CPack versioned
+client RPMs. Their names have the form
+``foundationdb<version>-clients-1.versioned.<architecture>.rpm`` and their
+files are installed below ``/usr/lib/foundationdb-<version>/``. Non-release
+builds may include build-time and prerelease text in the package name and
+directory. Install each versioned package with ``rpm -ivh`` so the packages
+can remain installed simultaneously. If a release does not publish its
+versioned RPM, build the
+``clients-versioned`` component from source with CPack (run ``cpack -G RPM``
+from the configured build directory).
+
+The active client is selected through the ``fdbclients`` alternatives group.
+Use ``update-alternatives --display fdbclients`` to inspect it and
+``update-alternatives --config fdbclients`` to select a version. The selected
+alternative applies consistently to the client tools, library, headers,
+pkg-config metadata, and CMake package metadata.
 	
 Testing your FoundationDB installation
 ======================================

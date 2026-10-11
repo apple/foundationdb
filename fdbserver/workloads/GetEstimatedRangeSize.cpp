@@ -56,7 +56,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		                 /*ratesAtKeyCounts=*/Promise<std::vector<std::pair<uint64_t, double>>>(),
 		                 /*keySaveIncrement=*/0,
 		                 /*keyCheckInterval=*/0.1,
-		                 /*startNodeIndex=*/0,
+		                 /*startNodeIdx=*/0,
 		                 /*endNodeIdx=*/0);
 	}
 

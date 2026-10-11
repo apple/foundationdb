@@ -41,7 +41,7 @@ public:
 	Deque() : arr(0), begin(0), end(0), mask(-1) {}
 
 	// TODO: iterator construction, other constructors
-	explicit(false) Deque(Deque const& r) : arr(nullptr), begin(0), end(r.size()), mask(r.mask) {
+	Deque(Deque const& r) : arr(nullptr), begin(0), end(r.size()), mask(r.mask) {
 		if (r.capacity() > 0) {
 			arr = (T*)aligned_alloc(std::max(__alignof(T), sizeof(void*)), capacity() * sizeof(T));
 			if (arr == nullptr) {
@@ -61,6 +61,9 @@ public:
 	}
 
 	void operator=(Deque const& r) {
+		if (this == &r) {
+			return;
+		}
 		cleanup();
 
 		arr = nullptr;
@@ -85,13 +88,16 @@ public:
 		}
 	}
 
-	explicit(false) Deque(Deque&& r) noexcept : arr(r.arr), begin(r.begin), end(r.end), mask(r.mask) {
+	Deque(Deque&& r) noexcept : arr(r.arr), begin(r.begin), end(r.end), mask(r.mask) {
 		r.arr = nullptr;
 		r.begin = r.end = 0;
 		r.mask = -1;
 	}
 
 	void operator=(Deque&& r) noexcept {
+		if (this == &r) {
+			return;
+		}
 		cleanup();
 
 		begin = r.begin;

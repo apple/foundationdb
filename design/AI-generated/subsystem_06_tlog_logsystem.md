@@ -14,7 +14,7 @@ The TLog subsystem is FDB's durability guarantee. All committed mutations flow t
 
 ---
 
-## TLog Server -- [`TLogServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/tlog/TLogServer.actor.cpp)
+## TLog Server -- [`TLogServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/tlog/TLogServer.cpp)
 
 ### TLogData (lines 295-420)
 
@@ -235,7 +235,7 @@ Optional per-storage-server version tracking:
 
 | File | Purpose |
 |------|---------|
-| [`fdbserver/tlog/TLogServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/tlog/TLogServer.actor.cpp) | TLog server: push, peek, spill, DiskQueue |
+| [`fdbserver/tlog/TLogServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/tlog/TLogServer.cpp) | TLog server: push, peek, spill, DiskQueue |
 | [`fdbserver/logsystem/LogSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/LogSystem.cpp) | LogSystem: push/peek/pop across TLog replicas |
 | [`fdbserver/logsystem/include/fdbserver/logsystem/LogSystem.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/include/fdbserver/logsystem/LogSystem.h) | LogSystem, IPeekCursor interfaces |
 | [`fdbserver/core/include/fdbserver/core/LogSystemConfig.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/LogSystemConfig.h) | Log system configuration and epoch tracking |

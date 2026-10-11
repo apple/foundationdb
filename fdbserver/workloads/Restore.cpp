@@ -245,7 +245,7 @@ struct RestoreWorkload : TestWorkload {
 
 			// Ensure that there is no left over key within the backup subspace
 			while (true) {
-				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 				TraceEvent("RW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(backupTag));
 

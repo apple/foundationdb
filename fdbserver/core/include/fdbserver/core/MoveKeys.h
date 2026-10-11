@@ -24,7 +24,7 @@
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/SeedShardServers.h"
 #include "flow/BooleanParam.h"
@@ -52,12 +52,37 @@ class DDEnabledState {
 	UID ddEnabledStatusUID;
 	Value stateValue = ENABLED;
 
+	// Effective shard-location-metadata encoding target for this DD
+	// incarnation. Resolved once at DD init from DatabaseConfiguration
+	// (shard_metadata_format), falling back to the legacy
+	// SHARD_ENCODE_LOCATION_METADATA knob when the config is UNSET. Like the
+	// rest of DDEnabledState this is transient: it is re-resolved on every DD
+	// (re-)init, so a config-change recovery re-elects a DD that reads the new
+	// value. All DD write/move paths read this instead of the raw knob so the
+	// config is the single source of truth for the encoding.
+	//
+	// Defaulted from the knob by the constructor so any DDEnabledState created
+	// outside the DD bootstrap (e.g. sim workloads) matches legacy behavior
+	// until/unless the owner overrides it.
+	bool shardMetadataFormatIsNew_;
+
 public:
+	DDEnabledState();
+
 	bool sameId(const UID&) const;
 
 	bool isEnabled() const;
 
 	bool isBlobRestorePreparing() const;
+
+	// True when this DD incarnation encodes shard-location metadata in the new
+	// (shard-encoded) format. Replaces direct reads of the
+	// SHARD_ENCODE_LOCATION_METADATA server knob in the DD write/move paths.
+	bool shardEncodeLocationMetadata() const;
+
+	// Set the effective encoding target. Called once by the DD bootstrap after
+	// loading DatabaseConfiguration.
+	void setShardEncodeLocationMetadata(bool isNewFormat);
 
 	// All tryXXX() methods return true if the in-memory state change succeed.
 	bool trySetEnabled(UID requesterId);
@@ -157,6 +182,27 @@ Future<Void> rawFinishMovement(Database occ,
 // it returns (since it needs to execute the finishMoveKeys transaction).
 // When dataMoveId.isValid(), the keyrange will be moved to a shard designated as dataMoveId.
 Future<Void> moveKeys(Database occ, MoveKeysParams params);
+
+// True for errors from moveKeys() that mean "this move did not happen, issue it again" rather than
+// "the cluster is broken". The data distributor already treats exactly these as normal and simply
+// reissues the relocation -- see normalDDQueueErrors() in DataDistribution.cpp and the matching
+// suppression in DDRelocationQueue.cpp.
+//
+// Callers that drive moveKeys() directly (the workloads) must handle these explicitly: none of them
+// are retryable transaction errors, so Transaction::onError() rethrows and kills the caller. Bound
+// any reissue loop by a count rather than a deadline -- one moveKeys() call can spend minutes inside
+// finishMoveKeys()/finishMoveShards() exhausting FINISH_MOVE_KEYS_MAX_RETRIES.
+//
+// movekeys_conflict is deliberately NOT included: it means another DD holds the lock, which callers
+// retry without consuming a reissue budget. broken_promise is likewise excluded so a genuinely dead
+// process still surfaces.
+bool retryableDataMoveError(const Error& e);
+
+// How many times a direct moveKeys() caller should reissue after a retryableDataMoveError() before
+// letting the error propagate. A count, not a wall-clock budget: one moveKeys() call can spend
+// minutes inside finishMoveKeys()/finishMoveShards() exhausting FINISH_MOVE_KEYS_MAX_RETRIES, which
+// blows any sane deadline before the first reissue.
+constexpr int MOVE_MAX_REISSUES = 3;
 
 // Cancels a data move designated by dataMoveId.
 Future<Void> cleanUpDataMove(

@@ -56,7 +56,7 @@ void HistogramRegistry::unregisterHistogram(Histogram* h) {
 		TraceEvent(SevError, "HistogramNotRegistered").detail("group", h->group).detail("op", h->op);
 	}
 	int count = histograms.erase(name);
-	ASSERT(count == 1);
+	ASSERT_EQ(count, 1);
 }
 
 Histogram* HistogramRegistry::lookupHistogram(std::string const& name) {

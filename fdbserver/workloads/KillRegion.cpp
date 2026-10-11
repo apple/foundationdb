@@ -1,5 +1,5 @@
 /*
- * KillRegion.actor.cpp
+ * KillRegion.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/tester/workloads.h"

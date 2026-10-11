@@ -23,7 +23,7 @@
 
 #include "flow/IRandom.h"
 #include "flow/ProcessEvents.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
@@ -1026,10 +1026,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		// Check DataDistributor
 		recruitment::Fitness fitnessLowerBound = recruitment::machineClassFitness(
 		    allWorkerProcessMap[db.master.address()].processClass, recruitment::DataDistributor);
+		// Bulk-load simulation can deliberately retain a DD with suboptimal fitness to let data moves finish.
+		const bool allowUnfitDistributor = g_network->isSimulated() && SERVER_KNOBS->CC_ENFORCE_USE_UNFIT_DD_IN_SIM;
 		if (db.distributor.present() &&
 		    (!nonExcludedWorkerProcessMap.contains(db.distributor.get().address()) ||
-		     recruitment::machineClassFitness(nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass,
-		                                      recruitment::DataDistributor) > fitnessLowerBound)) {
+		     (!allowUnfitDistributor &&
+		      recruitment::machineClassFitness(nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass,
+		                                       recruitment::DataDistributor) > fitnessLowerBound))) {
 			TraceEvent("ConsistencyCheck_DistributorNotBest")
 			    .detail("DataDistributorFitnessLowerBound", fitnessLowerBound)
 			    .detail("ExistingDistributorFitness",

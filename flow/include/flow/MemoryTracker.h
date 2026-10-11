@@ -97,6 +97,29 @@ struct MemoryTrackerCallSite {
 extern thread_local bool gInMemTracker;
 extern thread_local int gMemTrackerCounter;
 extern thread_local std::size_t gForceSampleBytes;
+
+// Set true (per thread, nest-safe via MemTrackerInternalAlloc) only around the
+// tracker's OWN bookkeeping allocations — map construction / node inserts / rehash
+// on the sampled path, and the reporter's scratch vectors, strings, and
+// TraceEvents. The global operator new override (fdbserver/GlobalNewDelete.cpp)
+// reads this: an allocation failure inside this window throws std::bad_alloc
+// straight to the tracker's fail-open catch instead of invoking the installed
+// std::new_handler (platform::outOfMemory, which terminates with FDB_EXIT_NO_MEM).
+// So a diagnostic bookkeeping allocation that fails just drops the sample or
+// report; it cannot terminate the server after the caller's real allocation has
+// already succeeded.
+//
+// Deliberately distinct from gInMemTracker: gInMemTracker is also set by Arena
+// around genuine user-owned allocations (new uint8_t[] for a large block), which
+// must keep the fatal OOM semantics. Only the tracker's own metadata fails open.
+extern thread_local bool gInMemTrackerAlloc;
+
+// Test-only one-shot, read by the global operator new override
+// (fdbserver/GlobalNewDelete.cpp). When set, the next tracker-internal allocation
+// (gInMemTrackerAlloc active) is forced to fail there, so tests can drive the
+// fail-open path through the real mallocWithNewHandler. Armed via
+// memTrackerFailNextInternalAllocForTest; cleared by memTrackerResetForTest.
+extern thread_local bool gMemTrackerFailNextInternalAllocForTest;
 // Set true (per thread) once this thread's slow path observes sampling is off,
 // so the alloc hot path then short-circuits on a single TLS load instead of
 // decrementing the counter and reading gForceSampleBytes every call. Per-thread
@@ -139,6 +162,23 @@ public:
 	~MemTrackerSuppress() { gInMemTracker = prev; }
 	MemTrackerSuppress(const MemTrackerSuppress&) = delete;
 	MemTrackerSuppress& operator=(const MemTrackerSuppress&) = delete;
+};
+
+// RAII: marks the enclosed region as tracker-internal bookkeeping, so a heap
+// allocation failure there fails open (throws std::bad_alloc, caught by the
+// tracker) rather than tripping the fatal OOM handler — see gInMemTrackerAlloc.
+// Nest-safe (saves and restores prev). Distinct from MemTrackerSuppress:
+// MemTrackerSuppress gates the sampling hook and is also used around real user
+// allocations; this guard only changes allocation-failure behavior, and only for
+// the tracker's own metadata.
+class MemTrackerInternalAlloc {
+	bool prev;
+
+public:
+	MemTrackerInternalAlloc() : prev(gInMemTrackerAlloc) { gInMemTrackerAlloc = true; }
+	~MemTrackerInternalAlloc() { gInMemTrackerAlloc = prev; }
+	MemTrackerInternalAlloc(const MemTrackerInternalAlloc&) = delete;
+	MemTrackerInternalAlloc& operator=(const MemTrackerInternalAlloc&) = delete;
 };
 
 // Initialize the tracker from the current knob values. Call once, from process
@@ -196,12 +236,15 @@ void memTrackerForEachSite(std::function<void(const MemoryTrackerCallSite&)> cb)
 // Reset all state. Tests only — not safe for production use.
 void memTrackerResetForTest();
 
-// Test only: arm a one-shot so the next sampled allocation simulates a tracker
-// metadata-allocation failure (the sampled path throws std::bad_alloc, which the
-// tracker swallows). Lets tests verify the tracker fails open — the underlying
-// allocation still succeeds and tracking recovers afterward. Never used in
-// production.
-void memTrackerFailNextSampleForTest();
+// Test only: arm a one-shot so the next tracker-internal (bookkeeping) allocation
+// is forced to fail. Unlike a throw injected at the top of the sampled path, this
+// drives the real failure route: an actual map/report allocation goes through the
+// global operator new (fdbserver/GlobalNewDelete.cpp), which — seeing the
+// tracker-internal context — throws std::bad_alloc WITHOUT invoking the installed
+// std::new_handler, and the tracker swallows it. Lets tests verify the tracker
+// fails open (underlying allocation preserved, handler not invoked, tracking
+// recovers afterward). Never used in production.
+void memTrackerFailNextInternalAllocForTest();
 
 #else // !FDB_MEMORY_TRACKER — compiled out: hooks are no-ops, no operator new override.
 

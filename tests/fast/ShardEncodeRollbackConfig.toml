@@ -1,0 +1,118 @@
+# Config-driven rollback variant of ShardEncodeRollback.toml.
+#
+# The sibling ShardEncodeRollback.toml drives the rollback by flipping the
+# SHARD_ENCODE_LOCATION_METADATA *knob* true->false. This test instead leaves
+# the knob TRUE for the entire run and drives the rollback purely through
+# DatabaseConfiguration: `configure shard_metadata_format=original`. It
+# proves the config-only path — DD resolves its effective encoding target from
+# shard_metadata_format (knob only as fallback), so a config change alone
+# (no process restart / no knob flip) rolls the cluster back to old format and
+# reaches ROLLBACK COMPLETE.
+#
+# Exclude sharded RocksDB (type 5) — it requires new-format metadata and
+# cannot operate once the effective target is original.
+#
+# datacenters=1 + generateFearless=false pin the sim to single-DC single-region
+# (see ShardEncodeRollback.toml for the rationale).
+[configuration]
+storageEngineExcludeTypes=[3,4,5]
+config = "triple ssd-2"
+datacenters = 1
+generateFearless = false
+
+# The knob stays TRUE for the whole test (never flipped). Rollback is driven by
+# config below. Fine-grained sharding so the rollback rewrite has many
+# keyServers/serverKeys entries to convert.
+[[knobs]]
+shard_encode_location_metadata = true
+min_shard_bytes = 10000
+shard_bytes_per_sqrt_bytes = 0
+
+[[test]]
+testTitle = 'ShardEncodeConfigRollbackSetup'
+
+    # Phase 1: knob=true (inherited), config unset -> effective = encoded.
+    # Build shard-encoded (new-format) keyServers/serverKeys state via data
+    # moves that the config-driven rollback below will convert.
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 5000.0
+    nodeCount = 60000
+    testDuration = 30.0
+
+    # RandomMoveKeys here (effective encoded) builds the new-format state the
+    # rollback converts. Confined to this phase — it takes the moveKeysLock
+    # itself and must not run concurrently with the rollback rewrite (see the
+    # note in ShardEncodeRollback.toml).
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 30.0
+
+# Phase 2: trigger the rollback via CONFIG ONLY — its OWN test block, so it
+# fully commits before the verify/check block below. This ordering is load-
+# bearing: CheckMetadataEncoding resolves the effective target (config, else
+# knob) when it starts, and the knob is still true here — so the config MUST be
+# set before any check runs, otherwise the check resolves effective=encoded
+# and fails. (Workloads within a single [[test]] block run concurrently; test
+# blocks run sequentially. An earlier version had ChangeConfig in the same
+# block as the check and lost the race under joshua fault injection.)
+#
+# Setting shard_metadata_format=original makes DD's effective target
+# original (the knob is still true but is now only the fallback, which is not
+# consulted because the config is set). shard_metadata_migration=enabled turns
+# on the DD-init active rewrite. The configure triggers a recovery, so the
+# newly-elected DD re-resolves the target from config and runs the rewrite.
+[[test]]
+testTitle = 'ShardEncodeConfigRollbackTrigger'
+
+    [[test.workload]]
+    testName = 'ChangeConfig'
+    configMode = 'shard_metadata_format=original shard_metadata_migration=enabled'
+    minDelayBeforeChange = 1.0
+    maxDelayBeforeChange = 3.0
+
+[[test]]
+testTitle = 'ShardEncodeConfigRollbackVerify'
+
+    # Phase 3: config is now original (set in the prior block). Stress the
+    # rewrite with traffic, DD restarts, and TLog recovery.
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 5000.0
+    nodeCount = 60000
+    testDuration = 30.0
+
+    # RandomMoveKeys intentionally NOT run here (same reason as
+    # ShardEncodeRollback.toml — a direct move can race DD's rewrite seal and
+    # reintroduce a new-format entry).
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 1
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+
+    # Force TLog recovery to verify mixed-format metadata survives recovery.
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 15.0
+    testDuration = 30.0
+
+    # requireKnobFalse here means "require the effective target to be
+    # original" (the workload resolves effective from config, not the raw
+    # knob) — so it passes even though the knob is still true.
+    [[test.workload]]
+    testName = 'CheckMetadataEncoding'
+    requireKnobFalse = true
+    allowMixedFormats = true
+
+# Phase 4: assert ROLLBACK COMPLETE — zero new-format entries in
+# keyServers/serverKeys and no in-flight dataMoves — proving the config-driven
+# rollback fully drained.
+[[test]]
+testTitle = 'ShardEncodeConfigRollbackFinal'
+
+    [[test.workload]]
+    testName = 'CheckMetadataEncoding'
+    requireKnobFalse = true
+    requireRollbackComplete = true

@@ -238,6 +238,10 @@ void LatencySample::addMeasurement(double measurement) {
 	sketch.addSample(measurement);
 }
 
+void LatencySample::addMeasurementPair(double measurement, LatencySample& other) {
+	sketch.addSamplePair(measurement, other.sketch);
+}
+
 void LatencySample::logSample() {
 	if (skipTraceOnSilentInterval && sketch.getPopulationSize() == 0) {
 		return;

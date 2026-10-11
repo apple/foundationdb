@@ -372,11 +372,13 @@ TEST_CASE("performance/flow/IndexedSet/strings") {
 
 	printf("%0.1f Map.KfindStr/sec\n", count / 1000.0 / (end - start));
 
+	tt = 0;
 	start = timer();
 	for (size_t i = 0; i < count; i++) {
-		aMap.find(hello);
+		tt += aMap.find(hello)->second;
 	}
 	end = timer();
+	ASSERT(tt == count);
 	printf("%0.1f std::map.KfindStr/sec\n", count / 1000.0 / (end - start));
 
 	return Void();
@@ -431,7 +433,7 @@ TEST_CASE("/flow/IndexedSet/data constructor and destructor calls match") {
 		int value;
 		explicit Counter(int value) : value(value) { count++; }
 		~Counter() { count--; }
-		explicit(false) Counter(const Counter& r) : value(r.value) { count++; }
+		Counter(const Counter& r) : value(r.value) { count++; }
 		void operator=(const Counter& r) { value = r.value; }
 		int compare(const Counter& r) const { return ::compare(value, r.value); }
 		bool operator<(const Counter& r) const { return value < r.value; }

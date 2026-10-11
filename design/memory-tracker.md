@@ -454,6 +454,19 @@ overloads retry through the installed `std::new_handler` on failure, exactly as
 the default `operator new` does, so an allocation failure still reaches FDB's
 `platform::outOfMemory` handler (`FDB_EXIT_NO_MEM`) instead of throwing past it.
 
+**One exception — tracker bookkeeping fails open.** The tracker's own metadata
+allocations (map growth on the sampled path, the reporter's scratch vectors /
+strings / TraceEvents) route through this same global `operator new`. If one of
+*those* fails, running the fatal handler would terminate the server on behalf of a
+diagnostic — even though the caller's real allocation already succeeded. So the
+tracker marks its bookkeeping regions with a thread-local
+`MemTrackerInternalAlloc` guard (`gInMemTrackerAlloc`); `mallocWithNewHandler`
+sees that flag and throws `std::bad_alloc` **directly**, skipping the handler. The
+tracker catches it and drops the sample or report. This flag is deliberately
+distinct from the `gInMemTracker` reentrancy guard, which `Arena` also sets around
+genuine user-owned allocations (a large `new uint8_t[]`) that must keep the fatal
+OOM semantics.
+
 These overloads live in a translation unit compiled directly into the
 `fdbserver` executable — not in the `flow` static library — for two
 reasons:
@@ -488,6 +501,15 @@ unconditional `memTrackerOnAlloc(p, Size)` / `memTrackerOnFree(ptr)` call added
 next to (not replacing) the existing conditional `ALLOC_INSTRUMENTATION`
 `recordAllocation`/`recordDeallocation` lines, which are left in place. `Size`
 is a compile-time template parameter, so no size lookup is needed.
+
+The `USE_GPERFTOOLS` / `ADDRESS_SANITIZER` and precise-Valgrind
+(`FDB_VALGRIND_PRECISE`) configurations replace the freelist with a per-block
+`aligned_alloc` / `aligned_free` and `return` early, before reaching the hook at
+the bottom of the function. The same `memTrackerOnAlloc` / `memTrackerOnFree`
+calls are therefore repeated on each of those early-return paths — otherwise every
+FastAllocator size class (and the small `Arena` blocks backed by it) would be
+invisible to the tracker under those builds. The per-block `aligned_alloc` does
+not go through `operator new`, so there is no double-tracking.
 
 The global `operator new` / `delete` overrides (both the tracker path
 and the legacy `ALLOC_INSTRUMENTATION` path) live in
@@ -853,10 +875,20 @@ binary that links the global `operator new`/`delete` override and can exercise i
   `arenaMediumAccounting`, `arenaHugeAccounting`** — byte/block accounting
   per allocation path; the "exactly one site carries the sentinel's frames"
   assertion is the B1 double-tracking regression test (the medium and huge
-  `Arena` paths are the ones that regressed).
-- **`failOpenOnMetadataAllocFailure`** — an injected tracker-metadata allocation
-  failure is swallowed: the underlying `new`/`delete` still succeeds and tracking
-  recovers on the thread afterward (the reentrancy guard is restored, not leaked).
+  `Arena` paths are the ones that regressed). `fastAlloc32Accounting` and
+  `arenaSmallAccounting` are not sanitizer-guarded, so under `USE_GPERFTOOLS` /
+  `ADDRESS_SANITIZER` / precise-Valgrind builds they also cover the
+  `FastAllocator` early-return paths — where the block comes from a per-block
+  `aligned_alloc` and the hook has to be invoked explicitly (see the FastAllocator
+  hook-site note above). Without that hook these tests would see zero
+  sentinel-attributed `FastAllocator` bytes under those builds.
+- **`failOpenOnMetadataAllocFailure`** — a one-shot forces an *actual*
+  tracker-internal allocation (map growth), routed through the global
+  `operator new` override, to fail. The tracker fails open: the failure is
+  swallowed, the underlying `new`/`delete` still succeeds, the installed
+  `std::new_handler` is **not** invoked (asserted — this is the "diagnostic
+  bookkeeping never terminates the server" guarantee), and tracking recovers on
+  the thread afterward (the reentrancy guards are restored, not leaked).
 
 Not yet covered by a dedicated unit test: a frame-pointer-walk-depth test — that
 behavior is exercised indirectly by the sentinel tests above.

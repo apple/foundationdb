@@ -77,12 +77,12 @@ Value makePadding(int size) {
 RangeFileWriter::RangeFileWriter(Reference<IBackupFile> file, int blockSize)
   : file(file), blockSize(blockSize), blockEnd(0), fileVersion(BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {}
 
-Future<Void> RangeFileWriter::newBlock(RangeFileWriter* self, int bytesNeeded, bool final) {
+Future<Void> RangeFileWriter::newBlock(int bytesNeeded, bool final) {
 	// Write padding to finish current block if needed
-	int bytesLeft = self->blockEnd - self->file->size();
+	int bytesLeft = blockEnd - file->size();
 	if (bytesLeft > 0) {
 		Value paddingFFs = makePadding(bytesLeft);
-		co_await self->file->append(paddingFFs.begin(), bytesLeft);
+		co_await file->append(paddingFFs.begin(), bytesLeft);
 	}
 
 	if (final) {
@@ -91,20 +91,20 @@ Future<Void> RangeFileWriter::newBlock(RangeFileWriter* self, int bytesNeeded, b
 	}
 
 	// Set new blockEnd
-	self->blockEnd += self->blockSize;
+	blockEnd += blockSize;
 
 	// write Header
-	co_await self->file->append((uint8_t*)&self->fileVersion, sizeof(self->fileVersion));
+	co_await file->append((uint8_t*)&fileVersion, sizeof(fileVersion));
 
 	// If this is NOT the first block then write duplicate stuff needed from last block
-	if (self->blockEnd > self->blockSize) {
-		co_await self->file->appendStringRefWithLen(self->lastKey);
-		co_await self->file->appendStringRefWithLen(self->lastKey);
-		co_await self->file->appendStringRefWithLen(self->lastValue);
+	if (blockEnd > blockSize) {
+		co_await file->appendStringRefWithLen(lastKey);
+		co_await file->appendStringRefWithLen(lastKey);
+		co_await file->appendStringRefWithLen(lastValue);
 	}
 
 	// There must now be room in the current block for bytesNeeded or the block size is too small
-	if (self->file->size() + bytesNeeded > self->blockEnd)
+	if (file->size() + bytesNeeded > blockEnd)
 		throw backup_bad_block_size();
 
 	co_return;
@@ -113,40 +113,32 @@ Future<Void> RangeFileWriter::newBlock(RangeFileWriter* self, int bytesNeeded, b
 Future<Void> RangeFileWriter::padEnd(bool final) {
 	ASSERT(g_network->isSimulated());
 	if (file->size() > 0) {
-		return newBlock(this, 0, final);
+		return newBlock(0, final);
 	}
 	return Void();
 }
 
 Future<Void> RangeFileWriter::newBlockIfNeeded(int bytesNeeded) {
 	if (file->size() + bytesNeeded > blockEnd)
-		return newBlock(this, bytesNeeded);
+		return newBlock(bytesNeeded);
 	return Void();
 }
 
-Future<Void> RangeFileWriter::writeKV_impl(RangeFileWriter* self, Key k, Value v) {
-	int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
-	co_await self->newBlockIfNeeded(toWrite);
-	co_await self->file->appendStringRefWithLen(k);
-	co_await self->file->appendStringRefWithLen(v);
-	self->lastKey = k;
-	self->lastValue = v;
-	co_return;
-}
-
 Future<Void> RangeFileWriter::writeKV(Key k, Value v) {
-	return writeKV_impl(this, k, v);
-}
-
-Future<Void> RangeFileWriter::writeKey_impl(RangeFileWriter* self, Key k) {
-	int toWrite = sizeof(uint32_t) + k.size();
-	co_await self->newBlockIfNeeded(toWrite);
-	co_await self->file->appendStringRefWithLen(k);
+	int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
+	co_await newBlockIfNeeded(toWrite);
+	co_await file->appendStringRefWithLen(k);
+	co_await file->appendStringRefWithLen(v);
+	lastKey = k;
+	lastValue = v;
 	co_return;
 }
 
 Future<Void> RangeFileWriter::writeKey(Key k) {
-	return writeKey_impl(this, k);
+	int toWrite = sizeof(uint32_t) + k.size();
+	co_await newBlockIfNeeded(toWrite);
+	co_await file->appendStringRefWithLen(k);
+	co_return;
 }
 
 Future<Void> RangeFileWriter::finish() {
@@ -275,36 +267,32 @@ Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsync
 LogFileWriter::LogFileWriter(Reference<IBackupFile> file, int blockSize)
   : file(file), blockSize(blockSize), blockEnd(0) {}
 
-Future<Void> LogFileWriter::writeKV_impl(LogFileWriter* self, Key k, Value v) {
+Future<Void> LogFileWriter::writeKV(Key k, Value v) {
 	// If key and value do not fit in this block, end it and start a new one
 	int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
-	if (self->file->size() + toWrite > self->blockEnd) {
+	if (file->size() + toWrite > blockEnd) {
 		// Write padding if needed
-		int bytesLeft = self->blockEnd - self->file->size();
+		int bytesLeft = blockEnd - file->size();
 		if (bytesLeft > 0) {
 			Value paddingFFs = makePadding(bytesLeft);
-			co_await self->file->append(paddingFFs.begin(), bytesLeft);
+			co_await file->append(paddingFFs.begin(), bytesLeft);
 		}
 
 		// Set new blockEnd
-		self->blockEnd += self->blockSize;
+		blockEnd += blockSize;
 
 		// write the block header
-		co_await self->file->append((uint8_t*)&BACKUP_AGENT_MLOG_VERSION, sizeof(BACKUP_AGENT_MLOG_VERSION));
+		co_await file->append((uint8_t*)&BACKUP_AGENT_MLOG_VERSION, sizeof(BACKUP_AGENT_MLOG_VERSION));
 	}
 
-	co_await self->file->appendStringRefWithLen(k);
-	co_await self->file->appendStringRefWithLen(v);
+	co_await file->appendStringRefWithLen(k);
+	co_await file->appendStringRefWithLen(v);
 
 	// At this point we should be in whatever the current block is or the block size is too small
-	if (self->file->size() > self->blockEnd)
+	if (file->size() > blockEnd)
 		throw backup_bad_block_size();
 
 	co_return;
-}
-
-Future<Void> LogFileWriter::writeKV(Key k, Value v) {
-	return writeKV_impl(this, k, v);
 }
 
 Standalone<VectorRef<KeyValueRef>> decodeMutationLogFileBlock(const Standalone<StringRef>& buf) {

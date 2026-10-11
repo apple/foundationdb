@@ -101,15 +101,15 @@ void ResumableStateForRunWorkload::postNextTick() {
 
 void ResumableStateForRunWorkload::runOneTick() {
 	assert(iter != OpEnd);
+	auto f = Future{};
+	// to minimize context switch overhead, repeat immediately completed ops
+	// in a loop, not an async continuation.
+repeat_immediate_steps:
 	if (iter.step == 0 /* first step */)
 		prepareKeys(iter.op, key1, key2, args);
 	watch_step.start();
 	if (iter.step == 0)
 		watch_op = Stopwatch(watch_step.getStart());
-	auto f = Future{};
-	// to minimize context switch overhead, repeat immediately completed ops
-	// in a loop, not an async continuation.
-repeat_immediate_steps:
 	f = opTable[iter.op].stepFunction(iter.step)(tx, args, key1, key2, val);
 	if (!f) {
 		// immediately completed client-side ops: e.g. set, setrange, clear, clearrange, ...

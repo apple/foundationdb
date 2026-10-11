@@ -28,7 +28,7 @@
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/WorkerEvents.h"
@@ -178,7 +178,7 @@ class StatusCounter {
 public:
 	StatusCounter() : hz(0), roughness(0), counter(0) {}
 	StatusCounter(double hz, double roughness, int64_t counter) : hz(hz), roughness(roughness), counter(counter) {}
-	explicit(false) StatusCounter(const std::string& parsableText) { parseText(parsableText); }
+	explicit StatusCounter(const std::string& parsableText) { parseText(parsableText); }
 
 	StatusCounter& parseText(const std::string& parsableText) {
 		sscanf(parsableText.c_str(), "%lf %lf %" SCNd64 "", &hz, &roughness, &counter);
@@ -454,6 +454,16 @@ struct RolesInfo {
 		return latencyStats;
 	}
 
+	void appendLatencyStatistics(JsonBuilderObject& object,
+	                             EventMap const& metrics,
+	                             const char* eventName,
+	                             const char* jsonKey) {
+		TraceEventFields const& latencyMetrics = metrics.at(eventName);
+		if (latencyMetrics.size()) {
+			object[jsonKey] = addLatencyStatistics(latencyMetrics);
+		}
+	}
+
 	JsonBuilderObject addLatencyBandInfo(TraceEventFields const& metrics) {
 		JsonBuilderObject latencyBands;
 		std::map<std::string, JsonBuilderObject> bands;
@@ -515,6 +525,11 @@ struct RolesInfo {
 			obj["low_priority_queries"] = StatusCounter(storageMetrics.getValue("LowPriorityQueries")).getStatus();
 			obj["bytes_queried"] = StatusCounter(storageMetrics.getValue("BytesQueried")).getStatus();
 			obj["keys_queried"] = StatusCounter(storageMetrics.getValue("RowsQueried")).getStatus();
+			obj.setKeyRawNumber("active_watches", storageMetrics.getValue("ActiveWatches"));
+			obj["total_watches"] = StatusCounter(storageMetrics.getValue("WatchQueries")).getStatus();
+			obj["triggered_watches"] = StatusCounter(storageMetrics.getValue("TriggeredWatches")).getStatus();
+			obj["timed_out_watches"] = StatusCounter(storageMetrics.getValue("TimedOutWatches")).getStatus();
+			obj["errored_watches"] = StatusCounter(storageMetrics.getValue("ErroredWatches")).getStatus();
 			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
 			obj["mutations"] = StatusCounter(storageMetrics.getValue("Mutations")).getStatus();
 			obj.setKeyRawNumber("local_rate", storageMetrics.getValue("LocalRate"));
@@ -542,10 +557,7 @@ struct RolesInfo {
 				    maxTLogVersion - version - SERVER_KNOBS->STORAGE_LOGGING_DELAY * SERVER_KNOBS->VERSIONS_PER_SECOND);
 			}
 
-			TraceEventFields const& readLatencyMetrics = metrics.at("ReadLatencyMetrics");
-			if (readLatencyMetrics.size()) {
-				obj["read_latency_statistics"] = addLatencyStatistics(readLatencyMetrics);
-			}
+			appendLatencyStatistics(obj, metrics, "ReadLatencyMetrics", "read_latency_statistics");
 
 			TraceEventFields const& readLatencyBands = metrics.at("ReadLatencyBands");
 			if (readLatencyBands.size()) {
@@ -558,12 +570,14 @@ struct RolesInfo {
 
 			TraceEventFields const& busiestReadTag = metrics.at("BusiestReadTag");
 			if (busiestReadTag.size()) {
-				int64_t tagCost = busiestReadTag.getInt64("TagCost");
+				double tagCost = busiestReadTag.getDouble("TagCost");
 				if (tagCost > 0) {
 					JsonBuilderObject busiestReadTagObj;
 					busiestReadTagObj["tag"] = busiestReadTag.getValue("Tag");
-					busiestReadTagObj["cost"] = tagCost;
-					busiestReadTagObj["fractional_cost"] = busiestReadTag.getValue("FractionalBusyness");
+					busiestReadTagObj["fractional_cost"] = busiestReadTag.getDouble("FractionalBusyness");
+					JsonBuilderObject estimatedCostObj;
+					estimatedCostObj["hz"] = tagCost;
+					busiestReadTagObj["estimated_cost"] = estimatedCostObj;
 					obj["busiest_read_tag"] = busiestReadTagObj;
 				}
 			}
@@ -657,20 +671,22 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
-			TraceEventFields const& commitLatencyMetrics = metrics.at("CommitLatencyMetrics");
-			if (commitLatencyMetrics.size()) {
-				obj["commit_latency_statistics"] = addLatencyStatistics(commitLatencyMetrics);
-			}
+			appendLatencyStatistics(obj, metrics, "CommitLatencyMetrics", "commit_latency_statistics");
 
 			TraceEventFields const& commitLatencyBands = metrics.at("CommitLatencyBands");
 			if (commitLatencyBands.size()) {
 				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyBands);
 			}
 
-			TraceEventFields const& commitBatchingWindowSize = metrics.at("CommitBatchingWindowSize");
-			if (commitBatchingWindowSize.size()) {
-				obj["commit_batching_window_size"] = addLatencyStatistics(commitBatchingWindowSize);
-			}
+			appendLatencyStatistics(obj, metrics, "CommitBatchingWindowSize", "commit_batching_window_size");
+			appendLatencyStatistics(obj, metrics, "CommitBatchTransactions", "commit_batch_transactions");
+			appendLatencyStatistics(obj, metrics, "CommitBatchBytes", "commit_batch_bytes");
+			appendLatencyStatistics(obj, metrics, "CommitBatchingWaiting", "commit_batching_waiting");
+			appendLatencyStatistics(obj, metrics, "CommitPreresolutionLatency", "commit_preresolution_latency");
+			appendLatencyStatistics(obj, metrics, "CommitResolutionLatency", "commit_resolution_latency");
+			appendLatencyStatistics(obj, metrics, "CommitPostresolutionLatency", "commit_postresolution_latency");
+			appendLatencyStatistics(obj, metrics, "CommitTLogLoggingLatency", "commit_tlog_logging_latency");
+			appendLatencyStatistics(obj, metrics, "CommitReplyLatency", "commit_reply_latency");
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found) {
 				throw e;
@@ -690,15 +706,8 @@ struct RolesInfo {
 
 			// GRV Latency metrics are grouped according to priority (currently batch or default).
 			// Other priorities can be added in the future.
-			TraceEventFields const& grvLatencyMetrics = metrics.at("GRVLatencyMetrics");
-			if (grvLatencyMetrics.size()) {
-				priorityStats["default"] = addLatencyStatistics(grvLatencyMetrics);
-			}
-
-			TraceEventFields const& grvBatchMetrics = metrics.at("GRVBatchLatencyMetrics");
-			if (grvBatchMetrics.size()) {
-				priorityStats["batch"] = addLatencyStatistics(grvBatchMetrics);
-			}
+			appendLatencyStatistics(priorityStats, metrics, "GRVLatencyMetrics", "default");
+			appendLatencyStatistics(priorityStats, metrics, "GRVBatchLatencyMetrics", "batch");
 
 			// Add GRV Latency metrics (for all priorities) to parent node.
 			if (!priorityStats.empty()) {
@@ -1693,8 +1702,8 @@ loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>
 						res.healthyZone = healthyZone.first;
 					} else if (healthyZone.second > tr.getReadVersion().get()) {
 						res.healthyZone = healthyZone.first;
-						res.healthyZoneSeconds =
-						    (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+						res.healthyZoneSeconds = static_cast<double>(healthyZone.second - tr.getReadVersion().get()) /
+						                         CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 					}
 				}
 				res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
@@ -1997,7 +2006,12 @@ static Future<std::vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetric
 static Future<std::vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	std::vector<std::string> eventNames{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize" };
+	std::vector<std::string> eventNames{
+		"CommitLatencyMetrics",       "CommitLatencyBands",      "CommitBatchingWindowSize",
+		"CommitBatchTransactions",    "CommitBatchBytes",        "CommitBatchingWaiting",
+		"CommitPreresolutionLatency", "CommitResolutionLatency", "CommitPostresolutionLatency",
+		"CommitTLogLoggingLatency",   "CommitReplyLatency"
+	};
 	std::vector<std::pair<CommitProxyInterface, EventMap>> results =
 	    co_await getServerMetrics(db->get().client.commitProxies, address_workers, std::move(eventNames));
 
@@ -2690,6 +2704,7 @@ AsyncResult<JsonBuilderObject> layerStatusFetcher(Database cx,
 				// TODO:  Also fetch other linked subtrees of meta keys
 
 				std::vector<Future<RangeResult>> docFutures;
+				docFutures.reserve(jsonLayers.size());
 				for (int i = 0; i < jsonLayers.size(); ++i) {
 					docFutures.push_back(
 					    tr.getRange(KeyRangeRef(jsonLayers[i].value, strinc(jsonLayers[i].value)), 1000));
@@ -2823,7 +2838,7 @@ Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicatedRegi
 Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> readStorageWiggleMetrics(
     Database cx,
     bool use_system_priority) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	Optional<StorageWiggleMetrics> primaryV;
 	Optional<StorageWiggleMetrics> remoteV;
 	StorageWiggleData wiggleState;

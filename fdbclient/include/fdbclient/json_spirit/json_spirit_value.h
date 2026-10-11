@@ -62,7 +62,7 @@ public:
 	explicit(false) Value_impl(
 	    const boost::variant<BOOST_VARIANT_ENUM_PARAMS(T)>& variant); // constructor for compatible variant types
 
-	explicit(false) Value_impl(const Value_impl& other);
+	Value_impl(const Value_impl& other);
 
 	bool operator==(const Value_impl& lhs) const;
 

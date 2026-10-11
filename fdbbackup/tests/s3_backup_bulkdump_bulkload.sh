@@ -53,10 +53,19 @@ function cleanup {
   if cleanup_with_preserve_check; then
     return 0
   fi
-  
+
   if type shutdown_fdb_cluster &> /dev/null; then
     shutdown_fdb_cluster
   fi
+
+  # Best-effort removal of this run's remote objects, so failed runs against a real bucket
+  # do not accumulate orphaned per-run key prefix trees.  Must happen after the cluster and
+  # backup agents have stopped (no more writers) but while the blob store (MockS3 or real)
+  # is still reachable.
+  if [[ -n "${REMOTE_CLEANUP_URL:-}" ]] && [[ -n "${TEST_SCRATCH_DIR:-}" ]]; then
+    s3_cleanup_url "${build_dir}" "${TEST_SCRATCH_DIR}" "${REMOTE_CLEANUP_URL}" "${blob_credentials_file}" || true
+  fi
+
   if type shutdown_mocks3 &> /dev/null; then
     shutdown_mocks3
   fi
@@ -240,8 +249,17 @@ function test_bulkdump_bulkload {
   local local_encryption_key_file="${5:-}"
   
   # Edit the url. Backup adds 'data' to the path. Need this url for cleanup.
-  local edited_url=$(echo "${local_url}" | sed -e "s/ctest/data\/ctest/" )
+  # When a key prefix is used the whole layout lives under the per-run unique prefix, so
+  # clean up that prefix tree instead (with a trailing slash so sibling prefixes cannot
+  # match).
+  local edited_url
+  if [[ -n "${BACKUP_URL_KEY_PREFIX}" ]]; then
+    edited_url="blobstore://${host}/${BACKUP_URL_KEY_PREFIX}/?${query_str}"
+  else
+    edited_url=$(echo "${local_url}" | sed -e "s/ctest/data\/ctest/" )
+  fi
   readonly edited_url
+  REMOTE_CLEANUP_URL="${edited_url}"
   if ! s3_preclear_url "${local_build_dir}" "${local_scratch_dir}" "${edited_url}" "${credentials}"; then
     return 1
   fi
@@ -410,7 +428,26 @@ fi
 
 # Globals
 TEST_SCRATCH_DIR=
+# Remote URL to best-effort delete in the EXIT trap; set once the test claims its
+# remote object tree so even failed runs clean up after themselves.
+REMOTE_CLEANUP_URL=
 readonly TAG="test_backup_bulkdump"
+# Optional object key prefix for the backup URL ("prefix" parameter).  Exercised by the
+# s3_backup_bulkdump_bulkload_prefix_tests ctest variant.  The value is normalized (leading
+# and trailing slashes stripped) the same way the container normalizes it, and a per-run
+# unique suffix is appended so concurrent runs against the same real bucket cannot delete
+# each other's objects during cleanup.
+_raw_key_prefix="${BACKUP_URL_KEY_PREFIX:-}"
+while [[ "${_raw_key_prefix}" == /* ]]; do _raw_key_prefix="${_raw_key_prefix#/}"; done
+while [[ "${_raw_key_prefix}" == */ ]]; do _raw_key_prefix="${_raw_key_prefix%/}"; done
+if [[ -n "${_raw_key_prefix}" ]]; then
+  # High-entropy per-run id: PIDs alone repeat across hosts/containers sharing one bucket.
+  _run_nonce="$(date -u +%Y%m%dt%H%M%S)-$$-$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  _raw_key_prefix="${_raw_key_prefix}/${_run_nonce}"
+  unset _run_nonce
+fi
+readonly BACKUP_URL_KEY_PREFIX="${_raw_key_prefix}"
+unset _raw_key_prefix
 
 # Setup common environment (USE_S3, KNOBS, TLS_CA_FILE, clears HTTP_PROXY/HTTPS_PROXY)
 setup_backup_test_environment 2
@@ -446,7 +483,9 @@ readonly scratch_dir
 ENCRYPTION_KEY_FILE=""
 if [[ "${USE_ENCRYPTION}" == "true" ]]; then
   log "Enabling encryption for backups"
-  ENCRYPTION_KEY_FILE="${scratch_dir}/test_encryption_key_file"
+  # Per-run unique name so concurrently running ctest variants cannot clobber each
+  # other's key while a restore still needs it.
+  ENCRYPTION_KEY_FILE="${scratch_dir}/test_encryption_key_file.$$"
   create_encryption_key_file "${ENCRYPTION_KEY_FILE}"
   log "Created encryption key file at ${ENCRYPTION_KEY_FILE}"
 else
@@ -465,8 +504,16 @@ setup_s3_environment "${build_dir}" "${scratch_dir}" "${temp_dir_prefix}"
 setup_fdb_cluster_with_backup "${source_dir}" "${build_dir}" "${TEST_SCRATCH_DIR}" 2 \
   "--knob_shard_encode_location_metadata=1" "--knob_enable_read_lock_on_range=1" "--knob_blobstore_encryption_type=aws:kms"
 
-# Run tests.
+# Run tests.  The prefixed variant uses its own container name so bucket-root state from
+# the non-prefixed variant cannot interfere when both run against the same real bucket.
 test="test_bulkdump_bulkload"
+if [[ -n "${BACKUP_URL_KEY_PREFIX}" ]]; then
+  test="test_bulkdump_bulkload_prefixed"
+fi
 url="blobstore://${host}/${url_path_prefix}/${test}?${query_str}"
+if [[ -n "${BACKUP_URL_KEY_PREFIX}" ]]; then
+  log "Using backup URL key prefix: ${BACKUP_URL_KEY_PREFIX}"
+  url="${url}&prefix=${BACKUP_URL_KEY_PREFIX}"
+fi
 test_bulkdump_bulkload "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}" "${ENCRYPTION_KEY_FILE}"
 log_test_result $? "test_bulkdump_bulkload"

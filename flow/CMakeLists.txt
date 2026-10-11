@@ -6,7 +6,6 @@ fdb_find_sources(FLOW_SRCS)
 list(REMOVE_ITEM FLOW_SRCS LinkTest.cpp)
 list(REMOVE_ITEM FLOW_SRCS TLSTest.cpp)
 list(REMOVE_ITEM FLOW_SRCS MkCertCli.cpp)
-list(REMOVE_ITEM FLOW_SRCS acac.cpp)
 list(REMOVE_ITEM FLOW_SRCS FlowTest.cpp)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
@@ -43,11 +42,8 @@ if(NOT Jinja2_FOUND)
     VENV_Python3_EXECUTABLE
     NAMES python3 python3.exe python.exe
     PATHS ${PROTOCOL_VERSION_VENV_DIR}/Scripts ${PROTOCOL_VERSION_VENV_DIR}/bin
-          REQUIRED
-    NO_DEFAULT_PATH NO_CACHE
+    REQUIRED NO_DEFAULT_PATH NO_CACHE
     DOC "Checking Python3 executable in virtual environment")
-  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m ensurepip
-                          COMMAND_ERROR_IS_FATAL ANY)
   execute_process(
     COMMAND
       "${VENV_Python3_EXECUTABLE}" -m pip install -r
@@ -101,7 +97,7 @@ add_flow_target(LINK_TEST NAME flowlinktest SRCS LinkTest.cpp)
 target_link_libraries(flowlinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>" stacktrace)
 
 add_flow_target(EXECUTABLE NAME flow_test SRCS FlowTest.cpp)
-set_target_properties(flow_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
+register_fdb_unit_tests(flow_test)
 target_link_libraries(flow_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>" fdbrpc)
 
 set(IS_ARM_MAC NO)
@@ -167,18 +163,7 @@ foreach(ft flow flow_sampling flowlinktest flow_test)
   target_link_libraries(${ft} PUBLIC std::coroutines)
 endforeach()
 
-if(OPEN_FOR_IDE)
-  # AcAC requires actor transpiler
-  add_library(acac OBJECT acac.cpp)
-else()
-  add_executable(acac acac.cpp)
-endif()
-target_link_libraries(acac PUBLIC flow boost_target_program_options)
-
 target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
-if(WIN32)
-  add_dependencies(flow_sampling_actors flow_actors)
-endif()
 
 if(OPEN_FOR_IDE)
   add_library(mkcert OBJECT MkCertCli.cpp)
@@ -256,7 +241,7 @@ if(WITH_SWIFT)
   target_compile_options(
     flow_swift
     PRIVATE
-      "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++20 -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml>"
+      "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++20 -Xfrontend -validate-tbd-against-ir=none -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml>"
   )
 
   # Ensure that C++ code in fdbserver can import Swift using a compatibility
@@ -273,8 +258,6 @@ if(WITH_SWIFT)
     FLAGS
     -Xcc
     -std=c++20
-    -Xcc
-    -DNO_INTELLISENSE
     -Xcc
     -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml
     # Important: This is needed to avoid including headers that depends on this
@@ -294,16 +277,12 @@ if(WITH_SWIFT)
     -Xcc
     -std=c++20
     -Xcc
-    -DNO_INTELLISENSE
-    -Xcc
     -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml)
 
-  add_dependencies(flow_swift_checked_continuation_header flow_actors
-                   boost_target ProtocolVersion)
+  add_dependencies(flow_swift_checked_continuation_header boost_target ProtocolVersion)
   add_dependencies(flow_swift_header flow_swift_checked_continuation_header)
   add_dependencies(flow_swift flow_swift_header)
 
-  add_dependencies(flow_swift flow_actors)
   add_dependencies(flow_swift boost_target)
   # TODO(swift): rdar://99107402 - this will only work once CMake 3.25 is
   # released: target_link_libraries(flow PRIVATE flow_swift)

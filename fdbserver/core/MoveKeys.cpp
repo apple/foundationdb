@@ -62,15 +62,52 @@ static bool updateFinishMoveKeysTransactionTooOldRetries(int errorCode, int maxR
 	return ++(*consecutiveRetries) > maxRetries;
 }
 
+// Per-chunk retry budget shared by the finishMove* loops.
+//
+// Both finishMoveKeys and finishMoveShards process one data move in KRM-sized
+// chunks, committing each chunk in its own transaction.
+// FINISH_MOVE_KEYS_MAX_RETRIES is meant to bound "this chunk is stuck", not
+// "this move is large", so finishing a chunk has to restore the full budget.
+// Without that reset the chunk count pollutes the counter: a move split into N
+// chunks that each hit a few benign conflicts drains a budget no individual
+// chunk was straining, and a late chunk then aborts the whole move on the first
+// concurrent reassignment it sees.
+class FinishMoveRetryBudget {
+	int attemptsSpent = 0;
+
+public:
+	// Failed attempts spent on the current chunk. Read-only on purpose: tracing
+	// and backoff consume this without being able to perturb the budget.
+	int attempts() const { return attemptsSpent; }
+
+	// Record a failed attempt at the current chunk. Returns true once this chunk
+	// has spent more attempts than `maxRetries` allows.
+	[[nodiscard]] bool recordRetry(int maxRetries) { return ++attemptsSpent > maxRetries; }
+
+	// Record a failed attempt at the current chunk without enforcing any cap.
+	// Used by the paths that deliberately retry indefinitely (see the comments
+	// there) but still want the count for backoff and tracing.
+	void recordRetryUncapped() { ++attemptsSpent; }
+
+	// The current chunk is finished — it committed, or it turned out to need no
+	// work. The next chunk starts with a full budget.
+	void chunkCompleted() { attemptsSpent = 0; }
+};
+
 // Shared retry tail used by the finishMove* post-wait branches that detect a
 // concurrent change (dest reassigned, data move deleted, phase changed):
-// bumps `retries`, throws finish_move_keys_too_many_retries once the cap is
-// exceeded, resets the transaction.
-static Future<Void> retryAfterPostWaitChange(int* retries, Transaction* tr) {
-	if (++(*retries) > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
+// spends one attempt from the current chunk's budget, throws
+// finish_move_keys_too_many_retries once it is exhausted, resets the transaction.
+static Future<Void> retryAfterPostWaitChange(FinishMoveRetryBudget* budget, Transaction* tr) {
+	if (budget->recordRetry(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES)) {
+		// Marked rare because all three call sites are rare: reaching them needs a concurrent
+		// reassignment to land inside the waitForShardReady window. Without this probe there is
+		// no way to tell whether the post-wait give-up path is exercised at all, which matters
+		// because FINISH_MOVE_KEYS_MAX_RETRIES is buggified down to 10 in simulation.
+		CODE_PROBE(true, "finishMove* giving up after a post-wait change", probe::decoration::rare);
 		throw finish_move_keys_too_many_retries();
 	}
-	co_await delay(finishMoveKeysBackoff(*retries));
+	co_await delay(finishMoveKeysBackoff(budget->attempts()));
 	tr->reset();
 	co_return;
 }
@@ -207,6 +244,7 @@ Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID
 	}
 	TraceEvent(SevDebug, "DataMoveDeleteCheckpoints", dataMoveId).detail("Checkpoints", describe(checkpointIds));
 	std::vector<Future<Optional<Value>>> checkpointEntries;
+	checkpointEntries.reserve(checkpointIds.size());
 	for (const UID& id : checkpointIds) {
 		checkpointEntries.push_back(tr->get(checkpointKeyFor(id)));
 	}
@@ -229,11 +267,21 @@ Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID
 }
 } // namespace
 
+DDEnabledState::DDEnabledState() : shardMetadataFormatIsNew_(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {}
+
 bool DDEnabledState::sameId(const UID& id) const {
 	return ddEnabledStatusUID == id;
 }
 bool DDEnabledState::isEnabled() const {
 	return stateValue == ENABLED;
+}
+
+bool DDEnabledState::shardEncodeLocationMetadata() const {
+	return shardMetadataFormatIsNew_;
+}
+
+void DDEnabledState::setShardEncodeLocationMetadata(bool isNewFormat) {
+	shardMetadataFormatIsNew_ = isNewFormat;
 }
 
 bool DDEnabledState::isBlobRestorePreparing() const {
@@ -512,11 +560,12 @@ Future<Void> auditLocationMetadataPreCheck(Database occ,
                                            KeyRange range,
                                            std::vector<UID> servers,
                                            std::string context,
-                                           UID dataMoveId) {
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+                                           UID dataMoveId,
+                                           const DDEnabledState* ddEnabledState) {
+	if (!ddEnabledState->shardEncodeLocationMetadata()) {
 		throw dd_config_changed();
 	}
-	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(ddEnabledState->shardEncodeLocationMetadata());
 
 	if (range.empty()) {
 		TraceEvent(SevWarn, "CheckLocationMetadataEmptyInputRange").detail("By", "PreCheck").detail("Range", range);
@@ -582,11 +631,15 @@ Future<Void> auditLocationMetadataPreCheck(Database occ,
 	}
 }
 
-Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, std::string context, UID dataMoveId) {
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+Future<Void> auditLocationMetadataPostCheck(Database occ,
+                                            KeyRange range,
+                                            std::string context,
+                                            UID dataMoveId,
+                                            const DDEnabledState* ddEnabledState) {
+	if (!ddEnabledState->shardEncodeLocationMetadata()) {
 		throw dd_config_changed();
 	}
-	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(ddEnabledState->shardEncodeLocationMetadata());
 
 	if (range.empty()) {
 		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "CheckLocationMetadataEmptyInputRange")
@@ -720,10 +773,10 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
                                         FlowLock* cleanUpDataMoveParallelismLock,
                                         UID dataMoveId,
                                         const DDEnabledState* ddEnabledState) {
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (!ddEnabledState->shardEncodeLocationMetadata()) {
 		throw dd_config_changed();
 	}
-	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(ddEnabledState->shardEncodeLocationMetadata());
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveBegin", dataMoveId).detail("Range", keys);
 	static auto* counters = makeCounters("/movekeys/cleanUpSingleShardDataMove");
 
@@ -751,7 +804,7 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 				throw operation_cancelled();
 			}
 			if (currentShards.empty()) {
-				if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				if (!ddEnabledState->shardEncodeLocationMetadata()) {
 					throw dd_config_changed();
 				}
 				ASSERT(!currentShards.empty());
@@ -779,7 +832,7 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 				std::vector<UID> servers(src.size() + dest.size());
 				std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 				co_await auditLocationMetadataPreCheck(
-				    occ, &tr, keys, servers, "cleanUpSingleShardDataMove_precheck", dataMoveId);
+				    occ, &tr, keys, servers, "cleanUpSingleShardDataMove_precheck", dataMoveId, ddEnabledState);
 			}
 
 			TraceEvent(SevInfo, "CleanUpSingleShardDataMove", dataMoveId)
@@ -808,7 +861,8 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 
 			// Post validate consistency of update of keyServers and serverKeys
 			if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-				co_await auditLocationMetadataPostCheck(occ, keys, "cleanUpSingleShardDataMove_postcheck", dataMoveId);
+				co_await auditLocationMetadataPostCheck(
+				    occ, keys, "cleanUpSingleShardDataMove_postcheck", dataMoveId, ddEnabledState);
 			}
 			break;
 		} catch (Error& e) {
@@ -827,12 +881,12 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveEnd", dataMoveId).detail("Range", keys);
 }
 
-Future<std::vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
-                                                  std::vector<StorageServerInterface> srcInterfs,
-                                                  std::vector<StorageServerInterface> destInterfs,
-                                                  Version version,
-                                                  int desiredHealthy,
-                                                  int maxServers) {
+AsyncResult<std::vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
+                                                       std::vector<StorageServerInterface> srcInterfs,
+                                                       std::vector<StorageServerInterface> destInterfs,
+                                                       Version version,
+                                                       int desiredHealthy,
+                                                       int maxServers) {
 	if (srcInterfs.size() >= maxServers) {
 		co_return std::vector<UID>();
 	}
@@ -884,6 +938,7 @@ Future<std::vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
 // Returns storage servers selected from 'candidates', who is serving a read-write copy of 'range'.
 Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector<UID> candidates, KeyRangeRef range) {
 	std::vector<Future<Optional<Value>>> serverListEntries;
+	serverListEntries.reserve(candidates.size());
 
 	for (const UID id : candidates) {
 		serverListEntries.push_back(tr->get(serverListKeyFor(id)));
@@ -892,6 +947,7 @@ Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector<UID> 
 	std::vector<Optional<Value>> serverListValues = co_await getAll(serverListEntries);
 
 	std::vector<StorageServerInterface> ssis;
+	ssis.reserve(serverListValues.size());
 	for (auto& v : serverListValues) {
 		ssis.push_back(decodeServerListValue(v.get()));
 	}
@@ -920,10 +976,10 @@ Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector<UID> 
 	co_return result;
 }
 
-Future<std::vector<std::vector<UID>>> additionalSources(RangeResult shards,
-                                                        Reference<ReadYourWritesTransaction> tr,
-                                                        int desiredHealthy,
-                                                        int maxServers) {
+AsyncResult<std::vector<std::vector<UID>>> additionalSources(RangeResult shards,
+                                                             Reference<ReadYourWritesTransaction> tr,
+                                                             int desiredHealthy,
+                                                             int maxServers) {
 	RangeResult UIDtoTagMap = co_await tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 	std::vector<Future<Optional<Value>>> serverListEntries;
@@ -957,7 +1013,7 @@ Future<std::vector<std::vector<UID>>> additionalSources(RangeResult shards,
 		ssiMap[ssi.id()] = ssi;
 	}
 
-	std::vector<Future<std::vector<UID>>> allChecks;
+	std::vector<AsyncResult<std::vector<UID>>> allChecks;
 	for (int i = 0; i < shards.size() - 1; ++i) {
 		KeyRangeRef rangeIntersectKeys(shards[i].key, shards[i + 1].key);
 		std::vector<UID> src;
@@ -982,7 +1038,7 @@ Future<std::vector<std::vector<UID>>> additionalSources(RangeResult shards,
 		    rangeIntersectKeys, srcInterfs, destInterfs, tr->getReadVersion().get(), desiredHealthy, maxServers));
 	}
 
-	std::vector<std::vector<UID>> result = co_await getAll(allChecks);
+	std::vector<std::vector<UID>> result = co_await getAllAsync(std::move(allChecks));
 	co_return result;
 }
 
@@ -1385,6 +1441,18 @@ static bool destUnchanged(const RangeResult& keyServers,
                           const RangeResult& uidToTagMap,
                           std::vector<UID> expectedDest,
                           Optional<UID> expectedDataMoveId) {
+	// Force the post-wait dest-changed branch in simulation. Buggifying
+	// FINISH_MOVE_KEYS_MAX_RETRIES cannot reach it: taking that branch requires a concurrent
+	// reassignment to land inside the waitForShardReady window, which no knob makes more likely
+	// (a 100k campaign with the cap buggified to 10 left all four post-wait branches at zero
+	// hits). Returning false here is a branch the callers already handle -- they retry the whole
+	// iteration -- so it is safe to inject. Deliberately low probability: every hit costs a
+	// re-read plus finishMoveKeysBackoff() before the iteration is retried.
+	if (buggify(0.01)) {
+		CODE_PROBE(true, "finishMove* injecting a post-wait dest change");
+		return false;
+	}
+
 	std::sort(expectedDest.begin(), expectedDest.end());
 	for (int i = 0; i + 1 < keyServers.size(); ++i) {
 		std::vector<UID> checkSrc, checkDest;
@@ -1703,7 +1771,7 @@ static Future<bool> reverifyKeysDestAndCommit(Transaction* tr,
                                               std::set<UID> const& allServers,
                                               KeyRange const& keys,
                                               UID relocationIntervalId,
-                                              int* retries,
+                                              FinishMoveRetryBudget* retryBudget,
                                               TxnCounters* counters) {
 	tr->trState->taskID = TaskPriority::MoveKeys;
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1751,7 +1819,7 @@ static Future<bool> reverifyKeysDestAndCommit(Transaction* tr,
 		    .detail("KeyBegin", keys.begin)
 		    .detail("KeyEnd", keys.end)
 		    .detail("OrigDest", describe(dest));
-		co_await retryAfterPostWaitChange(retries, tr);
+		co_await retryAfterPostWaitChange(retryBudget, tr);
 		co_return false;
 	}
 
@@ -1800,7 +1868,7 @@ static Future<Void> finishMoveKeys(Database occ,
 	static auto* counters = makeCounters("/movekeys/finishMoveKeys");
 	Key begin = keys.begin;
 	Key endKey;
-	int retries = 0;
+	FinishMoveRetryBudget retryBudget;
 	// Transaction 2 can hit benign not_committed conflicts while adjacent
 	// finishers update KRM ranges. Only consecutive transaction_too_old
 	// failures should exhaust the bailout intended for a stuck TTO loop.
@@ -1861,6 +1929,9 @@ static Future<Void> finishMoveKeys(Database occ,
 					                                                                 endKey);
 					if (!decoded.present()) {
 						begin = endKey;
+						// This chunk needed no work, so it is finished: the next one
+						// starts with a full budget.
+						retryBudget.chunkCompleted();
 						consecutiveTransactionTooOldRetries = 0;
 						break;
 					}
@@ -1902,7 +1973,7 @@ static Future<Void> finishMoveKeys(Database occ,
 						                                                    decoded->allServers,
 						                                                    keys,
 						                                                    relocationIntervalId,
-						                                                    &retries,
+						                                                    &retryBudget,
 						                                                    counters);
 						if (!committed) {
 							// dest changed during wait — retry the inner loop
@@ -1910,25 +1981,24 @@ static Future<Void> finishMoveKeys(Database occ,
 							continue;
 						}
 						begin = endKey;
-						retries = 0;
+						retryBudget.chunkCompleted();
 						consecutiveTransactionTooOldRetries = 0;
 						break;
 					}
 					// This leads to a count of transactions starting that exceeds the sum of
 					// committed or aborted, but this is intentional here.
 					consecutiveTransactionTooOldRetries = 0;
-					retries++;
-					if (retries > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
+					if (retryBudget.recordRetry(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES)) {
 						CODE_PROBE(true, "finishMoveKeys giving up due to timeout on dest servers");
 						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysDestNotReady", relocationIntervalId)
 						    .detail("KeyBegin", keys.begin)
 						    .detail("KeyEnd", keys.end)
-						    .detail("Retries", retries)
+						    .detail("Retries", retryBudget.attempts())
 						    .detail("ReadyCount", count)
 						    .detail("DestCount", decoded->dest.size());
 						throw finish_move_keys_too_many_retries();
 					}
-					co_await delay(finishMoveKeysBackoff(retries));
+					co_await delay(finishMoveKeysBackoff(retryBudget.attempts()));
 					tr.reset();
 					continue;
 				} catch (Error& error) {
@@ -1938,18 +2008,22 @@ static Future<Void> finishMoveKeys(Database occ,
 				if (err.code() == error_code_actor_cancelled)
 					throw err;
 				co_await tr.onError(err);
-				retries++;
+				// Uncapped: the give-up in this handler is driven by
+				// consecutiveTransactionTooOldRetries, not by the chunk budget. The
+				// budget is still spent so that backoff and tracing see the true
+				// attempt count for this chunk.
+				retryBudget.recordRetryUncapped();
 				bool tooManyConsecutiveTransactionTooOldRetries = updateFinishMoveKeysTransactionTooOldRetries(
 				    err.code(), SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES, &consecutiveTransactionTooOldRetries);
 				// tr.onError delays are short for transaction_too_old. With 15
 				// FlowLock slots all retrying, this creates a retry storm. Add
 				// additional exponential backoff capped at 5s.
 				if (err.code() == error_code_transaction_too_old) {
-					double backoff = finishMoveKeysBackoff(retries);
+					double backoff = finishMoveKeysBackoff(retryBudget.attempts());
 					CODE_PROBE(true, "finishMoveKeys transaction_too_old backoff");
 					TraceEvent("FinishMoveKeysBackoff", relocationIntervalId)
 					    .suppressFor(1.0)
-					    .detail("Retries", retries)
+					    .detail("Retries", retryBudget.attempts())
 					    .detail("TransactionTooOldRetries", consecutiveTransactionTooOldRetries)
 					    .detail("BackoffSeconds", backoff);
 					if (tooManyConsecutiveTransactionTooOldRetries) {
@@ -1958,14 +2032,14 @@ static Future<Void> finishMoveKeys(Database occ,
 						    .error(err)
 						    .detail("KeyBegin", keys.begin)
 						    .detail("KeyEnd", keys.end)
-						    .detail("Retries", retries)
+						    .detail("Retries", retryBudget.attempts())
 						    .detail("TransactionTooOldRetries", consecutiveTransactionTooOldRetries);
 						throw finish_move_keys_too_many_retries();
 					}
 					co_await delay(backoff);
 				}
-				if (retries % 10 == 0) {
-					TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
+				if (retryBudget.attempts() % 10 == 0) {
+					TraceEvent(retryBudget.attempts() == 20 ? SevWarnAlways : SevWarn,
 					           "RelocateShard_FinishMoveKeysRetrying",
 					           relocationIntervalId)
 					    .error(err)
@@ -2164,8 +2238,13 @@ static Future<Void> startMoveShards(Database occ,
 						if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 							std::vector<UID> servers(src.size() + dest.size());
 							std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-							co_await auditLocationMetadataPreCheck(
-							    occ, &tr, rangeIntersectKeys, servers, "startMoveShards_precheck", dataMoveId);
+							co_await auditLocationMetadataPreCheck(occ,
+							                                       &tr,
+							                                       rangeIntersectKeys,
+							                                       servers,
+							                                       "startMoveShards_precheck",
+							                                       dataMoveId,
+							                                       ddEnabledState);
 						}
 
 						if (destId.isValid()) {
@@ -2335,7 +2414,8 @@ static Future<Void> startMoveShards(Database occ,
 				if (currentKeys.end == keys.end) {
 					// Post validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-						co_await auditLocationMetadataPostCheck(occ, keys, "startMoveShards_postcheck", dataMoveId);
+						co_await auditLocationMetadataPostCheck(
+						    occ, keys, "startMoveShards_postcheck", dataMoveId, ddEnabledState);
 					}
 					break;
 				}
@@ -2456,7 +2536,8 @@ static Future<DecodedShardsKeyServers> decodeAndPreCheckShards(Database occ,
                                                                DataMoveMetaData const& dataMove,
                                                                UID relocationIntervalId,
                                                                Severity sevDm,
-                                                               bool* cancelDataMove) {
+                                                               bool* cancelDataMove,
+                                                               const DDEnabledState* ddEnabledState) {
 	std::vector<UID> completeSrc;
 	std::unordered_set<UID> allServers;
 
@@ -2490,7 +2571,7 @@ static Future<DecodedShardsKeyServers> decodeAndPreCheckShards(Database occ,
 			std::vector<UID> servers(src.size() + dest.size());
 			std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 			co_await auditLocationMetadataPreCheck(
-			    occ, tr, currentRange, servers, "finishMoveShards_precheck", dataMoveId);
+			    occ, tr, currentRange, servers, "finishMoveShards_precheck", dataMoveId, ddEnabledState);
 		}
 
 		std::sort(dest.begin(), dest.end());
@@ -2667,7 +2748,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
                                                             DataMoveMetaData* postWaitDataMove_out,
                                                             UID relocationIntervalId,
                                                             Severity sevDm,
-                                                            int* retries,
+                                                            FinishMoveRetryBudget* retryBudget,
                                                             bool* runPreCheck,
                                                             bool* cancelDataMove,
                                                             TxnCounters* counters) {
@@ -2688,7 +2769,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
 		TraceEvent(SevWarn, "FinishMoveShardsDataMoveDeletedAfterWait", relocationIntervalId)
 		    .detail("DataMoveID", dataMoveId);
 		*runPreCheck = false;
-		co_await retryAfterPostWaitChange(retries, tr);
+		co_await retryAfterPostWaitChange(retryBudget, tr);
 		co_return ReverifyShardsResult::RetryLoop;
 	}
 	if (reread.dataMove.get().getPhase() != DataMoveMetaData::Running) {
@@ -2697,7 +2778,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Phase", static_cast<int>(reread.dataMove.get().getPhase()));
 		*runPreCheck = false;
-		co_await retryAfterPostWaitChange(retries, tr);
+		co_await retryAfterPostWaitChange(retryBudget, tr);
 		co_return ReverifyShardsResult::RetryLoop;
 	}
 	ASSERT(!reread.keyServers.empty());
@@ -2729,7 +2810,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Range", *range);
 		*runPreCheck = false;
-		co_await retryAfterPostWaitChange(retries, tr);
+		co_await retryAfterPostWaitChange(retryBudget, tr);
 		co_return ReverifyShardsResult::RetryLoop;
 	}
 
@@ -2839,7 +2920,7 @@ static Future<Void> finishMoveShards(Database occ,
 	KeyRange keys = targetRanges[0];
 	Future<Void> warningLogger = logWarningAfter("FinishMoveShardsTooLong", 600, destinationTeam);
 	static auto* counters = makeCounters("/movekeys/finishMoveShards");
-	int retries = 0;
+	FinishMoveRetryBudget retryBudget;
 	DataMoveMetaData dataMove;
 	bool cancelDataMove = false;
 	Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
@@ -2948,7 +3029,8 @@ static Future<Void> finishMoveShards(Database occ,
 				                                                                   dataMove,
 				                                                                   relocationIntervalId,
 				                                                                   sevDm,
-				                                                                   &cancelDataMove);
+				                                                                   &cancelDataMove,
+				                                                                   ddEnabledState);
 
 				// Read the destination SSes' interfaces and record the read
 				// version waitForShardReady will need after we drop the txn.
@@ -3017,20 +3099,29 @@ static Future<Void> finishMoveShards(Database occ,
 					                                                            &postWaitDataMove,
 					                                                            relocationIntervalId,
 					                                                            sevDm,
-					                                                            &retries,
+					                                                            &retryBudget,
 					                                                            &runPreCheck,
 					                                                            &cancelDataMove,
 					                                                            counters);
 					if (res == ReverifyShardsResult::RetryLoop) {
 						continue;
 					}
+					// This chunk committed, so it is finished and the next one starts
+					// with a full budget (mirroring finishMoveKeys, which resets on the
+					// same event). Without this the chunk count of a large move drains
+					// a budget no individual chunk was straining; since the budget is
+					// only consulted by the post-wait-change branches, the symptom
+					// would be a late chunk aborting the whole move on the first
+					// concurrent reassignment it sees.
+					retryBudget.chunkCompleted();
 					if (res == ReverifyShardsResult::FullyCommitted) {
 						// Post validate consistency of update of keyServers and serverKeys
 						if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 							co_await auditLocationMetadataPostCheck(occ,
 							                                        postWaitDataMove.ranges.front(),
 							                                        "finishMoveShards_postcheck",
-							                                        relocationIntervalId);
+							                                        relocationIntervalId,
+							                                        ddEnabledState);
 						}
 						break;
 					}
@@ -3050,17 +3141,17 @@ static Future<Void> finishMoveShards(Database occ,
 					// DataMoveDeletedAfterWait / PhaseChangedAfterWait)
 					// still use retryAfterPostWaitChange because they detect
 					// real concurrent reassignments, not slowness.
-					++retries;
-					if (retries % 10 == 0) {
+					retryBudget.recordRetryUncapped();
+					if (retryBudget.attempts() % 10 == 0) {
 						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveShardsDestNotReady", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("Range", range)
-						    .detail("Retries", retries)
+						    .detail("Retries", retryBudget.attempts())
 						    .detail("ReadyCount", readyCount)
 						    .detail("DestCount", newDestinationsCount);
 					}
 					runPreCheck = false;
-					co_await delay(finishMoveKeysBackoff(retries));
+					co_await delay(finishMoveKeysBackoff(retryBudget.attempts()));
 					tr.reset();
 					continue;
 				}
@@ -3075,16 +3166,16 @@ static Future<Void> finishMoveShards(Database occ,
 				throw location_metadata_corruption();
 			} else if (err.code() == error_code_retry) {
 				runPreCheck = false;
-				++retries;
+				retryBudget.recordRetryUncapped();
 				co_await delay(1);
 			} else if (err.code() == error_code_actor_cancelled) {
 				throw err;
 			} else {
 				runPreCheck = false;
 				co_await tr.onError(err);
-				retries++;
-				if (retries % 10 == 0) {
-					TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
+				retryBudget.recordRetryUncapped();
+				if (retryBudget.attempts() % 10 == 0) {
+					TraceEvent(retryBudget.attempts() == 20 ? SevWarnAlways : SevWarn,
 					           "RelocateShard_FinishMoveShardsRetrying",
 					           relocationIntervalId)
 					    .error(err)
@@ -3155,6 +3246,7 @@ Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInter
 
 			std::vector<Future<Optional<Value>>> localityExclusions;
 			std::map<std::string, std::string> localityData = server.locality.getAllData();
+			localityExclusions.reserve(localityData.size());
 			for (const auto& l : localityData) {
 				localityExclusions.push_back(tr->get(StringRef(encodeExcludedLocalityKey(
 				    LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" + l.second))));
@@ -3568,13 +3660,14 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 						                                  DataMovementReason::ASSIGN_EMPTY_RANGE);
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
-						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+						if (ddEnabledState->shardEncodeLocationMetadata()) {
 							tr.set(keyServersKey(it.key), keyServersValue(teamForDroppedRange, {}, shardId, UID()));
 						} else {
 							tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange));
 						}
 
 						std::vector<Future<Void>> actors;
+						actors.reserve(dest.size());
 
 						// Unassign the shard from the dest servers.
 						for (const UID& id : dest) {
@@ -3587,7 +3680,7 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 						// Note, there could be data loss.
 						std::vector<Future<Void>> emptyRangeActors;
 						for (const UID& id : teamForDroppedRange) {
-							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (ddEnabledState->shardEncodeLocationMetadata()) {
 								emptyRangeActors.push_back(krmSetRangeCoalescing(
 								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysValue(shardId)));
 							} else {
@@ -3610,7 +3703,13 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 						    .detail("Key", it.key)
 						    .detail("ValueSrc", describe(src))
 						    .detail("ValueDest", describe(dest));
-						if (srcId != anonymousShardId) {
+						// Only preserve new-format (shardId-encoded) keyServers when the
+						// cluster is writing new format. During a rollback (target
+						// original) this failed-server cleanup must not re-introduce a
+						// new-format entry behind the DD-init rewrite — write old
+						// (tag-based) format. Mirrors the gated drop-all-replicas branch
+						// above.
+						if (srcId != anonymousShardId && ddEnabledState->shardEncodeLocationMetadata()) {
 							if (dest.empty())
 								destId = UID();
 							tr.set(keyServersKey(it.key), keyServersValue(src, dest, srcId, destId));
@@ -3804,8 +3903,13 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 						std::vector<UID> servers(src.size() + dest.size());
 						std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-						co_await auditLocationMetadataPreCheck(
-						    occ, &tr, rangeIntersectKeys, servers, "cleanUpDataMoveCore_precheck", dataMoveId);
+						co_await auditLocationMetadataPreCheck(occ,
+						                                       &tr,
+						                                       rangeIntersectKeys,
+						                                       servers,
+						                                       "cleanUpDataMoveCore_precheck",
+						                                       dataMoveId,
+						                                       ddEnabledState);
 					}
 
 					for (const auto& uid : src) {
@@ -3840,11 +3944,15 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 						oldDests.insert(uid);
 					}
 
-					krmSetPreviouslyEmptyRange(&tr,
-					                           keyServersPrefix,
-					                           rangeIntersectKeys,
-					                           keyServersValue(src, {}, srcId, UID()),
-					                           currentShards[i + 1].value);
+					// During a rollback (target original) this physical-datamove
+					// cleanup must not re-introduce a new-format (shardId-encoded)
+					// keyServers entry behind the DD-init rewrite — write old
+					// (tag-based) format.
+					Value cleanupKsValue = ddEnabledState->shardEncodeLocationMetadata()
+					                           ? keyServersValue(src, {}, srcId, UID())
+					                           : keyServersValue(UIDtoTagMap, src, {});
+					krmSetPreviouslyEmptyRange(
+					    &tr, keyServersPrefix, rangeIntersectKeys, cleanupKsValue, currentShards[i + 1].value);
 				}
 
 				if (range.end == dataMove.ranges.front().end) {
@@ -3864,6 +3972,7 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 				}
 
 				std::vector<Future<Void>> actors;
+				actors.reserve(oldDests.size());
 				for (const auto& uid : oldDests) {
 					actors.push_back(unassignServerKeys(&tr, uid, range, physicalShardMap[uid], dataMoveId));
 				}
@@ -3880,7 +3989,7 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 					// Post validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 						co_await auditLocationMetadataPostCheck(
-						    occ, dataMove.ranges.front(), "cleanUpDataMoveCore_postcheck", dataMoveId);
+						    occ, dataMove.ranges.front(), "cleanUpDataMoveCore_postcheck", dataMoveId, ddEnabledState);
 					}
 					break;
 				}
@@ -3929,7 +4038,7 @@ Future<Void> cleanUpDataMove(Database occ,
 				                                                             cleanUpDataMoveParallelismLock,
 				                                                             keys,
 				                                                             ddEnabledState,
-				                                                             /*backgroundDelaySeconds=*/10));
+				                                                             /*delaySeconds=*/10));
 			} else {
 				TraceEvent(SevWarn, "CleanUpDataMoveNotFound", dataMoveId).errorUnsuppressed(e);
 			}
@@ -3943,9 +4052,10 @@ Future<Void> cleanUpDataMove(Database occ,
 Future<Void> rawStartMovement(Database occ,
                               const MoveKeysParams& params,
                               std::map<UID, StorageServerInterface>& tssMapping) {
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		// A relocation launched before the knob changed can still carry the old-path sentinel.
-		// Never persist it as a shard-encoded data move; restart DD with the new configuration.
+	if (params.ddEnabledState->shardEncodeLocationMetadata()) {
+		// A relocation launched before the target format changed can still carry the old-path
+		// sentinel. Never persist it as a shard-encoded data move; restart DD with the new
+		// configuration.
 		if (!params.ranges.present() || params.dataMoveId == anonymousShardId) {
 			throw dd_config_changed();
 		}
@@ -3978,7 +4088,7 @@ Future<Void> rawStartMovement(Database occ,
 Future<Void> rawCheckFetchingState(const Database& cx,
                                    const MoveKeysParams& params,
                                    const std::map<UID, StorageServerInterface>& tssMapping) {
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (params.ddEnabledState->shardEncodeLocationMetadata()) {
 		if (!params.ranges.present()) {
 			throw dd_config_changed();
 		}
@@ -4006,7 +4116,7 @@ Future<Void> rawCheckFetchingState(const Database& cx,
 Future<Void> rawFinishMovement(Database occ,
                                const MoveKeysParams& params,
                                const std::map<UID, StorageServerInterface>& tssMapping) {
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (params.ddEnabledState->shardEncodeLocationMetadata()) {
 		if (!params.ranges.present()) {
 			throw dd_config_changed();
 		}
@@ -4034,6 +4144,18 @@ Future<Void> rawFinishMovement(Database occ,
 	                      params.relocationIntervalId,
 	                      tssMapping,
 	                      params.ddEnabledState);
+}
+
+bool retryableDataMoveError(const Error& e) {
+	switch (e.code()) {
+	case error_code_finish_move_keys_too_many_retries:
+	case error_code_start_move_keys_too_many_retries:
+	case error_code_data_move_cancelled:
+	case error_code_data_move_dest_team_not_found:
+		return true;
+	default:
+		return false;
+	}
 }
 
 Future<Void> moveKeys(Database occ, MoveKeysParams params) {
@@ -4113,6 +4235,43 @@ TEST_CASE("/fdbserver/MoveKeys/finishMoveKeysBackoff") {
 
 	// Verify the retry limit knob exists and is positive
 	ASSERT(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES > 0);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MoveKeys/finishMoveRetryBudgetIsPerChunk") {
+	constexpr int maxRetries = 5;
+
+	// A chunk may spend maxRetries attempts before the budget is exhausted; the
+	// next attempt is the one that reports exhaustion.
+	FinishMoveRetryBudget budget;
+	for (int i = 0; i < maxRetries; ++i) {
+		ASSERT(!budget.recordRetry(maxRetries));
+		ASSERT(budget.attempts() == i + 1);
+	}
+	ASSERT(budget.recordRetry(maxRetries));
+
+	// The budget bounds "this chunk is stuck", not "this move is large": a move
+	// split into many chunks that each need a few retries must never exhaust it,
+	// even though the total attempt count far exceeds maxRetries.
+	budget = FinishMoveRetryBudget();
+	for (int chunk = 0; chunk < 10; ++chunk) {
+		for (int i = 0; i < maxRetries; ++i) {
+			ASSERT(!budget.recordRetry(maxRetries));
+		}
+		budget.chunkCompleted();
+		ASSERT(budget.attempts() == 0);
+	}
+
+	// The uncapped variant still advances the count (callers use it for backoff
+	// and tracing) and is still cleared by finishing a chunk.
+	budget = FinishMoveRetryBudget();
+	for (int i = 0; i < maxRetries * 3; ++i) {
+		budget.recordRetryUncapped();
+	}
+	ASSERT(budget.attempts() == maxRetries * 3);
+	budget.chunkCompleted();
+	ASSERT(budget.attempts() == 0);
 
 	return Void();
 }

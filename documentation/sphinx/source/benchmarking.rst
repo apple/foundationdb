@@ -52,7 +52,7 @@ Here's the final strategy for testing writes against FoundationDB running on a s
 
     Result: 46,000 writes/second
 
-This is 50x faster than our first simple loop! We have achieved this without sacrificing any safety, and still only using a single core. This shows how efficiently FoundationDB handles real-world concurrent workloads—in this case 100 parallel clients. A lot of this can be attributed to the :doc:`Flow programming language <flow>` that we developed specifically for these use cases.
+This is 50x faster than our first simple loop! We have achieved this without sacrificing any safety, and still only using a single core. This shows how efficiently FoundationDB handles real-world concurrent workloads—in this case 100 parallel clients. A lot of this can be attributed to the :doc:`Flow asynchronous runtime <flow>` that we developed specifically for these use cases.
 
 Single-core Read Test
 =====================

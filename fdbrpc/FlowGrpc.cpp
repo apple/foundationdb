@@ -1,5 +1,5 @@
 /**
- * gRPC.actor.cpp
+ * FlowGrpc.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -68,7 +68,7 @@ Future<Void> GrpcServer::run() {
 		co_await run_actor_;
 	} catch (Error& err) {
 		if (err.code() != error_code_operation_cancelled) {
-			TraceEvent(SevError, "GrpcServerRunError").detail("Endpoint", address_).detail("Error", err.name());
+			TraceEvent(SevError, "GrpcServerRunError").error(err).detail("Endpoint", address_);
 			throw;
 		}
 	}

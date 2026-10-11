@@ -21,7 +21,7 @@
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
@@ -116,7 +116,7 @@ struct ValidateStorage : TestWorkload {
 				                                     auditRange,
 				                                     type,
 				                                     storageEngine,
-				                                     /*timeoutSecond=*/300);
+				                                     /*timeoutSeconds=*/300);
 				auditId = auditId_;
 				TraceEvent("TestAuditStorageTriggered")
 				    .detail("Context", context)
@@ -153,7 +153,8 @@ struct ValidateStorage : TestWorkload {
 			try {
 				AuditStorageState auditState_ = co_await getAuditState(cx, type, auditId);
 				auditState = auditState_;
-				if (auditState.getPhase() == AuditPhase::Complete) {
+				if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Error ||
+				    auditState.getPhase() == AuditPhase::Failed) {
 					break;
 				} else if (auditState.getPhase() == AuditPhase::Running) {
 					TraceEvent("TestAuditStorageWait")
@@ -162,10 +163,6 @@ struct ValidateStorage : TestWorkload {
 					    .detail("AuditType", type);
 					co_await delay(30);
 					continue;
-				} else if (auditState.getPhase() == AuditPhase::Error) {
-					break;
-				} else if (auditState.getPhase() == AuditPhase::Failed) {
-					break;
 				} else {
 					UNREACHABLE();
 				}
@@ -257,7 +254,7 @@ struct ValidateStorage : TestWorkload {
 				UID auditId_ = co_await cancelAuditStorage(cx->getConnectionRecord(),
 				                                           type,
 				                                           auditId,
-				                                           /*timeoutSecond=*/300);
+				                                           /*timeoutSeconds=*/300);
 				ASSERT(auditId == auditId_);
 				TraceEvent("TestAuditStorageWaitCancelAuditStorageUntilComplete")
 				    .detail("AuditID", auditId)

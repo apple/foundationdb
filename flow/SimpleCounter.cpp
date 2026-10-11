@@ -144,6 +144,7 @@ TEST_CASE("/flow/simplecounter/int64") {
 	};
 
 	std::vector<std::thread> threads;
+	threads.reserve(10);
 	for (int i = 0; i < 10; i++) {
 		threads.emplace_back(inclots);
 	}
@@ -184,6 +185,7 @@ TEST_CASE("/flow/simplecounter/double") {
 	};
 
 	std::vector<std::thread> threads;
+	threads.reserve(10);
 	for (int i = 0; i < 10; i++) {
 		threads.emplace_back(double_inclots);
 	}

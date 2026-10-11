@@ -55,6 +55,7 @@ if(OPEN_FOR_IDE)
 else()
   add_library(fdb_c SHARED ${FDB_C_SRCS} ${fdb_c_apiversion_file} ${asm_file})
   strip_debug_symbols(fdb_c)
+  add_custom_target(stripped_fdb_c ALL DEPENDS strip_only_fdb_c)
 endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 add_dependencies(fdbclient fdb_c_options)
@@ -237,9 +238,7 @@ if(NOT WIN32)
     target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
     if(NOT OPEN_FOR_IDE)
       strip_debug_symbols(mako)
-      if(NOT GENERATE_DEBUG_PACKAGES)
-        add_custom_target(prepare_mako_install ALL DEPENDS strip_only_mako)
-      endif()
+      add_custom_target(prepare_mako_install ALL DEPENDS strip_only_mako)
     endif()
   endif()
 
@@ -272,6 +271,20 @@ if(NOT WIN32)
     add_fdbclient_test(
       NAME fdb_c_setup_tests
       COMMAND $<TARGET_FILE:fdb_c_setup_tests>)
+    if(NOT USE_SANITIZER)
+      if(APPLE)
+        set(FDB_BLOB_GRANULE_LIBRARY_PATH_ENV "DYLD_LIBRARY_PATH")
+      else()
+        set(FDB_BLOB_GRANULE_LIBRARY_PATH_ENV "LD_LIBRARY_PATH")
+      endif()
+      add_test(NAME fdb_c_blob_granule_fatal_exports
+        COMMAND ${CMAKE_COMMAND} -E env
+        "${FDB_BLOB_GRANULE_LIBRARY_PATH_ENV}=${CMAKE_BINARY_DIR}/lib:$ENV{${FDB_BLOB_GRANULE_LIBRARY_PATH_ENV}}"
+        $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_blob_granule_fatal_exports.py
+        --library $<TARGET_FILE:fdb_c>
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+      set_tests_properties(fdb_c_blob_granule_fatal_exports PROPERTIES TIMEOUT 120)
+    endif()
     add_fdbclient_test(
       NAME fdb_c_unit_tests
       COMMAND $<TARGET_FILE:fdb_c_unit_tests>
@@ -303,11 +316,21 @@ if(NOT WIN32)
       COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
       @CLUSTER_FILE@
     )
+    # Legacy GRV futures ignore transaction timeouts; only the commit regressions apply.
+    add_unavailable_fdbclient_test(
+      NAME disconnected_timeout_legacy_api_unit_tests
+      COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
+      @CLUSTER_FILE@
+      --api-version=100
+      --test-case=500ms_commit_timeout_with_client_buggify,commit_cancel_with_client_buggify
+    )
+    # A disconnected multi-version client has no native transaction to cancel.
     add_unavailable_fdbclient_test(
       NAME disconnected_timeout_external_client_unit_tests
       COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
       @CLUSTER_FILE@
       ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+      --test-case-exclude=commit_cancel_with_client_buggify
     )
 
     file(GLOB API_TEST_FILES "${CMAKE_CURRENT_SOURCE_DIR}/test/apitester/tests/*.toml")
@@ -344,15 +367,17 @@ if(NOT WIN32)
       )
     endforeach()
 
-    add_python_venv_test(NAME fdb_c_upgrade_to_future_version
-      COMMAND python -m fdb_test_runner.upgrade_test
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-      --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
-      --process-number 3
-      )
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      add_python_venv_test(NAME fdb_c_upgrade_to_future_version
+        COMMAND python -m fdb_test_runner.upgrade_test
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
+        --process-number 3
+        )
+    endif()
 
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
       add_python_venv_test(NAME fdb_c_client_config_tests
         COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_client_config_tests.py
         --build-dir ${CMAKE_BINARY_DIR}

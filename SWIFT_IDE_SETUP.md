@@ -45,7 +45,7 @@ export FOUNDATIONDB_LLVM_TOOLCHAIN_ROOT=~/Downloads/clang+llvm-15.0.7-arm64-appl
 ```
 
 
-For actor compiler: Download and install mono:  [https://www.mono-project.com](https://www.mono-project.com/), e.g.
+For the C# build tools, including option generation, install [Mono](https://www.mono-project.com/), e.g.
 
 ```bash
 brew install mono
@@ -147,7 +147,5 @@ Setup:
 
 ## Known issues
 
-* jump-to-definition fails to open actor header files.
 * jump-to-definition from C++ to Swift does not work.
 * Code completion for semantic responses in Swift can be slow sometimes especially in files that import both FDBServer and FDBClient
-

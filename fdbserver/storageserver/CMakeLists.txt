@@ -16,4 +16,4 @@ target_include_directories(fdbserver_storageserver
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(fdbserver_storageserver PRIVATE fdbserver_core fdbserver_kvstore fdbserver_logsystem)
+target_link_libraries(fdbserver_storageserver PRIVATE fdbserver_core fdbserver_checkpoint fdbserver_kvstore fdbserver_logsystem)
