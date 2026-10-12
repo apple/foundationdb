@@ -19,6 +19,7 @@
  */
 
 #include <algorithm>
+#include <iterator>
 
 #include "fdbserver/core/BackupProgress.h"
 
@@ -112,10 +113,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 			}
 			updateTagVersions(&tagVersions, &tags, progressIt->second, info.epochEnd, adjustedBeginVersion, epoch);
 		} else {
-			auto rit = std::find_if(
-			    progress.rbegin(),
-			    progress.rend(),
-			    [epoch = epoch](const std::pair<LogEpoch, std::map<Tag, Version>>& p) { return p.first < epoch; });
+			auto rit = std::make_reverse_iterator(progressIt);
 			while (!(rit == progress.rend())) {
 				// A partial recovery can result in empty epoch that copies previous
 				// epoch's version range. In this case, we should check previous
