@@ -1186,83 +1186,19 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						TraceEvent("BS3BCW_ValidationStep4_AuditStarting")
 						    .detail("Comparing", "BulkLoad-restored (normalKeys) vs traditional-restored (prefix)");
 
-						Reference<IClusterConnectionRecord> clusterFile = cx->getConnectionRecord();
-						UID auditId;
-						int auditRetryCount = 0;
-						int maxAuditRetries = 5;
-
-						Error auditError;
-						while (true) {
-							Error err;
-							try {
-								UID scheduleResult = co_await timeoutError(auditStorage(clusterFile,
-								                                                        normalKeys,
-								                                                        AuditType::ValidateRestore,
-								                                                        KeyValueStoreType::END,
-								                                                        300.0),
-								                                           60.0);
-								auditId = scheduleResult;
-								break;
-							} catch (Error& e) {
-								err = e;
-							}
-							auditError = err;
-							if (auditError.code() == error_code_timed_out ||
-							    auditError.code() == error_code_audit_storage_failed) {
-								auditRetryCount++;
-								if (auditRetryCount < maxAuditRetries) {
-									TraceEvent(SevWarn, "BS3BCW_ValidationAuditRetry")
-									    .error(auditError)
-									    .detail("RetryCount", auditRetryCount);
-									co_await delay(2.0 * auditRetryCount);
-									continue;
-								}
-							}
-							throw auditError;
-						}
-
-						TraceEvent("BS3BCW_ValidationAuditScheduled").detail("AuditID", auditId);
-
-						// Monitor audit progress
-						double auditStartTime = now();
-						double maxAuditWaitTime = 300.0;
-						AuditPhase finalPhase = AuditPhase::Invalid;
-
-						while (true) {
-							co_await delay(5.0);
-
-							std::vector<AuditStorageState> auditStates =
-							    co_await getAuditStates(cx, AuditType::ValidateRestore, true);
-
-							for (const auto& auditState : auditStates) {
-								if (auditState.id == auditId) {
-									if (auditState.getPhase() == AuditPhase::Complete) {
-										finalPhase = AuditPhase::Complete;
-										break;
-									} else if (auditState.getPhase() == AuditPhase::Error ||
-									           auditState.getPhase() == AuditPhase::Failed) {
-										TraceEvent(SevError, "BS3BCW_ValidationAuditFailed")
-										    .detail("AuditID", auditId)
-										    .detail("Phase", (int)auditState.getPhase())
-										    .detail("Error", auditState.error)
-										    .detail(
-										        "Meaning",
-										        "BulkLoad restore produced different data than traditional restore!");
-										throw audit_storage_failed();
-									}
-								}
-							}
-
-							if (finalPhase == AuditPhase::Complete) {
-								break;
-							}
-
-							if (now() - auditStartTime > maxAuditWaitTime) {
-								TraceEvent(SevError, "BS3BCW_ValidationAuditTimeout")
-								    .detail("AuditID", auditId)
-								    .detail("ElapsedTime", now() - auditStartTime);
-								throw timed_out();
-							}
+						AuditWaitOptions auditOptions;
+						auditOptions.traceContext = "BS3BCW_ValidationStep4";
+						AuditStorageState auditState = co_await auditStorageAndWait(
+						    cx, normalKeys, AuditType::ValidateRestore, KeyValueStoreType::END, auditOptions);
+						UID auditId = auditState.id;
+						if (auditState.getPhase() != AuditPhase::Complete) {
+							TraceEvent(SevError, "BS3BCW_ValidationAuditFailed")
+							    .detail("AuditID", auditId)
+							    .detail("Phase", static_cast<int>(auditState.getPhase()))
+							    .detail("Error", auditState.error)
+							    .detail("Meaning",
+							            "BulkLoad restore produced different data than traditional restore!");
+							throw audit_storage_failed();
 						}
 
 						TraceEvent("BS3BCW_ValidationAuditComplete")

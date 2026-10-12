@@ -33,14 +33,6 @@
 #include "fdbclient/NativeAPI.h"
 #include "flow/flow.h"
 
-// Errors from reading audit state that come from proxies under load or from recoveries and succeed when retried.
-inline bool isTransientAuditReadError(Error const& e) {
-	return e.code() == error_code_grv_proxy_memory_limit_exceeded ||
-	       e.code() == error_code_commit_proxy_memory_limit_exceeded || e.code() == error_code_transaction_too_old ||
-	       e.code() == error_code_future_version || e.code() == error_code_tag_throttled ||
-	       e.code() == error_code_database_locked;
-}
-
 // Waits until no ValidateRestore audit is running, then `settleSeconds` more, and checks again. A data distributor
 // that takes over can run an audit again after it was reported complete; such an audit compares the live data with
 // the restored copy, so it must not overlap anything that changes either. Best effort: gives up after
@@ -58,7 +50,7 @@ inline Future<Void> waitForAuditsToSettle(Database cx, double settleSeconds = 30
 		} catch (Error& e) {
 			readError = e;
 		}
-		if (readError.isValid() && !isTransientAuditReadError(readError)) {
+		if (readError.isValid() && !isTransientAuditStateReadError(readError)) {
 			throw readError;
 		}
 		if (running || readError.isValid()) {
@@ -75,7 +67,7 @@ inline Future<Void> waitForAuditsToSettle(Database cx, double settleSeconds = 30
 		} catch (Error& e) {
 			recheckError = e;
 		}
-		if (recheckError.isValid() && !isTransientAuditReadError(recheckError)) {
+		if (recheckError.isValid() && !isTransientAuditStateReadError(recheckError)) {
 			throw recheckError;
 		}
 		settled = stillIdle;
@@ -90,79 +82,31 @@ inline Future<Void> waitForAuditsToSettle(Database cx, double settleSeconds = 30
 // `retryBudgetSeconds` have passed.
 inline Future<Void> runValidateRestoreAudit(Database cx,
                                             KeyRange range,
-                                            double pollIntervalSeconds = 2.0,
-                                            double maxWaitSeconds = 300.0,
+                                            AuditWaitOptions options = AuditWaitOptions(),
                                             double retryBudgetSeconds = 600.0) {
 	double firstAttemptTime = now();
-	constexpr int MAX_SCHEDULE_ATTEMPTS = 5;
-	for (int auditAttempt = 1;; ++auditAttempt) {
-		UID auditId;
-		for (int attempt = 1;; ++attempt) {
-			Error err;
-			try {
-				auditId = co_await timeoutError(auditStorage(cx->getConnectionRecord(),
-				                                             range,
-				                                             AuditType::ValidateRestore,
-				                                             KeyValueStoreType::END,
-				                                             maxWaitSeconds),
-				                                60.0);
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			if ((err.code() != error_code_timed_out && err.code() != error_code_audit_storage_failed) ||
-			    attempt == MAX_SCHEDULE_ATTEMPTS) {
-				throw err;
-			}
-			TraceEvent(SevWarn, "ValidateRestoreAuditScheduleRetry").error(err).detail("Attempt", attempt);
-			co_await delay(2.0 * attempt);
-		}
-
-		double startTime = now();
-		AuditPhase phase = AuditPhase::Running;
-		while (phase == AuditPhase::Running) {
-			co_await delay(pollIntervalSeconds);
-			if (now() - startTime > maxWaitSeconds) {
-				TraceEvent(SevError, "ValidateRestoreAuditTimeout").detail("AuditID", auditId).detail("Range", range);
-				throw timed_out();
-			}
-			std::vector<AuditStorageState> states;
-			Error readError;
-			try {
-				std::vector<AuditStorageState> result = co_await getAuditStates(cx, AuditType::ValidateRestore, true);
-				states = result;
-			} catch (Error& e) {
-				readError = e;
-			}
-			if (readError.isValid()) {
-				// Try the read again on the next poll.
-				if (!isTransientAuditReadError(readError)) {
-					throw readError;
-				}
-				continue;
-			}
-			for (const auto& state : states) {
-				if (state.id == auditId) {
-					phase = state.getPhase();
-				}
-			}
-		}
-
-		if (phase == AuditPhase::Complete) {
+	if (options.traceContext.empty()) {
+		options.traceContext = "ValidateRestoreAudit";
+	}
+	for (int attempt = 1;; ++attempt) {
+		AuditStorageState state =
+		    co_await auditStorageAndWait(cx, range, AuditType::ValidateRestore, KeyValueStoreType::END, options);
+		if (state.getPhase() == AuditPhase::Complete) {
 			co_return;
 		}
-		if (phase == AuditPhase::Failed && now() - firstAttemptTime < retryBudgetSeconds) {
+		if (state.getPhase() == AuditPhase::Failed && now() - firstAttemptTime < retryBudgetSeconds) {
 			TraceEvent(SevWarn, "ValidateRestoreAuditRetry")
-			    .detail("AuditID", auditId)
+			    .detail("AuditID", state.id)
 			    .detail("Range", range)
-			    .detail("Attempt", auditAttempt);
-			co_await delay(std::min(10.0, 2.0 * auditAttempt));
+			    .detail("Attempt", attempt);
+			co_await delay(std::min(10.0, 2.0 * attempt));
 			continue;
 		}
 		TraceEvent(SevError, "ValidateRestoreAuditFailed")
-		    .detail("AuditID", auditId)
+		    .detail("AuditID", state.id)
 		    .detail("Range", range)
-		    .detail("Phase", static_cast<int>(phase));
+		    .detail("Phase", static_cast<int>(state.getPhase()))
+		    .detail("Error", state.error);
 		throw audit_storage_failed();
 	}
 }
