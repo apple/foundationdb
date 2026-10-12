@@ -574,16 +574,17 @@ Future<Void> monitorBackupProgress(BackupData* self) {
 			continue;
 		}
 
-		// Check every version is larger than backup's startVersion
-		for (auto& [uid, info] : self->backups) {
-			if (self->recruitedEpoch == self->oldestBackupEpoch) {
-				// update update progress so far if previous epochs are done
-				Version v = std::numeric_limits<Version>::max();
-				for (const auto& [tag, version] : tagVersions) {
-					v = std::min(v, version);
-				}
-				savedLogVersions.emplace(uid, v);
-				TraceEvent("BackupWorkerSavedBackupVersion", self->myId).detail("BackupID", uid).detail("Version", v);
+		// Update progress once previous epochs are done.
+		if (self->recruitedEpoch == self->oldestBackupEpoch) {
+			Version savedVersion = std::numeric_limits<Version>::max();
+			for (const auto& [tag, version] : tagVersions) {
+				savedVersion = std::min(savedVersion, version);
+			}
+			for (auto& [uid, info] : self->backups) {
+				savedLogVersions.emplace(uid, savedVersion);
+				TraceEvent("BackupWorkerSavedBackupVersion", self->myId)
+				    .detail("BackupID", uid)
+				    .detail("Version", savedVersion);
 			}
 		}
 		Future<Void> setKeys = savedLogVersions.empty() ? Void() : setBackupKeys(self, savedLogVersions);
