@@ -9976,7 +9976,7 @@ static Future<Reference<ArenaPage>> neverCompletingPageRead(Reference<ArenaPage>
 TEST_CASE("/redwood/correctness/unit/pageCacheResize") {
 	constexpr int blockSize = 4096;
 	for (bool prioritized : { false, true }) {
-		DWALPager::PageCacheT::Evictor evictor(2 * blockSize);
+		DWALPager::PageCacheT::Evictor evictor(int64_t{ 2 } * blockSize);
 		DWALPager::PageCacheT cache(&evictor);
 		auto* entry = &cache.get(1, blockSize);
 		entry->setReadFuture(makeReference<ArenaPage>(blockSize, blockSize));
