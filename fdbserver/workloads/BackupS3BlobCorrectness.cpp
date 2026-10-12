@@ -126,24 +126,12 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	std::vector<Key> outOfRangeSentinels;
 	Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 	static int backupAgentRequests;
-	// Validation restores share a single destination prefix, so they run one at a time, and the in-place restore
-	// (which overwrites the live data they compare against) waits for all of them. State is process-wide: all
-	// instances of a test run in the same tester.
-	static inline FlowLock validationLock{ 1 };
-	static inline Reference<AsyncVar<int>> validationsPending = makeReference<AsyncVar<int>>(0);
 	LockDB locked{ false };
 	bool allowPauses;
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
 	bool defaultBackup;
-	// Restore the backup under the validation prefix and audit it against the live data before the in-place restore.
-	// Only valid when the data is quiescent and the backup captured all of it.
-	bool validateRestoredData;
-	// Earliest time (from workload start) at which the backup is validated; defaults to restoreAfter.
-	double validateAfter;
-	// Read version taken after the data has been written; backups being validated must cover it.
-	Future<Version> quiescentVersion;
-	bool countedAsPendingValidation = false;
+	QuiescentValidation validation;
 	// -1 for a standalone backup; otherwise this instance's index in a multi-backup scenario (see MultiBackupRanges.h).
 	int multiBackupIndex;
 	// An instance beyond the scenario's active backup count does nothing.
@@ -215,8 +203,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		allowPauses = getOption(options, "allowPauses"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
 		defaultBackup = getOption(options, "defaultBackup"_sr, false);
-		validateRestoredData = getOption(options, "validateRestoredData"_sr, false);
-		validateAfter = getOption(options, "validateAfter"_sr, restoreAfter);
+		validation.configure(options, restoreAfter);
 		multiBackupIndex = getOption(options, "multiBackupIndex"_sr, -1);
 		MultiBackupRanges::Scenario multiBackupScenario = MultiBackupRanges::scenarioFor(sharedRandomNumber);
 		int multiBackupCount = MultiBackupRanges::activeBackupCount(sharedRandomNumber);
@@ -416,12 +403,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		if (clientId != 0 || multiBackupIdle) {
 			return Void();
 		}
-		// Counted here and not in the constructor: a workload that is constructed but never started (the test is set up
-		// again after an early failure) would otherwise keep the in-place restore waiting forever.
-		if (validateRestoredData) {
-			countedAsPendingValidation = true;
-			validationsPending->set(validationsPending->get() + 1);
-		}
+		validation.claim();
 		return _start(cx);
 	}
 
@@ -740,10 +722,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			co_await stopDifferentialFuture;
 			TraceEvent("BS3BCW_DoBackupStopDifferential", randomID).detail("Tag", printable(tag));
 			// A discontinued backup stops at the version its log copy has reached, so let it catch up first.
-			if (validateRestoredData) {
-				Version target = co_await quiescentVersion;
-				co_await waitForRestorableVersion(cx, backupAgent, tag.toString(), target);
-			}
+			co_await validation.waitForBackupToCover(cx, backupAgent, tag.toString());
 			try {
 				co_await backupAgent->discontinueBackup(cx, tag);
 			} catch (Error& e) {
@@ -793,66 +772,11 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		TraceEvent("BS3BCW_DoBackupComplete", randomID).detail("Tag", printable(tag));
 	}
 
-	// Releases this instance's claim on the pending-validation count on every exit path, so a failed instance cannot
-	// leave the in-place restore waiting forever.
-	struct PendingValidationClaim : NonCopyable {
-		bool held;
-		explicit PendingValidationClaim(bool held) : held(held) {}
-		void release() {
-			if (held) {
-				held = false;
-				validationsPending->set(validationsPending->get() - 1);
-			}
-		}
-		~PendingValidationClaim() { release(); }
-	};
-
-	Future<Void> validateAgainstPrefixedRestore(Database cx,
-	                                            FileBackupAgent* backupAgent,
-	                                            Reference<IBackupContainer> container) {
-		Key prefix = validateRestoreLogKeys.begin;
-		Standalone<StringRef> validationTag(backupTag.toString() + "_validate");
-		co_await waitForAuditsToSettle(cx);
-		TraceEvent("BS3BCW_ValidateRestoreStart").detail("Tag", printable(backupTag));
-		// Latest restorable version: the data is quiescent, so it must equal the live data.
-		co_await backupAgent->restore(cx,
-		                              cx,
-		                              validationTag,
-		                              KeyRef(container->getURL()),
-		                              container->getProxy(),
-		                              backupRanges,
-		                              WaitForComplete::True,
-		                              ::invalidVersion,
-		                              Verbose::True,
-		                              prefix,
-		                              Key(),
-		                              LockDB::False,
-		                              UnlockDB::False,
-		                              OnlyApplyMutationLogs::False,
-		                              InconsistentSnapshotOnly::False,
-		                              ::invalidVersion,
-		                              container->getEncryptionKeyFileName());
-		for (const auto& range : backupRanges) {
-			// The audit only covers user keys.
-			KeyRangeRef userRange = range & normalKeys;
-			if (!userRange.empty()) {
-				co_await runValidateRestoreAudit(cx, userRange);
-			}
-		}
-		// The prefix is left in place: a data distributor can re-dispatch an audit after it was reported complete,
-		// and that audit would read a cleared prefix as an empty baseline. Rows left by earlier validations equal the
-		// live data, so they cause no false failures, but they can hide a key that a later restore of an overlapping
-		// range failed to write.
-		TraceEvent("BS3BCW_ValidateRestoreDone").detail("Tag", printable(backupTag));
-	}
-
 	Future<Void> _start(Database cx) {
 		FileBackupAgent backupAgent;
-		PendingValidationClaim validationClaim(countedAsPendingValidation);
-		if (validateRestoredData) {
-			quiescentVersion = readVersionAfter(cx, validateAfter);
-		}
-		Future<Void> startValidation = delay(validateAfter);
+		PendingValidationClaim validationClaim = validation.takeClaim();
+		validation.begin(cx);
+		Future<Void> startValidation = delay(validation.validateAfter);
 		Future<Void> stopDifferentialBackup = delay(stopDifferentialAfter);
 
 		TraceEvent("BS3BCW_Arguments")
@@ -911,7 +835,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				             Promise<Void>());
 			}
 
-			if (validateRestoredData) {
+			if (validation.enabled) {
 				co_await b;
 				// Validation compares against the live data, so wait until the workloads writing it have finished.
 				co_await startValidation;
@@ -921,9 +845,12 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				    co_await BackupConfig(uidFlag.first).backupContainer().getD(cx.getReference());
 				if (validationContainer) {
 					co_await waitForRestorable(validationContainer, 150);
-					co_await validationLock.take();
-					FlowLock::Releaser releaser(validationLock);
-					co_await validateAgainstPrefixedRestore(cx, &backupAgent, validationContainer);
+					co_await validateAgainstPrefixedRestore(cx,
+					                                        &backupAgent,
+					                                        validationContainer,
+					                                        backupRanges,
+					                                        backupTag,
+					                                        ValidationTraceOptions{ "BS3BCW_", UID(), false });
 				}
 				validationClaim.release();
 			}
@@ -957,10 +884,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					co_await waitForRestorable(lastBackupContainer, 150);
 
 					// Other backups' validation restores read the live data this restore is about to overwrite.
-					while (validationsPending->get() > 0) {
-						co_await validationsPending->onChange();
-					}
-					co_await waitForAuditsToSettle(cx);
+					co_await waitForValidationsToFinish(cx);
 
 					// Generate a lock UID for the entire clear+restore operation
 					UID lockUID = deterministicRandom()->randomUniqueID();
