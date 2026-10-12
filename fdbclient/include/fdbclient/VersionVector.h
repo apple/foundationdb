@@ -95,7 +95,7 @@ public:
 
 	bool hasVersion(const Tag& tag) const {
 		ASSERT(tag != invalidTag);
-		return versions.find(tag) != versions.end();
+		return versions.contains(tag);
 	}
 
 	// @pre assumes that the given tag has an entry in the version vector.

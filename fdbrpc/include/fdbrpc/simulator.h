@@ -230,13 +230,11 @@ public:
 		clearedAddresses[address]++;
 		TraceEvent("ClearAddress").detail("Address", address).detail("Value", clearedAddresses[address]);
 	}
-	bool isCleared(NetworkAddress const& address) const {
-		return clearedAddresses.find(address) != clearedAddresses.end();
-	}
+	bool isCleared(NetworkAddress const& address) const { return clearedAddresses.contains(address); }
 
 	void switchCluster(NetworkAddress const& address) { switchedCluster[address] = !switchedCluster[address]; }
 	bool hasSwitchedCluster(NetworkAddress const& address) const {
-		return switchedCluster.find(address) != switchedCluster.end() ? switchedCluster.at(address) : false;
+		return switchedCluster.contains(address) ? switchedCluster.at(address) : false;
 	}
 	void toggleGlobalSwitchCluster() { globalSwitchedCluster = !globalSwitchedCluster; }
 	bool globalHasSwitchedCluster() const { return globalSwitchedCluster; }
@@ -267,9 +265,7 @@ public:
 		TraceEvent("IncludeAddressAll").detail("AddressTotal", excludedAddresses.size());
 		excludedAddresses.clear();
 	}
-	bool isExcluded(NetworkAddress const& address) const {
-		return excludedAddresses.find(address) != excludedAddresses.end();
-	}
+	bool isExcluded(NetworkAddress const& address) const { return excludedAddresses.contains(address); }
 
 	void disableSwapToMachine(Optional<Standalone<StringRef>> zoneId) { swapsDisabled.insert(zoneId); }
 	void enableSwapToMachine(Optional<Standalone<StringRef>> zoneId) {

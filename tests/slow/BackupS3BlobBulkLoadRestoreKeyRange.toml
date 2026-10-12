@@ -1,15 +1,16 @@
-# BulkDump/BulkLoad Integration Test with Multiple Backup Ranges
+# BulkDump/BulkLoad Integration Test with a Key-Range-Scoped Backup
 #
-# This test validates BulkDump/BulkLoad with multiple non-contiguous backup ranges:
-# - backupRangesCount=5 creates 5 random key ranges to backup
-# - Tests that BulkDump/BulkLoad correctly handles multiple SST file sets
-# - Tests range boundary handling during restore
+# Every other BackupS3Blob test backs up all of normalKeys. This one backs up a single proper subrange,
+# which is the only configuration that can tell a range-scoped bulk round trip apart from a whole-keyspace
+# one. bulkdump and bulkload each carry exactly one key range per job and the cluster admits one bulk job
+# at a time, so a single range is the widest scoped backup the bulk path can express; submitBackup and
+# submitRestore reject anything else.
 #
-# Multiple range backup validates:
-# 1. Each range gets its own BulkDump SST files
-# 2. BulkLoad correctly identifies and loads all range files
-# 3. Data outside backup ranges is not affected
-# 4. Range boundaries are preserved correctly
+# What this exercises that the whole-keyspace tests cannot:
+# 1. The user's range reaches createBulkDumpJob / createBulkLoadJob rather than being replaced by normalKeys
+# 2. The mutation-log key-version map is confined to that range
+# 3. Keys outside the range survive the round trip -- the workload plants sentinels beyond the backup
+#    range, rewrites them once the backup has stopped, and fails if the restore reverts them
 #
 # NOTE: SST file handling is only applicable when simulation randomly chooses
 # RocksDB storage engine. With other storage engines, the test still runs but
@@ -59,7 +60,7 @@ min_byte_sampling_probability = 0.5
 cc_enforce_use_unfit_dd_in_sim = true
 disable_audit_storage_final_replica_check_in_sim = true
 max_trace_lines = 5000000
-# Linux/Joshua runs 4x slower than macOS, and multirange with 5 ranges takes longer
+# Linux/Joshua runs 4x slower than macOS
 # Even single-region runs need 3600s+ on Joshua (observed ~4000s in worst cases)
 bulkdump_job_timeout = 5400
 bulkload_job_timeout = 5400
@@ -82,7 +83,7 @@ dd_team_zero_server_left_log_delay = 0
 dd_rebalance_parallelism = 1
 
 [[test]]
-testTitle = 'BackupS3BlobBulkLoadRestoreMultiRange'
+testTitle = 'BackupS3BlobBulkLoadRestoreKeyRange'
 useDB = true
 clearAfterTest = false
 simBackupAgents = 'BackupToFile'
@@ -106,9 +107,9 @@ timeout = 7200
     abortAndRestartAfter = 0.0
     stopDifferentialAfter = 0.0
     performRestore = true
-    # Multiple backup ranges: 5 random non-contiguous ranges
-    # Each range gets separate BulkDump SST files
-    backupRangesCount = 5
+    # One random key range, so the backup covers a proper subrange of normalKeys. The bulk path accepts
+    # exactly one range per job; the workload plants its out-of-range sentinels beyond this range.
+    backupRangesCount = 1
     backupRangeLengthMax = 10
     skipDirtyRestore = false
     backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'

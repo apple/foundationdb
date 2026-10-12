@@ -339,9 +339,7 @@ Future<Void> endStreamOnDisconnect(Uncancellable,
 		auto res = co_await race(signal,
 		                         holder.peer.isValid() ? holder.peer->disconnect.getFuture() : Never(),
 		                         stream.getErrorFutureAndDelPromiseRef());
-		if (res.index() == 0) {
-			stream.sendError(connection_failed());
-		} else if (res.index() == 1) {
+		if (res.index() == 0 || res.index() == 1) {
 			stream.sendError(connection_failed());
 		}
 		co_return;

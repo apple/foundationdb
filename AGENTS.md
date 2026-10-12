@@ -110,7 +110,7 @@ Coordinators implement generation registers in `fdbserver/coordinator/Coordinati
 
 ### Simulation Testing
 
-`fdbserver -r simulation` runs the entire cluster in a single process using Sim2, a deterministic simulated network. `BUGGIFY` macros inject faults (delays, failures, corruption). Tests are TOML files that compose workloads. This is FDB's primary testing strategy.
+`fdbserver -r simulation` runs the entire cluster in a single process using Sim2, a deterministic simulated network. `buggify()` calls (`flow/include/flow/Buggify.h`) inject faults (delays, failures, corruption). Tests are TOML files that compose workloads. This is FDB's primary testing strategy.
 
 ### Knobs
 

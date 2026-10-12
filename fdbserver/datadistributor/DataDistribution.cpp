@@ -2263,8 +2263,7 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 						// No matter whether the task range is aligned with the manifest entry range, the task
 						// begin key must be in the manifestEntryMap. See manifestEntryMap definition for more
 						// details.
-						ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->find(task.getRange().begin) !=
-						       self->bulkLoadJobManager.get().manifestEntryMap->end());
+						ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->contains(task.getRange().begin));
 						if (task.onAnyPhase(
 						        { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error })) {
 							ASSERT(task.getRange().end == res[i + 1].key);
@@ -3431,9 +3430,9 @@ Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stream, Wo
 			    .detail("PeerAddress", stream.getEndpoint().getPrimaryAddress())
 			    .detail("Retry", snapReqRetry);
 			if (reply.getError().code() != error_code_request_maybe_delivered ||
-			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
+			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT) {
 				co_return ErrorOr<Void>(reply.getError());
-			else {
+			} else {
 				// retry for network failures with same snap UID to avoid snapshot twice
 				req = WorkerSnapRequest(req.snapPayload, req.snapUID, req.role);
 				co_await delay(snapRetryBackoff);
@@ -3521,7 +3520,7 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 
 			for (const auto& tlog : *tlogs) {
 				TraceEvent(SevDebug, "GetStatefulWorkersTLog").detail("Addr", tlog.address());
-				if (workersMap.find(tlog.address()) == workersMap.end()) {
+				if (!workersMap.contains(tlog.address())) {
 					TraceEvent(SevWarn, "MissingTLogWorkerInterface").detail("TlogAddress", tlog.address());
 					throw snap_tlog_failed();
 				}
@@ -3546,8 +3545,8 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 				// as we use primary addresses from storage and tlog interfaces above
 				NetworkAddress primary = worker.interf.address();
 				Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
-				if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end() ||
-				    (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
+				if (coordinatorsAddrSet.contains(primary) ||
+				    (secondary.present() && coordinatorsAddrSet.contains(secondary.get()))) {
 					if (result.contains(primary)) {
 						ASSERT(workersMap[primary].id() == result[primary].first.id());
 						result[primary].second.append(",coord");
@@ -3881,9 +3880,9 @@ Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 			rep.storageMetricsList = result.get();
 		} else {
 			auto& metricVec = result.get();
-			if (metricVec.empty())
+			if (metricVec.empty()) {
 				rep.midShardSize = 0;
-			else {
+			} else {
 				rep.midShardSize = getMedianShardSize(metricVec.contents());
 			}
 		}
@@ -4519,18 +4518,15 @@ void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAud
 	    .detail("AuditType", audit->coreState.getType())
 	    .detail("AuditRange", audit->coreState.range);
 
-	if (audit->coreState.getType() == AuditType::ValidateHA) {
-		audit->actors.add(dispatchAuditStorage(self, audit));
-	} else if (audit->coreState.getType() == AuditType::ValidateReplica) {
+	if (audit->coreState.getType() == AuditType::ValidateHA ||
+	    audit->coreState.getType() == AuditType::ValidateReplica ||
+	    audit->coreState.getType() == AuditType::ValidateRestore ||
+	    audit->coreState.getType() == AuditType::RangeDigest) {
 		audit->actors.add(dispatchAuditStorage(self, audit));
 	} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
 		audit->actors.add(dispatchAuditLocationMetadata(self, audit, allKeys));
 	} else if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
 		audit->actors.add(dispatchAuditStorageServerShard(self, audit));
-	} else if (audit->coreState.getType() == AuditType::ValidateRestore) {
-		audit->actors.add(dispatchAuditStorage(self, audit));
-	} else if (audit->coreState.getType() == AuditType::RangeDigest) {
-		audit->actors.add(dispatchAuditStorage(self, audit));
 	} else {
 		UNREACHABLE();
 	}

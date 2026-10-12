@@ -578,8 +578,7 @@ private:
 
 	void closeSocket() {
 		boost::system::error_code error;
-		socket.close(error);
-		if (error) {
+		if (socket.close(error)) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("PeerAddr", peer_address)
@@ -725,8 +724,7 @@ public:
 
 	void bind(NetworkAddress const& addr) override {
 		boost::system::error_code ec;
-		socket.bind(udpEndpoint(addr), ec);
-		if (ec) {
+		if (socket.bind(udpEndpoint(addr), ec)) {
 			Error x;
 			if (ec.value() == EADDRINUSE)
 				x = address_in_use();
@@ -758,8 +756,7 @@ private:
 
 	void closeSocket() {
 		boost::system::error_code error;
-		socket.close(error);
-		if (error) {
+		if (socket.close(error)) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("ErrorCode", error.value())
@@ -864,14 +861,9 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 
 	void action(Handshake& h) {
 		try {
-			h.socket.next_layer().non_blocking(false, h.err);
-			if (!h.err.failed()) {
-				h.socket.handshake(h.type, h.err);
-			}
-			if (!h.err.failed()) {
-				h.socket.next_layer().non_blocking(true, h.err);
-			}
-			if (h.err.failed()) {
+			if (h.socket.next_layer().non_blocking(false, h.err).failed() ||
+			    h.socket.handshake(h.type, h.err).failed() ||
+			    h.socket.next_layer().non_blocking(true, h.err).failed()) {
 				TraceEvent(SevWarn,
 				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
 				                                                        : "N2_AcceptHandshakeError"_audit)
@@ -1280,10 +1272,13 @@ private:
 
 	void closeSocket() {
 		boost::system::error_code cancelError;
+		// NOLINTNEXTLINE(bugprone-unused-return-value): Closing the socket below also cancels outstanding operations.
 		socket.cancel(cancelError);
 		boost::system::error_code closeError;
+		// NOLINTNEXTLINE(bugprone-unused-return-value): Asio closes the descriptor even when close reports an error.
 		socket.close(closeError);
 		boost::system::error_code shutdownError;
+		// NOLINTNEXTLINE(bugprone-unused-return-value): Best-effort TLS teardown after the transport has closed.
 		ssl_sock.shutdown(shutdownError);
 	}
 
@@ -2065,18 +2060,44 @@ static Future<Void> coordinatorDNSCacheRefresh(Net2* self) {
 	}
 }
 
+static Future<std::vector<NetworkAddress>> cacheResolvedTCPEndpoint(DNSCache* cache,
+                                                                    std::string host,
+                                                                    std::string service,
+                                                                    Future<std::vector<NetworkAddress>> resolution) {
+	std::vector<NetworkAddress> addresses = co_await resolution;
+	cache->add(host, service, addresses);
+	co_return addresses;
+}
+
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const std::string& host,
                                                                          const std::string& service) {
 	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
 		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
 		if (cache.present()) {
-			co_return cache.get();
+			return cache.get();
 		}
-		std::vector<NetworkAddress> addresses = co_await resolveTCPEndpoint_impl(this, host, service);
-		dnsCache.add(host, service, addresses);
-		co_return addresses;
+		return cacheResolvedTCPEndpoint(&dnsCache, host, service, resolveTCPEndpoint_impl(this, host, service));
 	}
-	co_return co_await resolveTCPEndpoint_impl(this, host, service);
+	return resolveTCPEndpoint_impl(this, host, service);
+}
+
+TEST_CASE("/flow/Net2/DNSCacheArgumentLifetime") {
+	DNSCache cache;
+	std::string host = "original-host";
+	std::string service = "4500";
+	Promise<std::vector<NetworkAddress>> resolution;
+	Future<std::vector<NetworkAddress>> result =
+	    cacheResolvedTCPEndpoint(&cache, host, service, resolution.getFuture());
+	ASSERT(!result.isReady());
+	host = "changed-host";
+	service = "4501";
+	const std::vector<NetworkAddress> addresses{ NetworkAddress::parse("127.0.0.1:4500") };
+	resolution.send(addresses);
+	ASSERT(result.isReady());
+	ASSERT(result.get() == addresses);
+	ASSERT(cache.find("original-host", "4500").get() == addresses);
+	ASSERT(!cache.find(host, service).present());
+	return Void();
 }
 
 std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& host, const std::string& service) {
