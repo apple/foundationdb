@@ -2336,11 +2336,11 @@ void checkAtomicSwitchOverConfig(StatusObjectReader srcStatus, StatusObjectReade
 
 	try {
 		// Check if src is unlocked and dest is locked
-		if (getLockedStatus(srcStatus) != false) {
+		if (getLockedStatus(srcStatus)) {
 			TraceEvent(SevWarn, "DBA_AtomicSwitchOverSrcLocked").log();
 			throw backup_error();
 		}
-		if (getLockedStatus(destStatus) != true) {
+		if (!getLockedStatus(destStatus)) {
 			TraceEvent(SevWarn, "DBA_AtomicSwitchOverDestUnlocked").log();
 			throw backup_error();
 		}

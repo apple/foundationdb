@@ -2826,7 +2826,7 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
 		localAddress.ip = IPAddress(localAddress.ip.toV4() + deterministicRandom()->randomInt(0, 256));
 	}
 	localAddress.port = deterministicRandom()->randomInt(40000, 60000);
-	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, Optional<NetworkAddress>{}));
+	return { makeReference<UDPSimSocket>(localAddress, Optional<NetworkAddress>{}) };
 }
 
 void startNewSimulator(bool printSimTime) {
