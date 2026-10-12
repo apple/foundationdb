@@ -682,7 +682,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				                                                 lastBackupContainer->getEncryptionBlockSize());
 				BackupDescription desc = co_await container->describeBackup();
 
-				co_await waitForValidationsToFinish(cx);
+				co_await RestoreValidationGate::waitUntilNonePending();
 
 				if (deterministicRandom()->random01() < 0.5) {
 					co_await attemptDirtyRestore(cx,
