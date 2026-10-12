@@ -247,3 +247,23 @@ TEST_CASE("/fdbserver/status/schema/basic") {
 
 	return Void();
 }
+
+TEST_CASE("/fdbserver/status/schema/timeout_messages") {
+	json_spirit::mValue schema = readJSONStrictly(JSONSchemas::statusSchema.toString());
+	json_spirit::mValue status = readJSONStrictly(R"json(
+{
+	"cluster": {
+		"messages": [
+			{ "name": "fetch_coordinator_addresses" },
+			{ "name": "fetch_blob_granule_status_timed_out" },
+			{ "name": "fetch_blob_restore_status_timed_out" }
+		]
+	}
+}
+)json");
+
+	std::string errorStr;
+	ASSERT(schemaMatch(schema.get_obj(), status.get_obj(), errorStr, SevError, true));
+
+	return Void();
+}
