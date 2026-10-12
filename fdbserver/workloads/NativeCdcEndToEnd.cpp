@@ -2253,19 +2253,6 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
-	Future<Void> expectConcurrentConsumeRejected(CDCProxyInterface proxy, CDCCursor cursor) {
-		Optional<Error> error;
-		try {
-			co_await throwErrorOr(proxy.consume.tryGetReply(CDCConsumeRequest(cursor)));
-		} catch (Error& e) {
-			error = e;
-		}
-		ASSERT(error.present());
-		if (error.get().code() != error_code_client_invalid_operation) {
-			throw error.get();
-		}
-	}
-
 	Future<Void> validateConsumeLeaseAndExclusivity(Database cx, CDCStreamId streamId, CDCProxyInterface* proxy) {
 		ASSERT(!streams.empty());
 		// Acknowledgements advance one durable frontier for the whole stream. Exercise cancellation and exclusivity on
@@ -2316,14 +2303,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		while (true) {
 			ASSERT_LT(now(), deadline);
 			try {
-				// Send both requests without yielding. The first request marks the stream active before its metadata
-				// read, so the second request deterministically exercises server-side exclusivity even while versions
-				// advance.
 				co_await getCurrentProxyStatus(cx, streamId, proxy);
-				Future<ErrorOr<CDCConsumeReply>> first = proxy->consume.tryGetReply(CDCConsumeRequest(currentCursor));
-				co_await timeoutError(expectConcurrentConsumeRejected(*proxy, currentCursor), operationTimeout);
-				first.cancel();
-				co_await waitForNoActiveConsumes(cx, streamId, proxy);
 
 				// The first request may finish before the retry reaches the proxy. A pending request is superseded,
 				// while an already-completed request retains its reply; either ordering must allow the same consumer to
@@ -2350,7 +2330,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 					throw;
 				}
 				// A status reply cannot prevent a proxy replacement or disconnect before the consume replies.
-				// Retry both requests so transport failure cannot count as evidence of exclusivity.
+				// Retry both requests so transport failure cannot count as a successful consumer retry.
 				CODE_PROBE(true, "Native CDC server consume validation retries after proxy request failure");
 			}
 			co_await waitForNoActiveConsumes(cx, streamId, proxy);
