@@ -45,22 +45,30 @@ public:
 		return iv;
 	}
 
-	// Read a single block of size encryptionBlockSize bytes, and decrypt.
+	// Read a single block of encryptionBlockSize bytes plus the trailing GCM tag, verify tag, and decrypt.
 	ACTOR static Future<Standalone<StringRef>> readBlock(AsyncFileEncrypted* self, uint32_t block) {
 		state Arena arena;
-		state unsigned char* encrypted = new (arena) unsigned char[self->encryptionBlockSize];
-		int bytes = wait(uncancellable(holdWhile(
-		    arena, self->file->read(encrypted, self->encryptionBlockSize, self->encryptionBlockSize * block))));
+		state int rawBlockSize = self->encryptionBlockSize + GCM_TAG_LEN;
+		state unsigned char* encrypted = new (arena) unsigned char[rawBlockSize];
+		int bytes = wait(
+		    uncancellable(holdWhile(arena, self->file->read(encrypted, rawBlockSize, int64_t(rawBlockSize) * block))));
+		if (bytes < GCM_TAG_LEN) {
+			throw restore_corrupted_data();
+		}
+		int ciphertextLen = bytes - GCM_TAG_LEN;
+		const uint8_t* tag = encrypted + ciphertextLen;
 		StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
 		DecryptionStreamCipher decryptor(cipherKey, self->getIV(block));
-		auto decrypted = decryptor.decrypt(encrypted, bytes, arena);
+		auto decrypted = decryptor.decrypt(encrypted, ciphertextLen, arena);
+		// Throws restore_corrupted_data if the tag does not verify.
+		decryptor.finish(tag, arena);
 		return Standalone<StringRef>(decrypted, arena);
 	}
 
 	ACTOR static Future<int> read(Reference<AsyncFileEncrypted> self, void* data, int length, int64_t offset) {
 		if (self->fileSize == -1) {
-			state int64_t fileSize = wait(self->file->size());
-			self->fileSize = fileSize;
+			state int64_t rawSize = wait(self->file->size());
+			self->fileSize = AsyncFileEncrypted::rawToLogicalSize(rawSize, self->encryptionBlockSize);
 		}
 		if (offset >= self->fileSize) {
 			return 0;
@@ -106,10 +114,7 @@ public:
 		state unsigned char const* input = reinterpret_cast<unsigned char const*>(data);
 		while (length > 0) {
 			const auto chunkSize = std::min(length, self->encryptionBlockSize - self->offsetInBlock);
-			Arena arena;
-			auto encrypted = self->encryptor->encrypt(input, chunkSize, arena);
-			std::copy(encrypted.begin(), encrypted.end(), &self->writeBuffer[self->offsetInBlock]);
-			offset += encrypted.size();
+			std::copy(input, input + chunkSize, &self->writeBuffer[self->offsetInBlock]);
 			self->offsetInBlock += chunkSize;
 			length -= chunkSize;
 			input += chunkSize;
@@ -118,8 +123,6 @@ public:
 				self->offsetInBlock = 0;
 				ASSERT_LT(self->currentBlock, std::numeric_limits<uint32_t>::max());
 				++self->currentBlock;
-				self->encryptor = std::make_unique<EncryptionStreamCipher>(StreamCipherKey::getGlobalCipherKey(),
-				                                                           self->getIV(self->currentBlock));
 			}
 		}
 		return Void();
@@ -127,7 +130,9 @@ public:
 
 	ACTOR static Future<Void> sync(Reference<AsyncFileEncrypted> self) {
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::APPEND_ONLY);
-		wait(self->writeLastBlockToFile());
+		if (self->offsetInBlock > 0) {
+			wait(self->writeLastBlockToFile());
+		}
 		wait(self->file->sync());
 		return Void();
 	}
@@ -148,8 +153,6 @@ AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, Mode mode, in
 	ASSERT(encryptionBlockSize > 0);
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (mode == Mode::APPEND_ONLY) {
-		encryptor =
-		    std::make_unique<EncryptionStreamCipher>(StreamCipherKey::getGlobalCipherKey(), getIV(currentBlock));
 		writeBuffer = std::vector<unsigned char>(encryptionBlockSize, 0);
 	}
 }
@@ -160,6 +163,29 @@ void AsyncFileEncrypted::addref() {
 
 void AsyncFileEncrypted::delref() {
 	ReferenceCounted<AsyncFileEncrypted>::delref();
+}
+
+int64_t AsyncFileEncrypted::rawToLogicalSize(int64_t rawSize, int blockSize) {
+	const int64_t rawBlockSize = int64_t(blockSize) + GCM_TAG_LEN;
+	const int64_t fullBlocks = rawSize / rawBlockSize;
+	const int64_t trailing = rawSize % rawBlockSize;
+	int64_t logical = fullBlocks * blockSize;
+	if (trailing > 0) {
+		ASSERT(trailing > GCM_TAG_LEN);
+		logical += trailing - GCM_TAG_LEN;
+	}
+	return logical;
+}
+
+int64_t AsyncFileEncrypted::logicalToRawSize(int64_t logicalSize, int blockSize) {
+	const int64_t rawBlockSize = int64_t(blockSize) + GCM_TAG_LEN;
+	const int64_t fullBlocks = logicalSize / blockSize;
+	const int64_t trailing = logicalSize % blockSize;
+	int64_t raw = fullBlocks * rawBlockSize;
+	if (trailing > 0) {
+		raw += trailing + GCM_TAG_LEN;
+	}
+	return raw;
 }
 
 Future<int> AsyncFileEncrypted::read(void* data, int length, int64_t offset) {
@@ -176,7 +202,7 @@ Future<Void> AsyncFileEncrypted::zeroRange(int64_t offset, int64_t length) {
 
 Future<Void> AsyncFileEncrypted::truncate(int64_t size) {
 	ASSERT(mode == Mode::APPEND_ONLY);
-	return file->truncate(size);
+	return file->truncate(logicalToRawSize(size, encryptionBlockSize));
 }
 
 Future<Void> AsyncFileEncrypted::sync() {
@@ -191,7 +217,8 @@ Future<Void> AsyncFileEncrypted::flush() {
 
 Future<int64_t> AsyncFileEncrypted::size() const {
 	ASSERT(mode == Mode::READ_ONLY);
-	return file->size();
+	int blockSize = encryptionBlockSize;
+	return map(file->size(), [blockSize](int64_t raw) { return rawToLogicalSize(raw, blockSize); });
 }
 
 std::string AsyncFileEncrypted::getFilename() const {
@@ -221,10 +248,17 @@ StreamCipher::IV AsyncFileEncrypted::getIV(uint32_t block) const {
 }
 
 Future<Void> AsyncFileEncrypted::writeLastBlockToFile() {
-	// The source buffer for the write is owned by *this so this must be kept alive by reference count until the write
-	// is finished.
-	return uncancellable(holdWhile(Reference<AsyncFileEncrypted>::addRef(this),
-	                               file->write(&writeBuffer[0], offsetInBlock, currentBlock * encryptionBlockSize)));
+	Arena arena;
+	EncryptionStreamCipher encryptor(StreamCipherKey::getGlobalCipherKey(), getIV(currentBlock));
+	auto ciphertext = encryptor.encrypt(&writeBuffer[0], offsetInBlock, arena);
+	auto tag = encryptor.finish(arena);
+	const int rawBlockSize = encryptionBlockSize + GCM_TAG_LEN;
+	auto* outBuf = new (arena) unsigned char[offsetInBlock + GCM_TAG_LEN];
+	std::copy(ciphertext.begin(), ciphertext.end(), outBuf);
+	std::copy(tag.begin(), tag.end(), outBuf + ciphertext.size());
+	return uncancellable(holdWhile(
+	    Reference<AsyncFileEncrypted>::addRef(this),
+	    holdWhile(arena, file->write(outBuf, offsetInBlock + GCM_TAG_LEN, int64_t(rawBlockSize) * currentBlock))));
 }
 
 // This test writes random data into an encrypted file in random increments,
