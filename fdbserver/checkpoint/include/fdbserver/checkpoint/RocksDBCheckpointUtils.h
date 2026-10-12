@@ -24,6 +24,12 @@
 #include "fdbserver/checkpoint/Checkpoint.h"
 #include "flow/flow.h"
 
+#ifdef WITH_ROCKSDB
+namespace rocksdb {
+struct LiveFileMetaData;
+}
+#endif
+
 class ICheckpointByteSampleReader {
 public:
 	virtual ~ICheckpointByteSampleReader() = default;
@@ -253,6 +259,12 @@ struct LiveFileMetaData : public SstFileMetaData {
 		           SstFileMetaData::largest);
 	}
 };
+
+#ifdef WITH_ROCKSDB
+// Callers handle range-tombstone bounds (smallest/largest) and any file-type override separately.
+rocksdb::LiveFileMetaData toRocksDBLiveFileMetaData(const LiveFileMetaData& fileMetaData);
+LiveFileMetaData fromRocksDBLiveFileMetaData(const rocksdb::LiveFileMetaData& fileMetaData);
+#endif
 
 // Checkpoint metadata associated with RockDBColumnFamily format.
 // Based on rocksdb::ExportImportFilesMetaData.
