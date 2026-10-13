@@ -7081,38 +7081,6 @@ public:
 		BackupConfig config(deterministicRandom()->randomUniqueID());
 		UID uid = config.getUid();
 
-		// This check will ensure that current backupUid is later than the last backup Uid
-		Standalone<StringRef> nowStr = BackupAgentBase::getCurrentTime();
-		std::string backupContainer = outContainer.toString();
-
-		// To be consistent with directory handling behavior since FDB backup was first released, if the container
-		// string describes a local directory then "/backup-<timestamp>" will be added to it.
-		if (backupContainer.find("file://") == 0) {
-			backupContainer = joinPath(backupContainer, std::string("backup-") + nowStr.toString());
-		}
-
-		Reference<IBackupContainer> bc =
-		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName, encryptionBlockSize);
-		try {
-			// Use longer timeout for blobstore:// URLs in simulation to handle slow S3 mock operations
-			double createTimeout = (g_network->isSimulated() && isBlobstoreUrl(backupContainer)) ? 300.0 : 30.0;
-			co_await timeoutError(bc->create(), createTimeout);
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled)
-				throw;
-			fprintf(stderr, "ERROR: Could not create backup container: %s\n", e.what());
-			throw backup_error();
-		}
-
-		Optional<Value> lastBackupTimestamp = co_await backupAgent->lastBackupTimestamp().get(tr);
-
-		if ((lastBackupTimestamp.present()) && (lastBackupTimestamp.get() >= nowStr)) {
-			fprintf(stderr,
-			        "ERROR: The last backup `%s' happened in the future.\n",
-			        printable(lastBackupTimestamp.get()).c_str());
-			throw backup_error();
-		}
-
 		KeyRangeMap<int> backupRangeSet;
 		for (auto& backupRange : backupRanges) {
 			backupRangeSet.insert(backupRange, 1);
@@ -7155,6 +7123,38 @@ public:
 			fprintf(stderr,
 			        "ERROR: --incremental cannot be combined with --mode bulkdump or --mode both; it suppresses "
 			        "the snapshot those modes exist to produce, leaving a backup no bulkload restore can use.\n");
+			throw backup_error();
+		}
+
+		// This check will ensure that current backupUid is later than the last backup Uid
+		Standalone<StringRef> nowStr = BackupAgentBase::getCurrentTime();
+		std::string backupContainer = outContainer.toString();
+
+		// To be consistent with directory handling behavior since FDB backup was first released, if the container
+		// string describes a local directory then "/backup-<timestamp>" will be added to it.
+		if (backupContainer.find("file://") == 0) {
+			backupContainer = joinPath(backupContainer, std::string("backup-") + nowStr.toString());
+		}
+
+		Reference<IBackupContainer> bc =
+		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName, encryptionBlockSize);
+		try {
+			// Use longer timeout for blobstore:// URLs in simulation to handle slow S3 mock operations
+			double createTimeout = (g_network->isSimulated() && isBlobstoreUrl(backupContainer)) ? 300.0 : 30.0;
+			co_await timeoutError(bc->create(), createTimeout);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			fprintf(stderr, "ERROR: Could not create backup container: %s\n", e.what());
+			throw backup_error();
+		}
+
+		Optional<Value> lastBackupTimestamp = co_await backupAgent->lastBackupTimestamp().get(tr);
+
+		if ((lastBackupTimestamp.present()) && (lastBackupTimestamp.get() >= nowStr)) {
+			fprintf(stderr,
+			        "ERROR: The last backup `%s' happened in the future.\n",
+			        printable(lastBackupTimestamp.get()).c_str());
 			throw backup_error();
 		}
 

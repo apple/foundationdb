@@ -10,8 +10,8 @@
 # 1. submitBackup  refuses --incremental with snapshotMode 1 or 2  -> backup_error
 # 2. submitRestore refuses --incremental with useRangeFileRestore=false -> restore_error
 #
-# It is deliberately separate from BackupS3BlobBulkLoadRestoreKeyRange.toml: the backup probe creates a
-# container as a side effect, and that test is the regression gate for the --keys data-correctness bug.
+# It is deliberately separate from BackupS3BlobBulkLoadRestoreKeyRange.toml, which is the regression
+# gate for the --keys data-correctness bug and should not carry extra probes.
 #
 # Based on BackupS3BlobBulkLoadRestoreKeyRange.toml
 
