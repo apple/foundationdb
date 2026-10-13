@@ -6852,8 +6852,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			                                          bulkDumpJobId,
 			                                          TaskCompletionKey::signal(bulkLoadDone));
 
-			// After BulkLoad completes, run RestoreDispatch to apply mutation logs
-			// Set onlyApplyMutationLogs so it only processes logs, not range files
+			// Sequencing, not user intent: the SSTs carry the range data, so the dispatch that follows must
+			// replay logs only. submitRestore rejects --incremental with bulkload, so this can only ever
+			// overwrite false.
 			restore.onlyApplyMutationLogs().set(tr, true);
 
 			// Add RestoreDispatch task that waits for BulkLoad to complete
@@ -7079,6 +7080,51 @@ public:
 		BackupConfig config(deterministicRandom()->randomUniqueID());
 		UID uid = config.getUid();
 
+		KeyRangeMap<int> backupRangeSet;
+		for (auto& backupRange : backupRanges) {
+			backupRangeSet.insert(backupRange, 1);
+		}
+
+		backupRangeSet.coalesce(allKeys);
+		std::vector<KeyRange> normalizedRanges;
+
+		for (auto& backupRange : backupRangeSet.ranges()) {
+			if (backupRange.value()) {
+				normalizedRanges.push_back(KeyRange(KeyRangeRef(backupRange.range().begin, backupRange.range().end)));
+			}
+		}
+
+		// A bulkdump job carries exactly one key range and the cluster admits one bulk job at a time, so
+		// several disjoint ranges cannot be expressed as a single snapshot. Rejecting here is what keeps
+		// the restore honest: the dump would otherwise widen to normalKeys and a later bulkload restore
+		// would overwrite every key between the caller's ranges. BulkDumpTaskFunc indexes range 0 on the
+		// strength of this check.
+		if (snapshotMode != static_cast<int>(SnapshotMode::RANGEFILE) && normalizedRanges.size() != 1) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkDumpRangeCount")
+			    .detail("TagName", tagName)
+			    .detail("SnapshotMode", snapshotMode)
+			    .detail("RangeCount", normalizedRanges.size());
+			fprintf(stderr,
+			        "ERROR: --mode bulkdump and --mode both require exactly one key range, but %d remain after "
+			        "coalescing adjacent ranges. Use --mode rangefile, or run one backup per range.\n",
+			        static_cast<int>(normalizedRanges.size()));
+			throw backup_error();
+		}
+
+		// --incremental suppresses the snapshot entirely (StartFullBackupTaskFunc skips the whole snapshot
+		// block), so pairing it with a bulkdump mode asks for an SST snapshot and for no snapshot at once.
+		// Taken silently, it yields a log-only backup that no bulkload restore can use, and the operator
+		// only discovers that when the restore aborts much later.
+		if (snapshotMode != static_cast<int>(SnapshotMode::RANGEFILE) && incrementalBackupOnly) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkDumpIncremental")
+			    .detail("TagName", tagName)
+			    .detail("SnapshotMode", snapshotMode);
+			fprintf(stderr,
+			        "ERROR: --incremental cannot be combined with --mode bulkdump or --mode both; it suppresses "
+			        "the snapshot those modes exist to produce, leaving a backup no bulkload restore can use.\n");
+			throw backup_error();
+		}
+
 		// This check will ensure that current backupUid is later than the last backup Uid
 		Standalone<StringRef> nowStr = BackupAgentBase::getCurrentTime();
 		std::string backupContainer = outContainer.toString();
@@ -7108,37 +7154,6 @@ public:
 			fprintf(stderr,
 			        "ERROR: The last backup `%s' happened in the future.\n",
 			        printable(lastBackupTimestamp.get()).c_str());
-			throw backup_error();
-		}
-
-		KeyRangeMap<int> backupRangeSet;
-		for (auto& backupRange : backupRanges) {
-			backupRangeSet.insert(backupRange, 1);
-		}
-
-		backupRangeSet.coalesce(allKeys);
-		std::vector<KeyRange> normalizedRanges;
-
-		for (auto& backupRange : backupRangeSet.ranges()) {
-			if (backupRange.value()) {
-				normalizedRanges.push_back(KeyRange(KeyRangeRef(backupRange.range().begin, backupRange.range().end)));
-			}
-		}
-
-		// A bulkdump job carries exactly one key range and the cluster admits one bulk job at a time, so
-		// several disjoint ranges cannot be expressed as a single snapshot. Rejecting here is what keeps
-		// the restore honest: the dump would otherwise widen to normalKeys and a later bulkload restore
-		// would overwrite every key between the caller's ranges. BulkDumpTaskFunc indexes range 0 on the
-		// strength of this check.
-		if (snapshotMode != static_cast<int>(SnapshotMode::RANGEFILE) && normalizedRanges.size() != 1) {
-			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkDumpRangeCount")
-			    .detail("TagName", tagName)
-			    .detail("SnapshotMode", snapshotMode)
-			    .detail("RangeCount", normalizedRanges.size());
-			fprintf(stderr,
-			        "ERROR: --mode bulkdump and --mode both require exactly one key range, but %d remain after "
-			        "coalescing adjacent ranges. Use --mode rangefile, or run one backup per range.\n",
-			        static_cast<int>(normalizedRanges.size()));
 			throw backup_error();
 		}
 
@@ -7239,6 +7254,18 @@ public:
 			        "ERROR: --mode bulkload requires exactly one key range, but %d remain after coalescing "
 			        "adjacent ranges. Use --mode rangefile, or run one restore per range.\n",
 			        static_cast<int>(restoreRanges.size()));
+			throw restore_error();
+		}
+
+		// Mirror of the backup-side rejection. A bulkload restore ingests the snapshot via SST, which is
+		// precisely the range data --incremental declines, and StartFullRestoreTaskFunc picks the bulkload
+		// branch without consulting the flag. Accepting the pair would restore the whole snapshot the
+		// caller asked to skip, then overwrite their setting so even status misreports it.
+		if (!useRangeFileRestore && onlyApplyMutationLogs) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadIncremental").detail("TagName", tagName);
+			fprintf(stderr,
+			        "ERROR: --incremental cannot be combined with --mode bulkload; bulkload restores the "
+			        "snapshot that --incremental skips. Use --mode rangefile for a logs-only restore.\n");
 			throw restore_error();
 		}
 
