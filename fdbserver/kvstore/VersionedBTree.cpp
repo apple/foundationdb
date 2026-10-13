@@ -1705,6 +1705,11 @@ public:
 			e.ownedByEvictor = true;
 		}
 
+		void resize(Entry& e, int size) {
+			sizeUsed += int64_t(size) - e.size;
+			e.size = size;
+		}
+
 		// Claim ownership of an entry, removing its size from the current size and removing it
 		// from the eviction order if it exists there
 		void reclaim(Entry& e) {
@@ -1831,6 +1836,10 @@ public:
 
 		// If entry is linked into an evictionOrder
 		if (entry.is_linked()) {
+			if (entry.size != size) {
+				// Reused indices can have a different size. Trimming here could evict the entry being returned.
+				pEvictor->resize(entry, size);
+			}
 			// If this access is meant to be a hit
 			if (!noHit) {
 				++entry.hits;
@@ -9962,6 +9971,37 @@ Future<Void> commitAndReportLoadProgress(VersionedBTree* btree,
 static Future<Reference<ArenaPage>> neverCompletingPageRead(Reference<ArenaPage> page) {
 	co_await Future<Void>(Never());
 	co_return page;
+}
+
+TEST_CASE("/redwood/correctness/unit/pageCacheResize") {
+	constexpr int blockSize = 4096;
+	for (bool prioritized : { false, true }) {
+		DWALPager::PageCacheT::Evictor evictor(int64_t{ 2 } * blockSize);
+		DWALPager::PageCacheT cache(&evictor);
+		auto* entry = &cache.get(1, blockSize);
+		entry->setReadFuture(makeReference<ArenaPage>(blockSize, blockSize));
+		entry->writeFuture = Void();
+		if (prioritized) {
+			cache.prioritizeEviction(1);
+		}
+
+		// Reusing a physical page ID can replace a cached page with a different block count.
+		for (int size : { 3 * blockSize, 2 * blockSize }) {
+			auto& resized = cache.get(1, size, true);
+			ASSERT(&resized == entry);
+			resized.setReadFuture(makeReference<ArenaPage>(size, size));
+			ASSERT_EQ(evictor.getSizeUsed(), resized.readFuture.get()->rawSize());
+		}
+
+		cache.flushPrioritizedEvictions();
+		auto& next = cache.get(2, blockSize);
+		next.setReadFuture(makeReference<ArenaPage>(blockSize, blockSize));
+		next.writeFuture = Void();
+		ASSERT(cache.getIfExists(1) == nullptr);
+		ASSERT_EQ(evictor.getSizeUsed(), blockSize);
+		co_await cache.clear();
+		ASSERT(evictor.empty());
+	}
 }
 
 TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
