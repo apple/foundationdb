@@ -50,6 +50,64 @@ static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSD
                ROCKSDB_PATCH == FDB_ROCKSDB_PATCH),
               "Unsupported rocksdb version.");
 
+rocksdb::LiveFileMetaData toRocksDBLiveFileMetaData(const LiveFileMetaData& fileMetaData) {
+	rocksdb::LiveFileMetaData liveFileMetaData;
+	liveFileMetaData.relative_filename = fileMetaData.relative_filename;
+	liveFileMetaData.directory = fileMetaData.directory;
+	liveFileMetaData.file_number = fileMetaData.file_number;
+	liveFileMetaData.file_type = static_cast<rocksdb::FileType>(fileMetaData.file_type);
+	liveFileMetaData.size = fileMetaData.size;
+	liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
+	liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+	liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+	liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+	liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+	liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+	liveFileMetaData.largestkey = fileMetaData.largestkey;
+	liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+	liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+	liveFileMetaData.num_entries = fileMetaData.num_entries;
+	liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+	liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+	liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+	liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+	liveFileMetaData.epoch_number = fileMetaData.epoch_number;
+	liveFileMetaData.name = fileMetaData.name;
+	liveFileMetaData.db_path = fileMetaData.db_path;
+	liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+	liveFileMetaData.level = fileMetaData.level;
+	return liveFileMetaData;
+}
+
+LiveFileMetaData fromRocksDBLiveFileMetaData(const rocksdb::LiveFileMetaData& fileMetaData) {
+	LiveFileMetaData liveFileMetaData;
+	liveFileMetaData.relative_filename = fileMetaData.relative_filename;
+	liveFileMetaData.directory = fileMetaData.directory;
+	liveFileMetaData.file_number = fileMetaData.file_number;
+	liveFileMetaData.file_type = static_cast<int>(fileMetaData.file_type);
+	liveFileMetaData.size = fileMetaData.size;
+	liveFileMetaData.temperature = static_cast<uint8_t>(fileMetaData.temperature);
+	liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+	liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+	liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+	liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+	liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+	liveFileMetaData.largestkey = fileMetaData.largestkey;
+	liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+	liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+	liveFileMetaData.num_entries = fileMetaData.num_entries;
+	liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+	liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+	liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+	liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+	liveFileMetaData.epoch_number = fileMetaData.epoch_number;
+	liveFileMetaData.name = fileMetaData.name;
+	liveFileMetaData.db_path = fileMetaData.db_path;
+	liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+	liveFileMetaData.level = fileMetaData.level;
+	return liveFileMetaData;
+}
+
 namespace {
 
 using DB = rocksdb::DB*;
@@ -71,31 +129,7 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 	metaData.db_comparator_name = rocksCF.dbComparatorName;
 
 	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
-		rocksdb::LiveFileMetaData liveFileMetaData;
-		liveFileMetaData.relative_filename = fileMetaData.relative_filename;
-		liveFileMetaData.directory = fileMetaData.directory;
-		liveFileMetaData.file_number = fileMetaData.file_number;
-		liveFileMetaData.file_type = static_cast<rocksdb::FileType>(fileMetaData.file_type);
-		liveFileMetaData.size = fileMetaData.size;
-		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
-		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
-		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
-		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
-		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
-		liveFileMetaData.largestkey = fileMetaData.largestkey;
-		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
-		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
-		liveFileMetaData.num_entries = fileMetaData.num_entries;
-		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
-		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
-		liveFileMetaData.name = fileMetaData.name;
-		liveFileMetaData.db_path = fileMetaData.db_path;
-		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
-		liveFileMetaData.level = fileMetaData.level;
+		rocksdb::LiveFileMetaData liveFileMetaData = toRocksDBLiveFileMetaData(fileMetaData);
 		liveFileMetaData.smallest = fileMetaData.smallest;
 		liveFileMetaData.largest = fileMetaData.largest;
 		liveFileMetaData.file_type = rocksdb::kTableFile;
