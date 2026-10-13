@@ -126,7 +126,7 @@ std::string ResponseBase<T>::getCodeDescription() {
 	}
 }
 
-std::string computeMD5Sum(std::string content) {
+std::string computeMD5Sum(std::string_view content) {
 	MD5_CTX sum;
 	::MD5_Init(&sum);
 	::MD5_Update(&sum, content.data(), content.size());

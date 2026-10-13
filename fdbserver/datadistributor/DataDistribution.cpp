@@ -388,6 +388,9 @@ struct DDBulkLoadJobManager {
 struct DDBulkDumpJobManager {
 	BulkDumpState jobState;
 	std::map<Key, BulkLoadManifest> taskManifestMap;
+	// Limits the "no replica in the target DC" warning to once per job rather than once per
+	// affected range per scheduling cycle. This manager is reconstructed for each job.
+	bool warnedNoServerInTargetDc = false;
 
 	DDBulkDumpJobManager() = default;
 	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -503,7 +506,8 @@ public:
 		                 lock,
 		                 configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
 		                 context->ddEnabledState.get(),
-		                 SkipDDModeCheck::False));
+		                 SkipDDModeCheck::False,
+		                 configuration));
 	}
 
 	void initDcInfo() {
@@ -511,6 +515,17 @@ public:
 		auto dcIds = getDataDistributorDcIds(configuration.regions, activePrimaryDcId);
 		primaryDcId = std::move(dcIds.primary);
 		remoteDcIds = std::move(dcIds.remote);
+	}
+
+	// The DC whose storage servers perform bulkdump uploads, or empty when the cluster has no
+	// region configuration. Resolved per dispatch rather than cached so it follows a failover.
+	std::string bulkDumpTargetDcId() const {
+		const std::vector<Optional<Key>>& dcIds =
+		    SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION ? remoteDcIds : primaryDcId;
+		if (!dcIds.empty() && dcIds[0].present()) {
+			return dcIds[0].get().toString();
+		}
+		return std::string();
 	}
 
 	Future<Void> waitDataDistributorEnabled() const {
@@ -647,9 +662,25 @@ public:
 			    .setMaxFieldLength(-1)
 			    .detail("Conf", self->configuration.toString());
 
+			// Resolve the effective shard-location-metadata encoding target for
+			// this DD incarnation: DatabaseConfiguration is authoritative, with
+			// the legacy SHARD_ENCODE_LOCATION_METADATA knob as the fallback
+			// only when shard_metadata_format is UNSET. Publish it on
+			// ddEnabledState so every downstream write/move path reads one
+			// resolved value instead of the raw knob.
+			bool shardEncodeLocationMetadata = self->configuration.shardMetadataFormatIsEncoded().orDefault(
+			    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+			self->context->ddEnabledState->setShardEncodeLocationMetadata(shardEncodeLocationMetadata);
+			TraceEvent("DDInitShardEncodeTarget", self->ddId)
+			    .detail("ShardEncodeLocationMetadata", shardEncodeLocationMetadata)
+			    .detail("ConfigFormatUnset",
+			            self->configuration.shardMetadataFormat == DatabaseConfiguration::ShardMetadataFormat::UNSET)
+			    .detail("Knob", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+
 			if (self->configuration.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
-			    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			    !shardEncodeLocationMetadata) {
 				TraceEvent(SevError, "PhysicalShardNotEnabledForShardedRocks", self->ddId)
+				    .detail("Reason", "sharded-rocksdb requires new-format shard-location metadata")
 				    .detail("EnableServerKnob", "SHARD_ENCODE_LOCATION_METADATA");
 				throw internal_error();
 			}
@@ -781,7 +812,8 @@ public:
 		}
 
 		std::vector<Key> customBoundaries;
-		if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+		if (bulkLoadIsEnabled(self->initData->bulkLoadMode,
+		                      self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 			// Bulk load does not allow boundary change
 			TraceEvent(SevInfo, "DDInitCustomRangeConfigDisabledByBulkLoadMode", self->ddId);
 		} else {
@@ -916,7 +948,7 @@ public:
 				    .detail("DataMove", meta.toString());
 				cancelledMoves++;
 			} else if (it.value()->isCancelled() ||
-			           (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
+			           (it.value()->valid && !self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
@@ -2245,8 +2277,7 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 						// No matter whether the task range is aligned with the manifest entry range, the task
 						// begin key must be in the manifestEntryMap. See manifestEntryMap definition for more
 						// details.
-						ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->find(task.getRange().begin) !=
-						       self->bulkLoadJobManager.get().manifestEntryMap->end());
+						ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->contains(task.getRange().begin));
 						if (task.onAnyPhase(
 						        { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error })) {
 							ASSERT(task.getRange().end == res[i + 1].key);
@@ -2592,10 +2623,11 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 		co_return;
 	}
 
-	// Only monitor if SHARD_ENCODE_LOCATION_METADATA is enabled (required for bulkload)
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	// Only monitor if the effective shard-location-metadata target is new
+	// format (required for bulkload)
+	if (!self->context->ddEnabledState->shardEncodeLocationMetadata()) {
 		TraceEvent(SevInfo, "DDBulkLoadModeMonitorSkipped", self->ddId)
-		    .detail("Reason", "SHARD_ENCODE_LOCATION_METADATA is disabled");
+		    .detail("Reason", "effective shard_metadata target is original");
 		co_return;
 	}
 
@@ -2620,7 +2652,8 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 				rd >> mode;
 			}
 
-			if (bulkLoadIsEnabled(mode) && !self->bulkLoadEnabled) {
+			if (bulkLoadIsEnabled(mode, self->context->ddEnabledState->shardEncodeLocationMetadata()) &&
+			    !self->bulkLoadEnabled) {
 				TraceEvent(SevInfo, "DDBulkLoadModeDynamicallyEnabled", self->ddId)
 				    .detail("UsableRegions", self->configuration.usableRegions);
 				self->bulkLoadEnabled = true;
@@ -2777,6 +2810,23 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					// Spawn task per shard
 					taskRange = rangeLocations[rangeLocationIndex].range;
 					ASSERT(!taskRange.empty());
+					// Skip rather than fall back to another region: the dumping server uploads the
+					// files, so a DC that cannot reach the destination would fail every task.
+					const std::string targetDcId = self->bulkDumpTargetDcId();
+					if (!targetDcId.empty()) {
+						const auto& servers = rangeLocations[rangeLocationIndex].servers;
+						auto targetDc = servers.find(targetDcId);
+						if (targetDc == servers.end() || targetDc->second.empty()) {
+							if (!self->bulkDumpJobManager.warnedNoServerInTargetDc) {
+								self->bulkDumpJobManager.warnedNoServerInTargetDc = true;
+								TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDc", self->ddId)
+								    .detail("JobID", jobId)
+								    .detail("TargetDcId", targetDcId)
+								    .detail("FirstSkippedRange", taskRange);
+							}
+							continue;
+						}
+					}
 					// Limit parallelism
 					while (true) {
 						if (self->bulkDumpParallelismLimitor.canStart()) {
@@ -2785,7 +2835,8 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 						co_await self->bulkDumpParallelismLimitor.waitUntilCounterChanged();
 					}
 					SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
-					                                        bulkDumpState.generateRangeTask(taskRange));
+					                                        bulkDumpState.generateRangeTask(taskRange),
+					                                        targetDcId);
 					// Issue task
 					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobSpawnRange", self->ddId)
 					    .detail("JobID", jobId)
@@ -3057,7 +3108,7 @@ void addDataDistributionActors(Reference<DataDistributor> self, std::vector<Futu
 	    self->txnProcessor->context(), self->lock, self->context->ddEnabledState.get(), self->initialized.getFuture()));
 	actors.push_back(nativeCdcBalancer(
 	    self->txnProcessor->context(), self->lock, self->context->ddEnabledState.get(), self->initialized.getFuture()));
-	if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+	if (bulkLoadIsEnabled(self->initData->bulkLoadMode, self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 		TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
 		    .detail("UsableRegions", self->configuration.usableRegions);
 		self->bulkLoadEnabled = true;
@@ -3164,18 +3215,19 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			actors.push_back(self->pollMoveKeysLock());
 			actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
 
-			self->context->tracker = makeReference<DataDistributionTracker>(
-			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
-			                                       .distributorId = self->ddId,
-			                                       .readyToStart = self->initialized,
-			                                       .output = self->relocationProducer,
-			                                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
-			                                       .physicalShardCollection = self->physicalShardCollection,
-			                                       .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
-			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
-			                                       .shards = &shards,
-			                                       .trackerCancelled = &self->context->trackerCancelled,
-			                                       .usableRegions = self->configuration.usableRegions });
+			self->context->tracker = makeReference<DataDistributionTracker>(DataDistributionTrackerInitParams{
+			    .db = self->txnProcessor,
+			    .distributorId = self->ddId,
+			    .readyToStart = self->initialized,
+			    .output = self->relocationProducer,
+			    .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			    .physicalShardCollection = self->physicalShardCollection,
+			    .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
+			    .anyZeroHealthyTeams = anyZeroHealthyTeams,
+			    .shards = &shards,
+			    .trackerCancelled = &self->context->trackerCancelled,
+			    .usableRegions = self->configuration.usableRegions,
+			    .shardEncodeLocationMetadata = self->context->ddEnabledState->shardEncodeLocationMetadata() });
 			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(self->context->tracker,
 			                                                                 self->initData,
 			                                                                 getShardMetrics.getFuture(),
@@ -3410,9 +3462,9 @@ Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stream, Wo
 			    .detail("PeerAddress", stream.getEndpoint().getPrimaryAddress())
 			    .detail("Retry", snapReqRetry);
 			if (reply.getError().code() != error_code_request_maybe_delivered ||
-			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
+			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT) {
 				co_return ErrorOr<Void>(reply.getError());
-			else {
+			} else {
 				// retry for network failures with same snap UID to avoid snapshot twice
 				req = WorkerSnapRequest(req.snapPayload, req.snapUID, req.role);
 				co_await delay(snapRetryBackoff);
@@ -3500,7 +3552,7 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 
 			for (const auto& tlog : *tlogs) {
 				TraceEvent(SevDebug, "GetStatefulWorkersTLog").detail("Addr", tlog.address());
-				if (workersMap.find(tlog.address()) == workersMap.end()) {
+				if (!workersMap.contains(tlog.address())) {
 					TraceEvent(SevWarn, "MissingTLogWorkerInterface").detail("TlogAddress", tlog.address());
 					throw snap_tlog_failed();
 				}
@@ -3525,8 +3577,8 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 				// as we use primary addresses from storage and tlog interfaces above
 				NetworkAddress primary = worker.interf.address();
 				Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
-				if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end() ||
-				    (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
+				if (coordinatorsAddrSet.contains(primary) ||
+				    (secondary.present() && coordinatorsAddrSet.contains(secondary.get()))) {
 					if (result.contains(primary)) {
 						ASSERT(workersMap[primary].id() == result[primary].first.id());
 						result[primary].second.append(",coord");
@@ -3860,9 +3912,9 @@ Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 			rep.storageMetricsList = result.get();
 		} else {
 			auto& metricVec = result.get();
-			if (metricVec.empty())
+			if (metricVec.empty()) {
 				rep.midShardSize = 0;
-			else {
+			} else {
 				rep.midShardSize = getMedianShardSize(metricVec.contents());
 			}
 		}
@@ -4498,18 +4550,15 @@ void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAud
 	    .detail("AuditType", audit->coreState.getType())
 	    .detail("AuditRange", audit->coreState.range);
 
-	if (audit->coreState.getType() == AuditType::ValidateHA) {
-		audit->actors.add(dispatchAuditStorage(self, audit));
-	} else if (audit->coreState.getType() == AuditType::ValidateReplica) {
+	if (audit->coreState.getType() == AuditType::ValidateHA ||
+	    audit->coreState.getType() == AuditType::ValidateReplica ||
+	    audit->coreState.getType() == AuditType::ValidateRestore ||
+	    audit->coreState.getType() == AuditType::RangeDigest) {
 		audit->actors.add(dispatchAuditStorage(self, audit));
 	} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
 		audit->actors.add(dispatchAuditLocationMetadata(self, audit, allKeys));
 	} else if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
 		audit->actors.add(dispatchAuditStorageServerShard(self, audit));
-	} else if (audit->coreState.getType() == AuditType::ValidateRestore) {
-		audit->actors.add(dispatchAuditStorage(self, audit));
-	} else if (audit->coreState.getType() == AuditType::RangeDigest) {
-		audit->actors.add(dispatchAuditStorage(self, audit));
 	} else {
 		UNREACHABLE();
 	}

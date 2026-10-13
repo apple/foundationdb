@@ -477,6 +477,10 @@ public:
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
+	// As getStatus(), serialized as a JSON document. The error list is not capped, since a consumer is
+	// not reading a terminal.
+	Future<std::string> getStatusJSON(Database cx, Key tagName);
+
 	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::False);
 	Future<EnumState> getStateValue(Database cx, UID logUid) {
 		return runRYWTransaction(cx,

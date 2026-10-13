@@ -499,9 +499,7 @@ public:
 		} else {
 			ASSERT(this->getMoveInShard());
 			const MoveInPhase phase = this->getMoveInShard()->getPhase();
-			if (phase < MoveInPhase::ReadWritePending) {
-				st = StorageServerShard::MovingIn;
-			} else if (phase == MoveInPhase::ReadWritePending) {
+			if (phase == MoveInPhase::ReadWritePending) {
 				st = StorageServerShard::ReadWritePending;
 			} else if (phase == MoveInPhase::Complete) {
 				st = StorageServerShard::ReadWrite;
@@ -735,9 +733,9 @@ struct UpdateEagerReadInfo {
 
 	void addMutation(MutationRef const& m) {
 		// SOMEDAY: Theoretically we can avoid a read if there is an earlier overlapping ClearRange
-		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end) && enableClearRangeEagerReads)
+		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end) && enableClearRangeEagerReads) {
 			keyBegin.push_back(m.param2);
-		else if (m.type == MutationRef::CompareAndClear) {
+		} else if (m.type == MutationRef::CompareAndClear) {
 			if (enableClearRangeEagerReads)
 				keyBegin.push_back(keyAfter(m.param1, arena));
 			if (!keys.empty() && keys.back().first == m.param1) {
@@ -834,10 +832,15 @@ struct BusiestWriteTagContext {
 	UID ratekeeperID;
 	Reference<EventCacheHolder> busiestWriteTagEventHolder;
 	double lastUpdateTime;
+	// True once an idle (reported=false) update has already been logged, so we don't repeat it
+	// every TAG_MEASUREMENT_INTERVAL while nothing changes. Cleared as soon as a real busy tag is
+	// reported again, or the ratekeeper changes.
+	bool wasIdleLastUpdate;
 
 	explicit BusiestWriteTagContext(const UID& thisServerID)
 	  : busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"), ratekeeperID(UID()),
-	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
+	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1),
+	    wasIdleLastUpdate(false) {}
 };
 
 struct SSBulkLoadMetrics {
@@ -3436,9 +3439,9 @@ Future<Key> findKey(StorageServer* data,
 	// Don't limit the number of bytes if this is a trivial key selector (there will be at most two items returned from
 	// the read range in this case)
 	int maxBytes{ 0 };
-	if (sel.offset <= 1 && sel.offset >= 0)
+	if (sel.offset <= 1 && sel.offset >= 0) {
 		maxBytes = std::numeric_limits<int>::max();
-	else {
+	} else {
 		maxBytes = (g_network->isSimulated() &&
 		            fdbSimulationHasCapability(FDBSimulationCapability::LimitStorageServerReadBytes) && buggify())
 		               ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
@@ -6798,9 +6801,9 @@ bool convertAtomicOp(MutationRef& m, StorageServer::VersionedData const& data, U
 		Optional<StringRef> oldVal;
 		auto it = data.latestLastLessOrEqual(m.param1);
 		auto latestEnd = data.latestEnd();
-		if (it != latestEnd && it->isValue() && it.key() == m.param1)
+		if (it != latestEnd && it->isValue() && it.key() == m.param1) {
 			oldVal = it->getValue();
-		else if (it != latestEnd && it->isClearTo() && it->getEndKey() > m.param1) {
+		} else if (it != latestEnd && it->isClearTo() && it->getEndKey() > m.param1) {
 			CODE_PROBE(true, "Atomic op right after a clear.");
 		} else {
 			Optional<Value>& oldThing = eager->getValue(m.param1);
@@ -7235,6 +7238,12 @@ Future<Void> tryGetRangeForBulkLoadFromSST(PromiseStream<RangeResult> results,
 	try {
 		std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader(
 		    keys, SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE, SERVER_KNOBS->FETCH_BLOCK_BYTES);
+		if (reader == nullptr) {
+			TraceEvent(SevWarnAlways, "SSBulkLoadNoSstReader")
+			    .detail("Reason", "Binary was built without RocksDB and cannot read SST files")
+			    .detail("File", sstFilePath);
+			throw unsupported_operation();
+		}
 		// TODO(BulkLoad): this can be a slow task. We will make this as async call.
 		reader->open(abspath(sstFilePath));
 		while (true) {
@@ -7347,6 +7356,12 @@ static Future<Void> processSampleFiles(StorageServer* data,
 						// Store as KeyValueRef to keep the original encoded size value
 						rawSamples.clear();
 						reader = newRocksDBSstFileReader();
+						if (reader == nullptr) {
+							TraceEvent(SevWarnAlways, "StorageServerNoSstReader", data->thisServerID)
+							    .detail("Reason", "Binary was built without RocksDB and cannot read SST files")
+							    .detail("File", sampleFilePath);
+							throw unsupported_operation();
+						}
 						reader->open(abspath(sampleFilePath));
 
 						TraceEvent(SevInfo, "StorageServerProcessingSampleFile", data->thisServerID)
@@ -8923,10 +8938,7 @@ Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 				co_await fetchShardIngestCheckpoint(data, moveInShard);
 			} else if (phase == MoveInPhase::ApplyingUpdates) {
 				co_await fetchShardApplyUpdates(data, moveInShard, moveInUpdates);
-			} else if (phase == MoveInPhase::Complete) {
-				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
-				break;
-			} else if (phase == MoveInPhase::Error || phase == MoveInPhase::Cancel) {
+			} else if (phase == MoveInPhase::Complete || phase == MoveInPhase::Error || phase == MoveInPhase::Cancel) {
 				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
 				break;
 			}
@@ -10791,10 +10803,11 @@ Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* data,
 				}
 				anyFileCreated = false;
 				sstWriter = newRocksDBSstFileWriter();
-				sstWriter->open(bytesSampleFile);
+				// Null when built without RocksDB.
 				if (sstWriter == nullptr) {
 					break;
 				}
+				sstWriter->open(bytesSampleFile);
 				ASSERT(!metaData.ranges.empty());
 				std::sort(metaData.ranges.begin(), metaData.ranges.end(), [](KeyRange a, KeyRange b) {
 					// Debug usage: make sure no overlapping between compared two ranges
@@ -12754,6 +12767,7 @@ Future<Void> serveUpdateCommitCostRequests(StorageServer* self,
 			    .detail("LastUpdateTime", req.postTime);
 			self->busiestWriteTagContext.ratekeeperID = req.ratekeeperID;
 			self->busiestWriteTagContext.lastUpdateTime = -1;
+			self->busiestWriteTagContext.wasIdleLastUpdate = false;
 		}
 		// In case we received an old request/duplicate request, due to, e.g. network problem
 		ASSERT(req.postTime > 0);
@@ -12762,14 +12776,17 @@ Future<Void> serveUpdateCommitCostRequests(StorageServer* self,
 		}
 
 		self->busiestWriteTagContext.lastUpdateTime = req.postTime;
-		TraceEvent("BusiestWriteTag", self->thisServerID)
-		    .detail("Elapsed", req.elapsed)
-		    .detail("Tag", req.busiestTag)
-		    .detail("TagOps", req.opsSum)
-		    .detail("TagCost", req.costSum)
-		    .detail("TotalCost", req.totalWriteCosts)
-		    .detail("Reported", req.reported)
-		    .trackLatest(self->busiestWriteTagContext.busiestWriteTagTrackingKey);
+		if (req.reported || !self->busiestWriteTagContext.wasIdleLastUpdate) {
+			TraceEvent("BusiestWriteTag", self->thisServerID)
+			    .trackLatest(self->busiestWriteTagContext.busiestWriteTagTrackingKey)
+			    .detail("Elapsed", req.elapsed)
+			    .detail("Tag", req.busiestTag)
+			    .detail("TagOps", req.opsSum)
+			    .detail("TagCost", req.costSum)
+			    .detail("TotalCost", req.totalWriteCosts)
+			    .detail("Reported", req.reported);
+		}
+		self->busiestWriteTagContext.wasIdleLastUpdate = !req.reported;
 
 		req.reply.send(Void());
 	}
@@ -12801,9 +12818,7 @@ Future<Void> serveAuditStorageRequests(StorageServer* self, FutureStream<AuditSt
 			continue;
 		}
 		// Start the new audit task
-		if (req.getType() == AuditType::ValidateHA) {
-			self->actors.add(auditStorageShardReplicaQ(self, req));
-		} else if (req.getType() == AuditType::ValidateReplica) {
+		if (req.getType() == AuditType::ValidateHA || req.getType() == AuditType::ValidateReplica) {
 			self->actors.add(auditStorageShardReplicaQ(self, req));
 		} else if (req.getType() == AuditType::ValidateStorageServerShard) {
 			self->actors.add(auditStorageServerShardQ(self, req));

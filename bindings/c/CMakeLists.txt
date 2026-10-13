@@ -55,6 +55,7 @@ if(OPEN_FOR_IDE)
 else()
   add_library(fdb_c SHARED ${FDB_C_SRCS} ${fdb_c_apiversion_file} ${asm_file})
   strip_debug_symbols(fdb_c)
+  add_custom_target(stripped_fdb_c ALL DEPENDS strip_only_fdb_c)
 endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 add_dependencies(fdbclient fdb_c_options)
@@ -237,9 +238,7 @@ if(NOT WIN32)
     target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
     if(NOT OPEN_FOR_IDE)
       strip_debug_symbols(mako)
-      if(NOT GENERATE_DEBUG_PACKAGES)
-        add_custom_target(prepare_mako_install ALL DEPENDS strip_only_mako)
-      endif()
+      add_custom_target(prepare_mako_install ALL DEPENDS strip_only_mako)
     endif()
   endif()
 
@@ -272,6 +271,20 @@ if(NOT WIN32)
     add_fdbclient_test(
       NAME fdb_c_setup_tests
       COMMAND $<TARGET_FILE:fdb_c_setup_tests>)
+    if(NOT USE_SANITIZER)
+      if(APPLE)
+        set(FDB_BLOB_GRANULE_LIBRARY_PATH_ENV "DYLD_LIBRARY_PATH")
+      else()
+        set(FDB_BLOB_GRANULE_LIBRARY_PATH_ENV "LD_LIBRARY_PATH")
+      endif()
+      add_test(NAME fdb_c_blob_granule_fatal_exports
+        COMMAND ${CMAKE_COMMAND} -E env
+        "${FDB_BLOB_GRANULE_LIBRARY_PATH_ENV}=${CMAKE_BINARY_DIR}/lib:$ENV{${FDB_BLOB_GRANULE_LIBRARY_PATH_ENV}}"
+        $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_blob_granule_fatal_exports.py
+        --library $<TARGET_FILE:fdb_c>
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+      set_tests_properties(fdb_c_blob_granule_fatal_exports PROPERTIES TIMEOUT 120)
+    endif()
     add_fdbclient_test(
       NAME fdb_c_unit_tests
       COMMAND $<TARGET_FILE:fdb_c_unit_tests>

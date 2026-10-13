@@ -9745,18 +9745,8 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 			}
 			IntIntPair q = items[newPos];
 			++q.v;
-			if (old) {
-				if (useHint) {
-					// s.seekLessThanOrEqualOld(q, 0, &s, newPos - pos);
-				} else {
-					// s.seekLessThanOrEqualOld(q, 0, nullptr, 0);
-				}
-			} else {
-				if (useHint) {
-					// s.seekLessThanOrEqual(q, 0, &s, newPos - pos);
-				} else {
-					s2.seekLessThanOrEqual(q);
-				}
+			if (!old && !useHint) {
+				s2.seekLessThanOrEqual(q);
 			}
 			pos = newPos;
 		}

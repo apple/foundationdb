@@ -1616,7 +1616,7 @@ Future<T> reportErrorsExcept(Future<T> in,
 		T t = co_await in;
 		co_return t;
 	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled && (!pExceptErrors || !pExceptErrors->count(e.code())))
+		if (e.code() != error_code_actor_cancelled && (!pExceptErrors || !pExceptErrors->contains(e.code())))
 			TraceEvent(SevError, context, id).error(e);
 		throw;
 	}

@@ -475,6 +475,23 @@ ClientCoordinators::ClientCoordinators(Key clusterKey, std::vector<NetworkAddres
 	ccr = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(coordinators, clusterKey));
 }
 
+std::vector<Future<Optional<LeaderInfo>>> ClientCoordinators::getLeaderReplies() const {
+	std::vector<Future<Optional<LeaderInfo>>> replies;
+	replies.reserve(clientLeaderServers.size());
+	for (const auto& server : clientLeaderServers) {
+		if (server.hostname.present()) {
+			replies.push_back(retryGetReplyFromHostname(GetLeaderRequest(clusterKey, UID()),
+			                                            server.hostname.get(),
+			                                            WLTOKEN_CLIENTLEADERREG_GETLEADER,
+			                                            TaskPriority::CoordinationReply));
+		} else {
+			replies.push_back(retryBrokenPromise(
+			    server.getLeader, GetLeaderRequest(clusterKey, UID()), TaskPriority::CoordinationReply));
+		}
+	}
+	return replies;
+}
+
 ClientLeaderRegInterface::ClientLeaderRegInterface(NetworkAddress remote)
   : getLeader(Endpoint::wellKnown({ remote }, WLTOKEN_CLIENTLEADERREG_GETLEADER)),
     openDatabase(Endpoint::wellKnown({ remote }, WLTOKEN_CLIENTLEADERREG_OPENDATABASE)),

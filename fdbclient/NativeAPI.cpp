@@ -7092,20 +7092,7 @@ Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> excl
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators").log();
 	ClientCoordinators coordinatorList(cx->getConnectionRecord());
-	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
-	for (const auto& clientLeaderServer : coordinatorList.clientLeaderServers) {
-		if (clientLeaderServer.hostname.present()) {
-			leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coordinatorList.clusterKey, UID()),
-			                                                  clientLeaderServer.hostname.get(),
-			                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
-			                                                  TaskPriority::CoordinationReply));
-		} else {
-			leaderServers.push_back(retryBrokenPromise(clientLeaderServer.getLeader,
-			                                           GetLeaderRequest(coordinatorList.clusterKey, UID()),
-			                                           TaskPriority::CoordinationReply));
-		}
-	}
+	std::vector<Future<Optional<LeaderInfo>>> leaderServers = coordinatorList.getLeaderReplies();
 	// Wait for quorum so we don't dismiss live coordinators as unreachable by acting too fast
 	auto res = co_await race(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.0), delay(3.0));
 	if (res.index() == 1) {

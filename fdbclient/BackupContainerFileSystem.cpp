@@ -812,13 +812,8 @@ public:
 			// If we didn't get log versions above then seed them using the first log file
 			if (!desc.contiguousLogEnd.present()) {
 				desc.minLogBegin = logs.begin()->beginVersion;
-				if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
-					// Cannot use the first file's end version, which may not be contiguous
-					// for other partitions. Set to its beginVersion to be safe.
-					desc.contiguousLogEnd = logs.begin()->beginVersion;
-				} else {
-					desc.contiguousLogEnd = logs.begin()->beginVersion;
-				}
+				// The first file's end version may not be contiguous for other partitions.
+				desc.contiguousLogEnd = logs.begin()->beginVersion;
 			}
 
 			if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
@@ -1498,28 +1493,43 @@ public:
 		co_await keyFile->sync();
 	}
 
+	static constexpr int ENCRYPTION_KEY_MAX_RETRIES = 5;
+
 	static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
-		Reference<IAsyncFile> keyFile;
 		StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
-		try {
-			Reference<IAsyncFile> _keyFile = co_await IAsyncFileSystem::filesystem()->open(
-			    encryptionKeyFileName,
-			    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
-			    0400);
-			keyFile = _keyFile;
-		} catch (Error& e) {
-			TraceEvent(SevError, "FailedToOpenEncryptionKeyFile").error(e).detail("FileName", encryptionKeyFileName);
-			throw e;
+		for (int retries = 0;; ++retries) {
+			const char* errorEvent = "FailedToOpenEncryptionKeyFile";
+			try {
+				Reference<IAsyncFile> keyFile = co_await IAsyncFileSystem::filesystem()->open(
+				    encryptionKeyFileName,
+				    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
+				    0400);
+				errorEvent = "FailedToReadEncryptionKeyFile";
+				int bytesRead = co_await uncancellable(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
+				if (bytesRead != cipherKey->size()) {
+					TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
+					    .detail("ExpectedSize", cipherKey->size())
+					    .detail("ActualSize", bytesRead)
+					    .detail("FileName", encryptionKeyFileName);
+					throw invalid_encryption_key_file();
+				}
+				co_return;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				bool retry = e.isDiskError() && retries < ENCRYPTION_KEY_MAX_RETRIES;
+				TraceEvent(retry ? SevWarn : SevError, errorEvent)
+				    .error(e)
+				    .detail("FileName", encryptionKeyFileName)
+				    .detail("Retries", retries);
+				if (!retry) {
+					throw;
+				}
+			}
+			// Containers retain this setup future, so recover disk errors before publishing a permanent failure.
+			co_await delay(1.0);
 		}
-		int bytesRead = co_await uncancellable(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
-		if (bytesRead != cipherKey->size()) {
-			TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
-			    .detail("ExpectedSize", cipherKey->size())
-			    .detail("ActualSize", bytesRead)
-			    .detail("FileName", encryptionKeyFileName);
-			throw invalid_encryption_key_file();
-		}
-		ASSERT_EQ(bytesRead, cipherKey->size());
 	}
 
 	static Future<Void> writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem> bc,
@@ -2886,6 +2896,99 @@ TEST_CASE("/backup/containers/localdir/readKeyspaceSnapshot/chunked") {
 
 	const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_MANIFEST_CHUNK_SIZE = savedChunkSize;
 	co_await c->deleteContainer();
+}
+
+// Verify that listKeyspaceSnapshots(begin, end) returns exactly the snapshots whose [beginVersion,
+// endVersion] range overlaps [begin, end), and that the default arguments still return every snapshot.
+TEST_CASE("/backup/containers/localdir/listKeyspaceSnapshots/versionFilter") {
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await c->create();
+
+	// Three snapshots, each spanning 5 versions, separated by gaps:
+	//   [1000, 1004]   [2000, 2004]   [3000, 3004]
+	int blockSize = 64;
+	for (Version base : { 1000, 2000, 3000 }) {
+		std::vector<std::string> rangeFileNames;
+		std::vector<std::pair<Key, Key>> beginEndKeys;
+		for (Version v = base; v < base + 5; ++v) {
+			Key begin = StringRef(format("begin-%lld", v));
+			Key end = StringRef(format("end-%lld", v));
+			Reference<IBackupFile> range = co_await c->writeRangeFile(v, 0, v, blockSize);
+			co_await testWriteSnapshotFile(range, begin, end, blockSize);
+			rangeFileNames.push_back(range->getFileName());
+			beginEndKeys.push_back({ begin, end });
+		}
+		co_await c->writeKeyspaceSnapshotFile(rangeFileNames, beginEndKeys, 99999, IncludeKeyRangeMap::True);
+	}
+
+	Reference<BackupContainerFileSystem> bcfs = c.castTo<BackupContainerFileSystem>();
+
+	// Default arguments (0, INT64_MAX) must not filter anything out. fdbdecode relies on this so that
+	// omitting --begin/end_version_filter behaves as it did before the filter was plumbed through.
+	std::vector<KeyspaceSnapshotFile> all = co_await bcfs->listKeyspaceSnapshots();
+	ASSERT_EQ(all.size(), 3);
+
+	// A window covering only the first snapshot.
+	std::vector<KeyspaceSnapshotFile> first = co_await bcfs->listKeyspaceSnapshots(1000, 1005);
+	ASSERT_EQ(first.size(), 1);
+	ASSERT_EQ(first[0].beginVersion, 1000);
+
+	// A single-version window inside the second snapshot, i.e. [v, v+1). This is the shape of a query for
+	// one specific range file, and the case that previously read all three manifests.
+	std::vector<KeyspaceSnapshotFile> single = co_await bcfs->listKeyspaceSnapshots(2002, 2003);
+	ASSERT_EQ(single.size(), 1);
+	ASSERT_EQ(single[0].beginVersion, 2000);
+
+	// A window in the gap between snapshots matches nothing.
+	std::vector<KeyspaceSnapshotFile> none = co_await bcfs->listKeyspaceSnapshots(1500, 1600);
+	ASSERT_EQ(none.size(), 0);
+
+	// A window spanning two snapshots returns both, in beginVersion order.
+	std::vector<KeyspaceSnapshotFile> two = co_await bcfs->listKeyspaceSnapshots(1004, 2001);
+	ASSERT_EQ(two.size(), 2);
+	ASSERT_EQ(two[0].beginVersion, 1000);
+	ASSERT_EQ(two[1].beginVersion, 2000);
+
+	// Boundary checks against the predicate `beginVersion < end && endVersion >= begin`.
+	// end is exclusive: a window ending exactly at a snapshot's beginVersion excludes it.
+	std::vector<KeyspaceSnapshotFile> endExclusive = co_await bcfs->listKeyspaceSnapshots(1500, 2000);
+	ASSERT_EQ(endExclusive.size(), 0);
+	// begin is inclusive: a window starting exactly at a snapshot's endVersion includes it.
+	std::vector<KeyspaceSnapshotFile> beginInclusive = co_await bcfs->listKeyspaceSnapshots(1004, 1005);
+	ASSERT_EQ(beginInclusive.size(), 1);
+	ASSERT_EQ(beginInclusive[0].beginVersion, 1000);
+
+	// A window past every snapshot matches nothing.
+	std::vector<KeyspaceSnapshotFile> beyond = co_await bcfs->listKeyspaceSnapshots(4000, 5000);
+	ASSERT_EQ(beyond.size(), 0);
+
+	co_await c->deleteContainer();
+}
+
+// A RangeMapFilters with no prefixes matches nothing, so callers wanting "no filter means everything" must
+// check for an empty prefix list themselves instead of consulting the filter.
+TEST_CASE("/backup/rangeMapFilters/emptyMatchesNothing") {
+	fileBackup::RangeMapFilters empty;
+	ASSERT(!empty.match(KeyRangeRef(""_sr, "\xff"_sr))); // not even the whole keyspace
+	ASSERT(!empty.match(KeyRangeRef("a"_sr, "b"_sr)));
+	ASSERT(!empty.match(KeyValueRef("a"_sr, "v"_sr)));
+
+	std::vector<std::string> prefixes = { "ab" };
+	fileBackup::RangeMapFilters filters;
+	filters.updateFilters(prefixes);
+	ASSERT(filters.match(KeyRangeRef("ab"_sr, "ac"_sr)));
+	ASSERT(filters.match(KeyRangeRef("aa"_sr, "az"_sr)));
+	ASSERT(filters.match(KeyValueRef("abc"_sr, "v"_sr)));
+	ASSERT(!filters.match(KeyRangeRef("b"_sr, "c"_sr)));
+	ASSERT(!filters.match(KeyValueRef("b"_sr, "v"_sr)));
+
+	std::vector<KeyRange> ranges = { KeyRangeRef("m"_sr, "n"_sr) };
+	fileBackup::RangeMapFilters fromRanges(ranges);
+	ASSERT(fromRanges.match(KeyRangeRef("m"_sr, "mz"_sr)));
+	ASSERT(!fromRanges.match(KeyRangeRef("x"_sr, "y"_sr)));
+
+	return Void();
 }
 
 } // namespace backup_test

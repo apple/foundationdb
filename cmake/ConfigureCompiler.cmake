@@ -75,7 +75,7 @@ if(USE_GPERFTOOLS)
 endif()
 
 add_compile_options(-DCMAKE_BUILD)
-add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED)
+add_compile_definitions(BOOST_SYSTEM_NO_DEPRECATED)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
@@ -86,11 +86,6 @@ if(WIN32)
   add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
   add_definitions(-DNOGDI) # WinGDI.h defines macro ERROR
   add_definitions(-D_USE_MATH_DEFINES) # Math constants
-endif()
-
-if(APPLE)
-# Remove this after boost 1.81 or above is used
-add_definitions(-D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION)
 endif()
 
 if (USE_CCACHE)

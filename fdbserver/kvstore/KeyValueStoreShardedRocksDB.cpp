@@ -567,34 +567,10 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 	metaData.db_comparator_name = rocksCF.dbComparatorName;
 
 	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
-		rocksdb::LiveFileMetaData liveFileMetaData;
-		liveFileMetaData.relative_filename = fileMetaData.relative_filename;
-		liveFileMetaData.directory = fileMetaData.directory;
-		liveFileMetaData.file_number = fileMetaData.file_number;
-		liveFileMetaData.file_type = static_cast<rocksdb::FileType>(fileMetaData.file_type);
-		liveFileMetaData.size = fileMetaData.size;
-		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
-		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
-		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
-		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
-		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
-		liveFileMetaData.largestkey = fileMetaData.largestkey;
-		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
-		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
-		liveFileMetaData.num_entries = fileMetaData.num_entries;
-		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
-		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+		rocksdb::LiveFileMetaData liveFileMetaData = toRocksDBLiveFileMetaData(fileMetaData);
 		liveFileMetaData.smallest = fileMetaData.smallest;
 		liveFileMetaData.largest = fileMetaData.largest;
 		liveFileMetaData.file_type = rocksdb::kTableFile;
-		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
-		liveFileMetaData.name = fileMetaData.name;
-		liveFileMetaData.db_path = fileMetaData.db_path;
-		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
-		liveFileMetaData.level = fileMetaData.level;
 		metaData.files.push_back(liveFileMetaData);
 	}
 
@@ -606,33 +582,9 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 	if (metaData != nullptr) {
 		rocksCF.dbComparatorName = metaData->db_comparator_name;
 		for (const rocksdb::LiveFileMetaData& fileMetaData : metaData->files) {
-			LiveFileMetaData liveFileMetaData;
-			liveFileMetaData.relative_filename = fileMetaData.relative_filename;
-			liveFileMetaData.directory = fileMetaData.directory;
-			liveFileMetaData.file_number = fileMetaData.file_number;
-			liveFileMetaData.file_type = static_cast<int>(fileMetaData.file_type);
-			liveFileMetaData.size = fileMetaData.size;
-			liveFileMetaData.temperature = static_cast<uint8_t>(fileMetaData.temperature);
-			liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-			liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
-			liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
-			liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
-			liveFileMetaData.smallestkey = fileMetaData.smallestkey;
-			liveFileMetaData.largestkey = fileMetaData.largestkey;
-			liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
-			liveFileMetaData.being_compacted = fileMetaData.being_compacted;
-			liveFileMetaData.num_entries = fileMetaData.num_entries;
-			liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-			liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-			liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
-			liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+			LiveFileMetaData liveFileMetaData = fromRocksDBLiveFileMetaData(fileMetaData);
 			liveFileMetaData.smallest = fileMetaData.smallest;
 			liveFileMetaData.largest = fileMetaData.largest;
-			liveFileMetaData.epoch_number = fileMetaData.epoch_number;
-			liveFileMetaData.name = fileMetaData.name;
-			liveFileMetaData.db_path = fileMetaData.db_path;
-			liveFileMetaData.column_family_name = fileMetaData.column_family_name;
-			liveFileMetaData.level = fileMetaData.level;
 			rocksCF.sstFiles.push_back(liveFileMetaData);
 		}
 	}
@@ -730,6 +682,8 @@ rocksdb::DBOptions getOptions() {
 	options.max_open_files = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_OPEN_FILES;
 	options.delete_obsolete_files_period_micros = SERVER_KNOBS->ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD * 1000000;
 	options.max_total_wal_size = SERVER_KNOBS->ROCKSDB_MAX_TOTAL_WAL_SIZE;
+	// Preallocating WAL space for many simulated databases can exhaust the test tmpfs before the data is written.
+	options.allow_fallocate = !g_network->isSimulated();
 	options.max_subcompactions = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS;
 	options.max_background_jobs = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
 
@@ -759,7 +713,6 @@ rocksdb::DBOptions getOptions() {
 	options.keep_log_file_num = SERVER_KNOBS->ROCKSDB_KEEP_LOG_FILE_NUM;
 
 	options.skip_stats_update_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
-	options.skip_checking_sst_file_sizes_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 	options.max_manifest_file_size = SERVER_KNOBS->ROCKSDB_MAX_MANIFEST_FILE_SIZE;
 
 	if (SERVER_KNOBS->ROCKSDB_FULLFILE_CHECKSUM) {
@@ -1267,7 +1220,9 @@ public:
 		}
 
 		std::vector<rocksdb::ColumnFamilyHandle*> handles;
-		status = rocksdb::DB::Open(dbOptions, path, descriptors, &handles, &db);
+		std::unique_ptr<rocksdb::DB> dbPtr;
+		status = rocksdb::DB::Open(dbOptions, path, descriptors, &handles, &dbPtr);
+		db = dbPtr.release();
 		if (!status.ok()) {
 			logRocksDBError(status, "Open");
 			return status;
@@ -2947,7 +2902,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				while (i < fetchedRanges.size() && j < intendedRanges.size()) {
 					if (fetchedRanges[i].begin != intendedRanges[j].begin) {
 						break;
-					} else if (fetchedRanges[i] == intendedRanges[j]) {
+					}
+					if (fetchedRanges[i] == intendedRanges[j]) {
 						++i;
 						++j;
 					} else if (fetchedRanges[i].contains(intendedRanges[j])) {
@@ -4688,10 +4644,11 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/RocksDBSstFileWriter") {
 	// Check: sst only contains kv of kvs3
 	rocksdb::Status status;
 	rocksdb::IngestExternalFileOptions ingestOptions;
-	rocksdb::DB* db;
 	rocksdb::Options options;
 	options.create_if_missing = true;
-	status = rocksdb::DB::Open(options, "testdb", &db);
+	std::unique_ptr<rocksdb::DB> dbPtr;
+	status = rocksdb::DB::Open(options, "testdb", &dbPtr);
+	rocksdb::DB* db = dbPtr.release();
 	ASSERT(status.ok());
 	status = db->IngestExternalFile({ localFile }, ingestOptions);
 	ASSERT(status.ok());

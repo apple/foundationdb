@@ -710,9 +710,7 @@ private:
 	}
 
 	void checkClearRangeLockPrefix(KeyRangeRef range) {
-		if (rangeLock == nullptr) {
-			return;
-		} else if (!rangeLockKeys.intersects(range)) {
+		if (rangeLock == nullptr || !rangeLockKeys.intersects(range)) {
 			return;
 		}
 		ASSERT(!initialCommit);

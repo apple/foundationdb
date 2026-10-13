@@ -385,6 +385,12 @@ struct BulkLoading : TestWorkload {
 		ASSERT(platform::createDirectory(folder));
 		std::string dataFile = res.getDataFileFullPath();
 		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+		if (sstWriter == nullptr) {
+			TraceEvent(SevWarnAlways, "BulkLoadingNoSstWriter")
+			    .detail("Reason", "Binary was built without RocksDB and cannot write SST files")
+			    .detail("DataFile", dataFile);
+			throw unsupported_operation();
+		}
 		sstWriter->open(abspath(dataFile));
 		std::vector<KeyValue> bytesSample;
 		for (const auto& kv : task.data) {

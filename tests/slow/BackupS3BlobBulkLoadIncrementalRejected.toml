@@ -1,25 +1,26 @@
-# BulkDump/BulkLoad Integration Test with Multiple Backup Ranges
+# --incremental must be refused on both bulk paths
 #
-# This test validates BulkDump/BulkLoad with multiple non-contiguous backup ranges:
-# - backupRangesCount=5 creates 5 random key ranges to backup
-# - Tests that BulkDump/BulkLoad correctly handles multiple SST file sets
-# - Tests range boundary handling during restore
+# --incremental means "logs only, no base snapshot". The bulk modes exist to produce (bulkdump) and
+# consume (bulkload) exactly that snapshot, so the combination is incoherent. Historically both sides
+# accepted it silently and resolved it in opposite directions: a bulkdump backup dropped the snapshot
+# and became unrestorable by bulkload, while a bulkload restore ingested the whole snapshot the caller
+# had asked to skip and then overwrote the caller's flag so status misreported it.
 #
-# Multiple range backup validates:
-# 1. Each range gets its own BulkDump SST files
-# 2. BulkLoad correctly identifies and loads all range files
-# 3. Data outside backup ranges is not affected
-# 4. Range boundaries are preserved correctly
+# This test asserts both submit-time rejections fire:
+# 1. submitBackup  refuses --incremental with snapshotMode 1 or 2  -> backup_error
+# 2. submitRestore refuses --incremental with useRangeFileRestore=false -> restore_error
 #
-# NOTE: SST file handling is only applicable when simulation randomly chooses
-# RocksDB storage engine. With other storage engines, the test still runs but
-# no SST file injection (instead streams the keyvalues).
+# It is deliberately separate from BackupS3BlobBulkLoadRestoreKeyRange.toml, which is the regression
+# gate for the --keys data-correctness bug and should not carry extra probes.
 #
-# Based on BackupS3BlobBulkLoadRestore.toml
+# Based on BackupS3BlobBulkLoadRestoreKeyRange.toml
 
 testClass = "Backup"
 
 [configuration]
+# Both guards under test write their user-facing message to stderr, and the harness scores stderr at
+# severity 40 by default -- which fails the run for the very output this test exists to provoke.
+StderrSeverity = 30
 storageEngineExcludeTypes = ["ssd-sharded-rocksdb"] # TODO(BulkLoad): remove after allowing bulkloading with fetchKey and shardedrocksdb
 disableTss = true # TODO(BulkLoad): support TSS
 
@@ -59,7 +60,7 @@ min_byte_sampling_probability = 0.5
 cc_enforce_use_unfit_dd_in_sim = true
 disable_audit_storage_final_replica_check_in_sim = true
 max_trace_lines = 5000000
-# Linux/Joshua runs 4x slower than macOS, and multirange with 5 ranges takes longer
+# Linux/Joshua runs 4x slower than macOS
 # Even single-region runs need 3600s+ on Joshua (observed ~4000s in worst cases)
 bulkdump_job_timeout = 5400
 bulkload_job_timeout = 5400
@@ -82,7 +83,7 @@ dd_team_zero_server_left_log_delay = 0
 dd_rebalance_parallelism = 1
 
 [[test]]
-testTitle = 'BackupS3BlobBulkLoadRestoreMultiRange'
+testTitle = 'BackupS3BlobBulkLoadIncrementalRejected'
 useDB = true
 clearAfterTest = false
 simBackupAgents = 'BackupToFile'
@@ -106,12 +107,15 @@ timeout = 7200
     abortAndRestartAfter = 0.0
     stopDifferentialAfter = 0.0
     performRestore = true
-    # Multiple backup ranges: 5 random non-contiguous ranges
-    # Each range gets separate BulkDump SST files
-    backupRangesCount = 5
+    backupRangesCount = 1
     backupRangeLengthMax = 10
     skipDirtyRestore = false
     backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
     # BulkDump/BulkLoad integration options
     snapshotMode = 1           # 1 = BULKDUMP (creates SST files instead of range files)
     useRangeFileRestore = false # false = use BulkLoad for restore
+    # Probe both guards: submitBackup and submitRestore must refuse --incremental with a bulk mode.
+    expectBulkIncrementalRejection = true
+    # And that submitBackup refuses --encryption-key-file with a bulk mode. Backup side only; the
+    # workload comment records why the restore side cannot be probed from here.
+    expectBulkEncryptionRejection = true

@@ -351,6 +351,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ALLOW_LARGE_SHARD,                                   false ); if( randomize && buggify() )  ALLOW_LARGE_SHARD = true;
 	init( MAX_LARGE_SHARD_BYTES,                          1000000000 ); // 1G
 	init( SHARD_ENCODE_LOCATION_METADATA,                      false ); if( isSimulated ) { bool v = deterministicRandom()->random01() < 0.75; if( !explicitlySetKnobs.contains("shard_encode_location_metadata") ) SHARD_ENCODE_LOCATION_METADATA = v; }
+	init( SHARD_ENCODE_REWRITE_KS_BATCH_SIZE,                   1000 ); if( randomize && buggify() ) SHARD_ENCODE_REWRITE_KS_BATCH_SIZE = deterministicRandom()->randomInt(1, 11); // small batch forces multi-page Phase 2 pagination in sim
 	init( ENABLE_DD_PHYSICAL_SHARD,                            false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
 	init( DD_PHYSICAL_SHARD_MOVE_PROBABILITY,                    0.0 ); // FIXME: re-enable after ShardedRocksDB is well tested by simulation
 	init( ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT,               false ); // FIXME: re-enable after ShardedRocksDB is well tested by simulation
@@ -549,6 +550,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// BulkDumping
 	init( DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC,                 5.0 ); if( randomize && buggify() ) DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC = deterministicRandom()->random01() * 10 + 1;
 	init( DD_BULKDUMP_PARALLELISM,                                50 ); if( randomize && buggify() ) DD_BULKDUMP_PARALLELISM = deterministicRandom()->randomInt(1, 5);
+	init( DD_BULKDUMP_USE_REMOTE_REGION,                       false ); if( randomize && buggify() ) DD_BULKDUMP_USE_REMOTE_REGION = deterministicRandom()->coinflip();
 	init( DD_BULKDUMP_BUILD_JOB_MANIFEST_BATCH_SIZE,           10000 ); if( isSimulated ) DD_BULKDUMP_BUILD_JOB_MANIFEST_BATCH_SIZE = deterministicRandom()->randomInt(1, 100);
 	init( SS_SERVE_BULKDUMP_PARALLELISM,                           1 ); // TODO(BulkDump): Do not set to 1 after SS can resolve the file folder conflict
 	init( SS_BULKDUMP_BATCH_BYTES,                   100LL*1024*1024 ); if( isSimulated ) SS_BULKDUMP_BATCH_BYTES = deterministicRandom()->randomInt(1000, 10000);
@@ -772,7 +774,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Does manual flushes at regular intervals(seconds), incase rocksdb did not flush. Feature disabled if the value is 0.
 	init( ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL,                    600 ); if( isSimulated ) ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL = deterministicRandom()->randomInt(4, 1200);
 	init( ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                    true );
-	init( ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                 true );
 	init( ROCKSDB_FULLFILE_CHECKSUM,                           false ); if ( randomize && buggify() ) ROCKSDB_FULLFILE_CHECKSUM = true;
 	// Enabling the below three PROTECTION_BYTES_PER_KEY knobs will have overhead(memory and performance). Be cautious to enable in prod.
 	// Writebatch key-value checksum
@@ -947,6 +948,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BACKUP_FILE_BLOCK_BYTES,                       1024 * 1024 );
 	init( BACKUP_WORKER_LOCK_BYTES,                              3e9 ); if(randomize && buggify()) BACKUP_WORKER_LOCK_BYTES = deterministicRandom()->randomInt(2048, 4096) * 4096LL;
 	init( BACKUP_UPLOAD_DELAY,                                  10.0 ); if(randomize && buggify()) BACKUP_UPLOAD_DELAY = deterministicRandom()->random01() * 60;
+	init( BACKUP_WORKER_UPLOAD_RETRY_LIMIT,                         5 );
+	init( BACKUP_WORKER_UPLOAD_RETRY_DELAY,                       1.0 );
+	init( BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY,                  10.0 );
 
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
@@ -1112,6 +1116,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT,            20e6 ); if( (randomize && buggify()) || smallTlogTarget ) REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT = 1e6;
 	init( TLOG_HARD_LIMIT_BYTES,                              3000e6 ); if( smallTlogTarget ) TLOG_HARD_LIMIT_BYTES = 30e6;
 	init( TLOG_MIN_AVAILABLE_SPACE_RATIO,                        0.0 ); if( randomize && buggify() ) TLOG_MIN_AVAILABLE_SPACE_RATIO = 0.1;
+	init( TLOG_DISK_SPACE_CHECK_INTERVAL,                        1.0 ); if( randomize && buggify() ) TLOG_DISK_SPACE_CHECK_INTERVAL = deterministicRandom()->coinflip() ? 0.0 : deterministicRandom()->random01();
 	init( TLOG_RECOVER_MEMORY_LIMIT, TARGET_BYTES_PER_TLOG + SPRING_BYTES_TLOG );
 
 	init( MAX_TRANSACTIONS_PER_BYTE,                            1000 );

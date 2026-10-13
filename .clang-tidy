@@ -35,6 +35,7 @@ Checks: >
   bugprone-undefined-memory-manipulation,
   bugprone-unhandled-self-assignment,
   bugprone-unique-ptr-array-mismatch,
+  bugprone-unused-return-value,
   bugprone-use-after-move,
   bugprone-virtual-near-miss,
   cppcoreguidelines-avoid-capturing-lambda-coroutines,
@@ -46,6 +47,7 @@ Checks: >
   modernize-use-using,
   performance-for-range-copy,
   performance-implicit-conversion-in-loop,
+  performance-inefficient-algorithm,
   performance-inefficient-vector-operation,
   performance-move-const-arg,
   performance-move-constructor-init,
@@ -54,8 +56,7 @@ Checks: >
   readability-const-return-type,
   readability-container-size-empty,
   readability-delete-null-pointer,
-  readability-duplicate-include,
-  readability-inconsistent-ifelse-braces
+  readability-duplicate-include
 CheckOptions:
   - key: bugprone-dangling-handle.HandleClasses
     value: 'std::basic_string_view;std::experimental::basic_string_view;std::span;StringRef'
