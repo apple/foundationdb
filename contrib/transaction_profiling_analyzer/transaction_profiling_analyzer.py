@@ -36,7 +36,10 @@ from fdb.impl import strinc
 import json
 from json import JSONEncoder
 import logging
+import os
 import struct
+import sys
+import uuid
 from bisect import bisect_left
 from bisect import bisect_right
 import time
@@ -813,6 +816,87 @@ class WriteCounter(object):
         return results
 
 
+def printable(b):
+    """Same escaping as fdbcli and trace events: printable ASCII as-is, backslash doubled, other bytes as \\xNN."""
+    if isinstance(b, str):
+        return b
+    return "".join("\\\\" if c == 92 else chr(c) if 32 <= c < 127 else "\\x%02x" % c for c in b)
+
+
+def cluster_description(cluster_file):
+    """The description part of the cluster file's connection string, looked up the same way fdb.open finds the file."""
+    for path in [cluster_file, os.environ.get("FDB_CLUSTER_FILE"), "fdb.cluster",
+                 "/etc/foundationdb/fdb.cluster", "/usr/local/etc/foundationdb/fdb.cluster"]:
+        if path and os.path.exists(path):
+            with open(path) as f:
+                lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+            return lines[-1].split(":")[0]
+    return ""
+
+
+AUDIT_LOG_FILE_NAME = "transaction_profiling_analyzer_audit.json"
+
+
+def audit_log_path():
+    """AUDIT_LOG_FILE_NAME in the FDB_NETWORK_OPTION_TRACE_ENABLE directory, next to libfdb_c's trace files.
+    Empty means the current directory, same as libfdb_c. Exits with a message if it's unset or not a directory."""
+    if "FDB_NETWORK_OPTION_TRACE_ENABLE" not in os.environ:
+        sys.exit("ERROR: audit logging is enabled (--audit-log or FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE) but "
+                 "FDB_NETWORK_OPTION_TRACE_ENABLE is not set. Set it to the directory to write the audit log to.")
+    log_dir = os.environ["FDB_NETWORK_OPTION_TRACE_ENABLE"] or "."
+    if not os.path.isdir(log_dir):
+        sys.exit("ERROR: FDB_NETWORK_OPTION_TRACE_ENABLE=%s is not a directory" % log_dir)
+    return os.path.join(log_dir, AUDIT_LOG_FILE_NAME)
+
+
+class AuditLog(object):
+    """Appends one JSON line per output the tool prints. Entries from the same input share a reqid."""
+
+    def __init__(self, path, cluster):
+        open(path, "a").close()  # fail at startup, not mid-run, if the file isn't writable
+        self.path = path
+        self.cluster = cluster
+
+    @staticmethod
+    def new_reqid():
+        return uuid.uuid4().hex[:16]
+
+    def log(self, reqid, operation, input, **output):
+        record = {
+            "ts": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "level": "info",
+            "msg": "TransactionProfilingAnalyzerAudit",
+            "cluster": self.cluster,
+            "reqid": reqid,
+            "operation": operation,
+            "input": input,
+        }
+        record.update(output)
+        with open(self.path, "a") as f:
+            f.write(json.dumps(record, default=lambda o: o.name if isinstance(o, Enum) else printable(o)) + "\n")
+
+    def log_transaction(self, info):
+        """One entry per key, range or mutation of each decoded operation in a printed transaction."""
+        ops = [("get", op) for op in info.gets] + [("get_range", op) for op in info.get_ranges]
+        ops += [("commit", info.commit)] if info.commit else []
+        ops += [("error_get", op) for op in info.error_gets] + [("error_get_range", op) for op in info.error_get_ranges]
+        ops += [("error_commit", op) for op in info.error_commits]
+        for operation, op in ops:
+            reqid = self.new_reqid()
+            # the op's own fields, minus what's logged as output and tenant
+            fields = {k: v for k, v in vars(op).items() if k not in (
+                "key", "key_range", "mutations", "read_conflict_range", "write_conflict_range", "tenant")}
+            if hasattr(op, "key"):
+                self.log(reqid, operation, fields, key=op.key)
+            if hasattr(op, "key_range"):
+                self.log(reqid, operation, fields, key=op.key_range.start_key, end_key=op.key_range.end_key)
+            for m in getattr(op, "mutations", []):
+                self.log(reqid, operation, fields, mutation_type=m.code, key=m.param_one, value=m.param_two)
+            for kind in ["read_conflict_range", "write_conflict_range"]:
+                for r in getattr(op, kind, []):
+                    self.log(reqid, operation, fields, conflict_range=kind, key=r.start_key, end_key=r.end_key)
+
+
 def connect(cluster_file=None):
     db = fdb.open(cluster_file=cluster_file)
     return db
@@ -853,10 +937,18 @@ def main():
                         help="Print addresses without the port number. Only works in versions older than 6.3, and is required in versions older than 6.2.")
     parser.add_argument("--single-shard-ranges-only", action="store_true",
                         help="Only print range boundaries that exist in a single shard")
+    parser.add_argument("--audit-log", action="store_true",
+                        help="Append a JSON line for every key, range or mutation this prints to "
+                             "$FDB_NETWORK_OPTION_TRACE_ENABLE/%s. Also enabled by setting "
+                             "FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE." % AUDIT_LOG_FILE_NAME)
     parser.add_argument("-a", "--filter-address", action="append",
                         help="Only print range boundaries that include the given address. This option can used multiple times to include more than one address in the filter, in which case all addresses must match.")
 
     args = parser.parse_args()
+
+    audit = None
+    if args.audit_log or "FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE" in os.environ:
+        audit = AuditLog(audit_log_path(), cluster_description(args.cluster_file))
 
     type_filter = set()
     if args.filter_get_version:
@@ -922,6 +1014,8 @@ def main():
         if info.has_types():
             if not write_counter and not read_counter:
                 print(info.to_json())
+                if audit:
+                    audit.log_transaction(info)
             else:
                 if write_counter:
                     write_counter.process(info)
@@ -930,6 +1024,9 @@ def main():
 
     def print_top(top, total, context):
         if top:
+            reqid = AuditLog.new_reqid()
+            query = {"top_requests": args.top_requests, "filter_address": args.filter_address,
+                     "min_timestamp": min_timestamp, "max_timestamp": max_timestamp}
             running_count = 0
             for (idx, (start, end, count, addresses)) in enumerate(top):
                 running_count += count
@@ -941,11 +1038,17 @@ def main():
                 print(" %d. %s\n    %d sampled %s (%.2f%%, %.2f%% cumulative)" % (
                     idx + 1, op_str, count, context, 100 * count / total, 100 * running_count / total))
                 print("    shard addresses: %s\n" % ", ".join(addresses))
+                if audit:
+                    audit.log(reqid, "top_" + context, query, key=start, end_key=end, count=count,
+                              shard_addresses=addresses)
 
         else:
             print(" No %s found" % context)
 
     def print_range_boundaries(range_boundaries, context):
+        reqid = AuditLog.new_reqid()
+        query = {"num_buckets": args.num_buckets, "single_shard_ranges_only": args.single_shard_ranges_only,
+                 "filter_address": args.filter_address, "min_timestamp": min_timestamp, "max_timestamp": max_timestamp}
         omit_start = None
         for (idx, (start, end, start_count, total_count, shard_count, addresses)) in enumerate(range_boundaries):
             omit = args.single_shard_ranges_only and shard_count is not None and shard_count > 1
@@ -976,6 +1079,9 @@ def main():
                     addresses_string = "; addresses=%s" % ', '.join(addresses) if addresses else ''
                     print(" %d. [%s, %s]\n     %s spanning %d shard(s)%s\n" % (
                         idx + 1, start, end, count_str, shard_count, addresses_string))
+                if audit:
+                    audit.log(reqid, context[:-1] + "_boundaries", query, key=start, end_key=end, count=start_count,
+                              total_count=total_count, shard_count=shard_count, shard_addresses=addresses)
             elif omit_start is None:
                 omit_start = idx
 
