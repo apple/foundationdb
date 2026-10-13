@@ -10,12 +10,6 @@
 set -euo pipefail
 
 MAX_GLIBC_VERSION=2.34
-# Newer symbol versions that RHEL 9.6 glibc does provide.
-ALLOWED_SYMBOLS=(
-  __rseq_flags@GLIBC_2.35
-  __rseq_offset@GLIBC_2.35
-  __rseq_size@GLIBC_2.35
-)
 
 if [[ $# -lt 2 ]]; then
   echo "Usage: $0 <nm> <binary>..." >&2
@@ -34,8 +28,7 @@ for file in "$@"; do
   bad_symbols=()
   for symbol in $(grep -oE '[^ ]+@GLIBC_[0-9.]+$' <<<"$undefined" | sort -u); do
     version=${symbol##*@GLIBC_}
-    newest=$(printf '%s\n%s\n' "$MAX_GLIBC_VERSION" "$version" | sort -V | tail -n1)
-    if [[ $version != "$MAX_GLIBC_VERSION" && $newest == "$version" && ! " ${ALLOWED_SYMBOLS[*]} " =~ " $symbol " ]]; then
+    if [[ $(printf '%s\n%s\n' "$MAX_GLIBC_VERSION" "$version" | sort -V | tail -n1) != "$MAX_GLIBC_VERSION" ]]; then
       bad_symbols+=("$symbol")
     fi
   done
