@@ -1207,7 +1207,7 @@ public:
 		std::vector<std::string> deleteLast;
 		std::set<std::string> partlyExpiredBulkDumpJobs;
 		for (const auto& jobId : expiringBulkDumpJobs) {
-			if (retainedBulkDumpJobs.count(jobId) > 0) {
+			if (retainedBulkDumpJobs.contains(jobId)) {
 				TraceEvent("BackupContainerExpireBulkDumpJobStillReferenced")
 				    .detail("URL", bc->getURL())
 				    .detail("BulkDumpJobId", jobId);
@@ -1250,7 +1250,7 @@ public:
 			auto job = snapshotBulkDumpJobs.find(f.fileName);
 			if (job == snapshotBulkDumpJobs.end()) {
 				toDelete.push_back(std::move(f.fileName));
-			} else if (partlyExpiredBulkDumpJobs.count(job->second) == 0) {
+			} else if (!partlyExpiredBulkDumpJobs.contains(job->second)) {
 				deleteLast.push_back(std::move(f.fileName));
 			}
 		}
