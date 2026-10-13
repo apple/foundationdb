@@ -7125,7 +7125,7 @@ public:
 			    .detail("SnapshotMode", snapshotMode);
 			fprintf(stderr,
 			        "ERROR: --incremental cannot be combined with --mode bulkdump or --mode both; it suppresses "
-			        "the snapshot those modes exist to produce, leaving a backup no bulkload restore can use.\n");
+			        "the snapshot those modes should produce.\n");
 			throw backup_error();
 		}
 
