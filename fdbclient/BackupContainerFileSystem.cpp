@@ -31,6 +31,7 @@
 #include "flow/UnitTest.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cinttypes>
 
 class BackupContainerFileSystemImpl {
@@ -68,6 +69,10 @@ public:
 			// Refusing to read anything over a chunk keeps expire from pulling in a huge manifest just to
 			// discover it has no job id.
 			if (size > CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE) {
+				TraceEvent("BackupContainerExpireSkipLargeSnapshotManifest")
+				    .detail("Snapshot", snapshot.fileName)
+				    .detail("Size", size)
+				    .detail("Limit", CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE);
 				co_return std::string();
 			}
 			std::string buf;
@@ -99,6 +104,23 @@ public:
 			    .detail("Snapshot", snapshot.fileName);
 			co_return std::string();
 		}
+	}
+
+	// Storage servers name every file of a dumped batch <dumpVersion>-..., e.g. 123-data.sst. Returns
+	// that version, or empty for files not named by version such as the job's job-manifest.txt.
+	static Optional<Version> bulkDumpFileVersion(const std::string& path) {
+		size_t leaf = path.find_last_of('/');
+		leaf = leaf == std::string::npos ? 0 : leaf + 1;
+		size_t dash = path.find('-', leaf);
+		if (dash == std::string::npos) {
+			return {};
+		}
+		Version v = 0;
+		auto [end, ec] = std::from_chars(path.data() + leaf, path.data() + dash, v);
+		if (ec != std::errc() || end != path.data() + dash) {
+			return {};
+		}
+		return v;
 	}
 
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of
@@ -924,6 +946,11 @@ public:
 						s.restorable = hasContinuousLogsForSnapshot(logs, s.beginVersion, s.endVersion);
 				}
 			}
+			// Expire deletes a snapshot's data before its descriptor, and keeps a bulkdump descriptor until its
+			// SST tree is empty, so a descriptor ending below unreliableEndVersion may be missing data.
+			if (s.endVersion < desc.unreliableEndVersion.orDefault(0)) {
+				s.restorable = false;
+			}
 
 			desc.snapshotBytes += s.totalSize;
 
@@ -931,7 +958,7 @@ public:
 			// Update only if minRestorableVersion and maxRestorableVersion are not set. If they are set, we should
 			// check for log continuity between current minRestorableVersion to s.endVersion which happens in the
 			// next if block.
-			if (s.beginVersion == s.endVersion && !desc.minRestorableVersion.present() &&
+			if (s.beginVersion == s.endVersion && s.restorable.get() && !desc.minRestorableVersion.present() &&
 			    !desc.maxRestorableVersion.present()) {
 				desc.minRestorableVersion = s.endVersion;
 				desc.maxRestorableVersion = s.endVersion;
@@ -1154,19 +1181,31 @@ public:
 		// the snapshot filename only carries a type suffix in 'both' mode, so a plain bulkdump snapshot
 		// reports an empty snapshotType and isBulkDump() is false for it. Any snapshot naming a job id is
 		// a bulkdump one; the rest read back empty and are skipped.
+		//
+		// As with range files, SSTs are expired by version: only files dumped before expireEndVersion go,
+		// so stepping the expire version forward splits reclaiming a large tree across runs. A dump
+		// finishes after its snapshot version, so an expiring snapshot can still have SSTs at or past
+		// expireEndVersion. Its descriptor is the only record of the job id, so it is kept until its tree
+		// is empty; describe reports it unrestorable, as unreliableEndVersion is already past it.
 		std::set<std::string> expiringBulkDumpJobs;
 		std::set<std::string> retainedBulkDumpJobs;
+		std::map<std::string, std::string> snapshotBulkDumpJobs;
 		for (auto& f : desc.snapshots) {
 			std::string jobId = co_await readBulkDumpJobId(bc, f);
 			if (jobId.empty()) {
 				continue;
 			}
+			snapshotBulkDumpJobs[f.fileName] = jobId;
 			if (f.endVersion < expireEndVersion) {
 				expiringBulkDumpJobs.insert(jobId);
 			} else {
 				retainedBulkDumpJobs.insert(jobId);
 			}
 		}
+		// Deleted only after every other file: an interrupted expire that had already removed a descriptor
+		// would leave the rest of its tree unreachable by any later run.
+		std::vector<std::string> deleteLast;
+		std::set<std::string> partlyExpiredBulkDumpJobs;
 		for (const auto& jobId : expiringBulkDumpJobs) {
 			if (retainedBulkDumpJobs.count(jobId) > 0) {
 				TraceEvent("BackupContainerExpireBulkDumpJobStillReferenced")
@@ -1175,18 +1214,45 @@ public:
 				continue;
 			}
 			BackupContainerFileSystem::FilesAndSizesT sstFiles = co_await bc->listFiles("bulkdump_data/" + jobId + "/");
+			std::vector<std::string> unversioned;
+			int64_t expiredCount = 0;
+			int64_t keptCount = 0;
+			for (auto& fs : sstFiles) {
+				Optional<Version> v = bulkDumpFileVersion(fs.first);
+				if (!v.present()) {
+					unversioned.push_back(std::move(fs.first));
+				} else if (v.get() < expireEndVersion) {
+					toDelete.push_back(std::move(fs.first));
+					++expiredCount;
+				} else {
+					++keptCount;
+				}
+			}
+			if (keptCount > 0) {
+				partlyExpiredBulkDumpJobs.insert(jobId);
+			} else {
+				deleteLast.insert(deleteLast.end(),
+				                  std::make_move_iterator(unversioned.begin()),
+				                  std::make_move_iterator(unversioned.end()));
+			}
 			TraceEvent("BackupContainerExpireBulkDumpJob")
 			    .detail("URL", bc->getURL())
 			    .detail("BulkDumpJobId", jobId)
-			    .detail("FileCount", sstFiles.size());
-			for (auto& fs : sstFiles) {
-				toDelete.push_back(fs.first);
-			}
+			    .detail("ExpiredFiles", expiredCount)
+			    .detail("KeptFiles", keptCount)
+			    .detail("UnversionedFiles", unversioned.size());
 		}
 
 		for (auto& f : desc.snapshots) {
-			if (f.endVersion < expireEndVersion)
+			if (f.endVersion >= expireEndVersion) {
+				continue;
+			}
+			auto job = snapshotBulkDumpJobs.find(f.fileName);
+			if (job == snapshotBulkDumpJobs.end()) {
 				toDelete.push_back(std::move(f.fileName));
+			} else if (partlyExpiredBulkDumpJobs.count(job->second) == 0) {
+				deleteLast.push_back(std::move(f.fileName));
+			}
 		}
 		desc = BackupDescription();
 
@@ -1203,33 +1269,35 @@ public:
 
 		if (progress != nullptr) {
 			progress->step = "Deleting files";
-			progress->total = toDelete.size();
+			progress->total = toDelete.size() + deleteLast.size();
 			progress->done = 0;
 		}
 
-		// Delete files, but limit parallelism because the file list could use a lot of memory and the corresponding
-		// delete actor states would use even more if they all existed at the same time.
-		std::list<Future<Void>> deleteFutures;
+		for (std::vector<std::string>* batch : { &toDelete, &deleteLast }) {
+			// Delete files, but limit parallelism because the file list could use a lot of memory and the
+			// corresponding delete actor states would use even more if they all existed at the same time.
+			std::list<Future<Void>> deleteFutures;
 
-		while (!toDelete.empty() || !deleteFutures.empty()) {
+			while (!batch->empty() || !deleteFutures.empty()) {
 
-			// While there are files to delete and budget in the deleteFutures list, start a delete
-			while (!toDelete.empty() && deleteFutures.size() < CLIENT_KNOBS->BACKUP_CONCURRENT_DELETES) {
-				deleteFutures.push_back(bc->deleteFile(toDelete.back()));
-				toDelete.pop_back();
-			}
-
-			// Wait for deletes to finish until there are only targetDeletesInFlight remaining.
-			// If there are no files left to start then this value is 0, otherwise it is one less
-			// than the delete concurrency limit.
-			int targetFuturesSize = toDelete.empty() ? 0 : (CLIENT_KNOBS->BACKUP_CONCURRENT_DELETES - 1);
-
-			while (deleteFutures.size() > targetFuturesSize) {
-				co_await deleteFutures.front();
-				if (progress != nullptr) {
-					++progress->done;
+				// While there are files to delete and budget in the deleteFutures list, start a delete
+				while (!batch->empty() && deleteFutures.size() < CLIENT_KNOBS->BACKUP_CONCURRENT_DELETES) {
+					deleteFutures.push_back(bc->deleteFile(batch->back()));
+					batch->pop_back();
 				}
-				deleteFutures.pop_front();
+
+				// Wait for deletes to finish until there are only targetDeletesInFlight remaining.
+				// If there are no files left to start then this value is 0, otherwise it is one less
+				// than the delete concurrency limit.
+				int targetFuturesSize = batch->empty() ? 0 : (CLIENT_KNOBS->BACKUP_CONCURRENT_DELETES - 1);
+
+				while (deleteFutures.size() > targetFuturesSize) {
+					co_await deleteFutures.front();
+					if (progress != nullptr) {
+						++progress->done;
+					}
+					deleteFutures.pop_front();
+				}
 			}
 		}
 
@@ -1348,9 +1416,14 @@ public:
 
 		// Find the most recent keyrange snapshot through which we can restore filtered key ranges into targetVersion.
 		std::vector<KeyspaceSnapshotFile> snapshots = co_await bc->listKeyspaceSnapshots();
+		// A snapshot ending below unreliableEndVersion may be partly deleted; see describeBackup.
+		Optional<Version> unreliableEnd = co_await bc->unreliableEndVersion().get();
 		for (int i = snapshots.size() - 1; i >= 0; i--) {
 			// The smallest version of filtered range files >= snapshot beginVersion > targetVersion
 			if (targetVersion >= 0 && snapshots[i].beginVersion > targetVersion) {
+				continue;
+			}
+			if (snapshots[i].endVersion < unreliableEnd.orDefault(0)) {
 				continue;
 			}
 
@@ -2888,9 +2961,10 @@ TEST_CASE("/backup/containers/localdir/expireProgressVersions") {
 }
 
 // A bulkdump snapshot's data is an SST tree under bulkdump_data/<jobId>/, which expireData's file
-// listings do not cover. Verify expiring such a snapshot reclaims that tree, and -- because
-// BulkDumpTaskFunc joins an already-submitted job rather than starting its own, so two snapshots can
-// name the same job -- that a tree still referenced by a surviving snapshot is left alone.
+// listings do not cover. Verify expiring such a snapshot reclaims that tree; that, as with range files,
+// only SSTs dumped before the expire point go, so a later expire finishes a partly expired tree; and --
+// because BulkDumpTaskFunc joins an already-submitted job rather than starting its own, so two snapshots
+// can name the same job -- that a tree still referenced by a surviving snapshot is left alone.
 Future<Void> testExpireBulkDumpData(std::string url) {
 	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
 	try {
@@ -2905,16 +2979,22 @@ Future<Void> testExpireBulkDumpData(std::string url) {
 
 	std::string expiringJob = deterministicRandom()->randomUniqueID().toString();
 	std::string sharedJob = deterministicRandom()->randomUniqueID().toString();
+	std::string straddlingJob = deterministicRandom()->randomUniqueID().toString();
 
 	auto plantSst = [&](std::string const& jobId, std::string const& leaf) -> std::string {
 		return "bulkdump_data/" + jobId + "/" + leaf;
 	};
-	co_await bc->writeEntireFile(plantSst(expiringJob, "0-data.sst"), "expiring-sst");
-	co_await bc->writeEntireFile(plantSst(expiringJob, "0-sample.sst"), "expiring-sample");
-	co_await bc->writeEntireFile(plantSst(sharedJob, "0-data.sst"), "shared-sst");
+	co_await bc->writeEntireFile(plantSst(expiringJob, "job-manifest.txt"), "expiring-job-manifest");
+	co_await bc->writeEntireFile(plantSst(expiringJob, "t/0/200-data.sst"), "expiring-sst");
+	co_await bc->writeEntireFile(plantSst(expiringJob, "t/0/200-data.sst-sample.sst"), "expiring-sample");
+	co_await bc->writeEntireFile(plantSst(sharedJob, "t/0/200-data.sst"), "shared-sst");
+	// Dumped on both sides of the first expire point.
+	co_await bc->writeEntireFile(plantSst(straddlingJob, "job-manifest.txt"), "straddling-job-manifest");
+	co_await bc->writeEntireFile(plantSst(straddlingJob, "t/0/500-data.sst"), "straddling-early-sst");
+	co_await bc->writeEntireFile(plantSst(straddlingJob, "t/1/3000-data.sst"), "straddling-late-sst");
 
-	// Three bulkdump snapshots. Two early ones expire; the late one survives and shares sharedJob
-	// with the early one, so only expiringJob's tree may be reclaimed.
+	// Four bulkdump snapshots. Three early ones expire; the late one survives and shares sharedJob
+	// with an early one, so sharedJob's tree must stay whole.
 	Version early = 100;
 	Version late = 5000;
 	co_await bc->writeKeyspaceSnapshotFile(
@@ -2922,12 +3002,14 @@ Future<Void> testExpireBulkDumpData(std::string url) {
 	co_await bc->writeKeyspaceSnapshotFile(
 	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(sharedJob, early + 1, 0, 0));
 	co_await bc->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(straddlingJob, early + 2, 0, 0));
+	co_await bc->writeKeyspaceSnapshotFile(
 	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(sharedJob, late, 0, 0));
 
 	// A log file ending exactly at the expire point. It must not straddle that point: expireData rolls
-	// the actual expiration back to a straddling log's begin version, which would move it before both
+	// the actual expiration back to a straddling log's begin version, which would move it before the
 	// early snapshots and expire nothing. (That rollback is what testExpireProgressVersions covers.)
-	Version expireTo = 1000; // after both early snapshots, before the late one
+	Version expireTo = 1000; // after the early snapshots, before the late one
 	Reference<IBackupFile> log = co_await bc->writeLogFile(1, expireTo, 1024);
 	co_await log->append("x", 1);
 	co_await log->finish();
@@ -2937,13 +3019,51 @@ Future<Void> testExpireBulkDumpData(std::string url) {
 	BackupContainerFileSystem::FilesAndSizesT expiringLeft =
 	    co_await bc->listFiles("bulkdump_data/" + expiringJob + "/");
 	BackupContainerFileSystem::FilesAndSizesT sharedLeft = co_await bc->listFiles("bulkdump_data/" + sharedJob + "/");
+	BackupContainerFileSystem::FilesAndSizesT straddlingLeft =
+	    co_await bc->listFiles("bulkdump_data/" + straddlingJob + "/");
 
-	fmt::print("expiringJob files left={} sharedJob files left={}\n", expiringLeft.size(), sharedLeft.size());
+	fmt::print("expiringJob files left={} sharedJob files left={} straddlingJob files left={}\n",
+	           expiringLeft.size(),
+	           sharedLeft.size(),
+	           straddlingLeft.size());
 
 	// The expired job's tree is gone...
 	ASSERT_EQ(expiringLeft.size(), 0);
-	// ...and the tree a surviving snapshot still names is untouched.
+	// ...the tree a surviving snapshot still names is untouched...
 	ASSERT_EQ(sharedLeft.size(), 1);
+	// ...and only the straddling job's SSTs dumped before the expire point went.
+	ASSERT_EQ(straddlingLeft.size(), 2);
+	for (const auto& [name, size] : straddlingLeft) {
+		ASSERT(name.find("500-data.sst") == std::string::npos);
+	}
+
+	// The straddling job's descriptor is kept so a later expire can find the rest of its tree, but must
+	// not be offered for restore now that part of its data is gone.
+	BackupDescription desc = co_await c->describeBackup();
+	int keptStraddling = 0;
+	for (const auto& s : desc.snapshots) {
+		if (s.endVersion == early + 2) {
+			++keptStraddling;
+			ASSERT(!s.restorable.orDefault(true));
+		}
+	}
+	ASSERT_EQ(keptStraddling, 1);
+	Optional<RestorableFileSet> rest = co_await c->getRestoreSet(early + 2);
+	ASSERT(!rest.present());
+
+	// Advancing the expire point past the remaining SSTs reclaims the rest of the tree and the descriptor.
+	co_await c->expireData(4000, true);
+	straddlingLeft = co_await bc->listFiles("bulkdump_data/" + straddlingJob + "/");
+	sharedLeft = co_await bc->listFiles("bulkdump_data/" + sharedJob + "/");
+	std::vector<KeyspaceSnapshotFile> snapshotsLeft = co_await bc->listKeyspaceSnapshots();
+	fmt::print("after second expire: straddlingJob files left={} sharedJob files left={} snapshots left={}\n",
+	           straddlingLeft.size(),
+	           sharedLeft.size(),
+	           snapshotsLeft.size());
+	ASSERT_EQ(straddlingLeft.size(), 0);
+	ASSERT_EQ(sharedLeft.size(), 1);
+	ASSERT_EQ(snapshotsLeft.size(), 1);
+	ASSERT_EQ(snapshotsLeft[0].endVersion, late);
 
 	// deleteContainer was only ever assumed to reclaim this data, as a side effect of removing the
 	// container's data path -- which is why expire was the command that needed teaching. Assert it, so
