@@ -203,6 +203,17 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 //	Using the serverID as a prefix, then followed by the beginning of the shard range
 //	as the key, the value indicates whether the shard does or does not exist on the server.
 //	These values can be changed as data movement occurs.
+//
+//	INVARIANT: serverKeys and keyServers are two views of one fact -- who owns a range. A
+//	transaction that changes a server's ownership of a range in serverKeys MUST write the
+//	corresponding keyServers entry for that range in the SAME transaction. Every writer today does
+//	(startMoveKeys/removeOldDestinations, finishMoveKeys, finishMoveShards,
+//	cleanUpSingleShardDataMove, cleanUpDataMoveCore, both branches of removeKeysFromFailedServer,
+//	prepareBlobRestore, seedShardServers), and readers rely on it: finishMove* re-reads keyServers
+//	after dropping its planning transaction in order to detect concurrent reassignment, so a
+//	one-sided serverKeys writer would be invisible to it and its revocation would be resurrected.
+//	See the tr.reset() comments in finishMoveKeys/finishMoveShards for which window depends on this.
+//	auditLocationMetadataPreCheck/PostCheck cross-validate the two maps.
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;

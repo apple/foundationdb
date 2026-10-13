@@ -1,6 +1,6 @@
-#############
-Release Notes
-#############
+###################
+Release Notes - 5.0
+###################
 
 5.0.8
 =====
@@ -49,7 +49,7 @@ Fixes
 
 * Logs continued to make their data persistent to disk after being removed. <rdar://problem/33852607>
 * Removed logs did not delete their data before shutting down. <rdar://problem/33852342>
-* In rare scenarios, a disk error which occured during log recruitment could cause the recruitment to hang indefinately.
+* In rare scenarios, a disk error which occurred during log recruitment could cause the recruitment to hang indefinitely.
 
 5.0.3
 =====
@@ -183,8 +183,3 @@ Earlier release notes
 * :doc:`3.0 (API Version 300) </release-notes/release-notes-300>`
 * :doc:`2.0 (API Version 200) </release-notes/release-notes-200>`
 * :doc:`1.0 (API Version 100) </release-notes/release-notes-100>`
-* :doc:`Beta 3 (API Version 23) </release-notes/release-notes-023>`
-* :doc:`Beta 2 (API Version 22) </release-notes/release-notes-022>`
-* :doc:`Beta 1 (API Version 21) </release-notes/release-notes-021>`
-* :doc:`Alpha 6 (API Version 16) </release-notes/release-notes-016>`
-* :doc:`Alpha 5 (API Version 14) </release-notes/release-notes-014>`

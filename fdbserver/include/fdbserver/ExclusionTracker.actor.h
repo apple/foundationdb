@@ -52,6 +52,8 @@ struct ExclusionTracker {
 		return excluded.contains(addrExclusion) || failed.contains(addrExclusion);
 	}
 
+	// Note the tracker is intended to be used by the Data Distributor. The tracker will check for excluded localities
+	// based on the server list, the server list only includes storage processes.
 	ACTOR static Future<Void> tracker(ExclusionTracker* self) {
 		// Fetch the list of excluded servers
 		state ReadYourWritesTransaction tr(self->db);
@@ -65,7 +67,8 @@ struct ExclusionTracker {
 				state Future<RangeResult> flocalitiesExclude =
 				    tr.getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<RangeResult> flocalitiesFailed = tr.getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<std::vector<ProcessData>> fworkers = getWorkers(&tr.getTransaction());
+				state Future<RangeResult> fServerList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+
 				wait(success(fresultsExclude) && success(fresultsFailed) && success(flocalitiesExclude) &&
 				     success(flocalitiesFailed));
 
@@ -96,22 +99,59 @@ struct ExclusionTracker {
 					}
 				}
 
-				wait(success(fworkers));
-				std::vector<ProcessData> workers = fworkers.get();
-				for (const auto& r : excludedLocalityResults) {
-					std::string locality = decodeExcludedLocalityKey(r.key);
-					std::set<AddressExclusion> localityExcludedAddresses = getAddressesByLocality(workers, locality);
-					newExcluded.insert(localityExcludedAddresses.begin(), localityExcludedAddresses.end());
-					if (localityExcludedAddresses.empty()) {
-						TraceEvent(SevWarn, "ExclusionTrackerLocalityNotFound").detail("Locality", locality);
-					}
+				wait(success(fServerList));
+				// In some cases it can happen that the process is not running, e.g. because the process is down
+				// for maintenance. In this case the process will not be part of the worker list, but the process
+				// might be a storage server and could be part of the server list.
+				// See: https://github.com/apple/foundationdb/issues/12168
+				state std::vector<std::pair<std::string, std::string>> decodedExcludedLocalities;
+				for (auto& excludedLocality : excludedLocalityResults) {
+					decodedExcludedLocalities.push_back(
+					    decodeLocality(decodeExcludedLocalityKey(excludedLocality.key)));
 				}
-				for (const auto& r : failedLocalityResults) {
-					std::string locality = decodeFailedLocalityKey(r.key);
-					std::set<AddressExclusion> localityFailedAddresses = getAddressesByLocality(workers, locality);
-					newFailed.insert(localityFailedAddresses.begin(), localityFailedAddresses.end());
-					if (localityFailedAddresses.empty()) {
-						TraceEvent(SevWarn, "ExclusionTrackerFailedLocalityNotFound").detail("Locality", locality);
+
+				state std::vector<std::pair<std::string, std::string>> decodedFailedLocalities;
+				for (auto& failedLocality : failedLocalityResults) {
+					decodedFailedLocalities.push_back(decodeLocality(decodeFailedLocalityKey(failedLocality.key)));
+				}
+
+				state RangeResult serverList = fServerList.get();
+				for (auto& s : serverList) {
+					auto decodedServer = decodeServerListValue(s.value);
+					// Check if the server is excluded based on a locality.
+					for (auto& excludedLocality : decodedExcludedLocalities) {
+						if (!decodedServer.locality.isPresent(excludedLocality.first)) {
+							continue;
+						}
+
+						if (decodedServer.locality.get(excludedLocality.first) != excludedLocality.second) {
+							continue;
+						}
+
+						auto addresses = decodedServer.getKeyValues.getEndpoint().addresses;
+						newExcluded.insert(AddressExclusion(addresses.address.ip, addresses.address.port));
+						if (addresses.secondaryAddress.present()) {
+							auto secondaryAddress = addresses.secondaryAddress.get();
+							newExcluded.insert(AddressExclusion(secondaryAddress.ip, secondaryAddress.port));
+						}
+					}
+
+					// Check if the server is excluded as failed based on a locality.
+					for (auto& failedLocality : decodedFailedLocalities) {
+						if (!decodedServer.locality.isPresent(failedLocality.first)) {
+							continue;
+						}
+
+						if (decodedServer.locality.get(failedLocality.first) != failedLocality.second) {
+							continue;
+						}
+
+						auto addresses = decodedServer.getKeyValues.getEndpoint().addresses;
+						newFailed.insert(AddressExclusion(addresses.address.ip, addresses.address.port));
+						if (addresses.secondaryAddress.present()) {
+							auto secondaryAddress = addresses.secondaryAddress.get();
+							newFailed.insert(AddressExclusion(secondaryAddress.ip, secondaryAddress.port));
+						}
 					}
 				}
 

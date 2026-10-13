@@ -1,8 +1,26 @@
 include(AddFdbTest)
 
+# Test for setting up Python venv for client tests.
+# Adding this test as a fixture to another test allows the use of non-native Python packages within client test scripts
+# by installing dependencies from requirements.txt
+set(test_venv_cmd "")
+string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
+string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
+string(APPEND test_venv_cmd "&& pip install --retries 9 -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt ")
+string(APPEND test_venv_cmd "&& pip install ${CMAKE_BINARY_DIR}/bindings/python ")
+
+# The module is also included by fdbcli; register this shared fixture only once.
+add_test(
+  NAME test_venv_setup
+  COMMAND bash -c ${test_venv_cmd}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(test_venv_setup PROPERTIES FIXTURES_SETUP test_virtual_env_setup TIMEOUT 120)
+set_tests_properties(test_venv_setup PROPERTIES RESOURCE_LOCK TEST_VENV_SETUP)
+
 # We need some variables to configure the test setup
 set(ENABLE_BUGGIFY ON CACHE BOOL "Enable buggify for tests")
 set(ENABLE_SIMULATION_TESTS OFF CACHE BOOL "Enable simulation tests (useful if you can't run Joshua)")
+set(ENABLE_LONG_RUNNING_TESTS OFF CACHE BOOL "Add a long running tests package")
 set(RUN_IGNORED_TESTS OFF CACHE BOOL "Run tests that are marked for ignore")
 set(TEST_KEEP_LOGS "FAILED" CACHE STRING "Which logs to keep (NONE, FAILED, ALL)")
 set(TEST_KEEP_SIMDIR "NONE" CACHE STRING "Which simfdb directories to keep (NONE, FAILED, ALL)")
@@ -191,7 +209,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/LongStackWriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/LowLatency.toml)
 
-  # TODO: Fix failures and reenable this test:
+  # TODO: Fix failures and re-enable this test:
   add_fdb_test(TEST_FILES fast/LowLatencySingleClog.toml IGNORE)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MinimumThroughput.toml)
@@ -213,6 +231,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/RESTUnit.toml IGNORE)
   add_fdb_test(TEST_FILES fast/SelectorCorrectness.toml)
   add_fdb_test(TEST_FILES fast/ShardedRocksNondeterministicTest.toml)
+  add_fdb_test(TEST_FILES fast/StalePeerTest.toml)
   add_fdb_test(TEST_FILES fast/Sideband.toml)
   add_fdb_test(TEST_FILES fast/SidebandSingle.toml)
   add_fdb_test(TEST_FILES fast/SidebandWithStatus.toml)
@@ -559,17 +578,11 @@ if(WITH_PYTHON)
 
     set(authz_venv_dir ${CMAKE_CURRENT_BINARY_DIR}/authorization_test_venv)
     set(authz_venv_activate ". ${authz_venv_dir}/bin/activate")
-    set(authz_venv_stamp_file ${authz_venv_dir}/venv.ready)
     set(authz_venv_cmd "")
-    string(APPEND authz_venv_cmd "[[ ! -f ${authz_venv_stamp_file} ]] && ")
     string(APPEND authz_venv_cmd "${Python3_EXECUTABLE} -m venv ${authz_venv_dir} ")
     string(APPEND authz_venv_cmd "&& ${authz_venv_activate} ")
-    string(APPEND authz_venv_cmd "&& pip install --upgrade pip ")
-    string(APPEND authz_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/authorization/requirements.txt ")
-	# NOTE: Here we are already in the venv so Python3_EXECUTABLE is not available anymore
-    string(APPEND authz_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 -m pip install .) ")
-    string(APPEND authz_venv_cmd "&& touch ${authz_venv_stamp_file} ")
-    string(APPEND authz_venv_cmd "|| echo 'venv already set up'")
+    string(APPEND authz_venv_cmd "&& pip install --retries 9 -r ${CMAKE_SOURCE_DIR}/tests/authorization/requirements.txt ")
+    string(APPEND authz_venv_cmd "&& pip install ${CMAKE_BINARY_DIR}/bindings/python ")
     add_test(
       NAME authorization_venv_setup
       COMMAND bash -c ${authz_venv_cmd}

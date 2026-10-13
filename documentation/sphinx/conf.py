@@ -33,6 +33,7 @@ extensions = [
     "brokenrole",
     "relativelink",
     "rubydomain",
+    "sphinxcontrib.jquery",  # for bootstrap theme
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -134,6 +135,10 @@ html_theme_options = {
     ],
     "source_link_position": "footer",
 }
+
+# Create table of contents entries for domain objects
+# (e.g. functions, classes, attributes, etc.) (in left column ToC in our theme)
+toc_object_entries = False
 
 # A shorter title for the navigation bar.  Default is the same as html_title.
 # html_short_title = None

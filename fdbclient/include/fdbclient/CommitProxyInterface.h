@@ -41,6 +41,7 @@
 
 struct CommitProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8954922;
+	constexpr static int kNumAdjustedEndpoints = 13;
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
@@ -74,6 +75,17 @@ struct CommitProxyInterface {
 	NetworkAddress address() const { return commit.getEndpoint().getPrimaryAddress(); }
 	NetworkAddressList addresses() const { return commit.getEndpoint().addresses; }
 
+	std::vector<UID> getEndpointTokens() const {
+		// Token at index 0 is the base `commit` endpoint; adjusted endpoints start at 1.
+		std::vector<UID> tokens;
+		tokens.reserve(kNumAdjustedEndpoints + 1);
+		tokens.push_back(commit.getEndpoint().token);
+		for (int i = 1; i <= kNumAdjustedEndpoints; ++i) {
+			tokens.push_back(commit.getEndpoint().getAdjustedEndpoint(i).token);
+		}
+		return tokens;
+	}
+
 	template <class Archive>
 	void serialize(Archive& ar) {
 		serializer(ar, processId, provisional, commit);
@@ -99,6 +111,10 @@ struct CommitProxyInterface {
 			    commit.getEndpoint().getAdjustedEndpoint(12));
 			setThrottledShard =
 			    RequestStream<struct SetThrottledShardRequest>(commit.getEndpoint().getAdjustedEndpoint(13));
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && g_network && g_network->global(INetwork::enFlowTransport)) {
+				FlowTransport::transport().interfaceTracker.created(
+				    commit.getEndpoint().getPrimaryAddress(), "CP", getEndpointTokens());
+			}
 		}
 	}
 
@@ -120,6 +136,10 @@ struct CommitProxyInterface {
 		streams.push_back(getBlobGranuleLocations.getReceiver());
 		streams.push_back(setThrottledShard.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+			// streams[0] is `commit` (base endpoint); streams[1..kNumAdjustedEndpoints] are adjusted endpoints.
+			ASSERT(streams.size() - 1 == kNumAdjustedEndpoints);
+		}
 	}
 };
 

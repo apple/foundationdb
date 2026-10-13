@@ -122,6 +122,35 @@ public:
 	double COORDINATOR_DNS_CACHE_TTL;
 	double CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED;
 
+	// When true, enables tracing to debug stale peer issues (see StalePeerTest.toml).
+	// Not recommended for production due to potential performance overhead.
+	//
+	// Debugging workflow: if a simulation test fails with a dangling peer reference
+	// error, re-run the same seed with stale_peer_observability=true. This causes
+	// interfaceTracker to emit trace events recording creation and destruction at
+	// different layers of the RPC stack: interface, request stream, flow receiver.
+	// See InterfaceTracker-related traces in FlowTransport.cpp. These traces include
+	// backtraces that can be used to identify where the leak originated. From there,
+	// reason about what the code is doing, why it runs into the stale peer issue,
+	// and what can be done to prune the stale peers. The fix will vary case by case.
+	bool STALE_PEER_OBSERVABILITY;
+
+	// Used for two purposes off the same value: (1) eviction age -- an address is
+	// pruned from TransportData::persistentConnectFailedCount once it has had no
+	// connect failure for this many seconds; and (2) sweep cadence -- the prune
+	// scan runs at most once per this interval (and only when triggered by a
+	// connect failure). Bounds that map and the locationCachePeerEvictor
+	// snapshot/streak maps it feeds. 0 disables pruning. Coupling both onto one
+	// knob is a deliberate simplification: sweep about as often as the eviction
+	// horizon.
+	//
+	// NOTE: this value should be set to a multiple of LOCATION_CACHE_PEER_EVICTOR_DELAY
+	// so that a dead address is not pruned from this map before the evictor has a
+	// chance to observe its failure delta and evict the corresponding location cache entries.
+	// It should also be a multiple of the reconnect interval, so that an address that is
+	// still being targeted by RPCs re-fails and refreshes its timestamp before the TTL,
+	// and is never pruned while actively dead.
+	double PERSISTENT_CONNECT_FAILED_COUNT_TTL;
 	double DELAY_JITTER_OFFSET;
 	double DELAY_JITTER_RANGE;
 	double BUSY_WAIT_THRESHOLD;

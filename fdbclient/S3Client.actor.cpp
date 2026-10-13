@@ -72,7 +72,7 @@ struct PartConfig {
 ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size) {
 	state int64_t pos = 0;
 	state XXH64_state_t* hashState = XXH64_createState();
-	state std::vector<uint8_t> buffer(65536);
+	state std::shared_ptr<std::vector<uint8_t>> buffer = std::make_shared<std::vector<uint8_t>>(65536);
 	state int readSize;
 
 	XXH64_reset(hashState, 0);
@@ -84,8 +84,8 @@ ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int6
 		}
 
 		while (pos < size) {
-			readSize = std::min<int64_t>(buffer.size(), size - pos);
-			int bytesRead = wait(file->read(buffer.data(), readSize, pos));
+			readSize = std::min<int64_t>(buffer->size(), size - pos);
+			int bytesRead = wait(uncancellable(holdWhile(buffer, file->read(buffer->data(), readSize, pos))));
 			if (bytesRead != readSize) {
 				XXH64_freeState(hashState);
 				TraceEvent(SevError, "S3ClientCalculateChecksumReadError")
@@ -94,7 +94,7 @@ ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int6
 				    .detail("Position", pos);
 				throw io_error();
 			}
-			XXH64_update(hashState, buffer.data(), bytesRead);
+			XXH64_update(hashState, buffer->data(), bytesRead);
 			pos += bytesRead;
 		}
 
@@ -214,7 +214,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 	state std::string uploadID;
 	state std::vector<Future<PartState>> uploadFutures;
 	state std::vector<PartState> parts;
-	state std::vector<std::string> partDatas;
+	state std::vector<std::shared_ptr<std::string>> partDatas;
 	state int64_t size = fileSize(filepath);
 
 	try {
@@ -248,10 +248,10 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			state int64_t partSize = std::min(config.partSizeBytes, size - offset);
 
 			// Store part data in our vector to keep it alive
-			partDatas.emplace_back();
-			partDatas.back().resize(partSize);
+			partDatas.push_back(std::make_shared<std::string>(partSize, '\0'));
 
-			int bytesRead = wait(file->read(&partDatas.back()[0], partSize, offset));
+			int bytesRead =
+			    wait(uncancellable(holdWhile(partDatas.back(), file->read(&(*partDatas.back())[0], partSize, offset))));
 			if (bytesRead != partSize) {
 				TraceEvent(SevError, "S3ClientCopyUpFileReadError")
 				    .detail("Expected", partSize)
@@ -261,7 +261,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 				throw io_error();
 			}
 
-			std::string md5 = HTTP::computeMD5Sum(partDatas.back());
+			std::string md5 = HTTP::computeMD5Sum(*partDatas.back());
 			state PartState part;
 			part.partNumber = partNumber;
 			part.offset = offset;
@@ -270,7 +270,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			parts.push_back(part);
 
 			uploadFutures.push_back(
-			    uploadPart(endpoint, bucket, objectName, uploadID, part, partDatas.back(), config.retryDelayMs));
+			    uploadPart(endpoint, bucket, objectName, uploadID, part, *partDatas.back(), config.retryDelayMs));
 
 			offset += partSize;
 			partNumber++;
@@ -299,7 +299,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			etagMap[part.partNumber] = part.etag;
 		}
 
-		wait(endpoint->finishMultiPartUpload(bucket, objectName, uploadID, etagMap));
+		wait(endpoint->finishMultiPartUpload(bucket, objectName, uploadID, etagMap, size));
 
 		// Clear data after successful upload
 		parts.clear();

@@ -62,10 +62,28 @@ ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalon
 	return Void();
 }
 
+Future<Void> append(Reference<IBackupFile> file, const void* data, size_t len) {
+	const char* ptr = static_cast<const char*>(data);
+	size_t chunkLimit = static_cast<size_t>(CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE);
+	for (size_t offset = 0; offset < len;) {
+		size_t chunkSize = std::min(len - offset, chunkLimit);
+		co_await file->appendImpl(ptr + offset, chunkSize);
+		offset += chunkSize;
+	}
+}
+
 } // namespace IBackupFile_impl
 
 Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
 	return IBackupFile_impl::appendStringRefWithLen(Reference<IBackupFile>::addRef(this), s);
+}
+
+Future<Void> IBackupFile::append(const void* data, size_t len) {
+	return IBackupFile_impl::append(Reference<IBackupFile>::addRef(this), data, len);
+}
+
+bool isBlobstoreUrl(const std::string& url) {
+	return url.find("blobstore://") == 0;
 }
 
 std::string IBackupContainer::ExpireProgress::toString() const {

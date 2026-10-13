@@ -16,8 +16,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM docker.io/rockylinux/rockylinux:9.5-minimal AS base
+FROM rockylinux/rockylinux:9.8-minimal AS base
 
+# It seems mirrorlist can be less reliable, just use original baseurl for package repo.
+RUN sed -i.bak 's/^#baseurl=/baseurl=/; s/^mirrorlist=/#mirrorlist=/' /etc/yum.repos.d/rocky.repo
 RUN microdnf install -y \
     bind-utils \
     binutils \
@@ -57,7 +59,9 @@ RUN curl -Ls "https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TA
 
 WORKDIR /
 
-FROM docker.io/library/golang:1.24.7-bookworm AS go-build
+# Check that glibc version in base image >= glibc in go-build image (unless CGO_ENABLED=0)
+
+FROM golang:1.24.13-bookworm AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
@@ -84,7 +88,7 @@ ENTRYPOINT ["/usr/bin/fdb-aws-s3-credentials-fetcher", "-dir", "/var/fdb"]
 FROM base AS foundationdb-base
 
 WORKDIR /tmp
-ARG FDB_VERSION=6.3.22
+ARG FDB_VERSION=7.3.79
 ARG FDB_LIBRARY_VERSIONS="${FDB_VERSION}"
 ARG FDB_WEBSITE=https://github.com/apple/foundationdb/releases/download
 
@@ -211,15 +215,17 @@ RUN microdnf -y install \
 WORKDIR /tmp
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
         AWS_ARCH=x86_64; \
+        KUBECTL_SHA256=9f652f0f4d8a06a211a694739f80259db008da63547f024345a42f4dd88a3341; \
     elif [ "$TARGETARCH" = "arm64" ]; then \
         AWS_ARCH=aarch64; \
+        KUBECTL_SHA256=cd1b787b804b5c16dfd1c5440dbce75c01410ed791a0d518de6fcf8353d8883e; \
     else \
         echo "ERROR: unsupported architecture $TARGETARCH" 1>&2; \
         exit 1; \
     fi; \
-    NO_PROXY="" no_proxy="" curl -Ls https://s3.us-west-2.amazonaws.com/amazon-eks/1.22.6/2022-03-09/bin/linux/$TARGETARCH/kubectl -o kubectl && \
-    echo "860c3d37a5979491895767e7332404d28dc0d7797c7673c33df30ca80e215a07  kubectl" > kubectl.txt && \
-    sha256sum --quiet -c kubectl.txt && \
+    NO_PROXY="" no_proxy="" curl -Ls https://s3.us-west-2.amazonaws.com/amazon-eks/1.31.14/2026-08-04/bin/linux/$TARGETARCH/kubectl -o kubectl && \
+    echo "${KUBECTL_SHA256}  kubectl" > kubectl.txt && \
+    sha256sum -c kubectl.txt && \
     mv kubectl /usr/local/bin/kubectl && \
     chmod 755 /usr/local/bin/kubectl && \
     curl -Ls https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}-2.7.34.zip -o "awscliv2-${AWS_ARCH}.zip" && \

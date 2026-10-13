@@ -100,7 +100,7 @@ def collect_syms(f):
             if name in syms_set:
                 continue
             syms_set.add(name)
-            sym["Size"] = int(sym["Size"], 0)  # Readelf is inconistent on Size format
+            sym["Size"] = int(sym["Size"], 0)  # Readelf is inconsistent on Size format
             if "@" in name:
                 sym["Default"] = "@@" in name
                 name, ver = re.split(r"@+", name)

@@ -118,5 +118,5 @@ func (s Snapshot) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyAr
 // Snapshot returns the receiver and allows Snapshot to satisfy the
 // ReadTransaction interface.
 func (s Snapshot) Options() TransactionOptions {
-	return s.Options()
+	return TransactionOptions{s.transaction}
 }

@@ -1,6 +1,6 @@
-#############
-Release Notes
-#############
+###################
+Release Notes - 7.0
+###################
 
 7.0.0
 =====
@@ -46,7 +46,7 @@ Performance
 Reliability
 -----------
 * Backup agents now pause themselves upon a successful snapshot recovery to avoid unintentional data corruption. Operators should manually abort backup agents and clear the backup agent keyspace to avoid using the old cluster's backup configuration. `(PR #4027) <https://github.com/apple/foundationdb/pull/4027>`_
-* Log class processes are prioritized above transaction class proceses for becoming tlogs. `(PR #4509) <https://github.com/apple/foundationdb/pull/4509>`_ 
+* Log class processes are prioritized above transaction class processes for becoming tlogs. `(PR #4509) <https://github.com/apple/foundationdb/pull/4509>`_ 
 * Improved worker recruitment logic to avoid unnecessary recoveries when processes are added or removed from a cluster. `(PR #4695) <https://github.com/apple/foundationdb/pull/4695>`_ `(PR #4631) <https://github.com/apple/foundationdb/pull/4631>`_ `(PR #4509) <https://github.com/apple/foundationdb/pull/4509>`_
 
 Fixes
@@ -114,8 +114,3 @@ Earlier release notes
 * :doc:`3.0 (API Version 300) </release-notes/release-notes-300>`
 * :doc:`2.0 (API Version 200) </release-notes/release-notes-200>`
 * :doc:`1.0 (API Version 100) </release-notes/release-notes-100>`
-* :doc:`Beta 3 (API Version 23) </release-notes/release-notes-023>`
-* :doc:`Beta 2 (API Version 22) </release-notes/release-notes-022>`
-* :doc:`Beta 1 (API Version 21) </release-notes/release-notes-021>`
-* :doc:`Alpha 6 (API Version 16) </release-notes/release-notes-016>`
-* :doc:`Alpha 5 (API Version 14) </release-notes/release-notes-014>`

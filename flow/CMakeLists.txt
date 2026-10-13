@@ -40,12 +40,14 @@ if(NOT Jinja2_FOUND)
   execute_process(COMMAND "${Python3_EXECUTABLE}" -m venv ${PROTOCOL_VERSION_VENV_DIR})
   find_program(
     VENV_Python3_EXECUTABLE
-    NAMES python3 python3.exe
-    PATHS ${PROTOCOL_VERSION_VENV_DIR}/Scripts ${PROTOCOL_VERSION_VENV_DIR}/bin REQUIRED
-    NO_DEFAULT_PATH NO_CACHE
+    NAMES python3 python3.exe python.exe
+    PATHS ${PROTOCOL_VERSION_VENV_DIR}/Scripts ${PROTOCOL_VERSION_VENV_DIR}/bin
+    REQUIRED NO_DEFAULT_PATH NO_CACHE
     DOC "Checking Python3 executable in virtual environment")
-  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m ensurepip COMMAND_ERROR_IS_FATAL ANY)
-  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install -r "${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/requirements.txt" COMMAND_ERROR_IS_FATAL ANY)
+  execute_process(
+    COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install
+            -r "${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/requirements.txt"
+    COMMAND_ERROR_IS_FATAL ANY)
   set(PROTOCOL_VERSION_PYTHON_EXECUTABLE "${VENV_Python3_EXECUTABLE}")
 endif()
 

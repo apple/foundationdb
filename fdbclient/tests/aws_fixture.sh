@@ -76,7 +76,7 @@ function write_blob_credentials {
       echo "ERROR: Failed running ${fetcher}."
       return 1
     fi
-    # The sript writes a file whose name is s3_blob_credentials.json
+    # The script writes a file whose name is s3_blob_credentials.json
     echo "${dir}/s3_blob_credentials.json"
   else
     # No go so fall back to old way of writing blob credentials.

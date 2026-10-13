@@ -1,6 +1,6 @@
-#############
-Release Notes
-#############
+###################
+Release Notes - 5.1
+###################
 
 5.1.7
 =====
@@ -27,7 +27,7 @@ Fixes
 * The consistency check calculated the size of the database inefficiently. <rdar://problem/38385230>
 * Could not create new directories with the Python and Ruby implementations of the directory layer. <rdar://problem/38911902> <rdar://problem/38477474>
 * fdbcli could erroneously report that it was incompatible with some processes in the cluster. <rdar://problem/39353867>
-* The commit commmand in fdbcli did not wait for the result of the commit before continuing to the next command.
+* The commit command in fdbcli did not wait for the result of the commit before continuing to the next command.
 
 
 Other Changes
@@ -207,8 +207,3 @@ Earlier release notes
 * :doc:`3.0 (API Version 300) </release-notes/release-notes-300>`
 * :doc:`2.0 (API Version 200) </release-notes/release-notes-200>`
 * :doc:`1.0 (API Version 100) </release-notes/release-notes-100>`
-* :doc:`Beta 3 (API Version 23) </release-notes/release-notes-023>`
-* :doc:`Beta 2 (API Version 22) </release-notes/release-notes-022>`
-* :doc:`Beta 1 (API Version 21) </release-notes/release-notes-021>`
-* :doc:`Alpha 6 (API Version 16) </release-notes/release-notes-016>`
-* :doc:`Alpha 5 (API Version 14) </release-notes/release-notes-014>`
