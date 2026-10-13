@@ -1493,28 +1493,43 @@ public:
 		co_await keyFile->sync();
 	}
 
+	static constexpr int ENCRYPTION_KEY_MAX_RETRIES = 5;
+
 	static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
-		Reference<IAsyncFile> keyFile;
 		StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
-		try {
-			Reference<IAsyncFile> _keyFile = co_await IAsyncFileSystem::filesystem()->open(
-			    encryptionKeyFileName,
-			    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
-			    0400);
-			keyFile = _keyFile;
-		} catch (Error& e) {
-			TraceEvent(SevError, "FailedToOpenEncryptionKeyFile").error(e).detail("FileName", encryptionKeyFileName);
-			throw e;
+		for (int retries = 0;; ++retries) {
+			const char* errorEvent = "FailedToOpenEncryptionKeyFile";
+			try {
+				Reference<IAsyncFile> keyFile = co_await IAsyncFileSystem::filesystem()->open(
+				    encryptionKeyFileName,
+				    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
+				    0400);
+				errorEvent = "FailedToReadEncryptionKeyFile";
+				int bytesRead = co_await uncancellable(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
+				if (bytesRead != cipherKey->size()) {
+					TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
+					    .detail("ExpectedSize", cipherKey->size())
+					    .detail("ActualSize", bytesRead)
+					    .detail("FileName", encryptionKeyFileName);
+					throw invalid_encryption_key_file();
+				}
+				co_return;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				bool retry = e.isDiskError() && retries < ENCRYPTION_KEY_MAX_RETRIES;
+				TraceEvent(retry ? SevWarn : SevError, errorEvent)
+				    .error(e)
+				    .detail("FileName", encryptionKeyFileName)
+				    .detail("Retries", retries);
+				if (!retry) {
+					throw;
+				}
+			}
+			// Containers retain this setup future, so recover disk errors before publishing a permanent failure.
+			co_await delay(1.0);
 		}
-		int bytesRead = co_await uncancellable(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
-		if (bytesRead != cipherKey->size()) {
-			TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
-			    .detail("ExpectedSize", cipherKey->size())
-			    .detail("ActualSize", bytesRead)
-			    .detail("FileName", encryptionKeyFileName);
-			throw invalid_encryption_key_file();
-		}
-		ASSERT_EQ(bytesRead, cipherKey->size());
 	}
 
 	static Future<Void> writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem> bc,
