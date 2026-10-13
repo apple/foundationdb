@@ -749,7 +749,8 @@ static Future<PartState> downloadPart(Reference<S3BlobStoreEndpoint> endpoint,
 
 			// Verify checksum if provided (currently only MD5 is used for download verification)
 			if (!resultPart.checksum.empty()) {
-				std::string calculatedMD5 = HTTP::computeMD5Sum(std::string((char*)buffer->data(), totalBytesRead));
+				std::string calculatedMD5 =
+				    HTTP::computeMD5Sum(std::string_view((const char*)buffer->data(), totalBytesRead));
 				if (resultPart.checksum != calculatedMD5) {
 					TraceEvent(SevWarnAlways, "S3ClientDownloadPartChecksumMismatch")
 					    .detail("Expected", resultPart.checksum)
