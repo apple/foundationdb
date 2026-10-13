@@ -196,18 +196,18 @@ public:
 			co_return;
 
 		// Test the get function
-		co_await ::success(self->runGet(data, self->numGets, self));
+		co_await self->runGet(data, self->numGets, self);
 
 		// Test the getRange function
 		for (int i = 0; i < self->numGetRanges; i++)
-			co_await ::success(self->runGetRange(data, self));
+			co_await self->runGetRange(data, self);
 
 		// Test the getRange function using key selectors
 		for (int i = 0; i < self->numGetRangeSelectors; i++)
-			co_await ::success(self->runGetRangeSelector(data, self));
+			co_await self->runGetRangeSelector(data, self);
 
 		// Test the getKey function
-		co_await ::success(self->runGetKey(data, self->numGetKeys, self));
+		co_await self->runGetKey(data, self->numGetKeys, self);
 
 		// Test the clear function
 		bool clearResult = co_await self->runClear(data, self->numClears, self);

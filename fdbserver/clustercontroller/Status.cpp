@@ -570,12 +570,14 @@ struct RolesInfo {
 
 			TraceEventFields const& busiestReadTag = metrics.at("BusiestReadTag");
 			if (busiestReadTag.size()) {
-				int64_t tagCost = busiestReadTag.getInt64("TagCost");
+				double tagCost = busiestReadTag.getDouble("TagCost");
 				if (tagCost > 0) {
 					JsonBuilderObject busiestReadTagObj;
 					busiestReadTagObj["tag"] = busiestReadTag.getValue("Tag");
-					busiestReadTagObj["cost"] = tagCost;
-					busiestReadTagObj["fractional_cost"] = busiestReadTag.getValue("FractionalBusyness");
+					busiestReadTagObj["fractional_cost"] = busiestReadTag.getDouble("FractionalBusyness");
+					JsonBuilderObject estimatedCostObj;
+					estimatedCostObj["hz"] = tagCost;
+					busiestReadTagObj["estimated_cost"] = estimatedCostObj;
 					obj["busiest_read_tag"] = busiestReadTagObj;
 				}
 			}

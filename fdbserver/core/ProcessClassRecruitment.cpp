@@ -22,6 +22,31 @@
 
 namespace recruitment {
 
+namespace {
+
+// Commit proxies, GRV proxies, masters, and resolvers must share fallback fitness.
+Fitness transactionRoleFitness(ProcessClass::ClassType type, ProcessClass::ClassType preferredClass) {
+	if (type == preferredClass) {
+		return BestFit;
+	}
+	switch (type) {
+	case ProcessClass::StatelessClass:
+		return GoodFit;
+	case ProcessClass::UnsetClass:
+		return UnsetFit;
+	case ProcessClass::TransactionClass:
+		return OkayFit;
+	case ProcessClass::CoordinatorClass:
+	case ProcessClass::TesterClass:
+	case ProcessClass::BlobWorkerClass:
+		return NeverAssign;
+	default:
+		return WorstFit;
+	}
+}
+
+} // namespace
+
 Fitness machineClassFitness(ProcessClass const& processClass, ClusterRole role) {
 	auto type = processClass.classType();
 	switch (role) {
@@ -56,74 +81,14 @@ Fitness machineClassFitness(ProcessClass const& processClass, ClusterRole role) 
 		default:
 			return NeverAssign;
 		}
-	case CommitProxy: // Resolver, Master, CommitProxy, and GrvProxy need to be the same besides best fit
-		switch (type) {
-		case ProcessClass::CommitProxyClass:
-			return BestFit;
-		case ProcessClass::StatelessClass:
-			return GoodFit;
-		case ProcessClass::UnsetClass:
-			return UnsetFit;
-		case ProcessClass::TransactionClass:
-			return OkayFit;
-		case ProcessClass::CoordinatorClass:
-		case ProcessClass::TesterClass:
-		case ProcessClass::BlobWorkerClass:
-			return NeverAssign;
-		default:
-			return WorstFit;
-		}
-	case GrvProxy: // Resolver, Master, CommitProxy, and GrvProxy need to be the same besides best fit
-		switch (type) {
-		case ProcessClass::GrvProxyClass:
-			return BestFit;
-		case ProcessClass::StatelessClass:
-			return GoodFit;
-		case ProcessClass::UnsetClass:
-			return UnsetFit;
-		case ProcessClass::TransactionClass:
-			return OkayFit;
-		case ProcessClass::CoordinatorClass:
-		case ProcessClass::TesterClass:
-		case ProcessClass::BlobWorkerClass:
-			return NeverAssign;
-		default:
-			return WorstFit;
-		}
-	case Master: // Resolver, Master, CommitProxy, and GrvProxy need to be the same besides best fit
-		switch (type) {
-		case ProcessClass::MasterClass:
-			return BestFit;
-		case ProcessClass::StatelessClass:
-			return GoodFit;
-		case ProcessClass::UnsetClass:
-			return UnsetFit;
-		case ProcessClass::TransactionClass:
-			return OkayFit;
-		case ProcessClass::CoordinatorClass:
-		case ProcessClass::TesterClass:
-		case ProcessClass::BlobWorkerClass:
-			return NeverAssign;
-		default:
-			return WorstFit;
-		}
-	case Resolver: // Resolver, Master, CommitProxy, and GrvProxy need to be the same besides best fit
-		switch (type) {
-		case ProcessClass::ResolutionClass:
-			return BestFit;
-		case ProcessClass::StatelessClass:
-			return GoodFit;
-		case ProcessClass::UnsetClass:
-			return UnsetFit;
-		case ProcessClass::TransactionClass:
-			return OkayFit;
-		case ProcessClass::CoordinatorClass:
-		case ProcessClass::TesterClass:
-		case ProcessClass::BlobWorkerClass:
-			return NeverAssign;
-		default:
-			return WorstFit;
-		}
+	case CommitProxy:
+		return transactionRoleFitness(type, ProcessClass::CommitProxyClass);
+	case GrvProxy:
+		return transactionRoleFitness(type, ProcessClass::GrvProxyClass);
+	case Master:
+		return transactionRoleFitness(type, ProcessClass::MasterClass);
+	case Resolver:
+		return transactionRoleFitness(type, ProcessClass::ResolutionClass);
 	case LogRouter:
 		switch (type) {
 		case ProcessClass::LogRouterClass:

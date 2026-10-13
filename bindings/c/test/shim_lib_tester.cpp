@@ -25,6 +25,8 @@
 #include "fmt/core.h"
 #include "test/fdb_api.hpp"
 #include "SimpleOpt/SimpleOpt.h"
+#include <algorithm>
+#include <chrono>
 #include <thread>
 #include <string_view>
 #include "foundationdb/fdb_c_shim.h"
@@ -42,6 +44,7 @@ enum TesterOptionId {
 	OPT_HELP,
 	OPT_CONNFILE,
 	OPT_LOCAL_CLIENT_LIBRARY,
+	OPT_EXPECTED_LOCAL_CLIENT_VERSION,
 	OPT_EXTERNAL_CLIENT_LIBRARY,
 	OPT_EXTERNAL_CLIENT_DIRECTORY,
 	OPT_DISABLE_LOCAL_CLIENT,
@@ -56,6 +59,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	  { OPT_CONNFILE, "--cluster-file", SO_REQ_SEP },
 	  { OPT_LOCAL_CLIENT_LIBRARY, "--local-client-library", SO_REQ_SEP },
+	  { OPT_EXPECTED_LOCAL_CLIENT_VERSION, "--expected-local-client-version", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_DIRECTORY, "--external-client-dir", SO_REQ_SEP },
 	  { OPT_DISABLE_LOCAL_CLIENT, "--disable-local-client", SO_NONE },
@@ -68,6 +72,7 @@ public:
 	int apiVersion = FDB_API_VERSION;
 	std::string clusterFile;
 	std::string localClientLibrary;
+	std::string expectedLocalClientVersion;
 	std::string externalClientLibrary;
 	std::string externalClientDir;
 	bool disableLocalClient = false;
@@ -82,6 +87,8 @@ void printProgramUsage(const char* execName) {
 	       "                 FoundationDB cluster. The default is `fdb.cluster'\n"
 	       "  --local-client-library FILE\n"
 	       "                 Path to the local client library.\n"
+	       "  --expected-local-client-version VERSION\n"
+	       "                 Require the selected local client to report this release version.\n"
 	       "  --external-client-library FILE\n"
 	       "                 Path to the external client library.\n"
 	       "  --external-client-dir DIR\n"
@@ -116,6 +123,9 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		break;
 	case OPT_LOCAL_CLIENT_LIBRARY:
 		options.localClientLibrary = args.OptionArg();
+		break;
+	case OPT_EXPECTED_LOCAL_CLIENT_VERSION:
+		options.expectedLocalClientVersion = args.OptionArg();
 		break;
 	case OPT_EXTERNAL_CLIENT_LIBRARY:
 		options.externalClientLibrary = args.OptionArg();
@@ -186,23 +196,59 @@ void applyNetworkOptions(TesterOptions& options) {
 }
 
 void testBasicApi(const TesterOptions& options) {
-	fdb::Database db(options.clusterFile);
-	fdb::Transaction tx = db.createTransaction();
-	while (true) {
-		try {
-			// Set a time out to avoid long delays when testing invalid configurations
-			tx.setOption(FDB_TR_OPTION_TIMEOUT, 1000);
-			tx.set(fdb::toBytesRef("key1"sv), fdb::toBytesRef("val1"sv));
-			fdb_check(tx.commit().blockUntilReady(), "Wait on commit failed");
-			break;
-		} catch (const fdb::Error& err) {
-			if (err.code() == error_code_timed_out) {
-				exit(1);
-			}
-			auto onErrorFuture = tx.onError(err);
-			fdb_check(onErrorFuture.blockUntilReady(), "Wait on onError failed");
-			fdb_check(onErrorFuture.error(), "onError failed");
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+	auto remainingTimeoutMs = [&deadline]() {
+		auto remaining =
+		    std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+		if (remaining <= 0) {
+			fmt::print(stderr, "Basic read/write deadline expired\n");
+			std::abort();
 		}
+		return std::min<int64_t>(remaining, 5000);
+	};
+	auto retryOnError = [&remainingTimeoutMs](fdb::Transaction& tx, fdb::Error error) {
+		(void)remainingTimeoutMs();
+		auto retryFuture = tx.onError(error);
+		fdb_check(retryFuture.blockUntilReady(), "Wait on transaction retry failed");
+		fdb_check(retryFuture.error(), "Transaction retry failed");
+	};
+
+	fdb::Database db(options.clusterFile);
+	std::string expectedValue = "val1";
+	if (!options.expectedLocalClientVersion.empty()) {
+		expectedValue += "-" + options.expectedLocalClientVersion;
+	}
+	// TIMEOUT is measured from transaction creation, so retries use fresh transactions.
+	while (true) {
+		fdb::Transaction writeTx = db.createTransaction();
+		writeTx.setOption(FDB_TR_OPTION_TIMEOUT, remainingTimeoutMs());
+		writeTx.set(fdb::toBytesRef("key1"sv), fdb::toBytesRef(expectedValue));
+		auto commitFuture = writeTx.commit();
+		fdb_check(commitFuture.blockUntilReady(), "Wait on commit failed");
+		auto error = commitFuture.error();
+		if (!error) {
+			break;
+		}
+		retryOnError(writeTx, error);
+	}
+
+	while (true) {
+		fdb::Transaction readTx = db.createTransaction();
+		readTx.setOption(FDB_TR_OPTION_TIMEOUT, remainingTimeoutMs());
+		auto readFuture = readTx.get(fdb::toBytesRef("key1"sv), false);
+		fdb_check(readFuture.blockUntilReady(), "Wait on readback failed");
+		auto error = readFuture.error();
+		if (error) {
+			retryOnError(readTx, error);
+			continue;
+		}
+		auto value = readFuture.get();
+		if (!value || *value != fdb::toBytesRef(expectedValue)) {
+			fmt::print(stderr, "Committed value did not match readback\n");
+			std::abort();
+		}
+		(void)remainingTimeoutMs();
+		break;
 	}
 }
 
@@ -239,6 +285,19 @@ int main(int argc, char** argv) {
 		}
 
 		fdb::selectApiVersionCapped(options.apiVersion);
+		if (!options.expectedLocalClientVersion.empty()) {
+			const char* clientVersion = fdb::native::fdb_get_client_version();
+			std::string_view version = clientVersion ? clientVersion : "";
+			if (version.substr(0, version.find(',')) != options.expectedLocalClientVersion) {
+				fmt::print(stderr,
+				           "Expected primary client version {}, got {}\n",
+				           options.expectedLocalClientVersion,
+				           version);
+				return 1;
+			}
+			fmt::print("Primary client version: {}\n", version);
+			fflush(stdout);
+		}
 		applyNetworkOptions(options);
 		fdb::network::setup();
 

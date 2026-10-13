@@ -947,6 +947,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BACKUP_FILE_BLOCK_BYTES,                       1024 * 1024 );
 	init( BACKUP_WORKER_LOCK_BYTES,                              3e9 ); if(randomize && buggify()) BACKUP_WORKER_LOCK_BYTES = deterministicRandom()->randomInt(2048, 4096) * 4096LL;
 	init( BACKUP_UPLOAD_DELAY,                                  10.0 ); if(randomize && buggify()) BACKUP_UPLOAD_DELAY = deterministicRandom()->random01() * 60;
+	init( BACKUP_WORKER_UPLOAD_RETRY_LIMIT,                         5 );
+	init( BACKUP_WORKER_UPLOAD_RETRY_DELAY,                       1.0 );
+	init( BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY,                  10.0 );
 
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
@@ -1112,6 +1115,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT,            20e6 ); if( (randomize && buggify()) || smallTlogTarget ) REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT = 1e6;
 	init( TLOG_HARD_LIMIT_BYTES,                              3000e6 ); if( smallTlogTarget ) TLOG_HARD_LIMIT_BYTES = 30e6;
 	init( TLOG_MIN_AVAILABLE_SPACE_RATIO,                        0.0 ); if( randomize && buggify() ) TLOG_MIN_AVAILABLE_SPACE_RATIO = 0.1;
+	init( TLOG_DISK_SPACE_CHECK_INTERVAL,                        1.0 ); if( randomize && buggify() ) TLOG_DISK_SPACE_CHECK_INTERVAL = deterministicRandom()->coinflip() ? 0.0 : deterministicRandom()->random01();
 	init( TLOG_RECOVER_MEMORY_LIMIT, TARGET_BYTES_PER_TLOG + SPRING_BYTES_TLOG );
 
 	init( MAX_TRANSACTIONS_PER_BYTE,                            1000 );
