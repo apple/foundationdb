@@ -385,6 +385,12 @@ struct TLogData : NonCopyable {
 
 	Reference<AsyncVar<bool>> degraded;
 	Reference<AsyncVar<bool>> lowDiskTLogExclusion;
+
+	// Last disk-space sample of the low-disk admission check, reused for TLOG_DISK_SPACE_CHECK_INTERVAL.
+	StorageBytes sampledKvStoreBytes;
+	StorageBytes sampledQueueBytes;
+	double diskSpaceSampledAt = -std::numeric_limits<double>::infinity();
+
 	std::vector<TagsAndMessage> tempTagMessages;
 
 	// Distribution of end-to-end server latency of tlog commit requests.
@@ -3506,9 +3512,19 @@ double effectiveTLogMinAvailableSpaceRatio() {
 }
 
 static bool canTLogAcceptNewData(TLogData* self, Reference<LogData> logData, Version ver, bool failRecovery) {
-	StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
-	StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
 	const double minAvailableSpaceRatio = effectiveTLogMinAvailableSpaceRatio();
+	if (minAvailableSpaceRatio <= 0.0) {
+		return true;
+	}
+	// This runs for every version a remote TLog pulls, and each disk-space probe is a realpath() plus a statvfs()
+	// that sums per-CPU counters: probing every time costs a remote TLog about a quarter of its CPU.
+	if (now() - self->diskSpaceSampledAt >= SERVER_KNOBS->TLOG_DISK_SPACE_CHECK_INTERVAL) {
+		self->sampledKvStoreBytes = self->persistentData->getStorageBytes();
+		self->sampledQueueBytes = self->rawPersistentQueue->getStorageBytes();
+		self->diskSpaceSampledAt = now();
+	}
+	const StorageBytes kvStoreBytes = self->sampledKvStoreBytes;
+	const StorageBytes queueBytes = self->sampledQueueBytes;
 	if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, minAvailableSpaceRatio)) {
 		return true;
 	}
