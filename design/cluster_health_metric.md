@@ -74,10 +74,14 @@ Behavior:
 
 ### `StorageReplication`
 
-Source event:
+Source events from the current data distributor:
+- `TotalDataInFlight`
 - `MovingData`
 
 Fields used:
+- `HighestPrimaryTeamPriority`
+- `HighestRemoteTeamPriority`
+- `HighestTeamPriority` for compatibility with older data distributors
 - `InQueue`
 - `InFlight`
 - `PriorityTeamUnhealthy`
@@ -86,10 +90,14 @@ Fields used:
 - `PriorityTeam0Left`
 
 Behavior:
-- Returns `OUTAGE` if any `PriorityTeam0Left > 0`.
-- Returns `CRITICAL_INTERVENTION_REQUIRED` if any `PriorityTeam1Left > 0` and the configured storage team size is 3.
-- Returns `SELF_HEALING` if data movement is queued or in flight to restore replication.
+- Uses live storage team priorities for replication severity. Relocation counts can change before or after team health changes.
+- Uses the data distributor's current primary and remote team collections, so the regional roles follow failover.
+- Returns `OUTAGE` if a team in the primary region has no replicas left.
+- Returns `METRICS_MISSING` if a required team summary is uninitialized or unavailable, unless a known team in the primary region has no replicas left. A database with one region treats the absent remote region as healthy.
+- Returns `CRITICAL_INTERVENTION_REQUIRED` if a team in the remote region has no replicas left. It also returns this level if a team in either region has one replica left and the configured storage team size is 3.
+- Returns `SELF_HEALING` if a team is unhealthy or data movement is queued or in flight to restore replication.
 - Returns `HEALTHY` otherwise.
+- During an upgrade, an older data distributor's combined `HighestTeamPriority` retains the existing conservative scoring because it cannot identify the affected region.
 
 ### `RecoveryState`
 

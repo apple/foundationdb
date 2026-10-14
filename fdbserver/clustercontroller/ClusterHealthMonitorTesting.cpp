@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <map>
 
 #include "fdbserver/core/Knobs.h"
@@ -350,6 +351,62 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationF
 	provider->setLatestDataDistributorEvents("TotalDataInFlight",
 	                                         makeLatestWorkerEvents(teamMetrics(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY)));
 	provider->setLatestDataDistributorEvents("MovingData", LatestWorkerEvents());
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::METRICS_MISSING);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationFactor/RegionalScores") {
+	StorageReplicationFactor factor;
+	auto provider = makeReference<FakeWorkerEventProvider>();
+	provider->setLatestDataDistributorEvents("MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().build()));
+	auto teamMetrics = [](int primaryPriority, int remotePriority) {
+		TraceEventFields fields;
+		int combinedPriority =
+		    primaryPriority < 0 || remotePriority < 0 ? -1 : std::max(primaryPriority, remotePriority);
+		fields.addField("HighestTeamPriority", std::to_string(combinedPriority));
+		fields.addField("HighestPrimaryTeamPriority", std::to_string(primaryPriority));
+		fields.addField("HighestRemoteTeamPriority", std::to_string(remotePriority));
+		return fields;
+	};
+	struct RegionalCase {
+		int primaryPriority;
+		int remotePriority;
+		Level expected;
+	};
+	for (auto const& test : {
+	         RegionalCase{ SERVER_KNOBS->PRIORITY_TEAM_HEALTHY, SERVER_KNOBS->PRIORITY_TEAM_HEALTHY, Level::HEALTHY },
+	         RegionalCase{
+	             SERVER_KNOBS->PRIORITY_TEAM_HEALTHY, SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY, Level::SELF_HEALING },
+	         RegionalCase{
+	             SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY, SERVER_KNOBS->PRIORITY_TEAM_HEALTHY, Level::SELF_HEALING },
+	         RegionalCase{
+	             SERVER_KNOBS->PRIORITY_TEAM_HEALTHY, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT, Level::SELF_HEALING },
+	         RegionalCase{ SERVER_KNOBS->PRIORITY_TEAM_HEALTHY,
+	                       SERVER_KNOBS->PRIORITY_TEAM_0_LEFT,
+	                       Level::CRITICAL_INTERVENTION_REQUIRED },
+	         RegionalCase{ SERVER_KNOBS->PRIORITY_TEAM_0_LEFT, SERVER_KNOBS->PRIORITY_TEAM_HEALTHY, Level::OUTAGE },
+	         RegionalCase{ SERVER_KNOBS->PRIORITY_TEAM_0_LEFT, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT, Level::OUTAGE },
+	         RegionalCase{ SERVER_KNOBS->PRIORITY_TEAM_0_LEFT, -1, Level::OUTAGE },
+	         RegionalCase{ -1, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT, Level::METRICS_MISSING },
+	         RegionalCase{ SERVER_KNOBS->PRIORITY_TEAM_HEALTHY, -1, Level::METRICS_MISSING },
+	     }) {
+		provider->setLatestDataDistributorEvents(
+		    "TotalDataInFlight", makeLatestWorkerEvents(teamMetrics(test.primaryPriority, test.remotePriority)));
+		Level level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+		ASSERT_EQ(level, test.expected);
+	}
+
+	provider->setStorageTeamOneReplicaLeftIsCritical(true);
+	provider->setLatestDataDistributorEvents(
+	    "TotalDataInFlight",
+	    makeLatestWorkerEvents(teamMetrics(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT)));
+	Level level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
+
+	TraceEventFields partialRegionalMetrics;
+	partialRegionalMetrics.addField("HighestTeamPriority", std::to_string(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY));
+	partialRegionalMetrics.addField("HighestPrimaryTeamPriority", std::to_string(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY));
+	provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(partialRegionalMetrics));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
