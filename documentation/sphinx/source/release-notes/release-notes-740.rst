@@ -9,6 +9,8 @@ Release Notes
 
 AVX enabled release.
 
+* On rhel9 based distros, avoid linking GLIBC_2.35 symbols. This fixes compatibility with RHEL 9.6 (and equivalent), and other linux distributions with glibc-2.34 (which lack some symbol backports added in RHEL 9.7). This issue affected FoundationDB 7.4.7 and 7.4.8 (which were the first versions built on RHEL 9.8). `(PR #14274) <https://github.com/apple/foundationdb/pull/14274>`_
+* Fix "can_clean_bounce" in fdbserver status json. `(PR #14272) <https://github.com/apple/foundationdb/pull/14272>`_
 * Update to RocksDB 8.11.5 again. This contains a disk format change (originally made in RocksDB 9.0) such that it cannot be downgraded back to RocksDB 8.11.4 or lower, and no other changes. This new disk format is fully forwards and backwards compatible with RocksDB 9+ (for how FDB uses it). Note that RocksDB-9.7.3 was used in FoundationDB-7.4.0, downgraded to RocksDB-8.11.5 in FoundationDB-7.4.6, and then to RocksDB-8.11.4 in FoundationDB-7.4.7. All 7.4 releases before FoundationDB-7.4.7 were considered pre-stable-release, apologies for the confusion. `(PR #14042) <https://github.com/apple/foundationdb/pull/14042>`_
 
 If you use the RocksDB storage engine, and care about the possibility of rolling-back a deployment, this FoundationDB release is meant to be useful as a step to the new RocksDB disk format. Once you have upgraded to FDB 7.4.8 and have confidence in that version, this FDB 7.4.9 release should have identical behavior in all respects, but cannot be downgraded back.
