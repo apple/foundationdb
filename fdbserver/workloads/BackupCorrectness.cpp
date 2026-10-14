@@ -29,6 +29,8 @@
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "BulkSetup.h"
+#include "MultiBackupRanges.h"
+#include "ValidateRestoreAudit.h"
 #include "flow/IRandom.h"
 
 // TODO: explain the purpose of this workload and how it different from the
@@ -47,11 +49,28 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	std::vector<KeyRange> skippedRestoreRanges;
 	Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 	static int backupAgentRequests;
+	// Validation restores share a single destination prefix, so they run one at a time, and the in-place restore
+	// (which overwrites the live data they compare against) waits for all of them. State is process-wide: all
+	// instances of a test run in the same tester.
+	static inline FlowLock validationLock{ 1 };
+	static inline Reference<AsyncVar<int>> validationsPending = makeReference<AsyncVar<int>>(0);
 	LockDB locked{ false };
 	bool allowPauses;
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
 	bool defaultBackup;
+	// Restore the backup under the validation prefix and compare it with the live data before the in-place restore.
+	// Only valid when the data is quiescent and the backup captured all of it.
+	bool validateRestoredData;
+	// Earliest time (from workload start) at which the backup is validated; defaults to restoreAfter.
+	double validateAfter;
+	// Read version taken after the data has been written; backups being validated must cover it.
+	Future<Version> quiescentVersion;
+	bool countedAsPendingValidation = false;
+	// -1 for a standalone backup; otherwise this instance's index in a multi-backup scenario (see MultiBackupRanges.h).
+	int multiBackupIndex;
+	// An instance beyond the scenario's active backup count does nothing.
+	bool multiBackupIdle = false;
 	Optional<std::string> encryptionKeyFileName;
 
 	// This workload is not compatible with RandomRangeLock workload because they will race in locked range
@@ -90,6 +109,25 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		allowPauses = getOption(options, "allowPauses"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
 		defaultBackup = getOption(options, "defaultBackup"_sr, false);
+		validateRestoredData = getOption(options, "validateRestoredData"_sr, false);
+		validateAfter = getOption(options, "validateAfter"_sr, restoreAfter);
+		multiBackupIndex = getOption(options, "multiBackupIndex"_sr, -1);
+		MultiBackupRanges::Scenario multiBackupScenario = MultiBackupRanges::scenarioFor(sharedRandomNumber);
+		int multiBackupCount = MultiBackupRanges::activeBackupCount(sharedRandomNumber);
+		if (multiBackupIndex >= 0) {
+			ASSERT(multiBackupIndex < MultiBackupRanges::MAX_BACKUPS);
+			multiBackupIdle = multiBackupIndex >= multiBackupCount;
+			// A peer backup may still be running when this one finishes, so the log range can legitimately be shared.
+			shareLogRange = true;
+			performRestore = performRestore && !multiBackupIdle &&
+			                 MultiBackupRanges::shouldRestore(multiBackupScenario, multiBackupIndex, multiBackupCount);
+			TraceEvent("BARW_MultiBackup")
+			    .detail("Index", multiBackupIndex)
+			    .detail("ActiveBackups", multiBackupCount)
+			    .detail("Idle", multiBackupIdle)
+			    .detail("Scenario", MultiBackupRanges::toString(multiBackupScenario))
+			    .detail("PerformRestore", performRestore);
+		}
 
 		std::vector<std::string> restorePrefixesToInclude =
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
@@ -102,7 +140,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent("BARW_ClientId").detail("Id", wcx.clientId);
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 		TraceEvent("BARW_PerformRestore", randomID).detail("Value", performRestore);
-		if (defaultBackup) {
+		if (multiBackupIndex >= 0) {
+			// An idle instance still needs non-empty ranges to construct; reuse the last active backup's.
+			MultiBackupRanges::addRanges(
+			    multiBackupScenario, std::min(multiBackupIndex, multiBackupCount - 1), multiBackupCount, backupRanges);
+		} else if (defaultBackup) {
 			addDefaultBackupRanges(backupRanges);
 		} else if (shareLogRange) {
 			bool beforePrefix = sharedRandomNumber & 1;
@@ -179,7 +221,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		if (clientId != 0) {
+		if (clientId != 0 || multiBackupIdle) {
 			return Void();
 		}
 
@@ -200,7 +242,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		if (clientId != 0)
+		if (clientId != 0 || multiBackupIdle)
 			return Void();
 
 		TraceEvent(SevInfo, "BARW_Param").detail("Locked", locked);
@@ -216,11 +258,18 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent(SevInfo, "BARW_Param").detail("AgentRequest", agentRequest);
 		TraceEvent(SevInfo, "BARW_Param").detail("Encrypted", encryptionKeyFileName.present());
 
+		// Counted here and not in the constructor: a workload that is constructed but never started (the test is set up
+		// again after an early failure) would otherwise keep the in-place restore waiting forever.
+		if (validateRestoredData) {
+			countedAsPendingValidation = true;
+			validationsPending->set(validationsPending->get() + 1);
+		}
+
 		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override {
-		if (clientId != 0)
+		if (clientId != 0 || multiBackupIdle)
 			return true;
 		else
 			return _check(cx);
@@ -336,6 +385,12 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID)
 			    .detail("Tag", printable(tag))
 			    .detail("DifferentialAfter", stopDifferentialDelay);
+
+			// A discontinued backup stops at the version its log copy has reached, so let it catch up first.
+			if (validateRestoredData) {
+				Version target = co_await quiescentVersion;
+				co_await waitForRestorableVersion(cx, backupAgent, tag.toString(), target);
+			}
 
 			try {
 				if (buggify()) {
@@ -527,9 +582,76 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		printf("BackupCorrectness, backupAgent.restore finished for tag:%s\n", restoreTag.toString().c_str());
 	}
 
+	Future<Void> validateAgainstPrefixedRestore(Database cx,
+	                                            FileBackupAgent* backupAgent,
+	                                            Reference<IBackupContainer> container,
+	                                            UID randomID) {
+		Key prefix = validateRestoreLogKeys.begin;
+		Standalone<StringRef> validationTag(backupTag.toString() + "_validate");
+		co_await waitForAuditsToSettle(cx);
+		TraceEvent("BARW_ValidateRestoreStart", randomID).detail("Tag", printable(backupTag));
+		// Latest restorable version: the data is quiescent, so it must equal the live data.
+		BackupDescription desc = co_await IBackupContainer::openContainer(container->getURL(),
+		                                                                  container->getProxy(),
+		                                                                  container->getEncryptionKeyFileName(),
+		                                                                  container->getEncryptionBlockSize())
+		                             ->describeBackup();
+		Version restoredVersion = co_await backupAgent->restore(cx,
+		                                                        cx,
+		                                                        validationTag,
+		                                                        KeyRef(container->getURL()),
+		                                                        container->getProxy(),
+		                                                        backupRanges,
+		                                                        WaitForComplete::True,
+		                                                        ::invalidVersion,
+		                                                        Verbose::True,
+		                                                        prefix,
+		                                                        Key(),
+		                                                        LockDB::False,
+		                                                        UnlockDB::False,
+		                                                        OnlyApplyMutationLogs::False,
+		                                                        InconsistentSnapshotOnly::False,
+		                                                        ::invalidVersion,
+		                                                        container->getEncryptionKeyFileName());
+		TraceEvent("BARW_ValidateRestoreVersions", randomID)
+		    .detail("Tag", printable(backupTag))
+		    .detail("RestoredVersion", restoredVersion)
+		    .detail("MaxRestorable", desc.maxRestorableVersion.present() ? desc.maxRestorableVersion.get() : -1);
+		for (const auto& range : backupRanges) {
+			// The audit only covers user keys.
+			KeyRangeRef userRange = range & normalKeys;
+			if (!userRange.empty()) {
+				co_await runValidateRestoreAudit(cx, userRange);
+			}
+		}
+		// The prefix is left in place: a data distributor can re-dispatch an audit after it was reported complete,
+		// and that audit would read a cleared prefix as an empty baseline. Rows left by earlier validations equal the
+		// live data, so they cause no false failures, but they can hide a key that a later restore of an overlapping
+		// range failed to write.
+		TraceEvent("BARW_ValidateRestoreDone", randomID).detail("Tag", printable(backupTag));
+	}
+
+	// Releases this instance's claim on the pending-validation count on every exit path, so a failed instance cannot
+	// leave the in-place restore waiting forever.
+	struct PendingValidationClaim : NonCopyable {
+		bool held;
+		explicit PendingValidationClaim(bool held) : held(held) {}
+		void release() {
+			if (held) {
+				held = false;
+				validationsPending->set(validationsPending->get() - 1);
+			}
+		}
+		~PendingValidationClaim() { release(); }
+	};
+
 	Future<Void> _start(Database cx) {
 		FileBackupAgent backupAgent;
 		Future<Void> extraBackup;
+		PendingValidationClaim validationClaim(countedAsPendingValidation);
+		if (validateRestoredData) {
+			quiescentVersion = readVersionAfter(cx, validateAfter);
+		}
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		TraceEvent("BARW_Arguments")
 		    .detail("BackupTag", printable(backupTag))
@@ -555,6 +677,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		try {
 			Future<Void> startRestore = delay(restoreAfter);
+			Future<Void> startValidation = delay(validateAfter);
 
 			// backup
 			co_await delay(backupAfter);
@@ -600,6 +723,17 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			Reference<IBackupContainer> lastBackupContainer =
 			    co_await BackupConfig(logUid).backupContainer().getD(cx.getReference());
 
+			if (validateRestoredData) {
+				// Validation runs as soon as this backup is done, possibly while other backups are still running.
+				co_await startValidation;
+				if (lastBackupContainer) {
+					co_await validationLock.take();
+					FlowLock::Releaser releaser(validationLock);
+					co_await validateAgainstPrefixedRestore(cx, &backupAgent, lastBackupContainer, randomID);
+				}
+				validationClaim.release();
+			}
+
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!locked && buggify()) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(backupTag));
@@ -630,6 +764,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				                                                 lastBackupContainer->getEncryptionKeyFileName(),
 				                                                 lastBackupContainer->getEncryptionBlockSize());
 				BackupDescription desc = co_await container->describeBackup();
+
+				while (validationsPending->get() > 0) {
+					co_await validationsPending->onChange();
+				}
+				co_await waitForAuditsToSettle(cx);
 
 				if (deterministicRandom()->random01() < 0.5) {
 					co_await attemptDirtyRestore(cx,

@@ -4704,8 +4704,10 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 		errors.push_back(error);
 	}
 
-	// Check for any remaining restored keys that don't have matching source keys
-	if (errors.empty() && restoredIdx < restoredReply.data.size() && !restoredReply.more) {
+	// Check for any remaining restored keys that don't have matching source keys. As with missing source keys
+	// above, this is only conclusive once the source has no more data either: a source read can come back short
+	// with more=true (the storage reply limit ends it) while the restored read is already complete.
+	if (errors.empty() && restoredIdx < restoredReply.data.size() && !sourceReply.more && !restoredReply.more) {
 		// Extra keys found in restored data - treat as validation error
 		std::string error = format("Extra key(s) in restored data, first extra key: %s",
 		                           Traceable<StringRef>::toString(restoredReply.data[restoredIdx].key).c_str());
@@ -4812,8 +4814,15 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 
 					errors.clear();
 
-					// Use current durable version for reading
-					version = data->version.get();
+					// Read at a fresh cluster version rather than this server's own. A server that lags can have a
+					// version older than data committed before the audit started (e.g. the restore being
+					// validated), which would then look missing.
+					{
+						Transaction versionTr(data->cx);
+						versionTr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+						Version readVersion = co_await versionTr.getReadVersion();
+						version = readVersion;
+					}
 
 					// Fetch both source and restored data
 					std::pair<GetKeyValuesReply, GetKeyValuesReply> replyPair =
@@ -4937,7 +4946,12 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 				if (nonRetryableError.isValid() && nonRetryableError.code() != error_code_success) {
 					if (nonRetryableError.code() == error_code_future_version ||
 					    nonRetryableError.code() == error_code_transaction_too_old ||
-					    nonRetryableError.code() == error_code_server_overloaded) {
+					    nonRetryableError.code() == error_code_server_overloaded ||
+					    nonRetryableError.code() == error_code_process_behind ||
+					    nonRetryableError.code() == error_code_grv_proxy_memory_limit_exceeded ||
+					    nonRetryableError.code() == error_code_tag_throttled ||
+					    nonRetryableError.code() == error_code_batch_transaction_throttled ||
+					    nonRetryableError.code() == error_code_transaction_throttled_hot_shard) {
 						// This batch is retried from the same start key, so undo its partial accounting.
 						numValidatedKeys = batchStartValidatedKeys;
 						validatedBytes = batchStartValidatedBytes;

@@ -242,8 +242,9 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 | `ApiCorrectness` | Tests get/set/getRange/clear correctness |
 | `ReadWrite` | Mixed read/write load with configurable patterns |
 | `ConsistencyCheck` | Validates data consistency across replicas |
-| `Cycle` | Tests cluster configuration changes |
-| `BackupCorrectness` | Validates backup/restore integrity |
+| `Cycle` | Keeps a ring of linked keys and, in each transaction, rewires a few neighbouring pointers; the check walks the ring and fails unless it is still one cycle through every node (detects inconsistent reads, lost writes, and inconsistent restores) |
+| `BackupAndRestoreCorrectness` | Backs up and restores a key range and validates the restored data |
+| `BackupS3BlobCorrectness` | Same for blobstore/S3 backups, against MockS3 in simulation |
 | `BulkLoad` / `BulkDumping` | Tests bulk operations |
 | `AtomicOps` | Validates atomic operation correctness |
 | `ChangeConfig` | Tests configuration changes under load |
