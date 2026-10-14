@@ -50,6 +50,9 @@ struct DataDistributionTrackerInitParams {
 	bool* trackerCancelled = nullptr;
 	Optional<Reference<TenantCache>> ddTenantCache;
 	int32_t usableRegions = -1;
+	// Effective shard-location-metadata encoding target (resolved from
+	// DatabaseConfiguration with knob fallback, published on ddEnabledState).
+	bool shardEncodeLocationMetadata = false;
 };
 
 // track the status of shards
@@ -80,6 +83,10 @@ public:
 	// BulkLoadTask Tracker
 	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	bool bulkLoadEnabled = false;
+
+	// Effective shard-location-metadata encoding target for this DD
+	// incarnation (mirrors DDEnabledState::shardEncodeLocationMetadata()).
+	bool shardEncodeLocationMetadata = false;
 
 	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
