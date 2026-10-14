@@ -1160,7 +1160,7 @@ TEST_CASE("/fdbserver/worker/storageHealthRegistry/staleChildAndReboot") {
 static Future<Void> holdStorageHealthRoleForTest(StorageHealthRegistry::Role owner,
                                                  StorageHealthRegistry::Registration registration) {
 	registration.registered();
-	co_await Never();
+	co_await Future<Void>(Never());
 	owner.close();
 }
 
@@ -1185,7 +1185,7 @@ static Future<Void> storageHealthChildAwaitingIOForTest(StorageHealthRegistry::R
                                                         bool* cancelled) {
 	registration.registered();
 	try {
-		co_await Never();
+		co_await Future<Void>(Never());
 	} catch (Error& error) {
 		*cancelled = error.code() == error_code_actor_cancelled;
 		registration.terminated(error);
