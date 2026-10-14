@@ -1157,8 +1157,9 @@ TEST_CASE("/fdbserver/worker/storageHealthRegistry/staleChildAndReboot") {
 	return Void();
 }
 
-static Future<Void> holdStorageHealthRoleForTest(StorageHealthRegistry::Role owner,
+static Future<Void> holdStorageHealthRoleForTest(StorageHealthRegistry::Role role,
                                                  StorageHealthRegistry::Registration registration) {
+	auto owner = std::move(role);
 	registration.registered();
 	co_await Future<Void>(Never());
 	owner.close();
@@ -1241,10 +1242,11 @@ TEST_CASE("/fdbserver/worker/storageHealthRegistry/ioCancellationBeforeRebootTra
 	return Void();
 }
 
-static Future<Void> holdIOStorageHealthRoleForTest(StorageHealthRegistry::Role owner,
+static Future<Void> holdIOStorageHealthRoleForTest(StorageHealthRegistry::Role role,
                                                    StorageHealthRegistry::Registration registration,
                                                    Future<ErrorOr<Void>> storeError,
                                                    bool* cancelled) {
+	auto owner = std::move(role);
 	auto child = storageHealthChildAwaitingIOForTest(registration, cancelled);
 	co_await handleIOErrors(child, storeError, UID(1, 2));
 	owner.close();
@@ -1298,14 +1300,14 @@ TEST_CASE("/fdbserver/worker/storageHealth/localRegistration") {
 	ASSERT(location(true, false) == WorkerHealthLocation::None);
 
 	info.master.locality = locality;
-	dbInfo->set(info);
+	dbInfo->setUnconditional(info);
 	ASSERT(location() == WorkerHealthLocation::Primary);
 	ASSERT(location(false, true) == WorkerHealthLocation::None);
 	info.master.locality = LocalityData();
-	dbInfo->set(info);
+	dbInfo->setUnconditional(info);
 	ASSERT(location() == WorkerHealthLocation::None);
 	info.master.locality.set("dcid"_sr, "primary"_sr);
-	dbInfo->set(info);
+	dbInfo->setUnconditional(info);
 	locality = LocalityData();
 	ASSERT(location() == WorkerHealthLocation::None);
 	locality.set("dcid"_sr, "remote"_sr);
@@ -1334,7 +1336,7 @@ TEST_CASE("/fdbserver/worker/storageHealth/transactionRolePrecedence") {
 	info.logSystemConfig.tLogs.push_back(TLogSet());
 	info.logSystemConfig.tLogs.back().isLocal = false;
 	info.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface(router));
-	dbInfo->set(info);
+	dbInfo->setUnconditional(info);
 	ASSERT(workerHealthLocation({ address }, remote, dbInfo, false, false, false) == WorkerHealthLocation::Remote);
 	ASSERT(workerHealthLocation({ address }, primary, dbInfo, true, true, true) == WorkerHealthLocation::Primary);
 
@@ -1342,7 +1344,7 @@ TEST_CASE("/fdbserver/worker/storageHealth/transactionRolePrecedence") {
 	info.logSystemConfig.tLogs.back().isLocal = true;
 	info.logSystemConfig.tLogs.back().locality = tagLocalitySatellite;
 	info.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(router));
-	dbInfo->set(info);
+	dbInfo->setUnconditional(info);
 	ASSERT(workerHealthLocation({ address }, remote, dbInfo, false, false, false) == WorkerHealthLocation::Satellite);
 	ASSERT(workerHealthLocation({ address }, remote, dbInfo, true, true, true) == WorkerHealthLocation::Remote);
 	return Void();
@@ -1866,7 +1868,9 @@ Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStore
                                            IKeyValueStore* store,
                                            bool validateDataFiles,
                                            Promise<Void>* rebootKVStore,
-                                           StorageHealthRegistry::Role healthRole) {
+                                           StorageHealthRegistry::Role role) {
+	// Retire at coroutine scope exit even if callers retain the completed future.
+	auto healthRole = std::move(role);
 	TrackRunningStorage _(id, storeType, locality, filename, runningStorages, storageCleaners);
 	while (true) {
 		ErrorOr<Void> e = co_await errorOr(prevStorageServer);
