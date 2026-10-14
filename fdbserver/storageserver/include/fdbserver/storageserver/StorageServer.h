@@ -23,6 +23,7 @@
 #define FDBSERVER_STORAGESERVER_STORAGE_SERVER_H
 
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/core/StorageHealthRegistry.h"
 #include "flow/flow.h"
 
 class IClusterConnectionRecord;
@@ -37,13 +38,15 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
                            Version tssSeedVersion,
                            ReplyPromise<InitializeStorageReply> recruitReply,
                            Reference<AsyncVar<ServerDBInfo> const> db,
-                           std::string folder);
+                           std::string folder,
+                           StorageHealthRegistry::Registration healthRegistration);
 
 Future<Void> storageServer(IKeyValueStore* persistentData,
                            StorageServerInterface ssi,
                            Reference<AsyncVar<ServerDBInfo> const> db,
                            std::string folder,
                            Promise<Void> recovered,
-                           Reference<IClusterConnectionRecord> connRecord);
+                           Reference<IClusterConnectionRecord> connRecord,
+                           StorageHealthRegistry::Registration healthRegistration);
 
 #endif

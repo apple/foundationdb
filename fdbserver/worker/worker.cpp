@@ -38,6 +38,7 @@
 #include "fdbclient/versions.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ProcessClassRecruitment.h"
+#include "fdbserver/core/StorageHealthRegistry.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
@@ -129,11 +130,6 @@ struct ErrorInfo {
 	void serialize(Ar&) {
 		ASSERT(false);
 	}
-};
-
-struct PrimaryAndRemoteAddresses {
-	std::vector<NetworkAddress> primary;
-	std::vector<NetworkAddress> remote;
 };
 
 namespace {
@@ -1036,13 +1032,329 @@ bool isDegradedPeer(const UpdateWorkerHealthRequest& lastReq, const NetworkAddre
 	return false;
 }
 
-// Check if the current worker is a transaction worker, and is experiencing degraded or disconnected peers.
+enum class WorkerHealthLocation { None, Primary, Satellite, Remote };
+
+WorkerHealthLocation workerHealthLocation(const NetworkAddressList& addresses,
+                                          const LocalityData& locality,
+                                          Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                          bool registeredStorage,
+                                          bool allowPrimaryStorage,
+                                          bool allowRemoteStorage) {
+	const auto storageDC = locality.dcId();
+	const auto primaryDC = dbInfo->get().master.locality.dcId();
+	const bool knownStorageDC = registeredStorage && storageDC.present() && primaryDC.present();
+	if (addressesInDbAndPrimaryDc(addresses, dbInfo) ||
+	    (knownStorageDC && allowPrimaryStorage && storageDC.get() == primaryDC.get())) {
+		return WorkerHealthLocation::Primary;
+	}
+	if (addressesInDbAndRemoteDc(addresses, dbInfo) ||
+	    (knownStorageDC && allowRemoteStorage && storageDC.get() != primaryDC.get())) {
+		return WorkerHealthLocation::Remote;
+	}
+	if (addressesInDbAndPrimarySatelliteDc(addresses, dbInfo)) {
+		return WorkerHealthLocation::Satellite;
+	}
+	return WorkerHealthLocation::None;
+}
+
+TEST_CASE("/fdbserver/worker/storageHealthRegistry/registrationAndMultipleRoles") {
+	auto registry = makeReference<StorageHealthRegistry>();
+	auto first = registry->newRole();
+	auto firstChild = first.beginChild();
+	auto changed = registry->onChange();
+	ASSERT(!registry->hasRegisteredStorage() && !changed.isReady());
+	firstChild.registered();
+	ASSERT(registry->hasRegisteredStorage() && changed.isReady());
+	changed = registry->onChange();
+	firstChild.registered();
+	ASSERT(!changed.isReady());
+
+	auto second = registry->newRole();
+	auto secondChild = second.beginChild();
+	secondChild.registered();
+	ASSERT(changed.isReady());
+	first.close();
+	ASSERT(registry->hasRegisteredStorage());
+	firstChild.registered();
+	firstChild.retireCurrent();
+	ASSERT(registry->hasRegisteredStorage());
+	changed = registry->onChange();
+	second.close();
+	ASSERT(!registry->hasRegisteredStorage() && changed.isReady());
+	changed = registry->onChange();
+	second.close();
+	secondChild.registered();
+	secondChild.retireCurrent();
+	ASSERT(!registry->hasRegisteredStorage() && !changed.isReady());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/storageHealthRegistry/moveOwnership") {
+	auto registry = makeReference<StorageHealthRegistry>();
+	auto first = registry->newRole();
+	auto firstChild = first.beginChild();
+	firstChild.registered();
+	auto owner = std::move(first);
+	first.close();
+	ASSERT(registry->hasRegisteredStorage());
+
+	auto second = registry->newRole();
+	auto secondChild = second.beginChild();
+	secondChild.registered();
+	owner = std::move(second);
+	second.close();
+	firstChild.registered();
+	firstChild.retireCurrent();
+	ASSERT(registry->hasRegisteredStorage());
+	owner.close();
+	secondChild.registered();
+	ASSERT(!registry->hasRegisteredStorage());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/storageHealthRegistry/failureBeforeWrapperOwnership") {
+	auto registry = makeReference<StorageHealthRegistry>();
+	Optional<StorageHealthRegistry::Registration> retained;
+	bool failed = false;
+	try {
+		auto owner = registry->newRole();
+		retained = owner.beginChild();
+		retained.get().registered();
+		ASSERT(registry->hasRegisteredStorage());
+		throw operation_failed();
+	} catch (Error& error) {
+		ASSERT(error.code() == error_code_operation_failed);
+		failed = true;
+	}
+	ASSERT(failed && !registry->hasRegisteredStorage());
+	retained.get().registered();
+	ASSERT(!registry->hasRegisteredStorage());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/storageHealthRegistry/staleChildAndReboot") {
+	auto registry = makeReference<StorageHealthRegistry>();
+	auto owner = registry->newRole();
+	auto unregisteredChild = owner.beginChild();
+	auto current = owner.beginChild();
+	unregisteredChild.registered();
+	ASSERT(!registry->hasRegisteredStorage());
+	current.registered();
+	ASSERT(registry->hasRegisteredStorage());
+	auto changed = registry->onChange();
+	auto replacement = owner.beginChild();
+	ASSERT(registry->hasRegisteredStorage() && !changed.isReady());
+	current.retireCurrent();
+	current.registered();
+	ASSERT(registry->hasRegisteredStorage() && !changed.isReady());
+	replacement.registered();
+	ASSERT(!changed.isReady());
+	replacement.retireCurrent();
+	ASSERT(!registry->hasRegisteredStorage() && changed.isReady());
+	current.registered();
+	replacement.registered();
+	ASSERT(!registry->hasRegisteredStorage());
+	return Void();
+}
+
+static Future<Void> holdStorageHealthRoleForTest(StorageHealthRegistry::Role owner,
+                                                 StorageHealthRegistry::Registration registration) {
+	registration.registered();
+	co_await Never();
+	owner.close();
+}
+
+TEST_CASE("/fdbserver/worker/storageHealthRegistry/cancellationWithRetainedHandle") {
+	auto registry = makeReference<StorageHealthRegistry>();
+	auto owner = registry->newRole();
+	auto retained = owner.beginChild();
+	auto holding = holdStorageHealthRoleForTest(std::move(owner), retained);
+	ASSERT(registry->hasRegisteredStorage() && !holding.isReady());
+	auto changed = registry->onChange();
+	holding.cancel();
+	ASSERT(holding.isReady() && holding.isError());
+	ASSERT(holding.getError().code() == error_code_actor_cancelled);
+	ASSERT(!registry->hasRegisteredStorage() && changed.isReady());
+	retained.registered();
+	retained.retireCurrent();
+	ASSERT(!registry->hasRegisteredStorage());
+	return Void();
+}
+
+static Future<Void> storageHealthChildAwaitingIOForTest(StorageHealthRegistry::Registration registration,
+                                                        bool* cancelled) {
+	registration.registered();
+	try {
+		co_await Never();
+	} catch (Error& error) {
+		*cancelled = error.code() == error_code_actor_cancelled;
+		registration.terminated(error);
+		throw;
+	}
+}
+
+TEST_CASE("/fdbserver/worker/storageHealthRegistry/terminationPolicy") {
+	auto registry = makeReference<StorageHealthRegistry>();
+	auto owner = registry->newRole();
+	auto first = owner.beginChild();
+	first.registered();
+	for (Error error : { actor_cancelled(), please_reboot(), please_reboot_kv_store() }) {
+		first.terminated(error);
+		ASSERT(registry->hasRegisteredStorage());
+	}
+	auto current = owner.beginChild();
+	first.terminated(worker_removed());
+	ASSERT(registry->hasRegisteredStorage());
+	current.terminated(worker_removed());
+	ASSERT(!registry->hasRegisteredStorage());
+	current.registered();
+	ASSERT(!registry->hasRegisteredStorage());
+	owner.close();
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/storageHealthRegistry/ioCancellationBeforeRebootTranslation") {
+	// handleIOErrors explicitly forbids lock_file_failure in simulation.
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+	auto registry = makeReference<StorageHealthRegistry>();
+	auto owner = registry->newRole();
+	auto retained = owner.beginChild();
+	bool cancelled = false;
+	auto child = storageHealthChildAwaitingIOForTest(retained, &cancelled);
+	Promise<ErrorOr<Void>> storeError;
+	auto wrapped = handleIOErrors(child, storeError.getFuture(), UID(1, 1));
+	ASSERT(registry->hasRegisteredStorage());
+	storeError.send(ErrorOr<Void>(lock_file_failure()));
+	ASSERT(wrapped.isReady() && wrapped.isError());
+	ASSERT(wrapped.getError().code() == error_code_please_reboot_kv_store);
+	ASSERT(cancelled && registry->hasRegisteredStorage());
+	auto replacement = owner.beginChild();
+	retained.retireCurrent();
+	retained.registered();
+	replacement.registered();
+	ASSERT(registry->hasRegisteredStorage());
+	owner.close();
+	replacement.registered();
+	ASSERT(!registry->hasRegisteredStorage());
+	return Void();
+}
+
+static Future<Void> holdIOStorageHealthRoleForTest(StorageHealthRegistry::Role owner,
+                                                   StorageHealthRegistry::Registration registration,
+                                                   Future<ErrorOr<Void>> storeError,
+                                                   bool* cancelled) {
+	auto child = storageHealthChildAwaitingIOForTest(registration, cancelled);
+	co_await handleIOErrors(child, storeError, UID(1, 2));
+	owner.close();
+}
+
+TEST_CASE("/fdbserver/worker/storageHealthRegistry/ioFailureAndWrapperCancellation") {
+	for (bool cancelWrapper : { false, true }) {
+		auto registry = makeReference<StorageHealthRegistry>();
+		auto owner = registry->newRole();
+		auto retained = owner.beginChild();
+		Promise<ErrorOr<Void>> storeError;
+		bool cancelled = false;
+		auto wrapped = holdIOStorageHealthRoleForTest(std::move(owner), retained, storeError.getFuture(), &cancelled);
+		ASSERT(registry->hasRegisteredStorage() && !wrapped.isReady());
+		if (cancelWrapper) {
+			wrapped.cancel();
+		} else {
+			storeError.send(ErrorOr<Void>(io_error()));
+		}
+		ASSERT(wrapped.isReady() && wrapped.isError());
+		ASSERT(wrapped.getError().code() == (cancelWrapper ? error_code_actor_cancelled : error_code_io_error));
+		ASSERT(cancelled && !registry->hasRegisteredStorage());
+		retained.registered();
+		retained.retireCurrent();
+		ASSERT(!registry->hasRegisteredStorage());
+	}
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/storageHealth/localRegistration") {
+	const NetworkAddress storageAddress(IPAddress(0x27272727), 1);
+	ServerDBInfo info;
+	info.master.locality.set("dcid"_sr, "primary"_sr);
+	info.master.getCommitVersion =
+	    RequestStream<GetCommitVersionRequest>(Endpoint({ NetworkAddress(IPAddress(0x13131313), 1) }, UID(1, 2)));
+	auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>(info);
+	LocalityData locality;
+	locality.set("dcid"_sr, "remote"_sr);
+	auto registry = makeReference<StorageHealthRegistry>();
+	auto role = registry->newRole();
+	auto registration = role.beginChild();
+	auto location = [&](bool primary = true, bool remote = true) {
+		return workerHealthLocation(
+		    { storageAddress }, locality, dbInfo, registry->hasRegisteredStorage(), primary, remote);
+	};
+
+	// A storage-class worker is not eligible until its storage role actually registers.
+	ASSERT(location() == WorkerHealthLocation::None);
+	registration.registered();
+	ASSERT(location() == WorkerHealthLocation::Remote);
+	ASSERT(location(true, false) == WorkerHealthLocation::None);
+
+	info.master.locality = locality;
+	dbInfo->set(info);
+	ASSERT(location() == WorkerHealthLocation::Primary);
+	ASSERT(location(false, true) == WorkerHealthLocation::None);
+	info.master.locality = LocalityData();
+	dbInfo->set(info);
+	ASSERT(location() == WorkerHealthLocation::None);
+	info.master.locality.set("dcid"_sr, "primary"_sr);
+	dbInfo->set(info);
+	locality = LocalityData();
+	ASSERT(location() == WorkerHealthLocation::None);
+	locality.set("dcid"_sr, "remote"_sr);
+	ASSERT(location() == WorkerHealthLocation::Remote);
+	registration.retireCurrent();
+	ASSERT(location() == WorkerHealthLocation::None);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/storageHealth/transactionRolePrecedence") {
+	const NetworkAddress address(IPAddress(0x27272727), 1);
+	const NetworkAddress primaryAddress(IPAddress(0x13131313), 1);
+	ServerDBInfo info;
+	LocalityData primary, remote;
+	primary.set("dcid"_sr, "primary"_sr);
+	remote.set("dcid"_sr, "remote"_sr);
+	info.master.locality = primary;
+	info.master.getCommitVersion = RequestStream<GetCommitVersionRequest>(Endpoint({ address }, UID(1, 2)));
+	auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>(info);
+	ASSERT(workerHealthLocation({ address }, remote, dbInfo, true, true, true) == WorkerHealthLocation::Primary);
+	ASSERT(workerHealthLocation({ address }, remote, dbInfo, false, false, false) == WorkerHealthLocation::Primary);
+
+	info.master.getCommitVersion = RequestStream<GetCommitVersionRequest>(Endpoint({ primaryAddress }, UID(1, 2)));
+	TLogInterface router(remote);
+	router.peekMessages = RequestStream<TLogPeekRequest>(Endpoint({ address }, UID(3, 4)));
+	info.logSystemConfig.tLogs.push_back(TLogSet());
+	info.logSystemConfig.tLogs.back().isLocal = false;
+	info.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface(router));
+	dbInfo->set(info);
+	ASSERT(workerHealthLocation({ address }, remote, dbInfo, false, false, false) == WorkerHealthLocation::Remote);
+	ASSERT(workerHealthLocation({ address }, primary, dbInfo, true, true, true) == WorkerHealthLocation::Primary);
+
+	info.logSystemConfig.tLogs.back().logRouters.clear();
+	info.logSystemConfig.tLogs.back().isLocal = true;
+	info.logSystemConfig.tLogs.back().locality = tagLocalitySatellite;
+	info.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(router));
+	dbInfo->set(info);
+	ASSERT(workerHealthLocation({ address }, remote, dbInfo, false, false, false) == WorkerHealthLocation::Satellite);
+	ASSERT(workerHealthLocation({ address }, remote, dbInfo, true, true, true) == WorkerHealthLocation::Remote);
+	return Void();
+}
+
+// Check eligible workers for degraded or disconnected transaction-system peers.
 UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
                                             const LocalityData& locality,
                                             Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                             const UpdateWorkerHealthRequest& lastReq,
                                             Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck,
-                                            Optional<PrimaryAndRemoteAddresses> storageServers) {
+                                            bool registeredStorage) {
 	const auto& allPeers = FlowTransport::transport().getAllPeers();
 
 	// Check remote log router connectivity only when remote TLogs are recruited and in use.
@@ -1050,31 +1362,17 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 	                                        dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED;
 	UpdateWorkerHealthRequest req;
 
-	enum WorkerLocation { None, Primary, Satellite, Remote };
-	WorkerLocation workerLocation = None;
-	if (addressesInDbAndPrimaryDc(interf.addresses(),
-	                              dbInfo,
-	                              storageServers.present() ? storageServers.get().primary
-	                                                       : Optional<std::vector<NetworkAddress>>{})) {
-		workerLocation = Primary;
-	} else if (addressesInDbAndRemoteDc(interf.addresses(),
-	                                    dbInfo,
-	                                    storageServers.present() ? storageServers.get().remote
-	                                                             : Optional<std::vector<NetworkAddress>>{})) {
-		workerLocation = Remote;
-	} else if (addressesInDbAndPrimarySatelliteDc(interf.addresses(), dbInfo)) {
-		workerLocation = Satellite;
-	}
-
+	const auto workerLocation = workerHealthLocation(interf.addresses(),
+	                                                 locality,
+	                                                 dbInfo,
+	                                                 registeredStorage,
+	                                                 SERVER_KNOBS->GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN,
+	                                                 SERVER_KNOBS->GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN);
 	TraceEvent(SevInfo, "DoPeerHealthCheck")
-	    .detail("WorkerLocation", workerLocation)
-	    .detail("StorageServersPresent", storageServers.present())
-	    .detail("StorageServersPrimarySize",
-	            storageServers.present() ? std::to_string(storageServers.get().primary.size()) : "NA")
-	    .detail("StorageServersRemoteSize",
-	            storageServers.present() ? std::to_string(storageServers.get().remote.size()) : "NA");
+	    .detail("WorkerLocation", static_cast<int>(workerLocation))
+	    .detail("RegisteredStorage", registeredStorage);
 
-	if (workerLocation == None && !enablePrimaryTxnSystemHealthCheck->get()) {
+	if (workerLocation == WorkerHealthLocation::None && !enablePrimaryTxnSystemHealthCheck->get()) {
 		// This worker doesn't need to monitor anything if it is not in transaction system or in remote satellite.
 		return req;
 	}
@@ -1112,15 +1410,15 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 			    .detail("PingCount", peer->pingLatencies.getPopulationSize())
 			    .detail("PingTimeoutCount", peer->timeoutCount)
 			    .detail("ConnectionFailureCount", peer->connectFailedCount)
-			    .detail("WorkerLocation", workerLocation)
+			    .detail("WorkerLocation", static_cast<int>(workerLocation))
 			    .detail("PeerInPrimaryDc", addressInDbAndPrimaryDc(address, dbInfo))
 			    .detail("PeerInRemoteDc", addressInDbAndRemoteDc(address, dbInfo))
 			    .detail("PeerInPrimarySatelliteDc", addressInDbAndPrimarySatelliteDc(address, dbInfo))
 			    .detail("PeerIsRemoteLogRouter", addressIsRemoteLogRouter(address, dbInfo));
 		}
 
-		if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
-		    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
+		if ((workerLocation == WorkerHealthLocation::Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
+		    (workerLocation == WorkerHealthLocation::Remote && addressInDbAndRemoteDc(address, dbInfo))) {
 			// Monitors intra DC latencies between servers that in the primary or remote DC's transaction
 			// systems. Note that currently we are not monitor storage servers, since lagging in storage
 			// servers today already can trigger server exclusion by data distributor.
@@ -1150,7 +1448,8 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 				    .detail("PingTimeoutCount", peer->timeoutCount)
 				    .detail("ConnectionFailureCount", peer->connectFailedCount);
 			}
-		} else if (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo)) {
+		} else if (workerLocation == WorkerHealthLocation::Primary &&
+		           addressInDbAndPrimarySatelliteDc(address, dbInfo)) {
 			// Monitors inter DC latencies between servers in primary and primary satellite DC. Note that
 			// TLog workers in primary satellite DC are on the critical path of serving a commit.
 			if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT) {
@@ -1180,14 +1479,16 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 				    .detail("PingTimeoutCount", peer->timeoutCount)
 				    .detail("ConnectionFailureCount", peer->connectFailedCount);
 			}
-		} else if (checkRemoteLogRouterConnectivity && (workerLocation == Primary || workerLocation == Satellite) &&
+		} else if (checkRemoteLogRouterConnectivity &&
+		           (workerLocation == WorkerHealthLocation::Primary ||
+		            workerLocation == WorkerHealthLocation::Satellite) &&
 		           addressIsRemoteLogRouter(address, dbInfo)) {
 			// Monitor remote log router's connectivity to the primary DCs' transaction system. We ignore
 			// latency based degradation between primary region and remote region due to that remote region
 			// may be distant from primary region.
 			if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT) {
 				TraceEvent("HealthMonitorDetectDegradedPeer")
-				    .detail("WorkerLocation", workerLocation)
+				    .detail("WorkerLocation", static_cast<int>(workerLocation))
 				    .detail("Peer", address)
 				    .detail("PeerAddress", address)
 				    .detail("RemoteLogRouter", true)
@@ -1208,7 +1509,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 			// and only used in TLogs.
 			if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT) {
 				TraceEvent("HealthMonitorDetectDegradedPeer")
-				    .detail("WorkerLocation", workerLocation)
+				    .detail("WorkerLocation", static_cast<int>(workerLocation))
 				    .detail("Peer", address)
 				    .detail("PeerAddress", address)
 				    .detail("ExtensiveConnectivityCheck", true)
@@ -1249,10 +1550,13 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 				continue;
 			}
 
-			if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
-			    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo)) ||
-			    (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo)) ||
-			    (checkRemoteLogRouterConnectivity && (workerLocation == Primary || workerLocation == Satellite) &&
+			if ((workerLocation == WorkerHealthLocation::Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
+			    (workerLocation == WorkerHealthLocation::Remote && addressInDbAndRemoteDc(address, dbInfo)) ||
+			    (workerLocation == WorkerHealthLocation::Primary &&
+			     addressInDbAndPrimarySatelliteDc(address, dbInfo)) ||
+			    (checkRemoteLogRouterConnectivity &&
+			     (workerLocation == WorkerHealthLocation::Primary ||
+			      workerLocation == WorkerHealthLocation::Satellite) &&
 			     addressIsRemoteLogRouter(address, dbInfo))) {
 				TraceEvent("HealthMonitorDetectRecentClosedPeer")
 				    .suppressFor(30)
@@ -1284,65 +1588,14 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 	return req;
 }
 
-static Optional<Standalone<StringRef>> getPrimaryDCId(const ServerDBInfo& dbInfo) {
-	return dbInfo.master.locality.dcId();
-}
-
-// Makes a "best effort" to return the network addresses of primary and remote storage servers.
-// Both primary and secondary (if present) addresses are returned.
-// This actor makes a network call, and if that call fails, an empty optional is returned in addition to a
-// TraceEvent being logged. Intentionally, this actor does not implement a retry policy, but the client can
-// choose to retry by waiting on this actor again.
-Future<Optional<PrimaryAndRemoteAddresses>> getStorageServers(Database db,
-                                                              Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	Optional<PrimaryAndRemoteAddresses> ret;
-	Transaction tr(db);
-	try {
-		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
-		    co_await NativeAPI::getServerListAndProcessClasses(&tr);
-		PrimaryAndRemoteAddresses storageServers;
-		const auto primaryDCId = getPrimaryDCId(dbInfo->get());
-		for (auto& [ssi, _] : results) {
-			const bool primarySS = ssi.locality.dcId().present() && primaryDCId.present() &&
-			                       ssi.locality.dcId().get() == primaryDCId.get();
-			const bool remoteSS = ssi.locality.dcId().present() && primaryDCId.present() &&
-			                      ssi.locality.dcId().get() != primaryDCId.get();
-			if (SERVER_KNOBS->GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN && primarySS) {
-				storageServers.primary.push_back(ssi.address());
-				if (ssi.secondaryAddress().present()) {
-					storageServers.primary.push_back(ssi.secondaryAddress().get());
-				}
-			} else if (SERVER_KNOBS->GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN && remoteSS) {
-				storageServers.remote.push_back(ssi.address());
-				if (ssi.secondaryAddress().present()) {
-					storageServers.remote.push_back(ssi.secondaryAddress().get());
-				}
-			}
-		}
-		ret = storageServers;
-	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled) {
-			TraceEvent("GetStorageServersError").error(e);
-		}
-	}
-	co_return ret;
-}
-
 // The actor that actively monitors the health of local and peer servers, and reports anomaly to the cluster controller.
 Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                            WorkerInterface interf,
                            LocalityData locality,
                            Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                           Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
+                           Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck,
+                           Reference<StorageHealthRegistry> storageHealth) {
 	UpdateWorkerHealthRequest req;
-	Optional<Database> db;
-	if (SERVER_KNOBS->GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN ||
-	    SERVER_KNOBS->GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN) {
-		db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
-	}
 	while (true) {
 		Future<Void> nextHealthCheckDelay = Never();
 		const RecoveryState& recoveryState = dbInfo->get().recoveryState;
@@ -1355,11 +1608,13 @@ Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInte
 		if ((recoveryState >= RecoveryState::ACCEPTING_COMMITS || primaryTxnSystemHealthCheckEnabled) &&
 		    ccInterfacePresent) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
-			Optional<PrimaryAndRemoteAddresses> storageServers;
-			if (db.present()) {
-				storageServers = co_await getStorageServers(db.get(), dbInfo);
-			}
-			req = doPeerHealthCheck(interf, locality, dbInfo, req, enablePrimaryTxnSystemHealthCheck, storageServers);
+			// Self-membership must remain available when the storage read path is unhealthy.
+			req = doPeerHealthCheck(interf,
+			                        locality,
+			                        dbInfo,
+			                        req,
+			                        enablePrimaryTxnSystemHealthCheck,
+			                        storageHealth->hasRegisteredStorage());
 
 			if (!req.disconnectedPeers.empty() || !req.degradedPeers.empty() || !req.recoveredPeers.empty()) {
 				if (g_network->isSimulated()) {
@@ -1385,7 +1640,8 @@ Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInte
 		co_await race(nextHealthCheckDelay,
 		              ccInterface->onChange(),
 		              dbInfo->onChange(),
-		              enablePrimaryTxnSystemHealthCheck->onChange());
+		              enablePrimaryTxnSystemHealthCheck->onChange(),
+		              storageHealth->onChange());
 	}
 }
 
@@ -1609,16 +1865,21 @@ Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStore
                                            int64_t memoryLimit,
                                            IKeyValueStore* store,
                                            bool validateDataFiles,
-                                           Promise<Void>* rebootKVStore) {
+                                           Promise<Void>* rebootKVStore,
+                                           StorageHealthRegistry::Role healthRole) {
 	TrackRunningStorage _(id, storeType, locality, filename, runningStorages, storageCleaners);
 	while (true) {
 		ErrorOr<Void> e = co_await errorOr(prevStorageServer);
-		if (!e.isError())
+		if (!e.isError()) {
+			healthRole.close();
 			co_return;
-		else if (e.getError().code() != error_code_please_reboot &&
-		         e.getError().code() != error_code_please_reboot_kv_store)
+		} else if (e.getError().code() != error_code_please_reboot &&
+		           e.getError().code() != error_code_please_reboot_kv_store) {
+			healthRole.close();
 			throw e.getError();
+		}
 
+		auto healthRegistration = healthRole.beginChild();
 		TraceEvent("StorageServerRequestedReboot", id)
 		    .detail("RebootStorageEngine", e.getError().code() == error_code_please_reboot_kv_store)
 		    .log();
@@ -1666,8 +1927,13 @@ Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStore
 		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
 		Future<ErrorOr<Void>> storeError = errorOr(store->getError());
-		prevStorageServer =
-		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
+		prevStorageServer = storageServer(store,
+		                                  recruited,
+		                                  db,
+		                                  folder,
+		                                  Promise<Void>(),
+		                                  Reference<IClusterConnectionRecord>(nullptr),
+		                                  healthRegistration);
 		prevStorageServer = handleIOErrors(prevStorageServer, storeError, id, store->onClosed());
 	}
 }
@@ -2035,6 +2301,7 @@ class WorkerServerCore {
 	WorkerCache<InitializeRangePartitionedBackupReply>& rangePartitionedBackupWorkerCache;
 	WorkerCache<TLogInterface>& logRouterCache;
 	std::set<std::pair<UID, KeyValueStoreType>>& runningStorages;
+	Reference<StorageHealthRegistry> storageHealth;
 	std::unordered_map<UID, StorageDiskCleaner>& storageCleaners;
 	Promise<Void>& rebootKVSPromise2;
 	Future<Void>& updateClusterIdFuture;
@@ -2503,6 +2770,7 @@ class WorkerServerCore {
 				filesClosed.add(kvClosed);
 				ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 				Future<ErrorOr<Void>> storeError = errorOr(data->getError());
+				auto healthRole = storageHealth->newRole();
 				Future<Void> s = storageServer(data,
 				                               recruited,
 				                               req.seedTag,
@@ -2510,7 +2778,8 @@ class WorkerServerCore {
 				                               isTss ? req.tssPairIDAndVersion.get().second : 0,
 				                               storageReady,
 				                               dbInfo,
-				                               folder);
+				                               folder,
+				                               healthRole.beginChild());
 				s = handleIOErrors(s, storeError, recruited.id(), kvClosed);
 				s = storageServerRollbackRebooter(&runningStorages,
 				                                  &storageCleaners,
@@ -2526,7 +2795,8 @@ class WorkerServerCore {
 				                                  memoryLimit,
 				                                  data,
 				                                  false,
-				                                  &rebootKVSPromise2);
+				                                  &rebootKVSPromise2,
+				                                  std::move(healthRole));
 				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 			} else {
 				TraceEvent("AttemptedDoubleRecruitment", interf.id()).detail("ForRole", "StorageServer");
@@ -2873,6 +3143,7 @@ public:
 	                 WorkerCache<InitializeRangePartitionedBackupReply>& rangePartitionedBackupWorkerCache,
 	                 WorkerCache<TLogInterface>& logRouterCache,
 	                 std::set<std::pair<UID, KeyValueStoreType>>& runningStorages,
+	                 Reference<StorageHealthRegistry> storageHealth,
 	                 std::unordered_map<UID, StorageDiskCleaner>& storageCleaners,
 	                 Promise<Void>& rebootKVSPromise2,
 	                 Future<Void>& updateClusterIdFuture,
@@ -2890,10 +3161,10 @@ public:
 	    activeSharedTLog(activeSharedTLog), enablePrimaryTxnSystemHealthCheck(enablePrimaryTxnSystemHealthCheck),
 	    sharedLogs(sharedLogs), backupWorkerCache(backupWorkerCache),
 	    rangePartitionedBackupWorkerCache(rangePartitionedBackupWorkerCache), logRouterCache(logRouterCache),
-	    runningStorages(runningStorages), storageCleaners(storageCleaners), rebootKVSPromise2(rebootKVSPromise2),
-	    updateClusterIdFuture(updateClusterIdFuture), loggingTrigger(loggingTrigger), loggingDelay(loggingDelay),
-	    lastSnapReq(lastSnapReq), snapReqMap(snapReqMap), snapReqResultMap(snapReqResultMap),
-	    lastSnapTime(lastSnapTime) {}
+	    runningStorages(runningStorages), storageHealth(storageHealth), storageCleaners(storageCleaners),
+	    rebootKVSPromise2(rebootKVSPromise2), updateClusterIdFuture(updateClusterIdFuture),
+	    loggingTrigger(loggingTrigger), loggingDelay(loggingDelay), lastSnapReq(lastSnapReq), snapReqMap(snapReqMap),
+	    snapReqResultMap(snapReqResultMap), lastSnapTime(lastSnapTime) {}
 
 	Future<Void> run(Future<Void> const& handleErrors) {
 		auto res = co_await race(interf.clientInterface.reboot.getFuture(),
@@ -2983,6 +3254,7 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	WorkerInterface interf(locality);
 
 	std::set<std::pair<UID, KeyValueStoreType>> runningStorages;
+	auto storageHealth = makeReference<StorageHealthRegistry>();
 	// storageCleaners manages cleanup actors after a storage server is terminated. It cleans up
 	// stale disk files in case storage server is terminated for io_timeout or io_error but the worker
 	// process is still alive. If worker process is alive, it may be recruited as a new storage server
@@ -3155,7 +3427,9 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				Future<ErrorOr<Void>> storeError = errorOr(kv->getError());
 				Promise<Void> recovery;
-				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord);
+				auto healthRole = storageHealth->newRole();
+				Future<Void> f =
+				    storageServer(kv, recruited, dbInfo, folder, recovery, connRecord, healthRole.beginChild());
 				recoveries.push_back(recovery.getFuture());
 
 				f = handleIOErrors(f, storeError, s.storeID, kvClosed);
@@ -3173,7 +3447,8 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                  memoryLimit,
 				                                  kv,
 				                                  validateDataFiles,
-				                                  &rebootKVSPromise);
+				                                  &rebootKVSPromise,
+				                                  std::move(healthRole));
 				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
 				LocalLineage _;
@@ -3283,7 +3558,7 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 		if (SERVER_KNOBS->ENABLE_WORKER_HEALTH_MONITOR) {
 			errorForwarders.add(
-			    healthMonitor(ccInterface, interf, locality, dbInfo, enablePrimaryTxnSystemHealthCheck));
+			    healthMonitor(ccInterface, interf, locality, dbInfo, enablePrimaryTxnSystemHealthCheck, storageHealth));
 		}
 
 		WorkerServerCore workerServerCore(interf,
@@ -3312,6 +3587,7 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                  rangePartitionedBackupWorkerCache,
 		                                  logRouterCache,
 		                                  runningStorages,
+		                                  storageHealth,
 		                                  storageCleaners,
 		                                  rebootKVSPromise2,
 		                                  updateClusterIdFuture,
