@@ -4,6 +4,14 @@
 Release Notes
 #############
 
+8.0.1
+=====
+
+* Fixed network setup failures when older multiversion clients load the 8.0
+  client, even when the application does not use blob granules. Restored the
+  required blob granule C symbols as stubs that abort the process when called.
+  `(PR #14238) <https://github.com/apple/foundationdb/pull/14238>`_
+
 8.0.0
 =====
 
