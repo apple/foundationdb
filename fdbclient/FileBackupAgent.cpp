@@ -7300,6 +7300,23 @@ public:
 			throw restore_error();
 		}
 
+		// A bulkload restore ingests SST files into the key range they were dumped from and has no way to
+		// rewrite keys, so a prefix cannot reach the snapshot. Log replay applies it regardless, so
+		// accepting the pair would split the result across two key spaces: snapshot at the original
+		// keys, mutations at the prefixed ones.
+		if (!useRangeFileRestore && (addPrefix.size() > 0 || removePrefix.size() > 0)) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadPrefix")
+			    .detail("TagName", tagName)
+			    .detail("AddPrefix", addPrefix)
+			    .detail("RemovePrefix", removePrefix);
+			fprintf(stderr,
+			        "ERROR: --add-prefix and --remove-prefix cannot be combined with --mode bulkload; the SST "
+			        "files it ingests cannot be rewritten to a new prefix, so only the mutation log would be "
+			        "prefixed and the restored data would be split across two key spaces. Use --mode "
+			        "rangefile.\n");
+			throw restore_error();
+		}
+
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
