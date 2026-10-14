@@ -25,6 +25,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "flow/SimpleCounter.h"
 #include "flow/genericactors.actor.h"
+#include "flow/Coroutines.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static void updateServersAndCompleteSources(std::set<UID>& servers,
@@ -283,6 +284,48 @@ class DDTxnProcessorImpl {
 		}
 	}
 
+	// When SHARD_ENCODE_LOCATION_METADATA is false on DD init, clear any
+	// DataMoveMetaData left behind by a shard-encoding DD.
+	//
+	// These records describe in-flight physical shard moves that this DD has no
+	// machinery to complete, so nothing would ever retire them: getInitialDataDistribution
+	// decodes every record into dataMoveMap on every init, and the old path rejects
+	// anonymous shard-encoded moves. Clearing the range is a single commit and is
+	// complete regardless of how many records exist.
+	//
+	// keyServers entries are deliberately NOT rewritten here. Every write on the old
+	// path emits old-format values, so both keyServers and serverKeys converge through
+	// normal shard movement. That convergence is unbounded in time -- a cold range may
+	// never be rewritten -- so it is not sufficient to declare a binary downgrade safe;
+	// see the "Migration for downgrade" section of
+	// design/shard-encode-location-metadata.md.
+	//
+	// Returns true if a clear was committed, so the caller restarts the outer init loop
+	// and re-reads. When there is nothing to clear this costs one system-key read per DD
+	// init and commits nothing.
+	static Future<bool> clearShardEncodedDataMoves(Transaction& tr, UID distributorId) {
+		TraceEvent(SevInfo, "DDInitShardEncodeOff", distributorId)
+		    .detail("KnobValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+		RangeResult dmsCheck = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
+		ASSERT(!dmsCheck.more && dmsCheck.size() < CLIENT_KNOBS->TOO_MANY);
+		if (!dmsCheck.empty()) {
+			TraceEvent(SevWarnAlways, "DDInitCancellingShardEncodedMoves", distributorId)
+			    .detail("Count", dmsCheck.size());
+			tr.clear(dataMoveKeys);
+			co_await tr.commit();
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			co_return true;
+		}
+
+		co_return false;
+	}
+
 	// Read keyservers, return unique set of teams
 	ACTOR static Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
 	    Database cx,
@@ -383,6 +426,14 @@ class DDTxnProcessorImpl {
 						server_dc[ssi.id()] = ssi.locality.dcId();
 					} else {
 						tss_servers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
+					}
+				}
+
+				// If SHARD_ENCODE is off, drop DataMoveMetaData this DD cannot complete.
+				if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+					bool cleared = wait(clearShardEncodedDataMoves(tr, distributorId));
+					if (cleared) {
+						continue; // Committed a clear — re-read from the top
 					}
 				}
 
