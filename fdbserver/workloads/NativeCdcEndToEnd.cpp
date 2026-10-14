@@ -186,6 +186,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	bool injectUndeliveredProxyHalt;
 	bool testMemoryBound;
 	bool testReplyChunking;
+	bool testReplyChunkingProxyReplacement;
 	bool testMultipleRanges;
 	bool testOversizedPeek;
 	bool testDurableAckScan;
@@ -2429,6 +2430,47 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await validatePopProgressUnderContinuousRequests(cx, firstStreamId, &proxy);
 	}
 
+	Future<Void> validateBufferedReplyBatching(Database cx, CDCStreamId streamId, Version lastVersion) {
+		const UID consumerId = deterministicRandom()->randomUniqueID();
+		bool replaceDuringPriming = testReplyChunkingProxyReplacement;
+		bool replaceBeforeReplay = testReplyChunkingProxyReplacement;
+		while (true) {
+			try {
+				const CDCProxyInterface proxy = co_await waitForAssignedProxy(cx, streamId);
+				CDCCursor cursor(streamId, invalidVersion);
+				// Both phases must use the same proxy-owned buffer. No acknowledgement may discard it before replay.
+				while (cursor.lastConsumedVersion < lastVersion) {
+					const CDCConsumeReply reply =
+					    co_await throwErrorOr(proxy.consume.tryGetReply(CDCConsumeRequest(cursor, consumerId)));
+					ASSERT_GE(reply.lastConsumedVersion, cursor.lastConsumedVersion);
+					cursor.lastConsumedVersion = reply.lastConsumedVersion;
+					if (!reply.mutations.empty() && std::exchange(replaceDuringPriming, false)) {
+						ASSERT_LT(cursor.lastConsumedVersion, lastVersion);
+						co_await haltProxyUntilReplaced(cx, proxy, false);
+						co_await waitForAssignedProxy(cx, streamId, proxy.id());
+					}
+				}
+				if (std::exchange(replaceBeforeReplay, false)) {
+					co_await haltProxyUntilReplaced(cx, proxy, false);
+					co_await waitForAssignedProxy(cx, streamId, proxy.id());
+				}
+				const CDCConsumeReply replay = co_await throwErrorOr(
+				    proxy.consume.tryGetReply(CDCConsumeRequest(CDCCursor(streamId, invalidVersion), consumerId)));
+				ASSERT_GT(replay.mutations.size(), 1);
+				ASSERT_LT(replay.lastConsumedVersion, lastVersion);
+				ASSERT(!replaceDuringPriming && !replaceBeforeReplay);
+				co_return;
+			} catch (Error& e) {
+				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_broken_promise &&
+				    e.code() != error_code_connection_failed && e.code() != error_code_request_maybe_delivered) {
+					throw;
+				}
+				CODE_PROBE(true, "Native CDC batching validation reprimes after proxy replacement");
+			}
+			co_await delay(0.1);
+		}
+	}
+
 	Future<Void> validateReplyChunking(Database cx) {
 		ASSERT_EQ(streams.size(), 1);
 		ASSERT_GE(keyCount, 2);
@@ -2450,29 +2492,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 		const Version lastVersion = expected.back().version;
 
-		// Prime one proxy-owned retained buffer without acknowledging. Several complete versions fit one TLog peek,
-		// but all versions exceed its bound; a batched reply proves one pass buffered multiple complete versions.
-		bool sawBatchedPrimingReply = false;
-		const double primeDeadline = now() + operationTimeout;
-		while (stream.consumer->position().lastConsumedVersion < lastVersion) {
-			const Version previous = stream.consumer->position().lastConsumedVersion;
-			CDCConsumeReply reply = co_await timeoutError(stream.consumer->consume(), operationTimeout);
-			// The priming consumer intentionally does not acknowledge. If its delivery proxy is replaced, the
-			// consumer rewinds to its durable cursor and replays retained versions through the replacement proxy.
-			if (reply.lastConsumedVersion < previous) {
-				ASSERT_LT(now(), primeDeadline);
-				continue;
-			}
-			if (reply.lastConsumedVersion == previous) {
-				ASSERT_LT(now(), primeDeadline);
-				co_await delay(0.1);
-				continue;
-			}
-			ASSERT_GT(reply.lastConsumedVersion, previous);
-			sawBatchedPrimingReply |= reply.mutations.size() > 1;
-		}
-		ASSERT(sawBatchedPrimingReply);
+		co_await timeoutError(validateBufferedReplyBatching(cx, stream.consumer->position().streamId, lastVersion),
+		                      operationTimeout);
 
+		// Consumer replay may switch to an unprimed replacement proxy and return one version per reply.
 		Reference<NativeCdcConsumer> resumed =
 		    resumeNativeCdcConsumer(cx, CDCCursor(stream.consumer->position().streamId, invalidVersion));
 		std::set<Version> observedVersions;
@@ -3334,6 +3357,7 @@ public:
 		injectUndeliveredProxyHalt = getOption(options, "injectUndeliveredProxyHalt"_sr, false);
 		testMemoryBound = getOption(options, "testMemoryBound"_sr, false);
 		testReplyChunking = getOption(options, "testReplyChunking"_sr, false);
+		testReplyChunkingProxyReplacement = getOption(options, "testReplyChunkingProxyReplacement"_sr, false);
 		testMultipleRanges = getOption(options, "testMultipleRanges"_sr, false);
 		testOversizedPeek = getOption(options, "testOversizedPeek"_sr, false);
 		testDurableAckScan = getOption(options, "testDurableAckScan"_sr, false);
@@ -3370,6 +3394,7 @@ public:
 		ASSERT(!testRetagTransactionRetries || testThroughputRetagging || testRetagCompatibility ||
 		       testRetaggedRestart);
 		ASSERT(!(testReplyChunking && (testOversizedPeek || testDurableAckScan)));
+		ASSERT(!testReplyChunkingProxyReplacement || testReplyChunking);
 		ASSERT(!(testOversizedPeek && testDurableAckScan));
 		ASSERT(!(testRetiredSharedTagSnapshot && testRetiredRecovery));
 		ASSERT(!(testThroughputRetagging && testMemoryBound));
