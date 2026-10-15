@@ -6098,8 +6098,13 @@ Future<Void> testRestoreWriterRecovery(Database cx) {
 				ASSERT_EQ(rows[i].value, value);
 				++i;
 			}
+		});
+		// A successful cleanup with an unknown commit result must not retry verification against deleted data.
+		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->clear(outputRange);
 			restore.clear(tr);
+			return Void();
 		});
 		co_await bc->deleteContainer();
 		TraceEvent("RestoreWriterRecoveryTestPassed")

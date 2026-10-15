@@ -20,7 +20,9 @@
 
 #include "fdbserver/tester/workloads.h"
 
+namespace fileBackup {
 Future<Void> testRestoreWriterRecovery(Database cx);
+}
 
 struct RestoreWriterRecoveryWorkload : TestWorkload {
 	static constexpr auto NAME = "RestoreWriterRecovery";
@@ -28,7 +30,9 @@ struct RestoreWriterRecoveryWorkload : TestWorkload {
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return clientId == 0 ? testRestoreWriterRecovery(cx) : Void(); }
+	Future<Void> start(Database const& cx) override {
+		return clientId == 0 ? fileBackup::testRestoreWriterRecovery(cx) : Void();
+	}
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
