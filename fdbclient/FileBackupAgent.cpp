@@ -47,6 +47,7 @@
 #include "FileBackupAgentFileFormat.h"
 #include "flow/network.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/Util.h"
 
 #include <cinttypes>
@@ -264,6 +265,82 @@ StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 Key FileBackupAgent::getPauseKey() {
 	FileBackupAgent backupAgent;
 	return backupAgent.taskBucket->getPauseKey();
+}
+
+void FileBackupAgent::validateBulkLoadRestoreArgs(Key tagName,
+                                                  Standalone<VectorRef<KeyRangeRef>> ranges,
+                                                  Key addPrefix,
+                                                  Key removePrefix,
+                                                  OnlyApplyMutationLogs onlyApplyMutationLogs,
+                                                  Optional<std::string> encryptionKeyFileName,
+                                                  bool useRangeFileRestore) {
+	if (useRangeFileRestore) {
+		return;
+	}
+
+	// Same one-range limit as bulkdump: the bulkload job that ingests the SSTs carries a single range.
+	// BulkLoadRestoreTaskFunc indexes range 0 on the strength of this check.
+	KeyRangeMap<int> restoreRangeSet;
+	for (auto& range : ranges) {
+		restoreRangeSet.insert(range, 1);
+	}
+	restoreRangeSet.coalesce(allKeys);
+	int rangeCount = 0;
+	for (auto& restoreRange : restoreRangeSet.ranges()) {
+		if (restoreRange.value()) {
+			++rangeCount;
+		}
+	}
+	if (rangeCount != 1) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadRangeCount")
+		    .detail("TagName", tagName)
+		    .detail("RangeCount", rangeCount);
+		fprintf(stderr,
+		        "ERROR: --mode bulkload requires exactly one key range, but %d remain after coalescing "
+		        "adjacent ranges. Use --mode rangefile, or run one restore per range.\n",
+		        rangeCount);
+		throw restore_error();
+	}
+
+	// Mirror of the backup-side rejection. A bulkload restore ingests the snapshot via SST, which is
+	// precisely the range data --incremental declines, and StartFullRestoreTaskFunc picks the bulkload
+	// branch without consulting the flag. Accepting the pair would restore the whole snapshot the
+	// caller asked to skip, then overwrite their setting so even status misreports it.
+	if (onlyApplyMutationLogs) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadIncremental").detail("TagName", tagName);
+		fprintf(stderr,
+		        "ERROR: --incremental cannot be combined with --mode bulkload; bulkload restores the "
+		        "snapshot that --incremental skips. Use --mode rangefile for a logs-only restore.\n");
+		throw restore_error();
+	}
+
+	// Mirror of the backup-side encryption refusal. Nothing on the SST path can decrypt, so a
+	// bulkload restore of an encrypted backup cannot work; refusing here says so plainly instead of
+	// failing later with an abort that blames the backup for having no bulkdump data.
+	if (encryptionKeyFileName.present()) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadEncryption").detail("TagName", tagName);
+		fprintf(stderr,
+		        "ERROR: --encryption-key-file cannot be combined with --mode bulkload; the SST files a "
+		        "bulkload restore ingests are not encrypted. Use --mode rangefile.\n");
+		throw restore_error();
+	}
+
+	// A bulkload restore ingests SST files into the key range they were dumped from and has no way to
+	// rewrite keys, so a prefix cannot reach the snapshot. Log replay applies it regardless, so
+	// accepting the pair would split the result across two key spaces: snapshot at the original
+	// keys, mutations at the prefixed ones.
+	if (!addPrefix.empty() || !removePrefix.empty()) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadPrefix")
+		    .detail("TagName", tagName)
+		    .detail("AddPrefix", addPrefix)
+		    .detail("RemovePrefix", removePrefix);
+		fprintf(stderr,
+		        "ERROR: --add-prefix and --remove-prefix cannot be combined with --mode bulkload; the SST "
+		        "files it ingests cannot be rewritten to a new prefix, so only the mutation log would be "
+		        "prefixed and the restored data would be split across two key spaces. Use --mode "
+		        "rangefile.\n");
+		throw restore_error();
+	}
 }
 
 Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap* tagsMap,
@@ -7264,58 +7341,13 @@ public:
 			ASSERT(restoreRange.begin.startsWith(removePrefix) && restoreRange.end.startsWith(removePrefix));
 		}
 
-		// Same one-range limit as bulkdump: the bulkload job that ingests the SSTs carries a single range.
-		// BulkLoadRestoreTaskFunc indexes range 0 on the strength of this check.
-		if (!useRangeFileRestore && restoreRanges.size() != 1) {
-			TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadRangeCount")
-			    .detail("TagName", tagName)
-			    .detail("RangeCount", restoreRanges.size());
-			fprintf(stderr,
-			        "ERROR: --mode bulkload requires exactly one key range, but %d remain after coalescing "
-			        "adjacent ranges. Use --mode rangefile, or run one restore per range.\n",
-			        static_cast<int>(restoreRanges.size()));
-			throw restore_error();
-		}
-
-		// Mirror of the backup-side rejection. A bulkload restore ingests the snapshot via SST, which is
-		// precisely the range data --incremental declines, and StartFullRestoreTaskFunc picks the bulkload
-		// branch without consulting the flag. Accepting the pair would restore the whole snapshot the
-		// caller asked to skip, then overwrite their setting so even status misreports it.
-		if (!useRangeFileRestore && onlyApplyMutationLogs) {
-			TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadIncremental").detail("TagName", tagName);
-			fprintf(stderr,
-			        "ERROR: --incremental cannot be combined with --mode bulkload; bulkload restores the "
-			        "snapshot that --incremental skips. Use --mode rangefile for a logs-only restore.\n");
-			throw restore_error();
-		}
-
-		// Mirror of the backup-side encryption refusal. Nothing on the SST path can decrypt, so a
-		// bulkload restore of an encrypted backup cannot work; refusing here says so plainly instead of
-		// failing later with an abort that blames the backup for having no bulkdump data.
-		if (!useRangeFileRestore && encryptionKeyFileName.present()) {
-			TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadEncryption").detail("TagName", tagName);
-			fprintf(stderr,
-			        "ERROR: --encryption-key-file cannot be combined with --mode bulkload; the SST files a "
-			        "bulkload restore ingests are not encrypted. Use --mode rangefile.\n");
-			throw restore_error();
-		}
-
-		// A bulkload restore ingests SST files into the key range they were dumped from and has no way to
-		// rewrite keys, so a prefix cannot reach the snapshot. Log replay applies it regardless, so
-		// accepting the pair would split the result across two key spaces: snapshot at the original
-		// keys, mutations at the prefixed ones.
-		if (!useRangeFileRestore && (addPrefix.size() > 0 || removePrefix.size() > 0)) {
-			TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadPrefix")
-			    .detail("TagName", tagName)
-			    .detail("AddPrefix", addPrefix)
-			    .detail("RemovePrefix", removePrefix);
-			fprintf(stderr,
-			        "ERROR: --add-prefix and --remove-prefix cannot be combined with --mode bulkload; the SST "
-			        "files it ingests cannot be rewritten to a new prefix, so only the mutation log would be "
-			        "prefixed and the restored data would be split across two key spaces. Use --mode "
-			        "rangefile.\n");
-			throw restore_error();
-		}
+		FileBackupAgent::validateBulkLoadRestoreArgs(tagName,
+		                                             ranges,
+		                                             addPrefix,
+		                                             removePrefix,
+		                                             onlyApplyMutationLogs,
+		                                             encryptionKeyFileName,
+		                                             useRangeFileRestore);
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -8706,4 +8738,51 @@ Future<EBackupState> FileBackupAgent::waitBackup(Database cx,
 
 Future<Void> FileBackupAgent::changePause(Database db, bool pause) {
 	return FileBackupAgentImpl::changePause(this, db, pause);
+}
+
+TEST_CASE("/backup/restore/validateBulkLoadRestoreArgs") {
+	auto rejected = [](std::vector<KeyRange> ranges,
+	                   Key addPrefix,
+	                   Key removePrefix,
+	                   OnlyApplyMutationLogs onlyApplyMutationLogs,
+	                   Optional<std::string> encryptionKeyFileName,
+	                   bool useRangeFileRestore) {
+		Standalone<VectorRef<KeyRangeRef>> rangeRefs;
+		for (auto& range : ranges) {
+			rangeRefs.push_back_deep(rangeRefs.arena(), range);
+		}
+		try {
+			FileBackupAgent::validateBulkLoadRestoreArgs("tag"_sr,
+			                                             rangeRefs,
+			                                             addPrefix,
+			                                             removePrefix,
+			                                             onlyApplyMutationLogs,
+			                                             encryptionKeyFileName,
+			                                             useRangeFileRestore);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_restore_error);
+			return true;
+		}
+		return false;
+	};
+	const std::vector<KeyRange> one = { KeyRangeRef("a"_sr, "b"_sr) };
+	const auto full = OnlyApplyMutationLogs::False, incremental = OnlyApplyMutationLogs::True;
+	const Optional<std::string> noKey;
+	const bool rangefile = true, bulkload = false;
+
+	ASSERT(!rejected(one, "p"_sr, "a"_sr, full, noKey, rangefile));
+	ASSERT(!rejected(one, Key(), Key(), full, noKey, bulkload));
+	ASSERT(rejected(one, "p"_sr, Key(), full, noKey, bulkload));
+	ASSERT(rejected(one, Key(), "a"_sr, full, noKey, bulkload));
+	ASSERT(rejected(one, "p"_sr, "a"_sr, full, noKey, bulkload));
+
+	ASSERT(rejected(one, Key(), Key(), incremental, noKey, bulkload));
+	ASSERT(rejected(one, Key(), Key(), full, std::string("key"), bulkload));
+	ASSERT(!rejected(one, Key(), Key(), incremental, std::string("key"), rangefile));
+
+	ASSERT(
+	    !rejected({ KeyRangeRef("a"_sr, "b"_sr), KeyRangeRef("b"_sr, "c"_sr) }, Key(), Key(), full, noKey, bulkload));
+	ASSERT(rejected({ KeyRangeRef("a"_sr, "b"_sr), KeyRangeRef("c"_sr, "d"_sr) }, Key(), Key(), full, noKey, bulkload));
+
+	return Void();
 }
