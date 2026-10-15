@@ -4665,6 +4665,52 @@ struct RestoreFileTaskFuncBase : RestoreTaskFuncBase {
 	}
 };
 
+// Optional observer for the deterministic writer recovery simulation. The size limit applies only to
+// writer transactions, so task setup and unrelated cluster activity retain their normal limits.
+struct RestoreWriterTestState {
+	int rejections = 0;
+	int commits = 0;
+	int committedRecords = 0;
+	int lastRejectedLimit = 0;
+	int lastCommittedLimit = 0;
+	std::vector<int> batchLimits;
+	std::vector<int> batchCommits;
+
+	void beginBatch(int limit) {
+		if (lastCommittedLimit) {
+			ASSERT_EQ(limit, lastCommittedLimit);
+		}
+		batchLimits.push_back(limit);
+		batchCommits.push_back(0);
+	}
+
+	Future<Void> commit(Reference<ReadYourWritesTransaction> tr, int limit, int records) {
+		ASSERT(g_network->isSimulated());
+		int64_t sizeLimit = 4096;
+		tr->setOption(FDBTransactionOptions::SIZE_LIMIT, StringRef((uint8_t*)&sizeLimit, sizeof(sizeLimit)));
+		try {
+			co_await tr->commit();
+		} catch (Error& e) {
+			if (e.code() == error_code_transaction_too_large) {
+				++rejections;
+				lastRejectedLimit = limit;
+			}
+			throw;
+		}
+		ASSERT_GT(rejections, 0);
+		ASSERT_LT(limit, lastRejectedLimit);
+		if (lastCommittedLimit) {
+			ASSERT_LE(limit, lastCommittedLimit);
+		}
+		lastCommittedLimit = limit;
+		++commits;
+		committedRecords += records;
+		if (!batchCommits.empty()) {
+			++batchCommits.back();
+		}
+	}
+};
+
 struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	static struct : InputParams {
 		// The range of data that the (possibly empty) data represented, which is set if it intersects the target
@@ -4694,7 +4740,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	static Future<Void> _execute(Database cx,
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
-	                             Reference<Task> task) {
+	                             Reference<Task> task,
+	                             RestoreWriterTestState* test = nullptr) {
 		RestoreConfig restore(task);
 
 		RestoreFile rangeFile = Params.inputFile().get(task);
@@ -4801,8 +4848,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 			int start = 0;
 			int end = data.size();
-			int dataSizeLimit =
-			    buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+			int dataSizeLimit = !test && buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6)
+			                                       : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 			tr->reset();
 			while (true) {
@@ -4847,7 +4894,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 					co_await checkLock;
 
-					co_await tr->commit();
+					co_await (test ? test->commit(tr, dataSizeLimit, i - start) : tr->commit());
 
 					TraceEvent("FileRestoreCommittedRange")
 					    .suppressFor(60)
@@ -5138,7 +5185,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 	static Future<Void> _execute(Database cx,
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
-	                             Reference<Task> task) {
+	                             Reference<Task> task,
+	                             RestoreWriterTestState* test = nullptr) {
 		RestoreConfig restore(task);
 
 		RestoreFile logFile = Params.inputFile().get(task);
@@ -5192,8 +5240,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		int start = 0;
 		int end = dataFiltered.size();
-		int dataSizeLimit =
-		    buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+		int dataSizeLimit = !test && buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6)
+		                                       : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 		tr->reset();
 		while (true) {
@@ -5222,7 +5270,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				// Add to bytes written count
 				restore.bytesWritten().atomicOp(tr, txBytes, MutationRef::Type::AddValue);
 
-				co_await tr->commit();
+				co_await (test ? test->commit(tr, dataSizeLimit, i - start) : tr->commit());
 
 				TraceEvent("FileRestoreCommittedLog")
 				    .suppressFor(60)
@@ -5509,7 +5557,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	                                  Key mutationLogPrefix,
 	                                  Reference<Task> task,
 	                                  Reference<TaskBucket> taskBucket,
-	                                  int txBytesLimit) {
+	                                  int txBytesLimit,
+	                                  RestoreWriterTestState* test = nullptr) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Standalone<VectorRef<KeyValueRef>> oldFormatMutations;
 		int mutationIndex = 0;
@@ -5520,6 +5569,9 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			oldFormatMutations.append(oldFormatMutations.arena(), data.begin(), data.size());
 		}
 		int totalMutation = oldFormatMutations.size();
+		if (test && totalMutation > 0) {
+			test->beginBatch(txBytesLimit);
+		}
 
 		// multiple transactions are needed, so this has to be in a _execute method rather than
 		// a _finish method
@@ -5546,7 +5598,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 					++mutationCount;
 				}
 				co_await taskBucket->keepRunning(tr, task);
-				co_await tr->commit();
+				co_await (test ? test->commit(tr, txBytesLimit, mutationCount) : tr->commit());
 
 				int64_t oldBytes = Params.bytesWritten().get(task);
 				Params.bytesWritten().set(task, oldBytes + txBytes);
@@ -5574,7 +5626,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	static Future<Void> _execute(Database cx,
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
-	                             Reference<Task> task) {
+	                             Reference<Task> task,
+	                             RestoreWriterTestState* test = nullptr) {
 		RestoreConfig restore(task);
 
 		int64_t maxTagID = Params.maxTagID().get(task);
@@ -5665,7 +5718,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				int64_t bytes = oneVersionData.expectedSize();
 				if (totalBytes + bytes > txBytesLimit) {
 					txBytesLimit = co_await writeMutations(
-					    cx, mutations, restore.mutationLogPrefix(), task, taskBucket, txBytesLimit);
+					    cx, mutations, restore.mutationLogPrefix(), task, taskBucket, txBytesLimit, test);
 					mutations.clear();
 					totalBytes = 0;
 				}
@@ -5678,7 +5731,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			if (err.code() == error_code_end_of_stream) {
 				if (!mutations.empty()) {
 					txBytesLimit = co_await writeMutations(
-					    cx, mutations, restore.mutationLogPrefix(), task, taskBucket, txBytesLimit);
+					    cx, mutations, restore.mutationLogPrefix(), task, taskBucket, txBytesLimit, test);
 				}
 				break;
 			} else {
@@ -5762,6 +5815,139 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 StringRef RestoreLogDataPartitionedTaskFunc::name = "restore_log_data_partitioned"_sr;
 REGISTER_TASKFUNC(RestoreLogDataPartitionedTaskFunc);
 
+// Runs the actual writers against a database, including the partitioned reader's batch handoff.
+Future<Void> testRestoreWriterRecovery(Database cx) {
+	ASSERT(g_network->isSimulated());
+	ASSERT_EQ(CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE, 16384);
+	constexpr int recordCount = 96;
+	const int blockSize = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+	KeyRange dataRange = KeyRangeRef("restore-writer/"_sr, "restore-writer0"_sr);
+	for (int writer = 0; writer < 3; ++writer) {
+		RestoreConfig restore(deterministicRandom()->randomUniqueID());
+		Reference<IBackupContainer> bc = IBackupContainer::openContainer(
+		    "file://" + abspath("simfdb/restore-writer-" + restore.getUid().toString()), {}, {}, 0);
+		co_await bc->create();
+		Reference<IBackupFile> file;
+		if (writer == 0) {
+			file = co_await bc->writeRangeFile(1, 0, 1, blockSize);
+		} else if (writer == 1) {
+			file = co_await bc->writeLogFile(1, recordCount + 1, blockSize);
+		} else {
+			file = co_await bc->writeTaggedLogFile(1, recordCount + 1, blockSize, 0, 1);
+			co_await file->append((uint8_t*)&PARTITIONED_MLOG_VERSION, sizeof(PARTITIONED_MLOG_VERSION));
+		}
+		fileBackup::RangeFileWriter rangeWriter(file, blockSize);
+		fileBackup::LogFileWriter logWriter(file, blockSize);
+		std::map<Key, Value> expected;
+		if (writer == 0) {
+			co_await rangeWriter.writeKey(dataRange.begin);
+		}
+		for (int i = 0; i < recordCount; ++i) {
+			Key key = StringRef(format("restore-writer/%04d", i));
+			Value value = StringRef(std::string(512, 'a' + i % 26));
+			if (writer == 0) {
+				co_await rangeWriter.writeKV(key, value);
+				expected[key] = value;
+			} else {
+				Standalone<VectorRef<VersionedMutation>> versionMutations;
+				VersionedMutation vm;
+				vm.version = i + 1;
+				vm.subsequence = 0;
+				vm.mutation = MutationRef(MutationRef::SetValue, key, value);
+				versionMutations.push_back_deep(versionMutations.arena(), vm);
+				auto oldFormat = generateOldFormatMutations(vm.version, { versionMutations });
+				ASSERT_EQ(oldFormat.size(), 1);
+				expected[oldFormat[0].key.withPrefix(restore.mutationLogPrefix())] = oldFormat[0].value;
+				if (writer == 1) {
+					co_await logWriter.writeKV(oldFormat[0].key, oldFormat[0].value);
+				} else {
+					BinaryWriter mutation(AssumeVersion(g_network->protocolVersion()));
+					mutation << vm.mutation;
+					BinaryWriter header(Unversioned());
+					header << bigEndian64(vm.version) << bigEndian32(vm.subsequence)
+					       << bigEndian32(mutation.getLength());
+					co_await file->append(header.getData(), header.getLength());
+					co_await file->append(mutation.getData(), mutation.getLength());
+				}
+			}
+		}
+		if (writer == 0) {
+			co_await rangeWriter.writeKey(dataRange.end);
+			co_await rangeWriter.finish();
+		}
+		co_await file->finish();
+		ASSERT_LT(file->size(), blockSize);
+		RestoreFile input{ 1, file->getFileName(), writer == 0, blockSize, file->size(), recordCount + 1, 0, 1 };
+		auto task = makeReference<Task>(writer == 0   ? RestoreRangeTaskFunc::name
+		                                : writer == 1 ? RestoreLogDataTaskFunc::name
+		                                              : RestoreLogDataPartitionedTaskFunc::name,
+		                                1);
+		RestoreFileTaskFuncBase::InputParams::inputFile().set(task, input);
+		RestoreFileTaskFuncBase::InputParams::readOffset().set(task, 0);
+		RestoreFileTaskFuncBase::InputParams::readLen().set(task, file->size());
+		RestoreLogDataPartitionedTaskFunc::Params.logs().set(task, { input });
+		RestoreLogDataPartitionedTaskFunc::Params.maxTagID().set(task, 0);
+		RestoreLogDataPartitionedTaskFunc::Params.beginVersion().set(task, 1);
+		RestoreLogDataPartitionedTaskFunc::Params.endVersion().set(task, recordCount + 1);
+		RestoreLogDataPartitionedTaskFunc::Params.bytesWritten().set(task, 0);
+		Key taskPrefix = "writer-tasks/"_sr.withPrefix(restore.mutationLogPrefix());
+		auto taskBucket = makeReference<TaskBucket>(Subspace(taskPrefix), AccessSystemKeys::True);
+		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			restore.sourceContainer().set(tr, bc);
+			restore.restoreRange().set(tr, dataRange);
+			restore.bytesWritten().set(tr, 0);
+			co_await restore.toTask(tr, task, SetValidation::False);
+			TaskBucket::setValidationCondition(
+			    task, restore.sourceContainer().key, TupleCodec<Reference<IBackupContainer>>::pack(bc));
+			taskBucket->addTask(tr, task);
+		});
+		task = co_await taskBucket->getOne(cx);
+		ASSERT(task);
+		RestoreWriterTestState test;
+		if (writer == 0) {
+			co_await RestoreRangeTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+		} else if (writer == 1) {
+			co_await RestoreLogDataTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+		} else {
+			co_await RestoreLogDataPartitionedTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+			ASSERT_GE(test.batchLimits.size(), 3);
+			ASSERT_EQ(test.batchLimits.front(), CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE);
+			ASSERT_GT(test.batchCommits.front(), 1);
+			for (int i = 1; i < test.batchLimits.size(); ++i) {
+				ASSERT_EQ(test.batchLimits[i], test.lastCommittedLimit);
+				ASSERT_GT(test.batchCommits[i], 0);
+			}
+		}
+		ASSERT_GT(test.rejections, 0);
+		ASSERT_GT(test.commits, 1);
+		ASSERT_EQ(test.committedRecords, recordCount);
+		KeyRange outputRange = writer == 0 ? dataRange : prefixRange(restore.mutationLogPrefix());
+		co_await taskBucket->clear(cx);
+		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			RangeResult rows = co_await tr->getRange(outputRange, recordCount + 1);
+			ASSERT(!rows.more);
+			ASSERT_EQ(rows.size(), expected.size());
+			int i = 0;
+			for (const auto& [key, value] : expected) {
+				ASSERT_EQ(rows[i].key, key);
+				ASSERT_EQ(rows[i].value, value);
+				++i;
+			}
+			tr->clear(outputRange);
+			restore.clear(tr);
+		});
+		co_await bc->deleteContainer();
+		TraceEvent("RestoreWriterRecoveryTestPassed")
+		    .detail("Writer", writer)
+		    .detail("Rejections", test.rejections)
+		    .detail("Commits", test.commits)
+		    .detail("Batches", test.batchLimits.size())
+		    .detail("ReducedLimit", test.lastCommittedLimit);
+	}
+}
+
 // Dispatch each version batch across bounded transactions. Commit proxies apply the loaded mutations only after
 // all range and log tasks in the batch complete.
 struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
@@ -5843,25 +6029,6 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			co_return;
 		}
 
-		// Get a batch of files.  We're targeting batchSize blocks(30k) being dispatched so query for batchSize(150)
-		// files (each of which is 0 or more blocks).
-		// lets say files have [10, 20), [20, 30) then if our range is [15, 25], we need to include both files,
-		// because [15, 20] is included in the first file, and [20, 25] is included in the second file
-		// say we have b and e
-		// as a result, the first file(inclusive): largest file whose begin <= b,
-		// the last file(exclusive): smallest file whose begin > e
-		// because of the encoding, version comes before the type of files(log or range),
-		// begin needs to start from the beginning --
-		// if we have a 3 files, (log,100,200), (range, 180), (log, 200, 300), then if we want to restore[190, 250]
-		// it would stop at (range, 180) and not looking at (log, 100, 200)
-		Optional<RestoreConfig::RestoreFile> beginLogInclude = Optional<RestoreConfig::RestoreFile>{};
-		// because of the encoding of RestoreFile, we use greaterThanOrEqual(end + 1) instead of greaterThan(end)
-		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result
-		// in a end+1
-		Optional<RestoreConfig::RestoreFile> endLogExclude = co_await restore.logFileSet().seekGreaterOrEqual(
-		    tr, RestoreConfig::RestoreFile({ endVersion + 1, "", false }));
-		RestoreConfig::FileSetT::RangeResultType logFiles =
-		    co_await restore.logFileSet().getRange(tr, beginLogInclude, endLogExclude, fileLimit);
 		// Use the saved cursor as an inclusive key even past the last file. A seek returning no entry
 		// would turn into an unbounded getRange start and redispatch files from the beginning.
 		Optional<RestoreConfig::RestoreFile> beginRangeInclude =
@@ -5873,16 +6040,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		    tr, RestoreConfig::RestoreFile({ endVersion + 1, "", true }));
 		RestoreConfig::FileSetT::RangeResultType rangeFiles =
 		    co_await restore.rangeFileSet().getRange(tr, beginRangeInclude, endRangeExclude, fileLimit);
-		int64_t maxTagID = 0;
-		std::vector<RestoreConfig::RestoreFile> logs;
 		std::vector<RestoreConfig::RestoreFile> ranges;
-		for (const auto& f : logFiles.results) {
-			if (f.endVersion > beginVersion) {
-				// skip all files whose endVersion is smaller or equal to beginVersion
-				logs.push_back(f);
-				maxTagID = std::max(maxTagID, f.tagId);
-			}
-		}
 		for (const auto& f : rangeFiles.results) {
 			// the getRange might get out-of-bound range file because log files need them to work
 			if (f.version >= beginVersion && f.version < endVersion) {
@@ -5996,6 +6154,25 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			    Optional<RestoreConfig::RestoreFile>({ beginRangeVersion, beginRangeFile, true }),
 			    beginRangeBlock));
 		} else {
+			// Log files are only needed after all snapshot blocks in this window have been dispatched.
+			// Include files starting before beginVersion if their end overlaps this window.
+			Optional<RestoreConfig::RestoreFile> beginLogInclude = Optional<RestoreConfig::RestoreFile>{};
+			// because of the encoding of RestoreFile, we use greaterThanOrEqual(end + 1) instead of greaterThan(end)
+			// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not
+			// result in a end+1
+			Optional<RestoreConfig::RestoreFile> endLogExclude = co_await restore.logFileSet().seekGreaterOrEqual(
+			    tr, RestoreConfig::RestoreFile({ endVersion + 1, "", false }));
+			RestoreConfig::FileSetT::RangeResultType logFiles =
+			    co_await restore.logFileSet().getRange(tr, beginLogInclude, endLogExclude, fileLimit);
+			int64_t maxTagID = 0;
+			std::vector<RestoreConfig::RestoreFile> logs;
+			for (const auto& f : logFiles.results) {
+				if (f.endVersion > beginVersion) {
+					// skip all files whose endVersion is smaller or equal to beginVersion
+					logs.push_back(f);
+					maxTagID = std::max(maxTagID, f.tagId);
+				}
+			}
 			addTaskFutures.push_back(
 			    RestoreLogDataPartitionedTaskFunc::addTask(tr,
 			                                               taskBucket,
