@@ -5485,4 +5485,198 @@ TEST_CASE("/fdbserver/clustercontroller/proxyColocationOnStateless") {
 	return Void();
 }
 
+// TEMP (do not commit): manual check that the RecruitmentFailed traces fire from findWorkersForConfigurationFromDC.
+static void tempPutWorkersInOneZone(ClusterControllerData& data, std::vector<WorkerInterface> const& workers) {
+	for (auto const& w : workers) {
+		data.id_worker[w.locality.processId()].details.interf.locality.set(LocalityData::keyZoneId,
+		                                                                  Standalone<StringRef>("oneZone"_sr));
+	}
+}
+
+static bool tempFromDcThrowsNoMoreServers(ClusterControllerData& data,
+                                          RecruitFromConfigurationRequest const& req,
+                                          Key const& dcId) {
+	try {
+		data.findWorkersForConfigurationFromDC(req, dcId, /*checkGoodRecruitment=*/false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_no_more_servers);
+		return true;
+	}
+	return false;
+}
+
+// TEMP: primary tlogs, 12 workers but all in one zone, policy needs 3 zones (Simple helper).
+static void tempTLogZoneFailure() {
+	const Key dcId = "dc1"_sr;
+	ClusterControllerData data = makeRecruitmentTestData(dcId);
+	data.goodRecruitmentTime = Void();
+	tempPutWorkersInOneZone(data, addRecruitmentTestWorkers(data, dcId, ProcessClass::TransactionClass, "tx"_sr, 12));
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+	config.usableRegions = 1;
+	RegionInfo region;
+	region.dcId = dcId;
+	config.regions.push_back(region);
+	config.tLogReplicationFactor = 3;
+	config.desiredTLogCount = 3;
+	config.tLogPolicy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+	data.db.config = config;
+	data.db.fullyRecoveredConfig = config;
+
+	RecruitFromConfigurationRequest req(config, /*recruitSeedServers=*/false, /*maxOldLogRouters=*/0);
+	ASSERT(tempFromDcThrowsNoMoreServers(data, req, dcId));
+}
+
+// TEMP: primary tlogs succeed (3 distinct zones) but the satellite DC has 12 workers in a single zone.
+static void tempSatelliteZoneFailure() {
+	const Key dcId = "dc1"_sr;
+	const Key satDc = "sat1"_sr;
+	ClusterControllerData data = makeRecruitmentTestData(dcId);
+	data.goodRecruitmentTime = Void();
+	addRecruitmentTestWorkers(data, dcId, ProcessClass::TransactionClass, "tx"_sr, 3);
+	tempPutWorkersInOneZone(data, addRecruitmentTestWorkers(data, satDc, ProcessClass::TransactionClass, "st"_sr, 20));
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+	config.usableRegions = 2;
+	RegionInfo region;
+	region.dcId = dcId;
+	SatelliteInfo sat;
+	sat.dcId = satDc;
+	region.satellites.push_back(sat);
+	region.satelliteTLogReplicationFactor = 2;
+	region.satelliteTLogUsableDcs = 1;
+	region.satelliteTLogPolicy = makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>());
+	config.regions.push_back(region);
+	RegionInfo remote;
+	remote.dcId = "dc2"_sr;
+	config.regions.push_back(remote);
+	config.tLogReplicationFactor = 3;
+	config.desiredTLogCount = 3;
+	config.tLogPolicy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+	data.db.config = config;
+	data.db.fullyRecoveredConfig = config;
+
+	RecruitFromConfigurationRequest req(config, /*recruitSeedServers=*/false, /*maxOldLogRouters=*/0);
+	ASSERT(tempFromDcThrowsNoMoreServers(data, req, dcId));
+}
+
+// TEMP: sets the data hall of every listed worker.
+static void tempSetDataHall(ClusterControllerData& data, std::vector<WorkerInterface> const& workers, StringRef hall) {
+	for (auto const& w : workers) {
+		data.id_worker[w.locality.processId()].details.interf.locality.set(LocalityData::keyDataHallId,
+		                                                                  Standalone<StringRef>(hall));
+	}
+}
+
+// TEMP: Complex helper. Policy needs 2 data halls with 2 zones each. hallA has 3 zones, hallB has 3 workers in a
+// single zone, so only one hall qualifies.
+static void tempComplexTLogFailure() {
+	const Key dcId = "dc1"_sr;
+	ClusterControllerData data = makeRecruitmentTestData(dcId);
+	data.goodRecruitmentTime = Void();
+	tempSetDataHall(data, addRecruitmentTestWorkers(data, dcId, ProcessClass::TransactionClass, "ha"_sr, 3), "hallA"_sr);
+	auto hallB = addRecruitmentTestWorkers(data, dcId, ProcessClass::TransactionClass, "hb"_sr, 3);
+	tempPutWorkersInOneZone(data, hallB);
+	tempSetDataHall(data, hallB, "hallB"_sr);
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+	config.usableRegions = 1;
+	RegionInfo region;
+	region.dcId = dcId;
+	config.regions.push_back(region);
+	config.tLogReplicationFactor = 4;
+	config.desiredTLogCount = 4;
+	config.tLogPolicy = makeReference<PolicyAcross>(
+	    2, "data_hall", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
+	data.db.config = config;
+	data.db.fullyRecoveredConfig = config;
+
+	RecruitFromConfigurationRequest req(config, /*recruitSeedServers=*/false, /*maxOldLogRouters=*/0);
+	ASSERT(tempFromDcThrowsNoMoreServers(data, req, dcId));
+}
+
+// TEMP: Backup helper. A policy that is neither Simple-shaped nor Complex-shaped (outer attribute is not zoneid and
+// the embedded policy is One) goes to the generic policy engine. 12 workers all in one data hall, policy needs 3 halls.
+static void tempBackupTLogFailure() {
+	const Key dcId = "dc1"_sr;
+	ClusterControllerData data = makeRecruitmentTestData(dcId);
+	data.goodRecruitmentTime = Void();
+	tempSetDataHall(data, addRecruitmentTestWorkers(data, dcId, ProcessClass::TransactionClass, "tx"_sr, 12), "hallA"_sr);
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+	config.usableRegions = 1;
+	RegionInfo region;
+	region.dcId = dcId;
+	config.regions.push_back(region);
+	config.tLogReplicationFactor = 3;
+	config.desiredTLogCount = 3;
+	config.tLogPolicy = makeReference<PolicyAcross>(3, "data_hall", makeReference<PolicyOne>());
+	data.db.config = config;
+	data.db.fullyRecoveredConfig = config;
+
+	RecruitFromConfigurationRequest req(config, /*recruitSeedServers=*/false, /*maxOldLogRouters=*/0);
+	ASSERT(tempFromDcThrowsNoMoreServers(data, req, dcId));
+}
+
+// TEMP: seed storage, via findWorkersForConfigurationFromDC. 12 storage workers in one zone, policy needs 3 zones.
+static void tempSeedStorageFailure() {
+	const Key dcId = "dc1"_sr;
+	ClusterControllerData data = makeRecruitmentTestData(dcId);
+	data.goodRecruitmentTime = Void();
+	tempPutWorkersInOneZone(data, addRecruitmentTestWorkers(data, dcId, ProcessClass::StorageClass, "ss"_sr, 12));
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+	config.usableRegions = 1;
+	RegionInfo region;
+	region.dcId = dcId;
+	config.regions.push_back(region);
+	config.storagePolicy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+	config.tLogPolicy = makeReference<PolicyOne>();
+	data.db.config = config;
+	data.db.fullyRecoveredConfig = config;
+
+	RecruitFromConfigurationRequest req(config, /*recruitSeedServers=*/true, /*maxOldLogRouters=*/0);
+	ASSERT(tempFromDcThrowsNoMoreServers(data, req, dcId));
+}
+
+// TEMP: first commit proxy, via findWorkersForConfigurationFromDC. No tlogs are required (replication factor 0,
+// policy One), so the tlog step passes with an empty DC and the commit proxy selection is the step that fails.
+// The GRV proxy and resolver cannot be isolated this way: they accept exactly the same workers as the commit proxy.
+static void tempFirstProxyFailure() {
+	const Key dcId = "dc1"_sr;
+	ClusterControllerData data = makeRecruitmentTestData(dcId);
+	data.goodRecruitmentTime = Void();
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+	config.usableRegions = 1;
+	RegionInfo region;
+	region.dcId = dcId;
+	config.regions.push_back(region);
+	config.tLogReplicationFactor = 0;
+	config.desiredTLogCount = 0;
+	config.tLogPolicy = makeReference<PolicyOne>();
+	data.db.config = config;
+	data.db.fullyRecoveredConfig = config;
+
+	RecruitFromConfigurationRequest req(config, /*recruitSeedServers=*/false, /*maxOldLogRouters=*/0);
+	ASSERT(tempFromDcThrowsNoMoreServers(data, req, dcId));
+}
+
+// TEMP: one test that triggers every RecruitmentFailed trace site we added, for manual inspection of the trace.
+TEST_CASE("/fdbserver/clustercontroller/tempRecruitmentFailureTraces") {
+	tempTLogZoneFailure(); // 1. primary tlogs, one zone (Simple helper)
+	tempSeedStorageFailure(); // 5. seed storage, one zone
+	tempComplexTLogFailure(); // 2. primary tlogs, only one data hall qualifies (Complex helper)
+	tempFirstProxyFailure(); // 6. first commit proxy, no workers
+	tempBackupTLogFailure(); // 3. primary tlogs, custom policy (Backup helper)
+	tempSatelliteZoneFailure(); // 4. satellite DC, one zone
+	return Void();
+}
+
 } // namespace
