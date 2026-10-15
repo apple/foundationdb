@@ -26,7 +26,15 @@ import unittest
 from types import SimpleNamespace as Obj
 from unittest import mock
 
-from transaction_profiling_analyzer import AuditLog, KeyRange, Mutation, audit_log_path, cluster_description, printable
+from transaction_profiling_analyzer import (
+    AuditLog,
+    KeyRange,
+    Mutation,
+    audit_log_path,
+    cluster_description,
+    local_ip,
+    printable,
+)
 
 
 def read_log(path):
@@ -61,16 +69,29 @@ class AuditLogTest(unittest.TestCase):
             f.write("# DO NOT EDIT!\nmycluster:abc@127.0.0.1:4500\n")
         self.assertEqual(cluster_description(self.path), "mycluster")
 
+    def test_local_ip(self):
+        for coordinators, expected in [
+            ("127.0.0.1:4500", {"127.0.0.1"}),
+            ("127.0.0.1:4500:tls", {"127.0.0.1"}),
+            ("[::1]:4500", {"::1"}),
+            ("localhost:4500", {"127.0.0.1", "::1"}),
+            ("bad,127.0.0.1:4500", {"127.0.0.1"}),  # unusable coordinators are skipped
+        ]:
+            with open(self.path, "w") as f:
+                f.write("c:id@%s\n" % coordinators)
+            self.assertIn(local_ip(self.path), expected, coordinators)
+
     def test_log_appends_one_json_line_per_entry(self):
-        AuditLog(self.path, "c1").log("r1", "top_writes", {"top_requests": 1}, key=b"a", count=3)
+        AuditLog(self.path, "c1", "10.0.0.1").log("r1", "top_writes", {"top_requests": 1}, key=b"a", count=3)
         AuditLog(self.path, "c1").log("r2", "top_writes", {"top_requests": 1}, key=b"b", count=1)
         records = read_log(self.path)
         self.assertEqual([r["key"] for r in records], ["a", "b"])
         self.assertEqual(
             sorted(records[0]),
-            ["cluster", "count", "input", "key", "level", "msg", "operation", "reqid", "ts"],
+            ["cluster", "count", "input", "ip_address", "key", "level", "msg", "operation", "reqid", "ts"],
         )
         self.assertEqual(records[0]["cluster"], "c1")
+        self.assertEqual(records[0]["ip_address"], "10.0.0.1")
         self.assertRegex(records[0]["ts"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 
     def test_log_transaction(self):

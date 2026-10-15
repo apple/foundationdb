@@ -37,6 +37,7 @@ import json
 from json import JSONEncoder
 import logging
 import os
+import socket
 import struct
 import sys
 import uuid
@@ -823,14 +824,38 @@ def printable(b):
     return "".join("\\\\" if c == 92 else chr(c) if 32 <= c < 127 else "\\x%02x" % c for c in b)
 
 
-def cluster_description(cluster_file):
-    """The description part of the cluster file's connection string, looked up the same way fdb.open finds the file."""
+def connection_string(cluster_file):
+    """The cluster file's connection string, looked up the same way fdb.open finds the file."""
     for path in [cluster_file, os.environ.get("FDB_CLUSTER_FILE"), "fdb.cluster",
                  "/etc/foundationdb/fdb.cluster", "/usr/local/etc/foundationdb/fdb.cluster"]:
         if path and os.path.exists(path):
             with open(path) as f:
                 lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-            return lines[-1].split(":")[0]
+            return lines[-1]
+    return ""
+
+
+def cluster_description(cluster_file):
+    """The description part of the connection string, description:id@coordinators."""
+    return connection_string(cluster_file).split(":")[0]
+
+
+def local_ip(cluster_file):
+    """The local IP this client reaches the coordinators from, i.e. what the OS picks for a UDP socket aimed at a
+    coordinator (nothing is sent). Same way fdb picks the IP for client trace files."""
+    coordinators = connection_string(cluster_file).partition("@")[2]
+    for coordinator in coordinators.split(","):
+        address = coordinator.strip()
+        if address.endswith(":tls"):
+            address = address[:-len(":tls")]
+        host, _, port = address.rpartition(":")
+        try:
+            for family, _, _, _, sockaddr in socket.getaddrinfo(host.strip("[]"), int(port), type=socket.SOCK_DGRAM):
+                with socket.socket(family, socket.SOCK_DGRAM) as s:
+                    s.connect(sockaddr)
+                    return s.getsockname()[0]
+        except (OSError, ValueError):
+            continue
     return ""
 
 
@@ -852,10 +877,11 @@ def audit_log_path():
 class AuditLog(object):
     """Appends one JSON line per output the tool prints. Entries from the same input share a reqid."""
 
-    def __init__(self, path, cluster):
+    def __init__(self, path, cluster, ip_address=""):
         open(path, "a").close()  # fail at startup, not mid-run, if the file isn't writable
         self.path = path
         self.cluster = cluster
+        self.ip_address = ip_address
 
     @staticmethod
     def new_reqid():
@@ -867,6 +893,7 @@ class AuditLog(object):
             "level": "info",
             "msg": "TransactionProfilingAnalyzerAudit",
             "cluster": self.cluster,
+            "ip_address": self.ip_address,
             "reqid": reqid,
             "operation": operation,
             "input": input,
@@ -948,7 +975,7 @@ def main():
 
     audit = None
     if args.audit_log or "FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE" in os.environ:
-        audit = AuditLog(audit_log_path(), cluster_description(args.cluster_file))
+        audit = AuditLog(audit_log_path(), cluster_description(args.cluster_file), local_ip(args.cluster_file))
 
     type_filter = set()
     if args.filter_get_version:
