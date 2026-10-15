@@ -7326,6 +7326,14 @@ public:
 	                                  Optional<std::string> encryptionKeyFileName,
 	                                  int encryptionBlockSize,
 	                                  bool useRangeFileRestore = true) {
+		FileBackupAgent::validateBulkLoadRestoreArgs(tagName,
+		                                             ranges,
+		                                             addPrefix,
+		                                             removePrefix,
+		                                             onlyApplyMutationLogs,
+		                                             encryptionKeyFileName,
+		                                             useRangeFileRestore);
+
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -7340,14 +7348,6 @@ public:
 		for (auto& restoreRange : restoreRanges) {
 			ASSERT(restoreRange.begin.startsWith(removePrefix) && restoreRange.end.startsWith(removePrefix));
 		}
-
-		FileBackupAgent::validateBulkLoadRestoreArgs(tagName,
-		                                             ranges,
-		                                             addPrefix,
-		                                             removePrefix,
-		                                             onlyApplyMutationLogs,
-		                                             encryptionKeyFileName,
-		                                             useRangeFileRestore);
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);

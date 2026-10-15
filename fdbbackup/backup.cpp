@@ -2233,6 +2233,15 @@ Future<Void> runRestore(Database db,
                         RestoreMode restoreMode = RestoreMode::RANGEFILE) {
 	ASSERT(!ranges.empty());
 
+	// Before anything remote is touched, and here so --dryrun refuses too.
+	FileBackupAgent::validateBulkLoadRestoreArgs(KeyRef(tagName),
+	                                             ranges,
+	                                             KeyRef(addPrefix),
+	                                             KeyRef(removePrefix),
+	                                             onlyApplyMutationLogs,
+	                                             encryptionKeyFile,
+	                                             restoreMode == RestoreMode::RANGEFILE);
+
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
 		fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");
 		throw restore_error();
@@ -2262,15 +2271,6 @@ Future<Void> runRestore(Database db,
 	}
 
 	try {
-		// Before opening the container so nothing remote is touched, and here so --dryrun refuses too.
-		FileBackupAgent::validateBulkLoadRestoreArgs(KeyRef(tagName),
-		                                             ranges,
-		                                             KeyRef(addPrefix),
-		                                             KeyRef(removePrefix),
-		                                             onlyApplyMutationLogs,
-		                                             encryptionKeyFile,
-		                                             restoreMode == RestoreMode::RANGEFILE);
-
 		FileBackupAgent backupAgent;
 
 		// encryptionBlockSize is passed 0 because we don't know about the block size yet and it will be read in the
