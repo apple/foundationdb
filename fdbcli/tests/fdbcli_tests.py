@@ -1615,12 +1615,14 @@ def audit_log_commands(logger):
     process = run_fdbcli_in(log_dir, args, {}, "; ".join(reads))
     assert process.returncode == 0, process.stderr
     events = read_audit_events(log_dir)
-    fields = ["Command", "AuditID", "Cluster", "Key", "Value", "StorageServer"]
+    fields = ["Command", "AuditID", "Cluster", "IPAddress", "Key", "Value", "StorageServer"]
     for e in events:
         logger.debug(" ".join('{}="{}"'.format(f, e[f]) for f in fields if f in e))
     assert [(e["Command"], e["Key"], e.get("Value")) for e in events] == expected
     assert [len(list(g)) for _, g in itertools.groupby(e["AuditID"] for e in events)] == group_sizes
     assert all(e["Cluster"] == cluster_description() for e in events)
+    # IPAddress is the IP part of Machine, which is "<ip>:<pid>" (IPv6 in brackets)
+    assert all(e["IPAddress"] == e["Machine"].rsplit(":", 1)[0].strip("[]") for e in events), events
     assert all(("StorageServer" in e) == (e["Command"] == "getall") for e in events)
     shutil.rmtree(log_dir)
 

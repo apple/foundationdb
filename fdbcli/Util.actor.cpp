@@ -50,6 +50,11 @@ void auditLogReturnedKey(Database const& cx,
 	    .detail("AuditID", auditId)
 	    .detail("Cluster",
 	            cx->getConnectionRecord() ? cx->getConnectionRecord()->getConnectionString().clusterKeyName() : Key());
+	// The local IP this client reaches the coordinators from, same as the IP in Machine (whose "port" is the pid)
+	static const IPAddress ip = cx->getConnectionRecord()
+	                                ? cx->getConnectionRecord()->getConnectionString().determineLocalSourceIP()
+	                                : IPAddress();
+	ev.detail("IPAddress", ip);
 	ev.detail("Key", key);
 	if (value.present() && (auditLogValues == AuditLogValues::All ||
 	                        (auditLogValues == AuditLogValues::System && key.startsWith(systemKeys.begin)))) {
