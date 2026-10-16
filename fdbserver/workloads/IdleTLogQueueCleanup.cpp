@@ -270,6 +270,7 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 			ASSERT(test.checkpoints["ReferenceReadAfterCrash"] > 0);
 		}
 		co_await verifyData(cx);
+		TraceEvent("IdleTLogQueueCleanupPhase").detail("Phase", "CleanupVerified");
 
 		const int previousRestores = test.restores;
 		g_simulator->rebootProcess(g_simulator->getProcessByAddress(target.address()), ISimulator::KillType::Reboot);
@@ -279,14 +280,17 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 		co_await waitRecovered();
 		co_await verifyData(cx);
 		ASSERT(co_await queueFileBytes() <= maxQueueBytes);
+		TraceEvent("IdleTLogQueueCleanupPhase").detail("Phase", "SecondRestartVerified");
 		co_await includeServers(cx, { exclusion });
-		for (const auto& [address, processClass] : originalClasses) {
-			ProcessClass restore = processClass.classSource() == ProcessClass::CommandLineSource
-			                           ? ProcessClass(ProcessClass::InvalidClass, ProcessClass::DBSource)
-			                           : processClass;
-			co_await setClass(cx, AddressExclusion(address.ip, address.port), restore);
-		}
+		TraceEvent("IdleTLogQueueCleanupPhase").detail("Phase", "WorkerIncluded");
+		// Registration and the persisted worker list can lag a reboot, so retry until the CC observes restoration.
 		while (true) {
+			for (const auto& [address, processClass] : originalClasses) {
+				ProcessClass restore = processClass.classSource() == ProcessClass::CommandLineSource
+				                           ? ProcessClass(ProcessClass::InvalidClass, ProcessClass::DBSource)
+				                           : processClass;
+				co_await setClass(cx, AddressExclusion(address.ip, address.port), restore);
+			}
 			auto availableWorkers = co_await getWorkers(dbInfo, GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY);
 			std::map<NetworkAddress, ProcessClass> observedClasses;
 			for (const auto& worker : availableWorkers) {
@@ -297,6 +301,14 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 				auto observed = observedClasses.find(address);
 				if (observed == observedClasses.end() || observed->second != processClass) {
 					restored = false;
+					TraceEvent("IdleTLogQueueCleanupClassPending")
+					    .suppressFor(10)
+					    .detail("Address", address)
+					    .detail("ExpectedClass", processClass.classType())
+					    .detail("ExpectedSource", processClass.classSource())
+					    .detail("ObservedClass", observed == observedClasses.end() ? -2 : observed->second.classType())
+					    .detail("ObservedSource",
+					            observed == observedClasses.end() ? -2 : observed->second.classSource());
 				}
 			}
 			if (restored) {
@@ -304,6 +316,7 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 			}
 			co_await delay(0.1);
 		}
+		TraceEvent("IdleTLogQueueCleanupPhase").detail("Phase", "ClassesRestored");
 		co_await waitRecovered();
 		LogEpoch previousEpoch = dbInfo->get().logSystemConfig.epoch;
 		UID previousMaster = dbInfo->get().master.id();
@@ -311,13 +324,16 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 		fdbSimulationPolicyState().disableTLogRecoveryFinish = true;
 		ScopeExit unpauseRecovery([]() { fdbSimulationPolicyState().disableTLogRecoveryFinish = false; });
 		rebootTransactionSystem();
+		TraceEvent("IdleTLogQueueCleanupPhase").detail("Phase", "NextRecoveryRequested");
 		while (dbInfo->get().master.id() == previousMaster ||
 		       dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
 			co_await dbInfo->onChange();
 		}
+		TraceEvent("IdleTLogQueueCleanupPhase").detail("Phase", "NextRecoveryObserved");
 		test.retainOldLogRoles = false;
 		fdbSimulationPolicyState().disableTLogRecoveryFinish = false;
 		co_await waitRecovered(Optional<LogEpoch>(previousEpoch));
+		TraceEvent("IdleTLogQueueCleanupPhase").detail("Phase", "NextRecoveryFinished");
 		co_await verifyData(cx);
 		// Placement may choose other logs after the original process classes are restored.
 		const bool reusedSharedQueue = isCurrentTarget();
