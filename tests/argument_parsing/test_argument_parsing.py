@@ -99,6 +99,9 @@ def test_fdbbackup(build_dir):
     check(not is_unknown_knob(run_command(command, ["--knob_min_trace_severity", "5"])))
     check(not is_unknown_knob(run_command(command, ["--knob_min-trace-severity", "5"])))
 
+    start_command = [args.build_dir + "/bin/fdbbackup", "start"]
+    check("--tagname TAGNAME" in run_command(start_command, ["--help"]))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
