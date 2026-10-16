@@ -4755,9 +4755,9 @@ TEST_CASE("/NativeCDC/TLogCommittedFrontier/AbsoluteDeadline") {
 	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 3.0);
 	co_await peek;
 	// frontier advances below begin should not wake the peek nor extend its deadline
-	ASSERT(now() - started >= timeout - 0.01);
-	ASSERT(now() < lastAdvance + timeout);
-	ASSERT(result.minKnownCommittedVersion == fixture.frontier());
+	ASSERT_GT(now() - started, timeout - 0.01);
+	ASSERT_LT(now() - lastAdvance, timeout);
+	ASSERT_EQ(result.minKnownCommittedVersion, fixture.frontier());
 	ASSERT(fixture.timedOutPeeks() == 1);
 }
 
