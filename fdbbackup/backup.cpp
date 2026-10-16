@@ -950,7 +950,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  --trace-format FORMAT\n"
 	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 	       "                 Has no effect unless --log is specified.\n");
-	printf("  --max-cleanup-seconds SECONDS\n"
+	printf("  --min-cleanup-seconds SECONDS\n"
 	       "                 Specifies the amount of time a backup or DR needs to be stale before cleanup will\n"
 	       "                 remove mutations for it. By default this is set to one hour.\n");
 	printf("  --delete-data\n"
