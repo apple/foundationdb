@@ -35,6 +35,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
@@ -1481,13 +1482,15 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 
 	if (req.recoveryState == RecoveryState::FULLY_RECOVERED) {
 		// Retaining old role advertisements must not interrupt an otherwise completed recovery.
-		if (!req.logSystemConfig.oldTLogs.empty()) {
+		const bool retainedRolesTest =
+		    g_network->isSimulated() && fdbSimulationPolicyState().tLogQueueCleanup.retainOldLogRoles;
+		if (!req.logSystemConfig.oldTLogs.empty() && !retainedRolesTest) {
 			TraceEvent(SevError, "FullyRecoveredWithOldTLogs", self->id)
 			    .detail("MasterId", req.id)
 			    .detail("RecoveryCount", req.recoveryCount)
 			    .detail("OldLogGenerations", req.logSystemConfig.oldTLogs.size());
 		}
-		ASSERT_WE_THINK(req.logSystemConfig.oldTLogs.empty());
+		ASSERT_WE_THINK(req.logSystemConfig.oldTLogs.empty() || retainedRolesTest);
 		self->db.unfinishedRecoveries = 0;
 	}
 

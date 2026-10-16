@@ -1,0 +1,36 @@
+[configuration]
+config = 'double logs=2 log_spill:=2'
+singleRegion = true
+generateFearless = false
+machineCount = 12
+processesPerMachine = 1
+desiredTLogCount = 2
+buggify = false
+faultInjection = true
+tenantModes = ['disabled']
+encryptModes = ['disabled']
+disableTss = true
+storageEngineType = 2
+
+[[knobs]]
+# Preserve multiple generations through the unfinished recovery and the targeted process crashes.
+track_tlog_recovery = false
+record_recover_at_in_cstate = true
+tlog_hard_limit_bytes = 1048576
+tlog_spill_threshold = 262144
+reference_spill_update_storage_byte_limit = 262144
+disk_queue_file_extension_bytes = 65536
+disk_queue_file_shrink_bytes = 65536
+
+[[test]]
+testTitle = 'IdleTLogQueueCleanupCrash'
+timeout = 600
+runFailureWorkloads = false
+connectionFailuresDisableDuration = 1000000
+waitForQuiescenceEnd = false
+
+    [[test.workload]]
+    testName = 'IdleTLogQueueCleanup'
+    operationTimeout = 500.0
+    # Crash once at a seeded durability boundary, then require recovery, reclamation, and queue reuse.
+    crashAt = 'random'
