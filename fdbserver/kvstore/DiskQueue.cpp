@@ -363,7 +363,8 @@ public:
 
 		Reference<IAsyncFile> empty = co_await replaceFile(files[1].f);
 		files[1].setFile(empty);
-		co_await empty->truncate(0);
+		// Keep a fully popped blank page: uncached handles cannot truncate to zero.
+		co_await empty->zeroRange(0, sizeof(Page));
 		co_await empty->sync();
 		if (g_network->isSimulated()) {
 			co_await tLogQueueCleanupTestPoint(dbgid, "AfterCompactOldFileReplaced", basename);
@@ -371,14 +372,14 @@ public:
 		std::swap(files[0], files[1]);
 		memset(firstPages[0], 0xFF, sizeof(Page));
 		memcpy(firstPages[1], pageData.begin(), sizeof(Page));
-		files[0].size = files[0].popped = 0;
+		files[0].size = files[0].popped = sizeof(Page);
 		files[1].size = writingPos = sizeof(Page);
 		files[1].popped = 0;
-		dbg_file0BeginSeq = beginSeq;
+		dbg_file0BeginSeq = beginSeq - sizeof(Page);
 		CODE_PROBE(true, "Reclaimed an empty disk queue without new payload writes");
 		TraceEvent("DiskQueueEmptyCompacted", dbgid)
 		    .detail("OldBytes", oldBytes)
-		    .detail("NewBytes", sizeof(Page))
+		    .detail("NewBytes", 2 * sizeof(Page))
 		    .detail("BeginSeq", beginSeq);
 		if (g_network->isSimulated()) {
 			co_await tLogQueueCleanupTestPoint(dbgid, "AfterCompact", basename);
