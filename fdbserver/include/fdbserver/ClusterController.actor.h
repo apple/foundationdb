@@ -108,6 +108,15 @@ struct WorkerFitnessInfo {
 	  : worker(worker), fitness(fitness), used(used) {}
 };
 
+template <class CandidateWorkers>
+int countCandidateWorkers(const CandidateWorkers& candidateWorkers) {
+	int count = 0;
+	for (const auto& [key, workers] : candidateWorkers) {
+		count += workers.size();
+	}
+	return count;
+}
+
 struct RecruitWorkersInfo : ReferenceCounted<RecruitWorkersInfo> {
 	RecruitFromConfigurationRequest req;
 	RecruitFromConfigurationReply rep;
@@ -459,14 +468,10 @@ public:
 		logServerSet.clear();
 
 		if (!bCompleted) {
-			int candidates = 0;
-			for (const auto& [fitness, workers] : fitness_workers) {
-				candidates += workers.size();
-			}
 			TraceEvent(SevWarn, "RecruitmentFailed", id)
 			    .detail("RecruitingRole", "SeedStorage")
 			    .detail("Policy", policy->info())
-			    .detail("Candidates", candidates);
+			    .detail("Candidates", countCandidateWorkers(fitness_workers));
 			throw no_more_servers();
 		}
 
@@ -757,10 +762,6 @@ public:
 		}
 
 		if (fieldsWithMin.size() < minFields) {
-			int candidates = 0;
-			for (const auto& [key, workers] : fitness_workers) {
-				candidates += workers.size();
-			}
 			int zones = 0;
 			for (const auto& [fieldValue, zonesAndWorkers] : field_zones) {
 				zones += zonesAndWorkers.first.size();
@@ -774,7 +775,7 @@ public:
 			    .detail("Groups", field_zones.size())
 			    .detail("GroupsWithEnoughZones", fieldsWithMin.size())
 			    .detail("Zones", zones)
-			    .detail("Candidates", candidates);
+			    .detail("Candidates", countCandidateWorkers(fitness_workers));
 
 			throw no_more_servers();
 		}
@@ -1018,15 +1019,11 @@ public:
 		}
 
 		if (resultSet.size() < required) {
-			int candidates = 0;
-			for (const auto& [key, workers] : fitness_workers) {
-				candidates += workers.size();
-			}
 			TraceEvent(SevWarn, "RecruitmentFailed", id)
 			    .detail("RecruitingRole", "TLog")
 			    .detail("Required", required)
 			    .detail("ZonesFound", resultSet.size())
-			    .detail("Candidates", candidates);
+			    .detail("Candidates", countCandidateWorkers(fitness_workers));
 
 			throw no_more_servers();
 		}
