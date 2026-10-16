@@ -133,6 +133,22 @@ AuditPhase stringToAuditPhase(std::string auditPhaseStr) {
 	}
 }
 
+bool isTransientAuditStateReadError(const Error& e) {
+	switch (e.code()) {
+	case error_code_grv_proxy_memory_limit_exceeded:
+	case error_code_commit_proxy_memory_limit_exceeded:
+	case error_code_transaction_too_old:
+	case error_code_future_version:
+	case error_code_tag_throttled:
+	case error_code_batch_transaction_throttled:
+	case error_code_database_locked:
+	case error_code_timed_out:
+		return true;
+	default:
+		return false;
+	}
+}
+
 // This is not transactional
 AsyncResult<std::vector<AuditStorageState>> getAuditStates(Database cx,
                                                            AuditType auditType,
