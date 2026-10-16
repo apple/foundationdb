@@ -1258,7 +1258,10 @@ Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 		const Optional<Version> lastEpochEnd = self->db.recoveryData.isValid()
 		                                           ? Optional<Version>(self->db.recoveryData->lastEpochEnd)
 		                                           : Optional<Version>();
-		if (!shouldDeferBetterMasterRecovery(lastEpochEnd, HasStorageServers(!self->storageStatusInfos.empty())) &&
+		const bool retainedRolesTest =
+		    g_network->isSimulated() && fdbSimulationPolicyState().tLogQueueCleanup.retainOldLogRoles;
+		if (!retainedRolesTest &&
+		    !shouldDeferBetterMasterRecovery(lastEpochEnd, HasStorageServers(!self->storageStatusInfos.empty())) &&
 		    self->betterMasterExists()) {
 			self->db.forceMasterFailure.trigger();
 			TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().master.id());

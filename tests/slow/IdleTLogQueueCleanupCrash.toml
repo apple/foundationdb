@@ -16,8 +16,6 @@ storageEngineType = 2
 # Preserve multiple generations through the unfinished recovery and the targeted process crashes.
 track_tlog_recovery = false
 record_recover_at_in_cstate = true
-# Keep unrelated placement improvements from replacing the retained-role recovery during targeted crashes.
-singleton_recruit_bme_delay = 1000000.0
 tlog_hard_limit_bytes = 1048576
 tlog_spill_threshold = 262144
 reference_spill_update_storage_byte_limit = 262144

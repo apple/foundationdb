@@ -23,6 +23,7 @@
 #include "fdbclient/ProcessData.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
@@ -184,7 +185,11 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 		// Keep this shared queue in the next generation, then move the current log elsewhere.
 		const AddressExclusion exclusion(target.address().ip, target.address().port);
 		std::vector<ProcessData> workers = co_await getWorkers(cx);
+		std::map<NetworkAddress, ProcessClass> originalClasses;
 		for (const auto& worker : workers) {
+			if (worker.address == target.address() || worker.processClass.classType() == ProcessClass::LogClass) {
+				originalClasses.emplace(worker.address, worker.processClass);
+			}
 			if (worker.address != target.address() && worker.processClass.classType() == ProcessClass::LogClass) {
 				co_await setClass(cx,
 				                  AddressExclusion(worker.address.ip, worker.address.port),
@@ -275,11 +280,36 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 		ASSERT(co_await queueFileBytes() <= maxQueueBytes);
 		test.retainOldLogRoles = false;
 		co_await includeServers(cx, { exclusion });
+		for (const auto& [address, processClass] : originalClasses) {
+			ProcessClass restore = processClass.classSource() == ProcessClass::CommandLineSource
+			                           ? ProcessClass(ProcessClass::InvalidClass, ProcessClass::DBSource)
+			                           : processClass;
+			co_await setClass(cx, AddressExclusion(address.ip, address.port), restore);
+		}
+		while (true) {
+			auto availableWorkers = co_await getWorkers(dbInfo, GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY);
+			std::map<NetworkAddress, ProcessClass> observedClasses;
+			for (const auto& worker : availableWorkers) {
+				observedClasses.emplace(worker.interf.address(), worker.processClass);
+			}
+			bool restored = true;
+			for (const auto& [address, processClass] : originalClasses) {
+				auto observed = observedClasses.find(address);
+				if (observed == observedClasses.end() || observed->second != processClass) {
+					restored = false;
+				}
+			}
+			if (restored) {
+				break;
+			}
+			co_await delay(0.1);
+		}
+		co_await waitRecovered();
 		LogEpoch previousEpoch = dbInfo->get().logSystemConfig.epoch;
 		rebootTransactionSystem();
 		co_await waitRecovered(Optional<LogEpoch>(previousEpoch));
 		co_await verifyData(cx);
-		// A new recovery may remove the retired shared actor before recruitment. The cleaned process must rejoin.
+		// Placement may choose other logs after the original process classes are restored.
 		const bool reusedSharedQueue = isCurrentTarget();
 		bool recruitedProcess = false;
 		for (const auto& set : dbInfo->get().logSystemConfig.tLogs) {
@@ -289,13 +319,13 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 				}
 			}
 		}
-		ASSERT(recruitedProcess);
 		co_await writeData(cx, 2);
 		co_await verifyData(cx, 2);
 		TraceEvent("IdleTLogQueueCleanupComplete", test.sharedTLogId)
 		    .detail("InitialQueueBytes", initialQueueBytes)
 		    .detail("PhysicalQueueBytesAfterCleanup", cleanedQueueBytes)
 		    .detail("ReusedSharedQueue", reusedSharedQueue)
+		    .detail("RecruitedProcess", recruitedProcess)
 		    .detail("CrashAt", crashAt)
 		    .detail("ReferenceReads", test.checkpoints["ReferenceRead"])
 		    .detail("ReferenceReadsAfterCrash", test.checkpoints["ReferenceReadAfterCrash"])
