@@ -31,6 +31,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/CoroUtils.h"
 #include "flow/Platform.h"
+#include "flow/ScopeExit.h"
 
 struct IdleTLogQueueCleanupWorkload : TestWorkload {
 	static constexpr auto NAME = "IdleTLogQueueCleanup";
@@ -278,7 +279,6 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 		co_await waitRecovered();
 		co_await verifyData(cx);
 		ASSERT(co_await queueFileBytes() <= maxQueueBytes);
-		test.retainOldLogRoles = false;
 		co_await includeServers(cx, { exclusion });
 		for (const auto& [address, processClass] : originalClasses) {
 			ProcessClass restore = processClass.classSource() == ProcessClass::CommandLineSource
@@ -306,7 +306,17 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 		}
 		co_await waitRecovered();
 		LogEpoch previousEpoch = dbInfo->get().logSystemConfig.epoch;
+		UID previousMaster = dbInfo->get().master.id();
+		// Change retention only after the old master's final registrations become obsolete.
+		fdbSimulationPolicyState().disableTLogRecoveryFinish = true;
+		ScopeExit unpauseRecovery([]() { fdbSimulationPolicyState().disableTLogRecoveryFinish = false; });
 		rebootTransactionSystem();
+		while (dbInfo->get().master.id() == previousMaster ||
+		       dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
+			co_await dbInfo->onChange();
+		}
+		test.retainOldLogRoles = false;
+		fdbSimulationPolicyState().disableTLogRecoveryFinish = false;
 		co_await waitRecovered(Optional<LogEpoch>(previousEpoch));
 		co_await verifyData(cx);
 		// Placement may choose other logs after the original process classes are restored.
