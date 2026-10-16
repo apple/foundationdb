@@ -10,6 +10,16 @@ learn more about how the images are built.
 
 For details about what is in the images, peruse `Dockerfile`
 
+The Docker build validates that downloaded executables and client libraries
+contain ELF64 little-endian headers for the requested target architecture.
+This also applies to local artifacts supplied through `FDB_WEBSITE`; an
+architecture-specific filename alone does not establish the binary architecture.
+Run the architecture validation tests without building an image:
+
+```shell
+python3 packaging/docker/test_verify_architecture.py
+```
+
 the `samples` directory is out of date, and anything therein should be used with
 the expectation that it is, at least, partially (if not entirely) incorrect.
 

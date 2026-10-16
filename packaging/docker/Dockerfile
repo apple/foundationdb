@@ -104,6 +104,7 @@ RUN groupadd --gid 4059 \
 
 WORKDIR /tmp
 COPY website /tmp/website/
+COPY verify-architecture.sh /tmp/verify-architecture.sh
 
 # Install FoundationDB Binaries and additional FoundationDB Client Libraries
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
@@ -119,6 +120,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
         URL="${FDB_WEBSITE}/${FDB_VERSION}/$file.$FDB_ARCH"; \
         echo "Downloading $URL"; \
         $CURL "$URL" -o "$file" && \
+        sh /tmp/verify-architecture.sh "$TARGETARCH" "$file" && \
         chmod +x "$file" && \
         mv "$file" /usr/bin/ || exit $?; \
     done && \
@@ -128,9 +130,11 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
         echo "Downloading $URL"; \
         TARGET="/usr/lib/fdb/multiversion/libfdb_c_${version%.*}.so"; \
         $CURL "$URL" -o "$TARGET" && \
+        sh /tmp/verify-architecture.sh "$TARGETARCH" "$TARGET" && \
         cp "$TARGET" /var/fdb/lib/ || exit $?; \
     done && \
-    $CURL $FDB_WEBSITE/$FDB_VERSION/libfdb_c.${FDB_ARCH}.so -o /usr/lib/libfdb_c.so
+    $CURL $FDB_WEBSITE/$FDB_VERSION/libfdb_c.${FDB_ARCH}.so -o /usr/lib/libfdb_c.so && \
+    sh /tmp/verify-architecture.sh "$TARGETARCH" /usr/lib/libfdb_c.so
 
 # Setup all symlinks for the other binaries that are a copy of fdbbackup
 RUN for file in fdbdr fdbrestore backup_agent dr_agent; do \
