@@ -110,10 +110,12 @@ function(strip_debug_symbols target)
   list(APPEND strip_command -o "${out_file}")
   if(is_exec AND NOT APPLE)
     # The debuglink command rewrites out_file, so it must finish before consumers copy it.
+    # Use entire original as .debug, instead of split debuginfo (only), for convenience.
     add_custom_command(
       OUTPUT "${out_file}" "${out_file}.debug"
       COMMAND ${strip_command} $<TARGET_FILE:${target}>
-      COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug"
+      # COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug"
+      COMMAND "${CMAKE_COMMAND}" -E copy $<TARGET_FILE:${target}> "${out_file}.debug"
       COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug" "${out_file}"
       DEPENDS ${target}
       COMMENT "Stripping symbols and copying debug symbols from ${target}")

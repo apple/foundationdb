@@ -4,6 +4,40 @@
 Release Notes
 #############
 
+7.4.9
+=====
+
+AVX enabled release.
+
+* On rhel9 based distros, avoid linking GLIBC_2.35 symbols. This fixes compatibility with RHEL 9.6 (and equivalent), and other linux distributions with glibc-2.34 (which lack some symbol backports added in RHEL 9.7). This issue affected FoundationDB 7.4.7 and 7.4.8 (which were the first versions built on RHEL 9.8). `(PR #14274) <https://github.com/apple/foundationdb/pull/14274>`_
+* Fix "can_clean_bounce" in fdbserver status json. `(PR #14272) <https://github.com/apple/foundationdb/pull/14272>`_
+* Update to RocksDB 8.11.5 again. This contains a disk format change (originally made in RocksDB 9.0) such that it cannot be downgraded back to RocksDB 8.11.4 or lower, and no other changes. This new disk format is fully forwards and backwards compatible with RocksDB 9+ (for how FDB uses it). Note that RocksDB-9.7.3 was used in FoundationDB-7.4.0, downgraded to RocksDB-8.11.5 in FoundationDB-7.4.6, and then to RocksDB-8.11.4 in FoundationDB-7.4.7. All 7.4 releases before FoundationDB-7.4.7 were considered pre-stable-release, apologies for the confusion. `(PR #14042) <https://github.com/apple/foundationdb/pull/14042>`_
+
+If you use the RocksDB storage engine, and care about the possibility of rolling-back a deployment, this FoundationDB release is meant to be useful as a step to the new RocksDB disk format. Once you have upgraded to FDB 7.4.8 and have confidence in that version, this FDB 7.4.9 release should have identical behavior in all respects, but cannot be downgraded back.
+
+============  =======  =================
+FoundationDB  RocksDB  Can Downgrade FDB
+============  =======  =================
+7.3.40+       8.11.4   YES
+7.4.0         9.7.3    NO
+7.4.6         8.11.5   TO 7.4.0 - 7.4.5
+7.4.7         8.11.4   TO 7.3.x
+7.4.8         8.11.4   TO 7.3.x, 7.4.7
+7.4.9         8.11.5   TO 7.4.0 - 7.4.5
+8.0.0         11.1.2   TO 7.4.9, 7.4.6
+============  =======  =================
+
+See also :ref:`note about encrypted backups <enc-backup-stable>` in release 7.4.7 below.
+
+7.4.8
+=====
+
+AVX enabled release.
+
+* Reconciled uncertain S3 multipart upload completions: a 200 response that embeds an error is now treated as a failure, and a completion that returns NoSuchUpload or a transport error is verified against the committed object with a HEAD request before being reported as successful. `(PR #14089) <https://github.com/apple/foundationdb/pull/14089>`_, `(PR #14093) <https://github.com/apple/foundationdb/pull/14093>`_
+* Fixed RPM build-id link conflicts that prevented installing versioned client packages alongside the main client package. `(PR #14103) <https://github.com/apple/foundationdb/pull/14103>`_
+* Changed debug level to "-g1" and enabled compression for "\*.debug" release artifacts, to make them much smaller. Also changed to include the main executable in the "\*.debug" release artifact so it can optionally be run directly, on its own. `(PR #14103) <https://github.com/apple/foundationdb/pull/14103>`_, `(PR #14131) <https://github.com/apple/foundationdb/pull/14131>`_
+
 7.4.7
 =====
 
@@ -33,6 +67,11 @@ AVX enabled release.
 * Fixed ``minRestorableVersion`` and ``maxRestorableVersion`` updates when mutation logs are missing. `(PR #12710) <https://github.com/apple/foundationdb/pull/12710>`_
 * Restricted ``backup_worker_enabled`` configuration through ``fdbcli``. `(PR #12711) <https://github.com/apple/foundationdb/pull/12711>`_
 * Enabled TLS hostname validation against certificate CN and SAN values. `(PR #12730) <https://github.com/apple/foundationdb/pull/12730>`_
+* Downgraded RocksDB to 8.11.4. `(PR #13830) <https://github.com/apple/foundationdb/pull/13830>`_
+
+.. _enc-backup-stable:
+
+Encrypted Backups are production-ready starting with 7.4.7. Encrypted backups created with earlier versions are not compatible with 7.4.7+ and cannot be restored due to a format change. If using this feature, create a new encrypted backup with 7.4.7+.
 
 7.4.6
 =====

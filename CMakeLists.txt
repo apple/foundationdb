@@ -24,7 +24,7 @@ if(POLICY CMP0135)
 endif()
 
 project(foundationdb
-  VERSION 7.4.8
+  VERSION 7.4.9
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
@@ -244,6 +244,21 @@ if(WITH_DOCUMENTATION)
   if(BUILD_JAVA_BINDING)
     add_dependencies(html CopyJavadoc)
   endif()
+endif()
+
+# Make sure binaries built on newer RHEL 9 minor releases still run on older ones, see ConfigureCompiler.cmake
+if(RHEL9_BASED)
+  set(glibc_check_binaries)
+  foreach(target fdbserver fdbcli fdbbackup fdbmonitor fdb_c fdb_c_shim fdb_java)
+    if(TARGET ${target})
+      get_target_property(target_type ${target} TYPE)
+      if(target_type MATCHES "^(EXECUTABLE|SHARED_LIBRARY|MODULE_LIBRARY)$")
+        list(APPEND glibc_check_binaries $<TARGET_FILE:${target}>)
+      endif()
+    endif()
+  endforeach()
+  add_test(NAME glibc_symbol_versions
+           COMMAND ${CMAKE_SOURCE_DIR}/contrib/check_glibc_symbol_versions.sh ${CMAKE_NM} ${glibc_check_binaries})
 endif()
 
 if(WIN32)
