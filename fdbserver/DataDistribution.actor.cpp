@@ -398,6 +398,9 @@ struct DDBulkLoadJobManager {
 struct DDBulkDumpJobManager {
 	BulkDumpState jobState;
 	std::map<Key, BulkLoadManifest> taskManifestMap;
+	// Limits the "no replica in the target DC" warning to once per job rather than once per
+	// affected range per scheduling cycle. This manager is reconstructed for each job.
+	bool warnedNoServerInTargetDc = false;
 
 	DDBulkDumpJobManager() = default;
 	DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -534,6 +537,17 @@ public:
 		if (configuration.regions.size() > 1) {
 			remoteDcIds.push_back(regions[1].dcId);
 		}
+	}
+
+	// The DC whose storage servers perform bulkdump uploads, or empty when the cluster has no
+	// region configuration. Resolved per dispatch rather than cached so it follows a failover.
+	std::string bulkDumpTargetDcId() const {
+		const std::vector<Optional<Key>>& dcIds =
+		    SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION ? remoteDcIds : primaryDcId;
+		if (!dcIds.empty() && dcIds[0].present()) {
+			return dcIds[0].get().toString();
+		}
+		return std::string();
 	}
 
 	Future<Void> waitDataDistributorEnabled() const {
@@ -2325,6 +2339,7 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	state int rangeLocationIndex = 0;
 	state std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations;
 	state KeyRange taskRange;
+	state std::string targetDcId;
 	state std::vector<Future<Void>> actors;
 	state Transaction tr(cx);
 	while (beginKey < endKey) {
@@ -2377,6 +2392,23 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					// Spawn task per shard
 					taskRange = rangeLocations[rangeLocationIndex].range;
 					ASSERT(!taskRange.empty());
+					// Skip rather than fall back to another region: the dumping server uploads the
+					// files, so a DC that cannot reach the destination would fail every task.
+					targetDcId = self->bulkDumpTargetDcId();
+					if (!targetDcId.empty()) {
+						const auto& servers = rangeLocations[rangeLocationIndex].servers;
+						auto targetDc = servers.find(targetDcId);
+						if (targetDc == servers.end() || targetDc->second.empty()) {
+							if (!self->bulkDumpJobManager.warnedNoServerInTargetDc) {
+								self->bulkDumpJobManager.warnedNoServerInTargetDc = true;
+								TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDc", self->ddId)
+								    .detail("JobID", jobId)
+								    .detail("TargetDcId", targetDcId)
+								    .detail("FirstSkippedRange", taskRange);
+							}
+							continue;
+						}
+					}
 					// Limit parallelism
 					loop {
 						if (self->bulkDumpParallelismLimitor.canStart()) {
@@ -2385,7 +2417,8 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 						wait(self->bulkDumpParallelismLimitor.waitUntilCounterChanged());
 					}
 					SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
-					                                        bulkDumpState.generateRangeTask(taskRange));
+					                                        bulkDumpState.generateRangeTask(taskRange),
+					                                        targetDcId);
 					// Issue task
 					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobSpawnRange", self->ddId)
 					    .detail("JobID", jobId)
