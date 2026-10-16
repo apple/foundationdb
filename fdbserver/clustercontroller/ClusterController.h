@@ -121,6 +121,15 @@ inline bool excludesFromTLogRecruitmentDueToLowDisk(const Standalone<VectorRef<S
 	return hasWorkerIssue(issues, "exclude_from_tlog_recruitment_low_disk"_sr);
 }
 
+template <class CandidateWorkers>
+int countCandidateWorkers(const CandidateWorkers& candidateWorkers) {
+	int count = 0;
+	for (const auto& [key, workers] : candidateWorkers) {
+		count += workers.size();
+	}
+	return count;
+}
+
 struct RecruitWorkersInfo : ReferenceCounted<RecruitWorkersInfo> {
 	RecruitFromConfigurationRequest req;
 	RecruitFromConfigurationReply rep;
@@ -409,10 +418,7 @@ public:
 		logServerSet.clear();
 
 		if (!bCompleted) {
-			int candidates = 0;
-			for (const auto& [fitness, workers] : fitness_workers) {
-				candidates += workers.size();
-			}
+			int candidates = countCandidateWorkers(fitness_workers);
 			TraceEvent(SevWarn, "RecruitmentFailed", id)
 			    .detail("RecruitingRole", "SeedStorage")
 			    .detail("Policy", policy->info())
@@ -716,10 +722,7 @@ public:
 		}
 
 		if (fieldsWithMin.size() < minFields) {
-			int candidates = 0;
-			for (const auto& [key, workers] : fitness_workers) {
-				candidates += workers.size();
-			}
+			int candidates = countCandidateWorkers(fitness_workers);
 			int zones = 0;
 			for (const auto& [fieldValue, zonesAndWorkers] : field_zones) {
 				zones += zonesAndWorkers.first.size();
@@ -987,10 +990,7 @@ public:
 		}
 
 		if (resultSet.size() < required) {
-			int candidates = 0;
-			for (const auto& [key, workers] : fitness_workers) {
-				candidates += workers.size();
-			}
+			int candidates = countCandidateWorkers(fitness_workers);
 			TraceEvent(SevWarn, "RecruitmentFailed", id)
 			    .detail("RecruitingRole", "TLog")
 			    .detail("Required", required)
