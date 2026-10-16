@@ -61,7 +61,7 @@ public:
 	bool isPresent(StringRef key) const { return (_data.find(key) != _data.end()); }
 	bool isPresent(StringRef key, Optional<Standalone<StringRef>> value) const {
 		auto pos = _data.find(key);
-		return (pos != _data.end()) ? false : (pos->second == value);
+		return pos != _data.end() && pos->second == value;
 	}
 
 	std::string describeValue(StringRef key) const {
