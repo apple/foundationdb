@@ -138,6 +138,11 @@ struct LoadBalanceRequestHooks<LoadBalanceTestRequest,
                                LoadBalanceTestMulti,
                                LoadBalanceTestModel,
                                false> {
+	static void prepareRequest(RequestStream<LoadBalanceTestRequest> const*,
+	                           LoadBalanceTestRequest&,
+	                           LoadBalanceTestModel*,
+	                           bool) {}
+
 	static void maybeDuplicate(RequestStream<LoadBalanceTestRequest> const*,
 	                           LoadBalanceTestRequest&,
 	                           LoadBalanceTestModel* model,
