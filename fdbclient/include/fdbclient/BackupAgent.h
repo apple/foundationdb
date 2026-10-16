@@ -170,14 +170,14 @@ public:
 	static StringRef restoreStateText(ERestoreState id);
 	static Key getPauseKey();
 
-	// Throws restore_error if a bulkload restore cannot honor these arguments; no-op for rangefile.
-	static void validateBulkLoadRestoreArgs(Key tagName,
-	                                        Standalone<VectorRef<KeyRangeRef>> ranges,
-	                                        Key addPrefix,
-	                                        Key removePrefix,
-	                                        OnlyApplyMutationLogs onlyApplyMutationLogs,
-	                                        Optional<std::string> encryptionKeyFileName,
-	                                        bool useRangeFileRestore);
+	// Why a bulkload restore cannot honor these arguments, or empty if it can (always empty for rangefile).
+	static Optional<std::string> bulkLoadRestoreRefusal(Key tagName,
+	                                                    Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                                    Key addPrefix,
+	                                                    Key removePrefix,
+	                                                    OnlyApplyMutationLogs onlyApplyMutationLogs,
+	                                                    Optional<std::string> encryptionKeyFileName,
+	                                                    bool useRangeFileRestore);
 
 	// restore() will
 	//   - make sure that url is readable and appears to be a complete backup

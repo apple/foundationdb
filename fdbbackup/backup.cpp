@@ -2234,13 +2234,17 @@ Future<Void> runRestore(Database db,
 	ASSERT(!ranges.empty());
 
 	// Before anything remote is touched, and here so --dryrun refuses too.
-	FileBackupAgent::validateBulkLoadRestoreArgs(KeyRef(tagName),
-	                                             ranges,
-	                                             KeyRef(addPrefix),
-	                                             KeyRef(removePrefix),
-	                                             onlyApplyMutationLogs,
-	                                             encryptionKeyFile,
-	                                             restoreMode == RestoreMode::RANGEFILE);
+	if (auto refusal = FileBackupAgent::bulkLoadRestoreRefusal(KeyRef(tagName),
+	                                                           ranges,
+	                                                           KeyRef(addPrefix),
+	                                                           KeyRef(removePrefix),
+	                                                           onlyApplyMutationLogs,
+	                                                           encryptionKeyFile,
+	                                                           restoreMode == RestoreMode::RANGEFILE);
+	    refusal.present()) {
+		fprintf(stderr, "ERROR: %s\n", refusal.get().c_str());
+		throw restore_error();
+	}
 
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
 		fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");
