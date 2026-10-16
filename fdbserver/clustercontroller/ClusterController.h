@@ -121,6 +121,15 @@ inline bool excludesFromTLogRecruitmentDueToLowDisk(const Standalone<VectorRef<S
 	return hasWorkerIssue(issues, "exclude_from_tlog_recruitment_low_disk"_sr);
 }
 
+template <class CandidateWorkers>
+int countCandidateWorkers(const CandidateWorkers& candidateWorkers) {
+	int count = 0;
+	for (const auto& [key, workers] : candidateWorkers) {
+		count += workers.size();
+	}
+	return count;
+}
+
 struct RecruitWorkersInfo : ReferenceCounted<RecruitWorkersInfo> {
 	RecruitFromConfigurationRequest req;
 	RecruitFromConfigurationReply rep;
@@ -409,6 +418,11 @@ public:
 		logServerSet.clear();
 
 		if (!bCompleted) {
+			int candidates = countCandidateWorkers(fitness_workers);
+			TraceEvent(SevWarn, "RecruitmentFailed", id)
+			    .detail("RecruitingRole", "SeedStorage")
+			    .detail("Policy", policy->info())
+			    .detail("Candidates", candidates);
 			throw no_more_servers();
 		}
 
@@ -708,6 +722,22 @@ public:
 		}
 
 		if (fieldsWithMin.size() < minFields) {
+			int candidates = countCandidateWorkers(fitness_workers);
+			int zones = 0;
+			for (const auto& [fieldValue, zonesAndWorkers] : field_zones) {
+				zones += zonesAndWorkers.first.size();
+			}
+
+			TraceEvent(SevWarn, "RecruitmentFailed", id)
+			    .detail("RecruitingRole", "TLog")
+			    .detail("GroupKey", field.toString())
+			    .detail("RequiredGroups", minFields)
+			    .detail("RequiredZonesPerGroup", minPerField)
+			    .detail("Groups", field_zones.size())
+			    .detail("GroupsWithEnoughZones", fieldsWithMin.size())
+			    .detail("Zones", zones)
+			    .detail("Candidates", candidates);
+
 			throw no_more_servers();
 		}
 
@@ -960,6 +990,13 @@ public:
 		}
 
 		if (resultSet.size() < required) {
+			int candidates = countCandidateWorkers(fitness_workers);
+			TraceEvent(SevWarn, "RecruitmentFailed", id)
+			    .detail("RecruitingRole", "TLog")
+			    .detail("Required", required)
+			    .detail("ZonesFound", resultSet.size())
+			    .detail("Candidates", candidates);
+
 			throw no_more_servers();
 		}
 
@@ -1124,6 +1161,12 @@ public:
 			for (auto& object : logServerMap->getObjects()) {
 				tLocalities.push_back(object->interf.locality);
 			}
+
+			TraceEvent(SevWarn, "RecruitmentFailed", id)
+			    .detail("RecruitingRole", "TLog")
+			    .detail("Policy", policy->info())
+			    .detail("Required", required)
+			    .detail("Candidates", tLocalities.size());
 
 			logServerSet->clear();
 			logServerSet.clear();
@@ -1400,6 +1443,13 @@ public:
 			                                  (satelliteFallback ? region.satelliteTLogUsableDcsFallback
 			                                                     : region.satelliteTLogUsableDcs)) {
 				if (satelliteFallback || region.satelliteTLogUsableDcsFallback == 0) {
+					TraceEvent(SevWarn, "RecruitmentFailed", id)
+					    .detail("RecruitingRole", "SatelliteTLog")
+					    .detail("Satellites", region.satellites.size())
+					    .detail("UsableDcs", region.satelliteTLogUsableDcs)
+					    .detail("UsableDcsFallback", region.satelliteTLogUsableDcsFallback)
+					    .detail("TriedFallback", satelliteFallback);
+
 					throw no_more_servers();
 				} else {
 					if (!goodRecruitmentTime.isReady()) {
@@ -1526,6 +1576,11 @@ public:
 			                         std::max(recruitment::GoodFit, std::get<0>(fitness_workers.begin()->first)),
 			                         std::get<1>(fitness_workers.begin()->first));
 		}
+
+		TraceEvent(SevWarn, "RecruitmentFailed", id)
+		    .detail("RecruitingRole", Role::get(role).roleName)
+		    .detail("DcId", dcId)
+		    .detail("CheckStable", checkStable);
 
 		throw no_more_servers();
 	}
