@@ -170,6 +170,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	// expectBulkEncryptionRejection: assert --encryption-key-file is refused on a bulkdump backup. Only
 	// the backup side is probed; the comment at the probe records why the restore side cannot be.
 	bool expectBulkEncryptionRejection;
+	// expectBulkPrefixRejection: assert --add-prefix/--remove-prefix is refused on a bulkload restore.
+	bool expectBulkPrefixRejection;
 	// expectRestoreFailure: the bulkload restore is expected NOT to complete, so the workload asserts the
 	// failure is reported and recovered from rather than that the data arrived.
 	bool expectRestoreFailure;
@@ -252,6 +254,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		performValidation = getOption(options, "performValidation"_sr, false);
 		expectBulkIncrementalRejection = getOption(options, "expectBulkIncrementalRejection"_sr, false);
 		expectBulkEncryptionRejection = getOption(options, "expectBulkEncryptionRejection"_sr, false);
+		expectBulkPrefixRejection = getOption(options, "expectBulkPrefixRejection"_sr, false);
 		// Mutually exclusive with performValidation, whose audit compares restored contents that by
 		// definition do not exist when the restore is expected to fail.
 		expectRestoreFailure = getOption(options, "expectRestoreFailure"_sr, false);
@@ -1093,6 +1096,44 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						TraceEvent("BS3BCW_IncrementalRestoreRejection")
 						    .error(rejected)
 						    .detail("Accepted", rejected.code() == error_code_success);
+						ASSERT(rejected.code() == error_code_restore_error);
+					}
+					if (expectBulkPrefixRejection) {
+						// Unlike the encryption refusal, this one is reachable through the public API:
+						// restore() touches neither prefix before submitRestore. The encryption refusal
+						// does sit ahead of it and throws the same error, so the probe only means
+						// something while the container is unencrypted.
+						ASSERT(!lastBackupContainer->getEncryptionKeyFileName().present());
+						bool accepted = true;
+						Error rejected;
+						try {
+							co_await backupAgent.restore(cx,
+							                             cx,
+							                             Standalone<StringRef>(restoreTag.toString() + "_pfxreject"),
+							                             KeyRef(lastBackupContainer->getURL()),
+							                             lastBackupContainer->getProxy(),
+							                             restoreRanges,
+							                             WaitForComplete::False,
+							                             ::invalidVersion,
+							                             Verbose::True,
+							                             "prefix_"_sr, // addPrefix
+							                             Key(), // removePrefix
+							                             LockDB::False,
+							                             UnlockDB::False,
+							                             OnlyApplyMutationLogs::False,
+							                             InconsistentSnapshotOnly::False,
+							                             ::invalidVersion,
+							                             lastBackupContainer->getEncryptionKeyFileName(),
+							                             lockUID,
+							                             /*useRangeFileRestore=*/false);
+						} catch (Error& e) {
+							if (e.code() == error_code_actor_cancelled) {
+								throw;
+							}
+							accepted = false;
+							rejected = e;
+						}
+						TraceEvent("BS3BCW_PrefixRestoreRejection").error(rejected).detail("Accepted", accepted);
 						ASSERT(rejected.code() == error_code_restore_error);
 					}
 					try {
