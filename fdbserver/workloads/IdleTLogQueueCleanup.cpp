@@ -272,17 +272,30 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 		}
 		co_await waitRecovered();
 		co_await verifyData(cx);
+		ASSERT(co_await queueFileBytes() <= maxQueueBytes);
+		test.retainOldLogRoles = false;
 		co_await includeServers(cx, { exclusion });
 		LogEpoch previousEpoch = dbInfo->get().logSystemConfig.epoch;
 		rebootTransactionSystem();
 		co_await waitRecovered(Optional<LogEpoch>(previousEpoch));
 		co_await verifyData(cx);
-		ASSERT(isCurrentTarget());
+		// A new recovery may remove the retired shared actor before recruitment. The cleaned process must rejoin.
+		const bool reusedSharedQueue = isCurrentTarget();
+		bool recruitedProcess = false;
+		for (const auto& set : dbInfo->get().logSystemConfig.tLogs) {
+			for (const auto& log : set.tLogs) {
+				if (log.present() && log.interf().address() == target.address()) {
+					recruitedProcess = true;
+				}
+			}
+		}
+		ASSERT(recruitedProcess);
 		co_await writeData(cx, 2);
 		co_await verifyData(cx, 2);
 		TraceEvent("IdleTLogQueueCleanupComplete", test.sharedTLogId)
 		    .detail("InitialQueueBytes", initialQueueBytes)
 		    .detail("PhysicalQueueBytesAfterCleanup", cleanedQueueBytes)
+		    .detail("ReusedSharedQueue", reusedSharedQueue)
 		    .detail("CrashAt", crashAt)
 		    .detail("ReferenceReads", test.checkpoints["ReferenceRead"])
 		    .detail("ReferenceReadsAfterCrash", test.checkpoints["ReferenceReadAfterCrash"])
