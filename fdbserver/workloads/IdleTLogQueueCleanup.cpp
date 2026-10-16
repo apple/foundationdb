@@ -272,15 +272,6 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 		co_await verifyData(cx);
 		TraceEvent("IdleTLogQueueCleanupPhase").detail("Phase", "CleanupVerified");
 
-		const int previousRestores = test.restores;
-		g_simulator->rebootProcess(g_simulator->getProcessByAddress(target.address()), ISimulator::KillType::Reboot);
-		while (test.restores == previousRestores) {
-			co_await delay(0.1);
-		}
-		co_await waitRecovered();
-		co_await verifyData(cx);
-		ASSERT(co_await queueFileBytes() <= maxQueueBytes);
-		TraceEvent("IdleTLogQueueCleanupPhase").detail("Phase", "SecondRestartVerified");
 		co_await includeServers(cx, { exclusion });
 		TraceEvent("IdleTLogQueueCleanupPhase").detail("Phase", "WorkerIncluded");
 		// Registration and the persisted worker list can lag a reboot, so retry until the CC observes restoration.
@@ -317,7 +308,38 @@ struct IdleTLogQueueCleanupWorkload : TestWorkload {
 			co_await delay(0.1);
 		}
 		TraceEvent("IdleTLogQueueCleanupPhase").detail("Phase", "ClassesRestored");
+		// A worker registered with the temporary log class can retain that class in the persisted worker list.
+		// Restart after clearing the override, then require the persisted and live worker views to agree.
+		const int previousRestores = test.restores;
+		g_simulator->rebootProcess(g_simulator->getProcessByAddress(target.address()), ISimulator::KillType::Reboot);
+		while (test.restores == previousRestores) {
+			co_await delay(0.1);
+		}
+		while (true) {
+			std::map<NetworkAddress, ProcessClass> persistedClasses;
+			for (const auto& worker : co_await getWorkers(cx)) {
+				persistedClasses.emplace(worker.address, worker.processClass);
+			}
+			std::map<NetworkAddress, ProcessClass> liveClasses;
+			for (const auto& worker : co_await getWorkers(dbInfo, GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY)) {
+				liveClasses.emplace(worker.interf.address(), worker.processClass);
+			}
+			bool restored = true;
+			for (const auto& [address, processClass] : originalClasses) {
+				if (!persistedClasses.contains(address) || persistedClasses.at(address) != processClass ||
+				    !liveClasses.contains(address) || liveClasses.at(address) != processClass) {
+					restored = false;
+				}
+			}
+			if (restored) {
+				break;
+			}
+			co_await delay(0.1);
+		}
 		co_await waitRecovered();
+		co_await verifyData(cx);
+		ASSERT(co_await queueFileBytes() <= maxQueueBytes);
+		TraceEvent("IdleTLogQueueCleanupPhase").detail("Phase", "SecondRestartVerified");
 		LogEpoch previousEpoch = dbInfo->get().logSystemConfig.epoch;
 		UID previousMaster = dbInfo->get().master.id();
 		// Change retention only after the old master's final registrations become obsolete.
