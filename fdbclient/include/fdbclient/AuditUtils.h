@@ -49,6 +49,15 @@ Future<Void> persistAuditState(Database cx,
 // Read a single audit's state by type and ID.
 Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id);
 
+// Throws audit_storage_cancelled if the audit's metadata is gone, and audit_storage_task_outdated if the audit is no
+// longer Running (it completed, failed or errored), so that work still in flight for it can stop. Used by audit tasks
+// before they act on data that is only meaningful while the audit runs.
+Future<Void> checkAuditRunning(Database cx, AuditType type, UID auditId);
+
+// As above, for the data distributor `ddId` that dispatches the audit: also throws movekeys_conflict if `lock` was lost
+// to another data distributor, and audit_storage_task_outdated if the audit now belongs to another data distributor.
+Future<Void> checkAuditRunningUnderLock(Database cx, AuditType type, UID auditId, UID ddId, MoveKeyLockInfo lock);
+
 // List audit states for a given type, optionally filtered by phase, ordered by ID.
 AsyncResult<std::vector<AuditStorageState>> getAuditStates(Database cx,
                                                            AuditType auditType,

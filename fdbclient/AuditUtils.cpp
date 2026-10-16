@@ -459,6 +459,54 @@ Future<Void> persistAuditState(Database cx,
 	}
 }
 
+static Future<Void> checkAuditRunningImpl(Database cx,
+                                          AuditType type,
+                                          UID auditId,
+                                          Optional<UID> ddId,
+                                          Optional<MoveKeyLockInfo> lock) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			if (lock.present()) {
+				co_await checkMoveKeysLockForAudit(&tr, lock.get(), true, false);
+			}
+			Optional<Value> res = co_await tr.get(auditKey(type, auditId));
+			if (!res.present()) {
+				throw audit_storage_cancelled();
+			}
+			const AuditStorageState state = decodeAuditStorageState(res.get());
+			if (state.getPhase() != AuditPhase::Running || (ddId.present() && state.ddId != ddId.get())) {
+				TraceEvent(SevInfo, "AuditUtilAuditNoLongerRunning", auditId)
+				    .detail("AuditType", type)
+				    .detail("AuditPhase", state.getPhase())
+				    .detail("AuditDDID", state.ddId)
+				    .detail("CallerDDID", ddId);
+				throw audit_storage_task_outdated();
+			}
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.code() == error_code_audit_storage_cancelled || err.code() == error_code_audit_storage_task_outdated ||
+		    err.code() == error_code_movekeys_conflict) {
+			throw err;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+Future<Void> checkAuditRunning(Database cx, AuditType type, UID auditId) {
+	return checkAuditRunningImpl(cx, type, auditId, Optional<UID>(), Optional<MoveKeyLockInfo>());
+}
+
+Future<Void> checkAuditRunningUnderLock(Database cx, AuditType type, UID auditId, UID ddId, MoveKeyLockInfo lock) {
+	return checkAuditRunningImpl(cx, type, auditId, ddId, lock);
+}
+
 Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id) {
 	Transaction tr(cx);
 	Optional<Value> res;

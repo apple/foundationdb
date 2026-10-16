@@ -3995,6 +3995,9 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 	try {
 		ASSERT(audit != nullptr);
 		ASSERT(audit->coreState.ddId == self->ddId);
+		// A data distributor that lost the lock, or whose audit another one completed or took over, must not dispatch
+		// its tasks again: they would run against data that nothing keeps consistent for an audit that is over.
+		co_await checkAuditRunningUnderLock(self->txnProcessor->context(), auditType, auditID, self->ddId, lockInfo);
 		loadAndDispatchAudit(self, audit);
 		TraceEvent(SevInfo, "DDAuditStorageCoreScheduled", self->ddId)
 		    .detail("Context", audit->getDDAuditContext())
