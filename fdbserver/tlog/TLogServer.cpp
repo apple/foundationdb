@@ -1314,20 +1314,6 @@ Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logData, Ve
 	logData->persistentDataUpdated.trigger();
 }
 
-void recordTLogQueueCleanupTestState(TLogData* self) {
-	if (g_network->isSimulated() && fdbSimulationPolicyState().tLogQueueCleanup.sharedTLogId == self->dbgid) {
-		auto& test = fdbSimulationPolicyState().tLogQueueCleanup;
-		test.queueBytes = self->rawPersistentQueue->getStorageBytes().used;
-		test.logCount = self->id_data.size();
-		test.retiredCount = 0;
-		test.activeCount = 0;
-		for (const auto& [id, log] : self->id_data) {
-			test.retiredCount += log->retired;
-			test.activeCount += !log->stopped();
-		}
-	}
-}
-
 void advanceRetiredLogQueues(TLogData* self) {
 	// A restored queue has no committed location until its first post-recovery commit.
 	if (self->queueCommitEnd.get() == 0) {
@@ -1365,49 +1351,7 @@ Future<bool> waitForRetirementStep(Future<Void> step, Future<Void> removed) {
 	co_return result.index() == 0 && !removed.isReady();
 }
 
-Future<Void> verifyRetainedTLogQueueForTest(TLogData* self, Reference<LogData> logData) {
-	std::vector<Tag> tags;
-	for (const auto& locality : logData->tag_data) {
-		for (const auto& tagData : locality) {
-			if (tagData && logData->shouldSpillByReference(tagData->tag)) {
-				tags.push_back(tagData->tag);
-			}
-		}
-	}
-	for (Tag tag : tags) {
-		RangeResult references = co_await self->persistentData->readRange(
-		    KeyRangeRef(persistTagMessageRefsKey(logData->logId, tag, 0),
-		                persistTagMessageRefsKey(logData->logId, tag, MAX_VERSION)));
-		for (const auto& reference : references) {
-			VectorRef<SpilledData> entries;
-			BinaryReader reader(reference.value, AssumeVersion(logData->protocolVersion));
-			reader >> entries;
-			for (const auto& entry : entries) {
-				Standalone<StringRef> bytes = co_await self->rawPersistentQueue->read(
-				    entry.start, entry.start.lo + entry.length, CheckHashes::True);
-				ASSERT(bytes.size() >= sizeof(uint32_t));
-				const uint32_t length = BinaryReader::fromStringRef<uint32_t>(bytes.substr(0, 4), Unversioned());
-				ASSERT(length + sizeof(uint32_t) + sizeof(uint8_t) == bytes.size());
-				BinaryReader queueReader(bytes.substr(sizeof(uint32_t)), IncludeVersion());
-				TLogQueueEntry recovered;
-				uint8_t valid;
-				queueReader >> recovered >> valid;
-				ASSERT(valid == 1 && recovered.id == logData->logId && recovered.version == entry.version);
-				auto& test = fdbSimulationPolicyState().tLogQueueCleanup;
-				++test.checkpoints["ReferenceRead"];
-				if (test.crashes > 0) {
-					++test.checkpoints["ReferenceReadAfterCrash"];
-				}
-			}
-		}
-	}
-}
-
 Future<Void> retireRecoveredLog(TLogData* self, Reference<LogData> logData) {
-	if (g_network->isSimulated()) {
-		recordTLogQueueCleanupTestState(self);
-		co_await tLogQueueCleanupTestPoint(self->dbgid, "RetirementBegin");
-	}
 	if (!logData->stopped()) {
 		if (!co_await waitForRetirementStep(logData->stoppedPromise.getFuture(), logData->removed)) {
 			co_return;
@@ -1443,9 +1387,6 @@ Future<Void> retireRecoveredLog(TLogData* self, Reference<LogData> logData) {
 	}
 	ASSERT(logData->persistentDataVersion == logData->version.get());
 	ASSERT(logData->persistentDataDurableVersion == logData->version.get());
-	if (g_network->isSimulated() && fdbSimulationPolicyState().tLogQueueCleanup.sharedTLogId == self->dbgid) {
-		co_await verifyRetainedTLogQueueForTest(self, logData);
-	}
 
 	const Version popTo = logData->version.get() + 1;
 	for (int tagLocality = 0; tagLocality < logData->tag_data.size(); ++tagLocality) {
@@ -1469,27 +1410,12 @@ Future<Void> retireRecoveredLog(TLogData* self, Reference<LogData> logData) {
 	if (g_network->isSimulated() && logData->logSpillType == TLogSpillType::VALUE) {
 		tLogMaxCreateDuration *= 2;
 	}
-	if (g_network->isSimulated()) {
-		co_await tLogQueueCleanupTestPoint(self->dbgid, "BeforeRetireCommit");
-	}
-	Future<Void> retirementCommit = self->persistentData->commit();
-	if (g_network->isSimulated()) {
-		co_await tLogQueueCleanupTestPoint(self->dbgid, "RetireCommitInFlight");
-	}
-	co_await ioTimeoutError(retirementCommit, tLogMaxCreateDuration, "TLogRetireCommit");
-	if (g_network->isSimulated()) {
-		co_await tLogQueueCleanupTestPoint(self->dbgid, "AfterRetireCommit");
-	}
+	co_await ioTimeoutError(self->persistentData->commit(), tLogMaxCreateDuration, "TLogRetireCommit");
 
 	logData->retired = true;
 	advanceRetiredLogQueues(self);
-	recordTLogQueueCleanupTestState(self);
-	if (g_network->isSimulated() && self->popOrder.empty()) {
-		co_await tLogQueueCleanupTestPoint(self->dbgid, "AfterQueuePop");
-	}
 	co_await ioTimeoutError(
 	    self->persistentQueue->commit(), SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "TLogRetireQueueCommit");
-	recordTLogQueueCleanupTestState(self);
 }
 
 Reference<LogData> getNextRecoveredLogToRetire(TLogData* self) {
@@ -3352,7 +3278,6 @@ Future<Void> logPeekTrackers(LogData* logData) {
 }
 
 void getQueuingMetrics(TLogData* self, Reference<LogData> logData, TLogQueuingMetricsRequest const& req) {
-	recordTLogQueueCleanupTestState(self);
 	TLogQueuingMetricsReply reply;
 	reply.localTime = now();
 	reply.instanceID = self->instanceID;
@@ -3857,6 +3782,17 @@ Future<Void> tLogCore(TLogData* self, Reference<LogData> logData, TLogInterface 
 
 		                                                 StorageBytes sbQueue =
 		                                                     self->rawPersistentQueue->getStorageBytes();
+		                                                 int activeLogs = 0, retiredLogs = 0;
+		                                                 for (const auto& [id, log] : self->id_data) {
+			                                                 activeLogs += !log->stopped();
+			                                                 retiredLogs += log->retired;
+		                                                 }
+		                                                 te.detail("SharedTLogID", self->dbgid.toString());
+		                                                 te.detail("SharedLogCount", self->id_data.size());
+		                                                 te.detail("ActiveLogCount", activeLogs);
+		                                                 te.detail("RetiredLogCount", retiredLogs);
+		                                                 te.detail("QueueDiskEmptyLimit",
+		                                                           self->rawPersistentQueue->getMaxEmptyQueueBytes());
 		                                                 te.detail("QueueDiskBytesUsed", sbQueue.used);
 		                                                 te.detail("QueueDiskBytesFree", sbQueue.free);
 		                                                 te.detail("QueueDiskBytesAvailable", sbQueue.available);
@@ -4536,11 +4472,6 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 
 		if (restoreFromDisk) {
 			co_await restorePersistentState(&self, locality, oldLog, recovered, tlogRequests);
-			if (g_network->isSimulated() && fdbSimulationPolicyState().tLogQueueCleanup.sharedTLogId == tlogId) {
-				++fdbSimulationPolicyState().tLogQueueCleanup.restores;
-				recordTLogQueueCleanupTestState(&self);
-				co_await tLogQueueCleanupTestPoint(tlogId, "Restored");
-			}
 			// Complete recovery repair writes and establish the committed boundary even if no new log is recruited.
 			co_await ioTimeoutError(
 			    self.persistentQueue->commit(), SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "TLogRestoreQueueCommit");

@@ -1,0 +1,46 @@
+[configuration]
+generateFearless = true
+processesPerMachine = 1
+machineCount = 20
+minimumRegions = 2
+coordinators = 1
+remoteConfig = 'remote_double'
+config = 'double log_spill:=2'
+buggify = false
+faultInjection = true
+disableTss = true
+tenantModes = ['disabled']
+encryptModes = ['disabled']
+storageEngineType = 2
+
+[[knobs]]
+max_write_transaction_life_versions = 5000000
+record_recover_at_in_cstate = true
+track_tlog_recovery = true
+cc_recovery_init_req_growth_factor = 1.01
+tlog_hard_limit_bytes = 1048576
+tlog_spill_threshold = 262144
+reference_spill_update_storage_byte_limit = 262144
+disk_queue_file_extension_bytes = 65536
+disk_queue_file_shrink_bytes = 65536
+
+[[test]]
+testTitle = 'GcGenerationsQueueCleanup'
+timeout = 1500
+runFailureWorkloads = false
+
+    [[test.knobs]]
+    dbinfo_send_amount = 50
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 250.0
+    testDuration = 300.0
+
+    [[test.workload]]
+    testName = 'GcGenerations'
+    testDuration = 1000.0
+    forceCloggedDcMasterRetry = true
+    checkQueueCleanup = true
+    cleanupRestarts = 3

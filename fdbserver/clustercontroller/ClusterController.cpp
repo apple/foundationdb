@@ -1258,8 +1258,7 @@ Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 		const Optional<Version> lastEpochEnd = self->db.recoveryData.isValid()
 		                                           ? Optional<Version>(self->db.recoveryData->lastEpochEnd)
 		                                           : Optional<Version>();
-		const bool retainedRolesTest =
-		    g_network->isSimulated() && fdbSimulationPolicyState().tLogQueueCleanup.retainOldLogRoles;
+		const bool retainedRolesTest = g_network->isSimulated() && fdbSimulationPolicyState().retainOldLogRoles;
 		if (!retainedRolesTest &&
 		    !shouldDeferBetterMasterRecovery(lastEpochEnd, HasStorageServers(!self->storageStatusInfos.empty())) &&
 		    self->betterMasterExists()) {
@@ -1485,8 +1484,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 
 	if (req.recoveryState == RecoveryState::FULLY_RECOVERED) {
 		// Retaining old role advertisements must not interrupt an otherwise completed recovery.
-		const bool retainedRolesTest =
-		    g_network->isSimulated() && fdbSimulationPolicyState().tLogQueueCleanup.retainOldLogRoles;
+		const bool retainedRolesTest = g_network->isSimulated() && fdbSimulationPolicyState().retainOldLogRoles;
 		if (!req.logSystemConfig.oldTLogs.empty() && !retainedRolesTest) {
 			TraceEvent(SevError, "FullyRecoveredWithOldTLogs", self->id)
 			    .detail("MasterId", req.id)

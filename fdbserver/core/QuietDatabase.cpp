@@ -242,6 +242,72 @@ Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx, Reference<Asyn
 	co_return std::make_pair(maxQueueSize, maxPoppedVersionLag);
 }
 
+static std::map<UID, std::pair<int64_t, int64_t>> getIdleTLogQueueDiskState(double newerThan) {
+	ASSERT(g_network->isSimulated());
+	// Each generation reports shared queue metrics. Use the newest report for each shared queue.
+	std::map<UID, std::pair<double, TraceEventFields>> latest;
+	for (const auto& event : latestEventCache.getAllUnsafe()) {
+		std::string type, sharedId;
+		if (!event.tryGetValue("Type", type) || type != "TLogMetrics" || !event.tryGetValue("SharedTLogID", sharedId)) {
+			continue;
+		}
+		const double time = boost::lexical_cast<double>(event.getValue("Time"));
+		if (time <= newerThan || now() - time > 2 * SERVER_KNOBS->STORAGE_LOGGING_DELAY + 5.0) {
+			continue;
+		}
+		UID id = UID::fromString(sharedId);
+		if (!latest.contains(id) || time > latest.at(id).first) {
+			latest[id] = { time, event };
+		}
+	}
+	std::map<UID, std::pair<int64_t, int64_t>> bytes;
+	for (const auto& [id, report] : latest) {
+		const auto& event = report.second;
+		const int logs = event.getInt("SharedLogCount");
+		if (logs > 0 && event.getInt("ActiveLogCount") == 0 && event.getInt("RetiredLogCount") == logs) {
+			bytes.emplace(id,
+			              std::make_pair(event.getInt64("QueueDiskBytesUsed"), event.getInt64("QueueDiskEmptyLimit")));
+		}
+	}
+	return bytes;
+}
+
+std::map<UID, int64_t> getIdleTLogQueueDiskBytes(double newerThan) {
+	std::map<UID, int64_t> bytes;
+	for (const auto& [id, state] : getIdleTLogQueueDiskState(newerThan)) {
+		bytes.emplace(id, state.first);
+	}
+	return bytes;
+}
+
+Future<Void> waitForTLogQueueCleanup(double timeout) {
+	ASSERT(g_network->isSimulated());
+	const double deadline = now() + timeout;
+	while (true) {
+		bool cleaned = true;
+		const auto queues = getIdleTLogQueueDiskState(0.0);
+		for (const auto& [id, state] : queues) {
+			const auto [bytes, emptyLimit] = state;
+			const int64_t allowedBytes = emptyLimit;
+			if (bytes > allowedBytes) {
+				cleaned = false;
+				TraceEvent(now() >= deadline ? SevError : SevInfo, "TLogQueueCleanupPending", id)
+				    .detail("QueueDiskBytesUsed", bytes)
+				    .detail("AllowedBytes", allowedBytes)
+				    .detail("Deadline", deadline);
+			}
+		}
+		if (cleaned) {
+			TraceEvent("TLogQueueCleanupChecked").detail("IdleQueues", queues.size());
+			co_return;
+		}
+		if (now() >= deadline) {
+			throw timed_out();
+		}
+		co_await delay(1.0);
+	}
+}
+
 Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority) {
 	Transaction tr(cx);
 	while (true) {

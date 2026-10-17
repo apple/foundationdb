@@ -21,7 +21,6 @@
 #include "fdbserver/kvstore/IDiskQueue.h"
 #include "flow/IAsyncFile.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbrpc/simulator.h"
 #include "crc32/crc32c.h"
 #include "flow/genericactors.h"
@@ -342,33 +341,19 @@ public:
 		ASSERT(files[1].popped == writingPos - sizeof(Page));
 		const int64_t beginSeq = dbg_file0BeginSeq + files[0].size + files[1].popped;
 		const int64_t oldBytes = files[0].size + files[1].size;
-		if (g_network->isSimulated()) {
-			co_await tLogQueueCleanupTestPoint(dbgid, "BeforeCompact", basename);
-		}
+		TraceEvent("DiskQueueEmptyCompactionBegin", dbgid).detail("OldBytes", oldBytes).detail("Basename", basename);
 
 		// The empty marker is already durable in files[1]. Keep that copy until the replacement marker is durable.
 		Reference<IAsyncFile> replacement = co_await replaceFile(files[0].f);
 		files[0].setFile(replacement);
-		if (g_network->isSimulated()) {
-			co_await tLogQueueCleanupTestPoint(dbgid, "AfterCompactFileCreate", basename);
-		}
 		co_await replacement->write(pageData.begin(), pageData.size(), 0);
-		if (g_network->isSimulated()) {
-			co_await tLogQueueCleanupTestPoint(dbgid, "AfterCompactMarkerWrite", basename);
-		}
 		co_await replacement->sync();
-		if (g_network->isSimulated()) {
-			co_await tLogQueueCleanupTestPoint(dbgid, "AfterCompactMarker", basename);
-		}
 
 		Reference<IAsyncFile> empty = co_await replaceFile(files[1].f);
 		files[1].setFile(empty);
 		// Keep a fully popped blank page: uncached handles cannot truncate to zero.
 		co_await empty->zeroRange(0, sizeof(Page));
 		co_await empty->sync();
-		if (g_network->isSimulated()) {
-			co_await tLogQueueCleanupTestPoint(dbgid, "AfterCompactOldFileReplaced", basename);
-		}
 		std::swap(files[0], files[1]);
 		memset(firstPages[0], 0xFF, sizeof(Page));
 		memcpy(firstPages[1], pageData.begin(), sizeof(Page));
@@ -380,10 +365,8 @@ public:
 		TraceEvent("DiskQueueEmptyCompacted", dbgid)
 		    .detail("OldBytes", oldBytes)
 		    .detail("NewBytes", 2 * sizeof(Page))
+		    .detail("Basename", basename)
 		    .detail("BeginSeq", beginSeq);
-		if (g_network->isSimulated()) {
-			co_await tLogQueueCleanupTestPoint(dbgid, "AfterCompact", basename);
-		}
 	}
 
 	Future<Future<Void>> push(Standalone<StringRef> pageData, std::vector<Reference<SyncQueue>>* toSync) {
@@ -526,9 +509,6 @@ public:
 			ASSERT(!syncFiles.empty() && syncFiles.size() <= 2);
 			CODE_PROBE(2 == syncFiles.size(), "push spans both files");
 			co_await pushed;
-			if (reclaimEmptyQueue && g_network->isSimulated()) {
-				co_await tLogQueueCleanupTestPoint(self->dbgid, "EmptyMarkerWritten", self->basename);
-			}
 
 			delete pageMem;
 			pageMem = 0;
@@ -1092,6 +1072,12 @@ public:
 	}
 
 	StorageBytes getStorageBytes() const override { return rawQueue->getStorageBytes(); }
+	int64_t getMaxEmptyQueueBytes() const override {
+		// Persisting a pop can extend the files once after the reclamation decision.
+		return std::max(SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES * 2,
+		                rawQueue->fileExtensionBytes + rawQueue->fileShrinkBytes) +
+		       rawQueue->fileExtensionBytes + 2 * sizeof(Page);
+	}
 
 private:
 	bool shouldReclaimEmptyQueue() const {
@@ -1692,6 +1678,7 @@ public:
 	}
 
 	StorageBytes getStorageBytes() const override { return queue->getStorageBytes(); }
+	int64_t getMaxEmptyQueueBytes() const override { return queue->getMaxEmptyQueueBytes(); }
 
 private:
 	DiskQueue* queue;

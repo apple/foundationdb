@@ -30,28 +30,6 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/FDBSimulatorProcessInfo.h"
-#include "flow/CoroUtils.h"
-
-Future<Void> tLogQueueCleanupTestPoint(UID sharedTLogId, const char* checkpoint, std::string queueBasename) {
-	auto& test = fdbSimulationPolicyState().tLogQueueCleanup;
-	if (test.sharedTLogId != sharedTLogId || sharedTLogId == UID()) {
-		co_return;
-	}
-	if (!queueBasename.empty() && abspath(queueBasename) != test.queueBasename) {
-		co_return;
-	}
-	++test.checkpoints[checkpoint];
-	TraceEvent("TLogQueueCleanupTestPoint", sharedTLogId).detail("Checkpoint", checkpoint);
-	if (test.crashAt == checkpoint) {
-		test.crashAt.clear();
-		++test.crashes;
-		g_simulator->rebootProcess(g_simulator->getCurrentProcess(), ISimulator::KillType::Reboot);
-		throw io_error().asInjectedFault();
-	}
-	while (test.pauseAt == checkpoint) {
-		co_await delay(0.1);
-	}
-}
 
 FDBExtraDatabaseMode stringToFDBExtraDatabaseMode(const std::string& databaseMode) {
 	if (databaseMode == "Disabled") {

@@ -55,22 +55,9 @@ enum FDBSimConsistencyScanState {
 };
 enum FDBSimConsistencyScanCorruptionType { FlipMoreFlag = 0, AddToEmpty = 1, RemoveLastRow = 2, ChangeFirstValue = 3 };
 
-struct TLogQueueCleanupTestState {
-	UID sharedTLogId;
-	std::string queueBasename;
-	std::string pauseAt;
-	std::string crashAt;
-	bool retainOldLogRoles = false;
-	std::map<std::string, int> checkpoints;
-	int restores = 0;
-	int crashes = 0;
-	int64_t queueBytes = 0;
-	int logCount = 0;
-	int retiredCount = 0;
-	int activeCount = 0;
-};
-
 struct FDBSimulationPolicyState {
+	// Exercise retained old roles independently of automatic role deletion.
+	bool retainOldLogRoles = false;
 	int desiredCoordinators = 1;
 	Reference<IReplicationPolicy> storagePolicy;
 	Reference<IReplicationPolicy> tLogPolicy;
@@ -91,7 +78,6 @@ struct FDBSimulationPolicyState {
 	FDBBackupAgentType backupAgents = FDBBackupAgentType::WaitForType;
 	FDBBackupAgentType drAgents = FDBBackupAgentType::WaitForType;
 	bool disableTLogRecoveryFinish = false;
-	TLogQueueCleanupTestState tLogQueueCleanup;
 	std::string disablePrimary;
 	std::string disableRemote;
 	std::string originalRegions;
@@ -136,7 +122,6 @@ struct FDBSimulationPolicyState {
 
 void installFDBSimulationPolicy();
 FDBSimulationPolicyState& fdbSimulationPolicyState();
-Future<Void> tLogQueueCleanupTestPoint(UID sharedTLogId, const char* checkpoint, std::string queueBasename = {});
 FDBExtraDatabaseMode stringToFDBExtraDatabaseMode(const std::string& databaseMode);
 void updateFDBSimulationPolicy(DatabaseConfiguration const& configuration, bool restartingTest);
 void setFDBSimulationPolicyRemoteTLogPolicy(Reference<IReplicationPolicy> remoteTLogPolicy);

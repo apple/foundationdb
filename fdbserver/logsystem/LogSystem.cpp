@@ -703,7 +703,7 @@ void LogSystem::retireOldLogRoles(DBCoreState const& finalState) {
 	ASSERT(recoveryCompleteWrittenToCoreState.get());
 	ASSERT(remoteLogPrefixRecovered());
 	// Exercise cleanup independently of role removal, including queues restored from releases that retain old roles.
-	if (g_network->isSimulated() && fdbSimulationPolicyState().tLogQueueCleanup.retainOldLogRoles) {
+	if (g_network->isSimulated() && fdbSimulationPolicyState().retainOldLogRoles) {
 		return;
 	}
 	if (!oldLogRolesRetired) {
