@@ -161,6 +161,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	// expectBulkEncryptionRejection: assert --encryption-key-file is refused on a bulkdump backup. Only
 	// the backup side is probed; the comment at the probe records why the restore side cannot be.
 	bool expectBulkEncryptionRejection;
+	// mutationLogType: 0 = classic blog mutation logs, 1 = partitioned logs written by backup workers.
+	// Only the real backup uses it; the refusal probes keep passing DEFAULT so they stay independent of it.
+	int mutationLogType;
 	// expectBulkPrefixRejection: assert --add-prefix/--remove-prefix is refused on a bulkload restore.
 	bool expectBulkPrefixRejection;
 	// expectRestoreFailure: the bulkload restore is expected NOT to complete, so the workload asserts the
@@ -245,6 +248,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		performValidation = getOption(options, "performValidation"_sr, false);
 		expectBulkIncrementalRejection = getOption(options, "expectBulkIncrementalRejection"_sr, false);
 		expectBulkEncryptionRejection = getOption(options, "expectBulkEncryptionRejection"_sr, false);
+		mutationLogType = getOption(options, "mutationLogType"_sr, 0);
 		expectBulkPrefixRejection = getOption(options, "expectBulkPrefixRejection"_sr, false);
 		// Mutually exclusive with performValidation, whose audit compares restored contents that by
 		// definition do not exist when the restore is expected to fail.
@@ -714,7 +718,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			                                   tag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ !stopDifferentialDelay },
-			                                   MutationLogType::DEFAULT,
+			                                   (MutationLogType)mutationLogType,
 			                                   IncrementalBackupOnly::False,
 			                                   encryptionKeyFileName,
 			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
