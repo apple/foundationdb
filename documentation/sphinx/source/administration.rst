@@ -127,13 +127,19 @@ FoundationDB servers and clients require read *and* write access to the cluster 
 Cluster file format
 -------------------
 
-The cluster file contains a connection string consisting of a cluster identifier and a comma-separated list of IP addresses (not hostnames) specifying the coordination servers. The format for the file is::
+The cluster file contains a connection string consisting of a cluster identifier and a comma-separated list of IP addresses or hostnames specifying the coordination servers. The format for the file is::
 
     description:ID@IP:PORT,IP:PORT,...
+
+or, using hostnames::
+
+    description:ID@HOSTNAME:PORT,HOSTNAME:PORT,...
 
 * |cluster-file-rule1|
 * |cluster-file-rule2|
 * |cluster-file-rule3|
+
+A hostname is resolved using DNS, and a list can mix hostnames and IP addresses. Hostnames you set are saved as hostnames. However, ``coordinators auto`` picks coordinators by IP address, so if it changes the coordinators, the cluster file will list IP addresses instead. To use TLS, add ``:tls`` as you would for an IP address (for example ``HOSTNAME:PORT:tls``).
 
 Together the ``description`` and the ``ID`` should uniquely identify a FoundationDB cluster.
 
