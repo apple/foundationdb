@@ -13248,7 +13248,8 @@ Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterface ssi
 
 Future<Void> storageInterfaceRegistration(StorageServer* self,
                                           StorageServerInterface ssi,
-                                          Optional<Future<Void>> readyToAcceptRequests) {
+                                          Optional<Future<Void>> readyToAcceptRequests,
+                                          StorageHealthRegistry::Registration healthRegistration) {
 	if (readyToAcceptRequests.present()) {
 		co_await readyToAcceptRequests.get();
 		ssi.startAcceptingRequests();
@@ -13261,6 +13262,7 @@ Future<Void> storageInterfaceRegistration(StorageServer* self,
 	} else {
 		co_await replaceInterface(self, ssi);
 	}
+	healthRegistration.registered();
 }
 
 Future<Void> rocksdbLogCleaner(std::string folder) {
@@ -13299,7 +13301,8 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
                            Version tssSeedVersion,
                            ReplyPromise<InitializeStorageReply> recruitReply,
                            Reference<AsyncVar<ServerDBInfo> const> db,
-                           std::string folder) {
+                           std::string folder,
+                           StorageHealthRegistry::Registration healthRegistration) {
 	StorageServer self(persistentData, db, ssi);
 	self.shardAware = persistentData->shardAware();
 	Future<Void> ssCore;
@@ -13374,8 +13377,8 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 			    .detail("Step", "10.NewStorageServerDurable");
 			++self.counters.kvCommits;
 
-			self.interfaceRegistered =
-			    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
+			self.interfaceRegistered = storageInterfaceRegistration(
+			    &self, ssi, self.registerInterfaceAcceptingRequests.getFuture(), healthRegistration);
 			co_await delay(0);
 
 			TraceEvent("StorageServerInit", ssi.id())
@@ -13399,6 +13402,7 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 		} catch (Error& e) {
 			err = e;
 		}
+		healthRegistration.terminated(err);
 		// If we die with an error before replying to the recruitment request, send the error to the recruiter
 		// (ClusterController, and from there to the DataDistributionTeamCollection)
 		if (!recruitReply.isSet())
@@ -13422,6 +13426,7 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 		try {
 			co_await delay(0);
 		} catch (Error& cleanupError) {
+			healthRegistration.terminated(cleanupError);
 			// A rollback keeps the KVS open for its rebooter, which cannot reclaim it after cancellation.
 			if (cleanupError.code() == error_code_actor_cancelled && err.code() == error_code_please_reboot) {
 				persistentData->close();
@@ -13438,7 +13443,8 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
                            Reference<AsyncVar<ServerDBInfo> const> db,
                            std::string folder,
                            Promise<Void> recovered,
-                           Reference<IClusterConnectionRecord> connRecord) {
+                           Reference<IClusterConnectionRecord> connRecord,
+                           StorageHealthRegistry::Registration healthRegistration) {
 	StorageServer self(persistentData, db, ssi);
 	Future<Void> ssCore;
 	self.folder = folder;
@@ -13447,21 +13453,21 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.bulkDumpFolder = joinPath(self.folder, serverBulkDumpFolder);
 	self.bulkLoadFolder = joinPath(self.folder, serverBulkLoadFolder);
 
-	if (!directoryExists(self.checkpointFolder)) {
-		TraceEvent(SevWarnAlways, "SSRebootCheckpointDirNotExists", self.thisServerID);
-		platform::createDirectory(self.checkpointFolder);
-	}
-	if (!directoryExists(self.fetchedCheckpointFolder)) {
-		TraceEvent(SevWarnAlways, "SSRebootFetchedCheckpointDirNotExists", self.thisServerID);
-		platform::createDirectory(self.fetchedCheckpointFolder);
-	}
-
-	clearFileFolder(self.bulkDumpFolder, self.thisServerID, /*ignoreError=*/false);
-	clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
-
-	self.actors.add(rocksdbLogCleaner(folder));
 	Error err;
 	try {
+		if (!directoryExists(self.checkpointFolder)) {
+			TraceEvent(SevWarnAlways, "SSRebootCheckpointDirNotExists", self.thisServerID);
+			platform::createDirectory(self.checkpointFolder);
+		}
+		if (!directoryExists(self.fetchedCheckpointFolder)) {
+			TraceEvent(SevWarnAlways, "SSRebootFetchedCheckpointDirNotExists", self.thisServerID);
+			platform::createDirectory(self.fetchedCheckpointFolder);
+		}
+
+		clearFileFolder(self.bulkDumpFolder, self.thisServerID, /*ignoreError=*/false);
+		clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
+
+		self.actors.add(rocksdbLogCleaner(folder));
 		double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID).log();
 
@@ -13481,6 +13487,7 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		bool ok = co_await self.storage.restoreDurableState();
 		if (!ok) {
+			healthRegistration.retireCurrent();
 			if (recovered.canBeSet())
 				recovered.send(Void());
 			co_return;
@@ -13506,15 +13513,15 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
-		Future<Void> f = storageInterfaceRegistration(&self, ssi, {});
+		Future<Void> f = storageInterfaceRegistration(&self, ssi, {}, healthRegistration);
 		co_await delay(0);
 		ErrorOr<Void> e = co_await errorOr(f);
 		if (e.isError()) {
 			throw f.getError();
 		}
 
-		self.interfaceRegistered =
-		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
+		self.interfaceRegistered = storageInterfaceRegistration(
+		    &self, ssi, self.registerInterfaceAcceptingRequests.getFuture(), healthRegistration);
 		co_await delay(0);
 
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
@@ -13526,6 +13533,7 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 	} catch (Error& e) {
 		err = e;
 	}
+	healthRegistration.terminated(err);
 
 	self.ssLock->halt();
 
@@ -13549,6 +13557,7 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 	try {
 		co_await delay(0);
 	} catch (Error& cleanupError) {
+		healthRegistration.terminated(cleanupError);
 		// A rollback keeps the KVS open for its rebooter, which cannot reclaim it after cancellation.
 		if (cleanupError.code() == error_code_actor_cancelled && err.code() == error_code_please_reboot) {
 			persistentData->close();
