@@ -1274,7 +1274,7 @@ public:
 	bool hasNext() override;
 	Future<Void> loadNextBlock();
 	static Future<Void> loadNextBlock(Reference<PartitionedLogIteratorSimple> self);
-	void removeBlockHeader();
+	void removeBlockHeader(const char* blockStart);
 
 	Standalone<VectorRef<VersionedMutation>> consumeData(Version firstVersion);
 
@@ -1321,8 +1321,13 @@ bool PartitionedLogIteratorSimple::hasNext() {
 	return fileIndex < files.size() && fileOffset < files[fileIndex].fileSize;
 }
 
-void PartitionedLogIteratorSimple::removeBlockHeader() {
+void PartitionedLogIteratorSimple::removeBlockHeader(const char* blockStart) {
 	if (bufferOffset % BLOCK_SIZE == 0) {
+		uint32_t blockVersion;
+		std::memcpy(&blockVersion, blockStart + bufferOffset, sizeof(blockVersion));
+		if (blockVersion != PARTITIONED_MLOG_VERSION) {
+			throw restore_unsupported_file_version();
+		}
 		bufferOffset += sizeof(uint32_t);
 	}
 }
@@ -1334,7 +1339,7 @@ Standalone<VectorRef<VersionedMutation>> PartitionedLogIteratorSimple::consumeDa
 	while (bufferOffset < bufferSize) {
 		while (bufferOffset < bufferSize && !endOfBlock(start, bufferOffset)) {
 			// for each block
-			removeBlockHeader();
+			removeBlockHeader(start);
 
 			// encoding format:
 			// wr << bigEndian64(message.version.version) << bigEndian32(message.version.sub) <<
@@ -1422,7 +1427,7 @@ Future<Version> PartitionedLogIteratorSimple::peekNextVersion(Reference<Partitio
 		co_return Version(0);
 	}
 	co_await self->loadNextBlock();
-	self->removeBlockHeader();
+	self->removeBlockHeader(self->buffer.get());
 	Version version{ 0 };
 	std::memcpy(&version, self->buffer.get() + self->bufferOffset, sizeof(Version));
 	version = bigEndian64(version);
@@ -1437,7 +1442,7 @@ Future<Version> PartitionedLogIteratorSimple::peekNextVersion(Reference<Partitio
 		self->fileOffset = 0;
 		self->fileIndex += 1;
 		co_await self->loadNextBlock();
-		self->removeBlockHeader();
+		self->removeBlockHeader(self->buffer.get());
 		std::memcpy(&version, self->buffer.get() + self->bufferOffset, sizeof(Version));
 		version = bigEndian64(version);
 	}
@@ -1497,7 +1502,7 @@ private:
 
 	// each block has a format of {<header>[mutations]<padding>}, need to skip the header to read mutations
 	// this method check if bufferOffset is at the boundary and advance it if necessary
-	void removeBlockHeader();
+	void removeBlockHeader(const char* blockStart);
 
 public:
 	// read up to a fixed number of block count
@@ -1548,7 +1553,7 @@ Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffer
 	while (self->bufferOffset < size) {
 		while (self->bufferOffset < size && !endOfBlock(start.get(), self->bufferOffset)) {
 			// for each block
-			self->removeBlockHeader();
+			self->removeBlockHeader(start.get());
 
 			// encoding is:
 			// wr << bigEndian64(message.version.version) << bigEndian32(message.version.sub) <<
@@ -1603,8 +1608,13 @@ Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffer
 	co_return mutations;
 }
 
-void PartitionedLogIteratorTwoBuffers::removeBlockHeader() {
+void PartitionedLogIteratorTwoBuffers::removeBlockHeader(const char* blockStart) {
 	if (bufferOffset % BLOCK_SIZE == 0) {
+		uint32_t blockVersion;
+		std::memcpy(&blockVersion, blockStart + bufferOffset, sizeof(blockVersion));
+		if (blockVersion != PARTITIONED_MLOG_VERSION) {
+			throw restore_unsupported_file_version();
+		}
 		bufferOffset += sizeof(uint32_t);
 	}
 }
@@ -1635,7 +1645,7 @@ Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(Reference<Part
 	}
 	co_await self->twobuffer->ready();
 	start = self->twobuffer->peek();
-	self->removeBlockHeader();
+	self->removeBlockHeader(start.get());
 	std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
 	version = bigEndian64(version);
 	fileIndex = self->twobuffer->getFileIndex();
@@ -1650,7 +1660,7 @@ Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(Reference<Part
 		self->twobuffer->setFileIndex(fileIndex + 1);
 		co_await self->twobuffer->ready();
 		start = self->twobuffer->peek();
-		self->removeBlockHeader();
+		self->removeBlockHeader(start.get());
 		std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
 		version = bigEndian64(version);
 		fileIndex = self->twobuffer->getFileIndex();
@@ -8735,6 +8745,76 @@ Future<EBackupState> FileBackupAgent::waitBackup(Database cx,
 
 Future<Void> FileBackupAgent::changePause(Database db, bool pause) {
 	return FileBackupAgentImpl::changePause(this, db, pause);
+}
+
+// Writes a one-entry partitioned mutation-log file whose block header carries blockVersion, then
+// returns the version the partitioned iterator reads back out of it. The body mirrors the backup
+// worker's encoding: a 4-byte block format version, then big-endian version / subsequence /
+// mutation size, then the serialized mutation.
+static Future<Version> peekPartitionedLogVersion(std::string url, uint32_t blockVersion, Version logVersion) {
+	Reference<IBackupContainer> bc = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await bc->create();
+
+	const int blockSize = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+	const uint16_t tagId = 0;
+	const int totalTags = 1;
+	Reference<IBackupFile> f = co_await bc->writeTaggedLogFile(logVersion, logVersion + 1, blockSize, tagId, totalTags);
+
+	MutationRef mutation(MutationRef::SetValue, "key"_sr, "value"_sr);
+	BinaryWriter mutationWriter(AssumeVersion(g_network->protocolVersion()));
+	mutationWriter << mutation;
+	Standalone<StringRef> mutationBytes = mutationWriter.toValue();
+
+	BinaryWriter header(Unversioned());
+	header << bigEndian64(logVersion) << bigEndian32(0) << bigEndian32((int32_t)mutationBytes.size());
+
+	co_await f->append(&blockVersion, sizeof(blockVersion));
+	co_await f->append(header.getData(), header.getLength());
+	co_await f->append(mutationBytes.begin(), mutationBytes.size());
+	co_await f->finish();
+
+	RestoreConfig::RestoreFile file;
+	file.version = logVersion;
+	file.fileName = f->getFileName();
+	file.isRange = false;
+	file.blockSize = blockSize;
+	file.fileSize = sizeof(blockVersion) + header.getLength() + mutationBytes.size();
+	file.endVersion = logVersion + 1;
+	file.tagId = tagId;
+	file.totalTags = totalTags;
+
+	auto iterator = makeReference<PartitionedLogIteratorTwoBuffers>(
+	    bc, tagId, std::vector<RestoreConfig::RestoreFile>{ file }, std::vector<Version>{ logVersion + 1 });
+	co_return co_await iterator->peekNextVersion();
+}
+
+// A partitioned mutation-log block opens with a 4-byte format version. The reader skipped it without
+// comparing it, so a block written in any other layout was parsed as tagged mutations, taking its
+// version and mutation size from unrelated bytes. The classic reader has always validated its own
+// magic, so only this direction was silent.
+TEST_CASE("/backup/restore/partitionedLogBlockVersion") {
+	const std::string base = format("file://%s/fdb_backups", params.getDataDir().c_str());
+	const Version logVersion = 1000;
+
+	// Control: the reader accepts its own format and returns the version that was written.
+	Version accepted = co_await peekPartitionedLogVersion(
+	    format("%s/%llx", base.c_str(), timer_int()), PARTITIONED_MLOG_VERSION, logVersion);
+	ASSERT_EQ(accepted, logVersion);
+
+	// A classic mutation-log block must be refused rather than parsed as tagged mutations.
+	Error refused;
+	try {
+		co_await peekPartitionedLogVersion(
+		    format("%s/%llx", base.c_str(), timer_int()), BACKUP_AGENT_MLOG_VERSION, logVersion);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		refused = e;
+	}
+	ASSERT_EQ(refused.code(), error_code_restore_unsupported_file_version);
+
+	co_return;
 }
 
 TEST_CASE("/backup/restore/bulkLoadRestoreRefusal") {
