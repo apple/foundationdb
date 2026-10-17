@@ -25,7 +25,7 @@
 
 // To regenerate this file, from the top level of a FoundationDB repository
 // checkout, run:
-// $ go run bindings/go/src/_util/translate_fdb_options.go < fdbclient/vexillographer/fdb.options > bindings/go/src/fdb/generated.go
+// $ go run bindings/go/src/internal/translate_fdb_options.go < fdbclient/vexillographer/fdb.options > bindings/go/src/fdb/generated.go
 
 package fdb
 
@@ -339,6 +339,11 @@ func (o NetworkOptions) SetDistributedClientTracer(param string) error {
 // Parameter: Client directory for temporary files.
 func (o NetworkOptions) SetClientTmpDir(param string) error {
 	return o.setOpt(91, []byte(param))
+}
+
+// After unlinking client library copies that are created for enabling multi-threading, replace with symlinks for debuggers/profilers.
+func (o NetworkOptions) SetSymlinkClientLibraryCopies() error {
+	return o.setOpt(92, nil)
 }
 
 // Set the size of the client location cache. Raising this value can boost performance in very large databases where clients access data in a near-random pattern. Defaults to 100000.
