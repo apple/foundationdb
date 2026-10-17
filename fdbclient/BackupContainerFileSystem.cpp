@@ -393,6 +393,9 @@ public:
 	// Returns the end version such that [begin, end] is continuous.
 	// "logs" should be already sorted.
 	static Version getPartitionedLogsContinuousEndVersion(const std::vector<LogFile>& logs, Version begin) {
+		if (!anyLogFileHasData(logs)) {
+			return 0;
+		}
 		Version end = 0;
 
 		std::map<int, std::vector<int>> tagIndices; // tagId -> indices in files
@@ -1147,9 +1150,26 @@ public:
 		}
 	}
 
+	// A log file's version range comes from its name, but every reader sizes its reads from fileSize:
+	// the classic dispatcher loops `j < f.fileSize` and the partitioned iterator computes
+	// `remaining = fileSize - position`. A window backed only by zero-byte files therefore advertises
+	// coverage that no reader can deliver. Checked per window rather than per file because a single
+	// empty file is legitimate: a tag with no mutations in its epoch writes no entries.
+	static bool anyLogFileHasData(const std::vector<LogFile>& files) {
+		for (const auto& f : files) {
+			if (f.fileSize > 0) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	// Returns true if logs are continuous in the range [begin, end].
 	// "files" should be pre-sorted according to version order.
 	static bool isPartitionedLogsContinuous(const std::vector<LogFile>& files, Version begin, Version end) {
+		if (!anyLogFileHasData(files)) {
+			return false;
+		}
 		std::map<int, std::vector<int>> tagIndices; // tagId -> indices in files
 		for (int i = 0; i < files.size(); i++) {
 			ASSERT(files[i].tagId >= 0 && files[i].tagId < files[i].totalTags);
@@ -2245,6 +2265,29 @@ TEST_CASE("/backup/time") {
 	       BackupAgentBase::parseTime("2019/04/01.03:45:07+0530"));
 	ASSERT(BackupAgentBase::parseTime("2019/03/31.22:45:07+0030") ==
 	       BackupAgentBase::parseTime("2019/04/01.04:00:07+0545"));
+
+	return Void();
+}
+
+// LogFile fields: { beginVersion, endVersion, blockSize, fileName, fileSize, tagId, totalTags }
+TEST_CASE("/backup/continuousAllEmptyLogs") {
+	// Zero-byte log files carry a version range in their name but no readable content, so they must
+	// not advertise coverage. Restorability is otherwise computed from names alone, and a restore
+	// into such a window reports success while applying nothing.
+	std::vector<LogFile> empty;
+	empty.push_back({ 0, 100, 10, "e0", 0, 0, 2 });
+	empty.push_back({ 0, 100, 10, "e1", 0, 1, 2 });
+	std::sort(empty.begin(), empty.end());
+	ASSERT(!BackupContainerFileSystemImpl::isPartitionedLogsContinuous(empty, 0, 99));
+	ASSERT(BackupContainerFileSystemImpl::getPartitionedLogsContinuousEndVersion(empty, 0) == 0);
+
+	// A single tag holding data keeps the window usable: individual empty files are legitimate, so
+	// only an entirely empty window is refused.
+	std::vector<LogFile> mixed = empty;
+	mixed.push_back({ 0, 100, 10, "d1", 512, 1, 2 });
+	std::sort(mixed.begin(), mixed.end());
+	ASSERT(BackupContainerFileSystemImpl::isPartitionedLogsContinuous(mixed, 0, 99));
+	ASSERT(BackupContainerFileSystemImpl::getPartitionedLogsContinuousEndVersion(mixed, 0) == 99);
 
 	return Void();
 }
