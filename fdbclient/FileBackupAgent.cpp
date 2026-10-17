@@ -273,6 +273,7 @@ Optional<std::string> FileBackupAgent::bulkLoadRestoreRefusal(Key tagName,
                                                               Key removePrefix,
                                                               OnlyApplyMutationLogs onlyApplyMutationLogs,
                                                               Optional<std::string> encryptionKeyFileName,
+                                                              MutationLogType mutationLogType,
                                                               bool useRangeFileRestore) {
 	if (useRangeFileRestore) {
 		return {};
@@ -332,6 +333,17 @@ Optional<std::string> FileBackupAgent::bulkLoadRestoreRefusal(Key tagName,
 		                   "files it ingests cannot be rewritten to a new prefix, so only the mutation log would "
 		                   "be prefixed and the restored data would be split across two key spaces. Use --mode "
 		                   "rangefile.");
+	}
+
+	// StartFullRestoreTaskFunc picks the bulkload branch before it looks at the log type, so the
+	// partitioned dispatcher is unreachable for a bulkload restore and the classic one is handed plogs
+	// it cannot decode. It rejects them on the first block, but a failing restore task is retried
+	// rather than aborted, so the restore never progresses instead of reporting the mismatch.
+	if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadPartitionedLog").detail("TagName", tagName);
+		return std::string("--mode bulkload cannot restore a backup whose mutation log is partitioned; the "
+		                   "bulkload path replays logs with the non-partitioned reader, which cannot decode "
+		                   "them. Use --mode rangefile.");
 	}
 	return {};
 }
@@ -7325,6 +7337,7 @@ public:
 		                                                           removePrefix,
 		                                                           onlyApplyMutationLogs,
 		                                                           encryptionKeyFileName,
+		                                                           mutationLogType,
 		                                                           useRangeFileRestore);
 		    refusal.present()) {
 			fprintf(stderr, "ERROR: %s\n", refusal.get().c_str());
@@ -8743,7 +8756,8 @@ TEST_CASE("/backup/restore/bulkLoadRestoreRefusal") {
 	                  Key removePrefix,
 	                  OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                  Optional<std::string> encryptionKeyFileName,
-	                  bool useRangeFileRestore) {
+	                  bool useRangeFileRestore,
+	                  MutationLogType mutationLogType = MutationLogType::DEFAULT) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRefs;
 		for (auto& range : ranges) {
 			rangeRefs.push_back_deep(rangeRefs.arena(), range);
@@ -8754,6 +8768,7 @@ TEST_CASE("/backup/restore/bulkLoadRestoreRefusal") {
 		                                               removePrefix,
 		                                               onlyApplyMutationLogs,
 		                                               encryptionKeyFileName,
+		                                               mutationLogType,
 		                                               useRangeFileRestore)
 		    .orDefault("");
 	};
@@ -8771,6 +8786,12 @@ TEST_CASE("/backup/restore/bulkLoadRestoreRefusal") {
 	ASSERT(refusal(one, Key(), Key(), incremental, noKey, bulkload).starts_with("--incremental"));
 	ASSERT(refusal(one, Key(), Key(), full, key, bulkload).starts_with("--encryption-key-file"));
 	ASSERT(refusal(one, Key(), Key(), incremental, key, rangefile).empty());
+
+	// A partitioned mutation log cannot be replayed by the bulkload path's non-partitioned reader.
+	const auto classicLog = MutationLogType::DEFAULT, partitionedLog = MutationLogType::PARTITIONED_LOG;
+	ASSERT(refusal(one, Key(), Key(), full, noKey, bulkload, classicLog).empty());
+	ASSERT(refusal(one, Key(), Key(), full, noKey, bulkload, partitionedLog).starts_with("--mode bulkload cannot"));
+	ASSERT(refusal(one, Key(), Key(), full, noKey, rangefile, partitionedLog).empty());
 
 	const std::vector<KeyRange> adjacent = { KeyRangeRef("a"_sr, "b"_sr), KeyRangeRef("b"_sr, "c"_sr) };
 	const std::vector<KeyRange> disjoint = { KeyRangeRef("a"_sr, "b"_sr), KeyRangeRef("c"_sr, "d"_sr) };

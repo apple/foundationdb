@@ -177,6 +177,7 @@ public:
 	                                                    Key removePrefix,
 	                                                    OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                                                    Optional<std::string> encryptionKeyFileName,
+	                                                    MutationLogType mutationLogType,
 	                                                    bool useRangeFileRestore);
 
 	// restore() will
