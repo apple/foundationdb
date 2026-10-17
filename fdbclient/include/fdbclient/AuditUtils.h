@@ -56,6 +56,10 @@ AsyncResult<std::vector<AuditStorageState>> getAuditStates(Database cx,
                                                            Optional<int> num = Optional<int>(),
                                                            Optional<AuditPhase> phase = Optional<AuditPhase>());
 
+// True for errors from reading audit state that come from proxies under load, throttling or recoveries and succeed
+// when the read is repeated.
+bool isTransientAuditStateReadError(const Error& e);
+
 // Persist per-range audit progress (which sub-ranges have been validated).
 Future<Void> persistAuditStateByRange(Database cx, AuditStorageState auditState);
 

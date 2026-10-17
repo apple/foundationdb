@@ -860,6 +860,12 @@ static void printBackupUsage(bool devhelp) {
 	       "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
 	       "                 then `%s'.\n",
 	       platform::getDefaultClusterFilePath().c_str());
+	printf(
+	    "  -t, --tagname TAGNAME\n"
+	    "                 For start, modify, status, abort, wait, and discontinue operations, the tag of the backup to "
+	    "act on.\n"
+	    "                 Backups on different tags run independently.  Defaults to `default'.  Use `tags' to list all "
+	    "tags.\n");
 	printf("  -d, --destcontainer URL\n"
 	       "                 The Backup container URL for start, modify, describe, query, expire, and delete "
 	       "operations.\n");
@@ -2232,6 +2238,19 @@ Future<Void> runRestore(Database db,
                         Optional<std::string> encryptionKeyFile,
                         RestoreMode restoreMode = RestoreMode::RANGEFILE) {
 	ASSERT(!ranges.empty());
+
+	// Before anything remote is touched, and here so --dryrun refuses too.
+	if (auto refusal = FileBackupAgent::bulkLoadRestoreRefusal(KeyRef(tagName),
+	                                                           ranges,
+	                                                           KeyRef(addPrefix),
+	                                                           KeyRef(removePrefix),
+	                                                           onlyApplyMutationLogs,
+	                                                           encryptionKeyFile,
+	                                                           restoreMode == RestoreMode::RANGEFILE);
+	    refusal.present()) {
+		fprintf(stderr, "ERROR: %s\n", refusal.get().c_str());
+		throw restore_error();
+	}
 
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
 		fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");

@@ -4466,6 +4466,25 @@ static inline Severity auditRestoreVerboseEventSev() {
 	return SERVER_KNOBS->ENABLE_AUDIT_VERBOSE_TRACE ? SevInfo : SevDebug;
 }
 
+// Errors a read of the data an audit compares can fail with because of the timing or load of the read (a lagging
+// replica, an overloaded server or proxy, throttling), not because of the data. Reading again succeeds. Anything
+// else is a finding about the audit and is reported as its result.
+static bool auditReadCanRetry(const Error& e) {
+	switch (e.code()) {
+	case error_code_future_version:
+	case error_code_transaction_too_old:
+	case error_code_server_overloaded:
+	case error_code_process_behind:
+	case error_code_grv_proxy_memory_limit_exceeded:
+	case error_code_tag_throttled:
+	case error_code_batch_transaction_throttled:
+	case error_code_transaction_throttled_hot_shard:
+		return true;
+	default:
+		return false;
+	}
+}
+
 // Adapt the byte budget of one validate_restore comparison batch (AIMD). See
 // AUDIT_RESTORE_BATCH_BYTE_LIMIT for why a fixed size does not work.
 //
@@ -4944,14 +4963,7 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 				}
 				// Handle errors outside catch — co_await not allowed in handlers
 				if (nonRetryableError.isValid() && nonRetryableError.code() != error_code_success) {
-					if (nonRetryableError.code() == error_code_future_version ||
-					    nonRetryableError.code() == error_code_transaction_too_old ||
-					    nonRetryableError.code() == error_code_server_overloaded ||
-					    nonRetryableError.code() == error_code_process_behind ||
-					    nonRetryableError.code() == error_code_grv_proxy_memory_limit_exceeded ||
-					    nonRetryableError.code() == error_code_tag_throttled ||
-					    nonRetryableError.code() == error_code_batch_transaction_throttled ||
-					    nonRetryableError.code() == error_code_transaction_throttled_hot_shard) {
+					if (auditReadCanRetry(nonRetryableError)) {
 						// This batch is retried from the same start key, so undo its partial accounting.
 						numValidatedKeys = batchStartValidatedKeys;
 						validatedBytes = batchStartValidatedBytes;
@@ -5187,9 +5199,7 @@ Future<Void> auditRangeDigestQ(StorageServer* data, AuditStorageRequest req) {
 				}
 				// co_await is not allowed inside a catch handler; handle retry here.
 				if (nonRetryableError.isValid() && nonRetryableError.code() != error_code_success) {
-					if (nonRetryableError.code() == error_code_future_version ||
-					    nonRetryableError.code() == error_code_transaction_too_old ||
-					    nonRetryableError.code() == error_code_server_overloaded) {
+					if (auditReadCanRetry(nonRetryableError)) {
 						// This batch is retried from the same start key, so undo its partial fold.
 						digest = batchStartDigest;
 						kvCount = batchStartKvCount;

@@ -119,3 +119,6 @@ timeout = 7200
     # And that submitBackup refuses --encryption-key-file with a bulk mode. Backup side only; the
     # workload comment records why the restore side cannot be probed from here.
     expectBulkEncryptionRejection = true
+    # And that submitRestore refuses --add-prefix with --mode bulkload: SSTs cannot be rewritten to a
+    # new prefix, so only the mutation log would be prefixed and the result would be split.
+    expectBulkPrefixRejection = true
