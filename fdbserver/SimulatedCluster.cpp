@@ -2566,7 +2566,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				}
 			}
 
-			if (desiredStatelessClasses.present() && actualStatelessClasses < desiredStatelessClasses.get()) {
+			if (machine < machines && desiredStatelessClasses.present() &&
+			    actualStatelessClasses < desiredStatelessClasses.get()) {
+				if (assignClasses &&
+				    (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass)) {
+					possible_ss--;
+				}
 				processClass = ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource);
 				actualStatelessClasses++;
 			}
