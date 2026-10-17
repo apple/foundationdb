@@ -155,14 +155,19 @@ private:
 	RoleInfo roleInfo;
 	std::map<NetworkAddress, RoleInfo> roleInfoMap;
 
-	RoleInfo& mutateRoleInfo() {
+	RoleInfo& mutateRoleInfo(NetworkAddress const& address) {
 		ASSERT(g_network);
 
 		if (g_network->isSimulated()) {
-			return roleInfoMap[g_network->getLocalAddress()];
+			return roleInfoMap[address];
 		}
 
 		return roleInfo;
+	}
+
+	RoleInfo& mutateRoleInfo() {
+		ASSERT(g_network);
+		return mutateRoleInfo(g_network->getLocalAddress());
 	}
 
 public:
@@ -569,13 +574,13 @@ public:
 		r.refreshRolesString();
 	}
 
-	void removeRole(std::string const& role) {
+	void removeRole(std::string const& role, NetworkAddress const& address) {
 		MutexHolder holder(mutex);
 
-		RoleInfo& r = mutateRoleInfo();
+		RoleInfo& r = mutateRoleInfo(address);
 
 		auto itr = r.roles.find(role);
-		ASSERT(itr != r.roles.end() || (g_network->isSimulated() && g_network->getLocalAddress() == NetworkAddress()));
+		ASSERT(itr != r.roles.end() || (g_network->isSimulated() && address == NetworkAddress()));
 
 		if (itr != r.roles.end() && --(*itr).second == 0) {
 			r.roles.erase(itr);
@@ -852,8 +857,8 @@ void addTraceRole(std::string const& role) {
 	g_traceLog.addRole(role);
 }
 
-void removeTraceRole(std::string const& role) {
-	g_traceLog.removeRole(role);
+void removeTraceRole(std::string const& role, NetworkAddress const& address) {
+	g_traceLog.removeRole(role, address);
 }
 
 void setTraceLogGroup(const std::string& logGroup) {
