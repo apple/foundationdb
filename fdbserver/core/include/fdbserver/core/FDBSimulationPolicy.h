@@ -56,6 +56,8 @@ enum FDBSimConsistencyScanState {
 enum FDBSimConsistencyScanCorruptionType { FlipMoreFlag = 0, AddToEmpty = 1, RemoveLastRow = 2, ChangeFirstValue = 3 };
 
 struct FDBSimulationPolicyState {
+	// Exercise retained old roles independently of automatic role deletion.
+	bool retainOldLogRoles = false;
 	int desiredCoordinators = 1;
 	Reference<IReplicationPolicy> storagePolicy;
 	Reference<IReplicationPolicy> tLogPolicy;

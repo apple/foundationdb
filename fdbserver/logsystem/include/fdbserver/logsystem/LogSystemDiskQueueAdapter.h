@@ -115,6 +115,7 @@ public:
 		throw internal_error();
 	}
 	int getCommitOverhead() const override { return 0; } // SOMEDAY: could this be more accurate?
+	int64_t getMaxEmptyQueueBytes() const override { return 0; }
 
 private:
 	Reference<AsyncVar<PeekTxsInfo>> peekLocality;

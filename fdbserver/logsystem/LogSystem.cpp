@@ -24,6 +24,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "fdbserver/core/SpanContextMessage.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "flow/CodeProbe.h"
 #include "flow/serialize.h"
 
@@ -701,6 +702,10 @@ void LogSystem::retireOldLogRoles(DBCoreState const& finalState) {
 	ASSERT(expectedLogSets > 0 && finalState.tLogs.size() == static_cast<size_t>(expectedLogSets));
 	ASSERT(recoveryCompleteWrittenToCoreState.get());
 	ASSERT(remoteLogPrefixRecovered());
+	// Exercise cleanup independently of role removal, including queues restored from releases that retain old roles.
+	if (g_network->isSimulated() && fdbSimulationPolicyState().retainOldLogRoles) {
+		return;
+	}
 	if (!oldLogRolesRetired) {
 		oldLogRolesRetired = true;
 		TraceEvent("RetireOldTLogRoles", dbgid)

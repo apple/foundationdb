@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <map>
+
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.h"
@@ -29,6 +31,9 @@
 Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
 Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
                                                      Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
+// Inspect all simulated workers, including retained queues absent from the current log configuration.
+std::map<UID, int64_t> getIdleTLogQueueDiskBytes(double newerThan = 0.0);
+Future<Void> waitForTLogQueueCleanup(double timeout = 60.0);
 Future<int64_t> getMaxStorageServerQueueSize(Database cx,
                                              Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                              Version version);
