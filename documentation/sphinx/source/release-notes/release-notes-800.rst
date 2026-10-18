@@ -37,8 +37,6 @@ Unreleased.
 8.0.0
 =====
 
-AVX enabled release.
-
 Compatibility and removed features
 ----------------------------------
 
