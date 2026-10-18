@@ -302,7 +302,10 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		}
 
 		// Multi-backup scenarios restore every range: skipping one could leave nothing to restore.
-		if (shouldSkipRestoreRanges && backupRangesCount > 1 && multiBackupIndex < 0) {
+		// Keyed off the actual range count, not backupRangesCount: a single-range configuration that does
+		// not set that option inherits its default and would otherwise skip its only range, leaving the
+		// restore with none and failing in restore() with a bare restore_error.
+		if (shouldSkipRestoreRanges && backupRanges.size() > 1 && multiBackupIndex < 0) {
 			skippedRestoreRanges.push_back(backupRanges[deterministicRandom()->randomInt(0, backupRanges.size())]);
 		}
 
