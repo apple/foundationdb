@@ -120,6 +120,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
 	Key backupTag;
 	int backupRangesCount, backupRangeLengthMax;
+	// backupRangePrefix: back up exactly one prefix range instead of random endpoints. Set it to the
+	// same prefix the data workload writes under, so the backup actually covers the test's data.
+	Key backupRangePrefix;
 	bool differentialBackup, performRestore, agentRequest;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	std::vector<KeyRange> skippedRestoreRanges;
@@ -186,6 +189,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
 		backupRangesCount = getOption(options, "backupRangesCount"_sr, 5);
 		backupRangeLengthMax = getOption(options, "backupRangeLengthMax"_sr, 1);
+		backupRangePrefix = getOption(options, "backupRangePrefix"_sr, ""_sr);
 		abortAndRestartAfter =
 		    getOption(options,
 		              "abortAndRestartAfter"_sr,
@@ -272,6 +276,13 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			// An idle instance still needs non-empty ranges to construct; reuse the last active backup's.
 			MultiBackupRanges::addRanges(
 			    multiBackupScenario, std::min(multiBackupIndex, multiBackupCount - 1), multiBackupCount, backupRanges);
+		} else if (backupRangePrefix.size() > 0) {
+			// A range built from random alphanumeric endpoints almost never overlaps the data workload's
+			// keyspace -- Cycle writes 16-character lowercase hex keys via doubleToTestKey -- so the
+			// backup covers no data and a round trip proves nothing, at random, depending on the draw.
+			// Deriving the range from a shared prefix keeps the data inside it while leaving the rest of
+			// the keyspace outside, which the out-of-range sentinels below depend on.
+			backupRanges.push_back_deep(backupRanges.arena(), prefixRange(backupRangePrefix));
 		} else if (backupRangesCount <= 0) {
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		} else {
@@ -315,7 +326,12 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			restoreRanges = filteredRestoreRanges;
 		}
 
-		TraceEvent("BS3BCW_Ranges");
+		// Which ranges were chosen decides whether the test covers any data at all, so record them.
+		TraceEvent ranges("BS3BCW_Ranges");
+		ranges.detail("BackupRangeCount", backupRanges.size()).detail("RestoreRangeCount", restoreRanges.size());
+		for (int i = 0; i < backupRanges.size() && i < 4; i++) {
+			ranges.detail(format("BackupRange%d", i), printable(backupRanges[i]));
+		}
 	}
 
 	Future<Void> setup(Database const& cx) override {
