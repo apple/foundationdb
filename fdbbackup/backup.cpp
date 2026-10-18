@@ -859,6 +859,12 @@ static void printBackupUsage(bool devhelp) {
 	       "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
 	       "                 then `%s'.\n",
 	       platform::getDefaultClusterFilePath().c_str());
+	printf(
+	    "  -t, --tagname TAGNAME\n"
+	    "                 For start, modify, status, abort, wait, and discontinue operations, the tag of the backup to "
+	    "act on.\n"
+	    "                 Backups on different tags run independently.  Defaults to `default'.  Use `tags' to list all "
+	    "tags.\n");
 	printf("  -d, --destcontainer URL\n"
 	       "                 The Backup container URL for start, modify, describe, query, expire, and delete "
 	       "operations.\n");
@@ -949,7 +955,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  --trace-format FORMAT\n"
 	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 	       "                 Has no effect unless --log is specified.\n");
-	printf("  --max-cleanup-seconds SECONDS\n"
+	printf("  --min-cleanup-seconds SECONDS\n"
 	       "                 Specifies the amount of time a backup or DR needs to be stale before cleanup will\n"
 	       "                 remove mutations for it. By default this is set to one hour.\n");
 	printf("  --delete-data\n"
