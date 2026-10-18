@@ -62,6 +62,7 @@ struct UnitTestRunnerResult {
 	int testsAvailable = 0;
 	int testsExecuted = 0;
 	int testsFailed = 0;
+	std::vector<std::string> failures;
 };
 
 enum UnitTestRunnerOption {
@@ -359,6 +360,7 @@ Future<Void> runTests(const UnitTestRunnerOptions& options,
 
 		if (resultCode.code() != error_code_success) {
 			fmt::print(stderr, "Test failed: {}: {}\n", test->name, resultCode.what());
+			result->failures.push_back(fmt::format("{}: {} ({})", test->name, resultCode.name(), resultCode.what()));
 		}
 	}
 }
@@ -490,6 +492,9 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 
 	fmt::print(
 	    stdout, "\n{} tests passed; {} tests failed.\n", result.testsExecuted - result.testsFailed, result.testsFailed);
+	for (const auto& failure : result.failures) {
+		fmt::print(stdout, "FAILED: {}\n", failure);
+	}
 
 	if (result.testsFailed != 0) {
 		exitCode = 1;

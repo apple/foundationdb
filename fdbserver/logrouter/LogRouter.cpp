@@ -31,9 +31,12 @@
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/CodeProbe.h"
+#include "flow/CoroUtils.h"
 #include "flow/Coroutines.h"
 #include "flow/Histogram.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/network.h"
 #include "flow/DebugTrace.h"
 
@@ -704,7 +707,9 @@ Future<Void> LogRouterData::logRouterPeekMessages(PromiseType replyPromise,
 	auto messagesValue = messages.toValue();
 	reply.arena.dependsOn(messagesValue.arena());
 	reply.messages = messagesValue;
-	reply.popped = minPopped.get() >= startVersion ? minPopped.get() : 0;
+	// The initial pop floor permits startup but does not certify remote durability at startVersion.
+	// Only a frontier beyond that floor proves every remote tag has acknowledged durable progress.
+	reply.popped = minPopped.get() > startVersion ? minPopped.get() : 0;
 	reply.end = endVersion;
 	reply.onlySpilled = false;
 
@@ -937,4 +942,52 @@ Future<Void> logRouter(TLogInterface interf,
 		}
 		throw;
 	}
+}
+
+namespace {
+
+Future<TLogPeekReply> peekLogRouter(LogRouterData* router) {
+	Promise<TLogPeekReply> reply;
+	Future<Void> serving = router->logRouterPeekMessages(reply, router->version.get(), Tag(tagLocalityRemoteLog, 0));
+	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 1.0);
+	co_await timeoutError(serving, 1.0);
+	co_return result;
+}
+
+} // namespace
+
+TEST_CASE("/LogRouter/PoppedFrontier/PositiveStart") {
+	InitializeLogRouterRequest req;
+	req.recoveryCount = 1;
+	req.routerTag = Tag(tagLocalityLogRouter, 0);
+	req.startVersion = 100;
+	req.tLogLocalities.resize(2);
+	req.tLogPolicy = makeReference<PolicyOne>();
+	req.locality = 1;
+	req.allowDropInSim = false;
+	LogRouterData router(deterministicRandom()->randomUniqueID(), req);
+
+	const bool batching = SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG;
+	ScopeExit restoreBatching(
+	    [batching]() { const_cast<ServerKnobs*>(SERVER_KNOBS)->PEEK_BATCHING_EMPTY_MSG = batching; });
+	const_cast<ServerKnobs*>(SERVER_KNOBS)->PEEK_BATCHING_EMPTY_MSG = false;
+
+	// The bootstrap floor must still let an empty router start pulling without remote pops.
+	Future<Void> bootstrap = router.waitForVersion(101);
+	ASSERT(bootstrap.isReady());
+	co_await timeoutError(bootstrap, 1.0);
+	TLogPeekReply initial = co_await peekLogRouter(&router);
+	ASSERT(initial.popped == 0);
+
+	router.version.set(200);
+	co_await logRouterPop(&router, TLogPopRequest(130, 130, Tag(tagLocalityRemoteLog, 0)));
+	TLogPeekReply partial = co_await peekLogRouter(&router);
+	ASSERT(partial.popped == 0);
+
+	co_await logRouterPop(&router, TLogPopRequest(110, 110, Tag(tagLocalityRemoteLog, 1)));
+	TLogPeekReply all = co_await peekLogRouter(&router);
+	ASSERT(all.popped == 110);
+	co_await logRouterPop(&router, TLogPopRequest(140, 140, Tag(tagLocalityRemoteLog, 1)));
+	TLogPeekReply advanced = co_await peekLogRouter(&router);
+	ASSERT(advanced.popped == 130);
 }

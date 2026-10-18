@@ -591,6 +591,7 @@ int main(int argc, char** argv) {
 							}
 
 							confpath = redone_confpath;
+							free(redone_confpath);
 
 							// Will always succeed given an absolute path
 							confdir = parentDirectory(confpath, false);
