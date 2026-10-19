@@ -7,10 +7,32 @@ Release Notes
 8.0.1
 =====
 
+Unreleased.
+
 * Fixed network setup failures when older multiversion clients load the 8.0
   client, even when the application does not use blob granules. Restored the
   required blob granule C symbols as stubs that abort the process when called.
   `(PR #14238) <https://github.com/apple/foundationdb/pull/14238>`_
+* Fixed Redwood page-cache memory accounting when a reused page ID changes
+  size, so cache eviction uses the current page size.
+  `(PR #14291) <https://github.com/apple/foundationdb/pull/14291>`_
+* Added bounded retries for disk errors when opening or reading backup
+  encryption-key files, allowing transient failures to recover before the
+  backup container retains a failed initialization result.
+  `(PR #14294) <https://github.com/apple/foundationdb/pull/14294>`_
+* Avoided linking newer glibc symbols into RHEL 9 builds that prevented
+  binaries built on RHEL 9.7 from starting on RHEL 9.6 systems and containers.
+  `(PR #14278) <https://github.com/apple/foundationdb/pull/14278>`_
+* Cached the network interface name used for network-traffic metrics to reduce
+  periodic network-thread stalls on hosts with many interfaces.
+  `(PR #14283) <https://github.com/apple/foundationdb/pull/14283>`_
+* Fixed a Linux ``fdbmonitor`` memory leak when changes to a configuration-file
+  symlink caused its target path to be resolved again.
+  `(PR #14253) <https://github.com/apple/foundationdb/pull/14253>`_
+* Changed the Kubernetes monitor image to declare its existing non-root user
+  numerically, allowing it to start with ``runAsNonRoot: true`` when
+  ``runAsUser`` is not specified.
+  `(PR #14248) <https://github.com/apple/foundationdb/pull/14248>`_
 
 8.0.0
 =====
