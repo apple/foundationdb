@@ -45,7 +45,6 @@
 #include "fdbserver/checkpoint/BulkSstFiles.h"
 #include "fdbserver/checkpoint/Checkpoint.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
-#include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/kvstore/FDBExecHelper.h"
@@ -107,6 +106,14 @@
 #include "flow/CoroUtils.h"
 #include "flow/TDMetric.h"
 #include "flow/genericactors.h"
+
+#ifdef WITH_ROCKSDB
+#include "fdbserver/core/FDBRocksDBVersion.h"
+#else
+#define FDB_ROCKSDB_MAJOR 0
+#define FDB_ROCKSDB_MINOR 0
+#define FDB_ROCKSDB_PATCH 0
+#endif
 
 #ifndef __INTEL_COMPILER
 #pragma region Data Structures
@@ -12257,6 +12264,7 @@ Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
 	    self->thisServerID.toString() + "/StorageMetrics",
 	    [self = self](TraceEvent& te) {
 		    te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
+		    // if not WITH_ROCKSDB: "0.0.0"
 		    te.detail("RocksDBVersion", format("%d.%d.%d", FDB_ROCKSDB_MAJOR, FDB_ROCKSDB_MINOR, FDB_ROCKSDB_PATCH));
 		    te.detail("Tag", self->tag.toString());
 		    std::vector<int> rpr = self->readPriorityRanks;
