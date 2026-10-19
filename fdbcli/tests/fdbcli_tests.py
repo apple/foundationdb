@@ -1499,7 +1499,7 @@ def read_audit_events(trace_dir):
     return events
 
 
-def run_fdbcli_in(cwd, args, env, commands):
+def run_fdbcli_audit(cwd, args, env, commands):
     return subprocess.run(
         command_template[:3] + args + ["--exec", commands],
         cwd=cwd,
@@ -1531,7 +1531,7 @@ def audit_log_flags(logger):
     }
     for audit, (audit_args, audit_env) in audit_modes.items():
         for trace, (trace_args, trace_env, trace_dir) in trace_modes.items():
-            process = run_fdbcli_in(
+            process = run_fdbcli_audit(
                 cwd, audit_args + trace_args, {**audit_env, **trace_env}, "get audit_a"
             )
             case = (audit, trace, process.returncode)
@@ -1564,7 +1564,7 @@ def audit_log_values(logger):
     for mode, values in expected.items():
         log_dir = tempfile.mkdtemp()
         mode_args = [] if mode is None else ["--audit-log-values", mode]
-        process = run_fdbcli_in(
+        process = run_fdbcli_audit(
             log_dir,
             ["--log", "--log-dir", log_dir, "--audit-log"] + mode_args,
             {},
@@ -1576,7 +1576,7 @@ def audit_log_values(logger):
         assert [e.get("Value") for e in events] == values, (mode, events)
         shutil.rmtree(log_dir)
 
-    process = run_fdbcli_in(None, ["--audit-log", "--audit-log-values", "bogus"], {}, "get audit_a")
+    process = run_fdbcli_audit(None, ["--audit-log", "--audit-log-values", "bogus"], {}, "get audit_a")
     assert process.returncode == 1
     assert b"invalid --audit-log-values" in process.stderr
 
@@ -1612,7 +1612,7 @@ def audit_log_commands(logger):
         # missing keys and the empty range log nothing
         group_sizes += [1, 1, 2, 1, 2, 1]
 
-    process = run_fdbcli_in(log_dir, args, {}, "; ".join(reads))
+    process = run_fdbcli_audit(log_dir, args, {}, "; ".join(reads))
     assert process.returncode == 0, process.stderr
     events = read_audit_events(log_dir)
     fields = ["Command", "AuditID", "Cluster", "IPAddress", "Key", "Value", "StorageServer"]
@@ -1629,7 +1629,7 @@ def audit_log_commands(logger):
     # A read that fails exits with the usual error, not a crash, and logs nothing
     log_dir = tempfile.mkdtemp()
     args = ["--log", "--log-dir", log_dir, "--audit-log"]
-    process = run_fdbcli_in(log_dir, args, {}, "get \\xff\\x02/audit_a")
+    process = run_fdbcli_audit(log_dir, args, {}, "get \\xff\\x02/audit_a")
     assert process.returncode == 1, process.returncode
     assert read_audit_events(log_dir) == []
     shutil.rmtree(log_dir)
@@ -1640,7 +1640,7 @@ def audit_log_cluster(logger):
     # Cluster is read when logging, so it follows a description change made mid-session
     description = cluster_description()
     log_dir = tempfile.mkdtemp()
-    process = run_fdbcli_in(
+    process = run_fdbcli_audit(
         log_dir,
         ["--log", "--log-dir", log_dir, "--audit-log"],
         {},
