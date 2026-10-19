@@ -6405,9 +6405,14 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		Params.firstVersion().set(task, firstVersion);
 		Params.beginVersion().set(task, beginVersion);
 		Params.endVersion().set(task, endVersion);
-		// Carry the reduced limit forward so each successor does not repeat the same oversized attempt.
-		Params.dispatchTaskLimit().set(
-		    task, Params.dispatchTaskLimit().getOrDefault(parentTask, CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE));
+		// Preserve reductions for continuations and requeues of this window. Later windows may have smaller
+		// task metadata, so let them start with the configured limit again.
+		int taskLimit = CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
+		if (Params.beginVersion().getOrDefault(parentTask, invalidVersion) == beginVersion &&
+		    Params.endVersion().getOrDefault(parentTask, invalidVersion) == endVersion) {
+			taskLimit = Params.dispatchTaskLimit().getOrDefault(parentTask, taskLimit);
+		}
+		Params.dispatchTaskLimit().set(task, taskLimit);
 		if (rangeStart.present()) {
 			Params.beginRangeVersion().set(task, rangeStart.get().version);
 			Params.beginRangeFile().set(task, rangeStart.get().fileName);
