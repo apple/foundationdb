@@ -3181,6 +3181,7 @@ Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>> maybeDuplicateTSSStr
 Future<Void> getRangeStreamImpl(Reference<TransactionState> trStateInput,
                                 PromiseStream<RangeResult> resultsInput,
                                 KeyRange keysInput,
+                                KeyRange conflictBounds,
                                 GetRangeLimits limits,
                                 Snapshot snapshot,
                                 Reverse reverse,
@@ -3188,6 +3189,7 @@ Future<Void> getRangeStreamImpl(Reference<TransactionState> trStateInput,
 	Reference<TransactionState> trState(std::move(trStateInput));
 	PromiseStream<RangeResult> results(std::move(resultsInput));
 	KeyRange keys(std::move(keysInput));
+	Key currentConflictBegin = conflictBounds.begin;
 	std::vector<KeyRangeLocationInfo> locations;
 	// Keep the active streams alive through retry delays and location refreshes.
 	Optional<TSSDuplicateStreamData<GetKeyValuesStreamReply>> tssDuplicateStream;
@@ -3401,6 +3403,13 @@ Future<Void> getRangeStreamImpl(Reference<TransactionState> trStateInput,
 								// getRangeStream() uses end_of_stream to indicate exhaustion, so keep 'more' true.
 								output.more = true;
 								output.setReadThrough(reverse ? keys.begin : keys.end);
+								if (!snapshot) {
+									Key chunkEnd = conflictBounds.end;
+									if (currentConflictBegin < chunkEnd) {
+										trState->addStreamConflictRange(KeyRangeRef(currentConflictBegin, chunkEnd));
+										currentConflictBegin = chunkEnd;
+									}
+								}
 								results.send(std::move(output));
 								results.sendError(end_of_stream());
 								if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
@@ -3417,6 +3426,13 @@ Future<Void> getRangeStreamImpl(Reference<TransactionState> trStateInput,
 						// If it's not the last shard, set more to true and readThrough to the shard boundary.
 						output.more = true;
 						output.setReadThrough(reverse ? range.begin : range.end);
+						if (!snapshot) {
+							Key chunkEnd = reverse ? range.begin : range.end;
+							if (currentConflictBegin < chunkEnd) {
+								trState->addStreamConflictRange(KeyRangeRef(currentConflictBegin, chunkEnd));
+								currentConflictBegin = chunkEnd;
+							}
+						}
 						results.send(std::move(output));
 						break;
 					}
@@ -3427,6 +3443,13 @@ Future<Void> getRangeStreamImpl(Reference<TransactionState> trStateInput,
 					}
 					if (keys.end == allKeys.end && reverse) {
 						output.readThroughEnd = true;
+					}
+					if (!snapshot) {
+						Key chunkEnd = reverse ? output[0].key : keyAfter(output[output.size() - 1].key);
+						if (currentConflictBegin < chunkEnd) {
+							trState->addStreamConflictRange(KeyRangeRef(currentConflictBegin, chunkEnd));
+							currentConflictBegin = chunkEnd;
+						}
 					}
 					results.send(std::move(output));
 				}
@@ -3473,14 +3496,12 @@ Future<Void> getRangeStream(Reference<TransactionState> trStateInput,
                             KeySelector beginInput,
                             KeySelector endInput,
                             GetRangeLimits limits,
-                            Promise<std::pair<Key, Key>> conflictRangeInput,
                             Snapshot snapshot,
                             Reverse reverse) {
 	Reference<TransactionState> trState(std::move(trStateInput));
 	PromiseStream<RangeResult> _results(std::move(_resultsInput));
 	KeySelector begin(std::move(beginInput));
 	KeySelector end(std::move(endInput));
-	Promise<std::pair<Key, Key>> conflictRange(std::move(conflictRangeInput));
 	// FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
 	Span span("NAPI:getRangeStream"_loc, trState->spanContext);
@@ -3495,19 +3516,16 @@ Future<Void> getRangeStream(Reference<TransactionState> trStateInput,
 	Key b = co_await fb;
 	Key e = co_await fe;
 
-	if (!snapshot) {
-		// FIXME: this conflict range is too large, and should be updated continuously as results are returned
-		conflictRange.send(std::make_pair(std::min(b, Key(begin.getKey(), begin.arena())),
-		                                  std::max(e, Key(end.getKey(), end.arena()))));
-	}
-
 	if (b >= e) {
 		_results.sendError(end_of_stream());
 		co_return;
 	}
 
+	Key rangeBegin = std::min(b, Key(begin.getKey(), begin.arena()));
+	Key rangeEnd = std::max(e, Key(end.getKey(), end.arena()));
+
 	co_await getRangeStreamImpl(
-	    trState, _results, KeyRange(KeyRangeRef(b, e)), limits, snapshot, reverse, span.context);
+	    trState, _results, KeyRange(KeyRangeRef(b, e)), KeyRange(KeyRangeRef(rangeBegin, rangeEnd)), limits, snapshot, reverse, span.context);
 }
 
 Future<RangeResult> getRange(Reference<TransactionState> const& trState,
@@ -3940,12 +3958,7 @@ Future<Void> Transaction::getRangeStream(PromiseStream<RangeResult>& results,
 		return Void();
 	}
 
-	Promise<std::pair<Key, Key>> conflictRange;
-	if (!snapshot) {
-		extraConflictRanges.push_back(conflictRange.getFuture());
-	}
-
-	return forwardErrors(::getRangeStream(trState, results, b, e, limits, conflictRange, snapshot, reverse), results);
+	return forwardErrors(::getRangeStream(trState, results, b, e, limits, snapshot, reverse), results);
 }
 
 Future<Void> Transaction::getRangeStream(PromiseStream<RangeResult>& results,
@@ -4839,6 +4852,11 @@ Future<Void> Transaction::commitMutations() {
 			if (extraConflictRange.isReady() && extraConflictRange.get().first < extraConflictRange.get().second)
 				tr.transaction.read_conflict_ranges.emplace_back(
 				    tr.arena, extraConflictRange.get().first, extraConflictRange.get().second);
+		}
+		for (const auto& streamRange : trState->streamConflictRanges) {
+			if (streamRange.begin < streamRange.end)
+				tr.transaction.read_conflict_ranges.emplace_back(
+				    tr.arena, streamRange.begin, streamRange.end);
 		}
 
 		if (tr.idempotencyId.valid()) {

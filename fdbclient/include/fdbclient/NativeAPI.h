@@ -276,6 +276,13 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	bool automaticIdempotency = false;
 
+	std::vector<KeyRange> streamConflictRanges;
+	void addStreamConflictRange(KeyRangeRef const& range) {
+		if (range.begin < range.end) {
+			streamConflictRanges.emplace_back(range);
+		}
+	}
+
 	Future<Void> startFuture;
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
@@ -484,7 +491,13 @@ public:
 
 	const std::vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
 	Standalone<VectorRef<KeyRangeRef>> readConflictRanges() const {
-		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.read_conflict_ranges, tr.arena);
+		Standalone<VectorRef<KeyRangeRef>> result(tr.transaction.read_conflict_ranges, tr.arena);
+		for (const auto& r : trState->streamConflictRanges) {
+			if (r.begin < r.end) {
+				result.push_back(result.arena(), r);
+			}
+		}
+		return result;
 	}
 	Standalone<VectorRef<KeyRangeRef>> writeConflictRanges() const {
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
