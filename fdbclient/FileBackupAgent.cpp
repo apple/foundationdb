@@ -4924,7 +4924,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 					err = e;
 				}
 				if (err.code() == error_code_transaction_too_large && dataSizeLimit > 1) {
-					dataSizeLimit = std::max(1, dataSizeLimit / 2);
+					dataSizeLimit /= 2;
 					tr->reset();
 				} else {
 					co_await tr->onError(err);
@@ -5296,7 +5296,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				err = e;
 			}
 			if (err.code() == error_code_transaction_too_large && dataSizeLimit > 1) {
-				dataSizeLimit = std::max(1, dataSizeLimit / 2);
+				dataSizeLimit /= 2;
 				tr->reset();
 			} else {
 				co_await tr->onError(err);
@@ -5614,7 +5614,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				err = e;
 			}
 			if (err.code() == error_code_transaction_too_large && txBytesLimit > 1 && mutationCount > 1) {
-				txBytesLimit = std::max(1, txBytesLimit / 2);
+				txBytesLimit /= 2;
 				tr->reset();
 			} else {
 				co_await tr->onError(err);
@@ -5828,11 +5828,15 @@ Future<Void> testRestoreWriterRecovery(Database cx) {
 		    "file://" + abspath("simfdb/restore-writer-" + restore.getUid().toString()), {}, {}, 0);
 		co_await bc->create();
 		Reference<IBackupFile> file;
+		StringRef taskName;
 		if (writer == 0) {
+			taskName = RestoreRangeTaskFunc::name;
 			file = co_await bc->writeRangeFile(1, 0, 1, blockSize);
 		} else if (writer == 1) {
+			taskName = RestoreLogDataTaskFunc::name;
 			file = co_await bc->writeLogFile(1, recordCount + 1, blockSize);
 		} else {
+			taskName = RestoreLogDataPartitionedTaskFunc::name;
 			file = co_await bc->writeTaggedLogFile(1, recordCount + 1, blockSize, 0, 1);
 			co_await file->append((uint8_t*)&PARTITIONED_MLOG_VERSION, sizeof(PARTITIONED_MLOG_VERSION));
 		}
@@ -5878,10 +5882,7 @@ Future<Void> testRestoreWriterRecovery(Database cx) {
 		co_await file->finish();
 		ASSERT_LT(file->size(), blockSize);
 		RestoreFile input{ 1, file->getFileName(), writer == 0, blockSize, file->size(), recordCount + 1, 0, 1 };
-		auto task = makeReference<Task>(writer == 0   ? RestoreRangeTaskFunc::name
-		                                : writer == 1 ? RestoreLogDataTaskFunc::name
-		                                              : RestoreLogDataPartitionedTaskFunc::name,
-		                                1);
+		auto task = makeReference<Task>(taskName, 1);
 		RestoreFileTaskFuncBase::InputParams::inputFile().set(task, input);
 		RestoreFileTaskFuncBase::InputParams::readOffset().set(task, 0);
 		RestoreFileTaskFuncBase::InputParams::readLen().set(task, file->size());
@@ -5902,8 +5903,14 @@ Future<Void> testRestoreWriterRecovery(Database cx) {
 			    task, restore.sourceContainer().key, TupleCodec<Reference<IBackupContainer>>::pack(bc));
 			taskBucket->addTask(tr, task);
 		});
-		task = co_await taskBucket->getOne(cx);
-		ASSERT(task);
+		// An unknown commit result can leave the task leased; retry until its lease expires and it is requeued.
+		while (true) {
+			task = co_await taskBucket->getOne(cx);
+			if (task) {
+				break;
+			}
+			co_await delay(1.0);
+		}
 		RestoreWriterTestState test;
 		if (writer == 0) {
 			co_await RestoreRangeTaskFunc::_execute(cx, taskBucket, {}, task, &test);
@@ -6113,7 +6120,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			beginRangeFile = f.fileName;
 			// For each block of the file
 			int64_t j = beginRangeBlock * f.blockSize;
-			for (; j < f.fileSize && blocksDispatched < taskBatchSize; j += f.blockSize) {
+			bool txFull = false;
+			for (; j < f.fileSize && blocksDispatched < taskBatchSize && !txFull; j += f.blockSize) {
 				addTaskFutures.push_back(RestoreRangeTaskFunc::addTask(tr,
 				                                                       taskBucket,
 				                                                       task,
@@ -6125,11 +6133,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				++blocksDispatched;
 				// addTask may yield before adding its metadata; measure only once those writes are buffered.
 				co_await addTaskFutures.back();
-				if (tr->getApproximateSize() >= CLIENT_KNOBS->RESTORE_DISPATCH_TX_SIZE) {
-					// break skips the loop increment; j must still point past the block just dispatched.
-					j += f.blockSize;
-					break;
-				}
+				txFull = tr->getApproximateSize() >= CLIENT_KNOBS->RESTORE_DISPATCH_TX_SIZE;
 			}
 			if (j < f.fileSize) {
 				break;
@@ -6291,7 +6295,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				// The failed transaction persisted neither tasks nor cursor. Rebuild from the current task's
 				// original cursor, with fewer blocks; the successor receives the new cursor only on commit.
 				int oldLimit = taskBatchSize;
-				taskBatchSize = std::max(1, taskBatchSize / 2);
+				taskBatchSize /= 2;
 				tr->reset();
 				CODE_PROBE(true, "Partitioned restore dispatch shrank after transaction_too_large");
 				TraceEvent("FileRestorePartitionDispatchResize")
