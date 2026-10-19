@@ -7547,10 +7547,13 @@ public:
 					state Reference<IBackupContainer> bc;
 					state Optional<Version> latestRestorableVersion;
 					state Version recentReadVersion;
+					state MutationLogType mutationLogType;
 
 					wait(store(latestRestorableVersion, config.getLatestRestorableVersion(tr)) &&
 					     store(bc, config.backupContainer().getOrThrow(tr)) &&
-					     store(recentReadVersion, tr->getReadVersion()));
+					     store(recentReadVersion, tr->getReadVersion()) &&
+					     store(mutationLogType,
+					           config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT)));
 					bc = fileBackup::getBackupContainerWithProxy(bc);
 
 					bool snapshotProgress = false;
@@ -7581,6 +7584,7 @@ public:
 					}
 					statusText += format("BackupUID: %s\n", uidAndAbortedFlag.get().first.toString().c_str());
 					statusText += format("BackupURL: %s\n", bc->getURL().c_str());
+					statusText += format("Mutation Log Type: %s\n", mutationLogTypeToString(mutationLogType).c_str());
 
 					if (snapshotProgress) {
 						state int64_t snapshotInterval;
