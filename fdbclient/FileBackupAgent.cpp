@@ -7963,6 +7963,10 @@ public:
 					}
 					statusText += format("Snapshot Mode: %s\n", snapshotModeText.c_str());
 
+					MutationLogType mutationLogType =
+					    co_await config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
+					statusText += format("Mutation Log Type: %s\n", mutationLogTypeToString(mutationLogType).c_str());
+
 					// Check if backup is BulkLoad compatible (has bulkdump_data/).
 					// In rangefile mode no bulkdump task ever runs, so the answer is
 					// always "no" and the line carries no information — skip it.
