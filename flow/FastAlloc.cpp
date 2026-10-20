@@ -708,34 +708,16 @@ FastAllocator<Size>::ThreadData::~ThreadData() {
 int64_t getTotalUnusedAllocatedMemory() {
 	int64_t unusedMemory = 0;
 
-	unusedMemory += FastAllocator<16>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<32>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<64>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<96>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<128>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<256>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<512>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<1024>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<2048>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<4096>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<8192>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<16384>::getApproximateMemoryUnused();
+#define ADD_UNUSED_MEMORY(size) unusedMemory += FastAllocator<size>::getApproximateMemoryUnused();
+	FLOW_FOR_EACH_FAST_ALLOCATOR_SIZE(ADD_UNUSED_MEMORY)
+#undef ADD_UNUSED_MEMORY
 
 	return unusedMemory;
 }
 
-template class FastAllocator<16>;
-template class FastAllocator<32>;
-template class FastAllocator<64>;
-template class FastAllocator<96>;
-template class FastAllocator<128>;
-template class FastAllocator<256>;
-template class FastAllocator<512>;
-template class FastAllocator<1024>;
-template class FastAllocator<2048>;
-template class FastAllocator<4096>;
-template class FastAllocator<8192>;
-template class FastAllocator<16384>;
+#define INSTANTIATE_FAST_ALLOCATOR(size) template class FastAllocator<size>;
+FLOW_FOR_EACH_FAST_ALLOCATOR_SIZE(INSTANTIATE_FAST_ALLOCATOR)
+#undef INSTANTIATE_FAST_ALLOCATOR
 
 #ifdef USE_JEMALLOC
 #include <jemalloc/jemalloc.h>

@@ -106,6 +106,20 @@ void recordDeallocation(void* ptr);
 
 inline constexpr auto kFastAllocMagazineBytes = 128 << 10;
 
+#define FLOW_FOR_EACH_FAST_ALLOCATOR_SIZE(M)                                                                           \
+	M(16)                                                                                                              \
+	M(32)                                                                                                              \
+	M(64)                                                                                                              \
+	M(96)                                                                                                              \
+	M(128)                                                                                                             \
+	M(256)                                                                                                             \
+	M(512)                                                                                                             \
+	M(1024)                                                                                                            \
+	M(2048)                                                                                                            \
+	M(4096)                                                                                                            \
+	M(8192)                                                                                                            \
+	M(16384)
+
 template <int Size>
 class FastAllocator {
 public:
