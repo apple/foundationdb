@@ -718,9 +718,10 @@ bool addressInDbAndPrimaryDc(
 		}
 	}
 
-	auto localityIsInPrimaryDc = [&dbInfo](const LocalityData& locality) {
-		return locality.dcId() == dbInfo->get().master.locality.dcId();
-	};
+	// LocalityData::dcId() is a std::map lookup that returns a Standalone by value, so keep the
+	// loop-invariant master lookup out of the per-tlog comparison below.
+	const auto masterDcId = dbi.master.locality.dcId();
+	auto localityIsInPrimaryDc = [&masterDcId](const LocalityData& locality) { return locality.dcId() == masterDcId; };
 
 	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
 		for (const auto& tlog : logSet.tLogs) {
@@ -1089,28 +1090,34 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		// If peer->lastLoggedTime == 0, we just started monitor this peer and haven't logged it once yet.
 		double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
 
-		TraceEvent(SevDebug, "PeerHealthMonitor")
-		    .suppressFor(5.0)
-		    .detail("Peer", address)
-		    .detail("PeerAddress", address)
-		    .detail("Force", enablePrimaryTxnSystemHealthCheck->get())
-		    .detail("Elapsed", now() - lastLoggedTime)
-		    .detail("Disconnected", disconnectedPeer)
-		    .detail("MinLatency", peer->pingLatencies.min())
-		    .detail("MaxLatency", peer->pingLatencies.max())
-		    .detail("MeanLatency", peer->pingLatencies.mean())
-		    .detail("MedianLatency", peer->pingLatencies.median())
-		    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
-		    .detail("CheckedPercentileLatency",
-		            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
-		    .detail("PingCount", peer->pingLatencies.getPopulationSize())
-		    .detail("PingTimeoutCount", peer->timeoutCount)
-		    .detail("ConnectionFailureCount", peer->connectFailedCount)
-		    .detail("WorkerLocation", workerLocation)
-		    .detail("PeerInPrimaryDc", addressInDbAndPrimaryDc(address, dbInfo))
-		    .detail("PeerInRemoteDc", addressInDbAndRemoteDc(address, dbInfo))
-		    .detail("PeerInPrimarySatelliteDc", addressInDbAndPrimarySatelliteDc(address, dbInfo))
-		    .detail("PeerIsRemoteLogRouter", addressIsRemoteLogRouter(address, dbInfo));
+		// .detail() arguments are evaluated by the caller even when the event is filtered out, and
+		// the addressInDbAnd*Dc() predicates each walk ServerDBInfo. This runs once per peer, every
+		// WORKER_HEALTH_MONITOR_INTERVAL, on every process, so guard the whole chain. suppressFor()
+		// does not help: suppression is applied when the event is logged, not when it is built.
+		TraceEvent peerHealthEvent(SevDebug, "PeerHealthMonitor");
+		if (peerHealthEvent.isEnabled()) {
+			peerHealthEvent.suppressFor(5.0)
+			    .detail("Peer", address)
+			    .detail("PeerAddress", address)
+			    .detail("Force", enablePrimaryTxnSystemHealthCheck->get())
+			    .detail("Elapsed", now() - lastLoggedTime)
+			    .detail("Disconnected", disconnectedPeer)
+			    .detail("MinLatency", peer->pingLatencies.min())
+			    .detail("MaxLatency", peer->pingLatencies.max())
+			    .detail("MeanLatency", peer->pingLatencies.mean())
+			    .detail("MedianLatency", peer->pingLatencies.median())
+			    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
+			    .detail("CheckedPercentileLatency",
+			            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
+			    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+			    .detail("PingTimeoutCount", peer->timeoutCount)
+			    .detail("ConnectionFailureCount", peer->connectFailedCount)
+			    .detail("WorkerLocation", workerLocation)
+			    .detail("PeerInPrimaryDc", addressInDbAndPrimaryDc(address, dbInfo))
+			    .detail("PeerInRemoteDc", addressInDbAndRemoteDc(address, dbInfo))
+			    .detail("PeerInPrimarySatelliteDc", addressInDbAndPrimarySatelliteDc(address, dbInfo))
+			    .detail("PeerIsRemoteLogRouter", addressIsRemoteLogRouter(address, dbInfo));
+		}
 
 		if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 		    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
