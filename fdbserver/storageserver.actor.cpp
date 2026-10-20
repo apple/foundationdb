@@ -9595,7 +9595,6 @@ void ShardInfo::addMutation(Version version,
 		    .setMaxEventLength(-1)
 		    .detail("Version", version)
 		    .detail("KeyHex", mutation.param1.toHexString())
-		    .detail("ValueHex", mutation.param2.toHexString())
 		    .detail("Mutation", mutation)
 		    .detail("Skipping", skip)
 		    .detail("SkipVersion", skipVersion);
