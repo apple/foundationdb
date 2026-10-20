@@ -1329,10 +1329,12 @@ Future<RangeResult> ExclusionInProgressRangeImpl::getRange(ReadYourWritesTransac
 	return ExclusionInProgressActor(ryw, getKeyRange().begin, kr);
 }
 
-Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
-	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
-	std::vector<ProcessData> workers = co_await getWorkers(&ryw->getTransaction());
-	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
+namespace {
+RangeResult buildProcessClassRows(std::vector<ProcessData> workers,
+                                  KeyRef prefix,
+                                  KeyRangeRef kr,
+                                  std::string (ProcessClass::*valueString)() const) {
+	// Special-key rows use lexical endpoint order, e.g. 1.1.1.1:11 < 1.1.1.1:5.
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
 	});
@@ -1340,17 +1342,24 @@ Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef 
 	auto last = std::unique(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) == formatIpPort(rhs.address.ip, rhs.address.port);
 	});
-	// remove duplicates
 	workers.erase(last, workers.end());
 	RangeResult result;
 	for (auto& w : workers) {
 		// exclude :tls in keys even the network address is TLS
 		KeyRef k(prefix.withSuffix(formatIpPort(w.address.ip, w.address.port), result.arena()));
 		if (kr.contains(k)) {
-			ValueRef v(result.arena(), w.processClass.toString());
+			ValueRef v(result.arena(), (w.processClass.*valueString)());
 			result.push_back(result.arena(), KeyValueRef(k, v));
 		}
 	}
+	return result;
+}
+} // namespace
+
+Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
+	std::vector<ProcessData> workers = co_await getWorkers(&ryw->getTransaction());
+	RangeResult result = buildProcessClassRows(std::move(workers), prefix, kr, &ProcessClass::toString);
 	co_return rywGetRange(ryw, kr, result);
 }
 
@@ -1455,28 +1464,7 @@ void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& 
 Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
 	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
 	std::vector<ProcessData> workers = co_await getWorkers(&ryw->getTransaction());
-	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
-	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
-		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
-	});
-	// Note: ProcessData can contain duplicate workers in corner cases
-	auto last = std::unique(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
-		return formatIpPort(lhs.address.ip, lhs.address.port) == formatIpPort(rhs.address.ip, rhs.address.port);
-	});
-	// remove duplicates
-	workers.erase(last, workers.end());
-	RangeResult result;
-	for (auto& w : workers) {
-		// exclude :tls in keys even the network address is TLS
-		Key k(prefix.withSuffix(formatIpPort(w.address.ip, w.address.port)));
-		if (kr.contains(k)) {
-			Value v(w.processClass.sourceString());
-			result.push_back(result.arena(), KeyValueRef(k, v));
-			result.arena().dependsOn(k.arena());
-			result.arena().dependsOn(v.arena());
-		}
-	}
-	co_return result;
+	co_return buildProcessClassRows(std::move(workers), prefix, kr, &ProcessClass::sourceString);
 }
 
 ProcessClassSourceRangeImpl::ProcessClassSourceRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
@@ -3041,4 +3029,53 @@ Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
 		}
 		ASSERT(testResult == expectedResult);
 	}
+}
+
+TEST_CASE("/SpecialKeySpace/ProcessClassRows") {
+	RangeResult classes;
+	RangeResult sources;
+	RangeResult bounded;
+	{
+		Key prefix = "process/"_sr;
+		KeyRange all = KeyRangeRef("process/"_sr, "process0"_sr);
+		std::vector<ProcessData> workers = {
+			ProcessData(LocalityData(),
+			            ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource),
+			            NetworkAddress::parse("1.1.1.1:5:tls"),
+			            Optional<NetworkAddress>()),
+			ProcessData(LocalityData(),
+			            ProcessClass(ProcessClass::TransactionClass, ProcessClass::DBSource),
+			            NetworkAddress::parse("1.1.1.1:11"),
+			            Optional<NetworkAddress>()),
+			ProcessData(LocalityData(),
+			            ProcessClass(ProcessClass::LogClass, ProcessClass::AutoSource),
+			            NetworkAddress::parse("1.1.1.1:2"),
+			            Optional<NetworkAddress>()),
+			ProcessData(LocalityData(),
+			            ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource),
+			            NetworkAddress::parse("1.1.1.1:5"),
+			            Optional<NetworkAddress>())
+		};
+		classes = buildProcessClassRows(workers, prefix, all, &ProcessClass::toString);
+		sources = buildProcessClassRows(workers, prefix, all, &ProcessClass::sourceString);
+		KeyRange bounds = KeyRangeRef("process/1.1.1.1:11"_sr, "process/1.1.1.1:5"_sr);
+		bounded = buildProcessClassRows(workers, prefix, bounds, &ProcessClass::toString);
+		ASSERT(
+		    buildProcessClassRows(workers, prefix, KeyRangeRef("process/2"_sr, "process0"_sr), &ProcessClass::toString)
+		        .empty());
+		ASSERT(buildProcessClassRows({}, prefix, all, &ProcessClass::toString).empty());
+	}
+
+	// Returned rows own their keys and values after the input workers and prefix are destroyed.
+	ASSERT(classes.size() == 3 && sources.size() == 3);
+	ASSERT(classes[0] == KeyValueRef("process/1.1.1.1:11"_sr, "transaction"_sr));
+	ASSERT(classes[1] == KeyValueRef("process/1.1.1.1:2"_sr, "log"_sr));
+	ASSERT(classes[2] == KeyValueRef("process/1.1.1.1:5"_sr, "storage"_sr));
+	ASSERT(sources[0] == KeyValueRef("process/1.1.1.1:11"_sr, "set_class"_sr));
+	ASSERT(sources[1] == KeyValueRef("process/1.1.1.1:2"_sr, "configure_auto"_sr));
+	ASSERT(sources[2] == KeyValueRef("process/1.1.1.1:5"_sr, "command_line"_sr));
+	ASSERT(bounded.size() == 2);
+	ASSERT(bounded[0] == classes[0] && bounded[1] == classes[1]);
+	ASSERT(!classes.more && !sources.more && !bounded.more);
+	return Void();
 }
