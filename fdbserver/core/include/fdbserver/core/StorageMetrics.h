@@ -51,6 +51,8 @@ struct StorageMetricSample {
 
 	int64_t getEstimate(KeyRangeRef keys) const;
 	KeyRef splitEstimate(KeyRangeRef range, int64_t offset, bool front = true) const;
+	// splitEstimate() and the estimate of the part it splits off: [range.begin, key) if front, else [key, range.end).
+	std::pair<KeyRef, int64_t> splitAndEstimate(KeyRangeRef range, int64_t offset, bool front) const;
 };
 
 struct TransientStorageMetricSample : StorageMetricSample {
