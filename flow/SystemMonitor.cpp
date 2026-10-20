@@ -226,21 +226,22 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 
 			    .trackLatest(eventName);
 
-#define DETAILALLOCATORMEMUSAGE(size)                                                                                  \
-	.detail("TotalMemory" #size, FastAllocator<size>::getTotalMemory())                                                \
-	    .detail("ApproximateUnusedMemory" #size, FastAllocator<size>::getApproximateMemoryUnused())                    \
-	    .detail("ActiveThreads" #size, FastAllocator<size>::getActiveThreads())
-			TraceEvent("MemoryMetrics") FLOW_FOR_EACH_FAST_ALLOCATOR_SIZE(DETAILALLOCATORMEMUSAGE)
-			    .detail("HugeArenaMemory", g_hugeArenaMemory.load())
-			    .detail("DCID", machineState.dcId)
-			    .detail("ZoneID", machineState.zoneId)
-			    .detail("MachineID", machineState.machineId);
-#undef DETAILALLOCATORMEMUSAGE
+			{
+				TraceEvent memoryMetrics("MemoryMetrics");
+				forEachFastAllocatorSize([&]<int Size>() {
+					memoryMetrics.detail(format("TotalMemory%d", Size), FastAllocator<Size>::getTotalMemory())
+					    .detail(format("ApproximateUnusedMemory%d", Size),
+					            FastAllocator<Size>::getApproximateMemoryUnused())
+					    .detail(format("ActiveThreads%d", Size), FastAllocator<Size>::getActiveThreads());
+				});
+				memoryMetrics.detail("HugeArenaMemory", g_hugeArenaMemory.load())
+				    .detail("DCID", machineState.dcId)
+				    .detail("ZoneID", machineState.zoneId)
+				    .detail("MachineID", machineState.machineId);
+			}
 
 			uint64_t total_memory = 0;
-#define ADD_TOTAL_MEMORY(size) total_memory += FastAllocator<size>::getTotalMemory();
-			FLOW_FOR_EACH_FAST_ALLOCATOR_SIZE(ADD_TOTAL_MEMORY)
-#undef ADD_TOTAL_MEMORY
+			forEachFastAllocatorSize([&]<int Size>() { total_memory += FastAllocator<Size>::getTotalMemory(); });
 
 			const uint64_t unused_memory = getTotalUnusedAllocatedMemory();
 

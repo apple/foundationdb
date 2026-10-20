@@ -45,11 +45,13 @@ bool valgrindPrecise();
 #include "flow/Hash3.h"
 
 #include <assert.h>
+#include <array>
 #include <atomic>
 #include <vector>
 #include <cstdlib>
 #include <cstdio>
 #include <unordered_map>
+#include <utility>
 
 #if defined(ALLOC_INSTRUMENTATION) && defined(__linux__)
 #include <execinfo.h>
@@ -106,19 +108,14 @@ void recordDeallocation(void* ptr);
 
 inline constexpr auto kFastAllocMagazineBytes = 128 << 10;
 
-#define FLOW_FOR_EACH_FAST_ALLOCATOR_SIZE(M)                                                                           \
-	M(16)                                                                                                              \
-	M(32)                                                                                                              \
-	M(64)                                                                                                              \
-	M(96)                                                                                                              \
-	M(128)                                                                                                             \
-	M(256)                                                                                                             \
-	M(512)                                                                                                             \
-	M(1024)                                                                                                            \
-	M(2048)                                                                                                            \
-	M(4096)                                                                                                            \
-	M(8192)                                                                                                            \
-	M(16384)
+inline constexpr std::array FAST_ALLOCATOR_SIZES{ 16, 32, 64, 96, 128, 256, 512, 1024, 2048, 4096, 8192, 16384 };
+
+template <class Visitor>
+void forEachFastAllocatorSize(Visitor&& visitor) {
+	[&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
+		(static_cast<void>(visitor.template operator()<FAST_ALLOCATOR_SIZES[Indices]>()), ...);
+	}(std::make_index_sequence<FAST_ALLOCATOR_SIZES.size()>{});
+}
 
 template <int Size>
 class FastAllocator {
