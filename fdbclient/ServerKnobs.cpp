@@ -1072,6 +1072,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGESERVER_READ_PRIORITIES,           "120,10,20,40,60" );
 	// The total concurrency which will be shared by active priorities according to their relative weights
 	init( STORAGE_SERVER_READ_CONCURRENCY,                        70 );
+	// Emergency: if non-zero, drop (instead of asserting on) mutations delivered to a not-assigned shard at exactly this version
+	init( SS_SKIP_DELIVERED_TO_NOT_ASSIGNED_VERSION,               0 );
 	// The priority number which each ReadType maps to in enumeration order
 	// This exists for flexibility but assigning each ReadType to its own unique priority number makes the most sense
 	// The enumeration is currently: eager, fetch, low, normal, high
