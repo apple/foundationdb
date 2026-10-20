@@ -5803,7 +5803,14 @@ Future<ProtocolVersion> getClusterProtocolImpl(
 			NetworkAddress coordinatorAddress;
 			if (coordinator->get().get().hostname.present()) {
 				Hostname h = coordinator->get().get().hostname.get();
-				coordinatorAddress = co_await h.resolveWithRetry();
+				// resolveWithRetry() never gives up, so a hostname that can't be resolved (e.g. a stale coordinator
+				// that was removed from DNS) must not keep us from noticing that the coordinator has changed.
+				auto resolved = co_await race(h.resolveWithRetry(), coordinator->onChange());
+				if (resolved.index() == 1) {
+					needToConnect = true;
+					continue;
+				}
+				coordinatorAddress = std::get<0>(resolved);
 			} else {
 				coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
 			}
