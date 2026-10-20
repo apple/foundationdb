@@ -43,8 +43,8 @@ struct StaleCoordinatorProtocolMonitorWorkload : TestWorkload {
 	// How many databases are opened. The order in which coordinators are tried is random, so more databases make it
 	// more likely that at least one of them starts with an unresolvable coordinator.
 	int numDatabases;
-	// How many unresolvable hostnames are added to the real connection string. Those are appended, so the final connection string
-	// will contain the live coordinators + the additional stale coordinator entries.
+	// How many unresolvable hostnames are added to the real connection string. Those are appended, so the final
+	// connection string will contain the live coordinators + the additional stale coordinator entries.
 	int numStaleCoordinators;
 	// Simulated seconds to wait for the protocol version before a database is considered stuck.
 	double protocolTimeout;
