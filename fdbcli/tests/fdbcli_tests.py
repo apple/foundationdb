@@ -1654,11 +1654,21 @@ def audit_log_cluster(logger):
     shutil.rmtree(log_dir)
 
 
+def set_audit_keys():
+    # A setup commit can come back commit_unknown_result (1021) when the cluster is busy, which left a key unset
+    # in CI. The sets are idempotent, so write and read back until all the keys are there.
+    keys = [("audit_a", "1"), ("audit_b", "2"), ("\\xff\\x02/audit_a", "1"), ("\\xff\\x02/audit_b", "2")]
+    for _ in range(10):
+        run_fdbcli_command("writemode on; option on ACCESS_SYSTEM_KEYS;", "; ".join("set %s %s" % kv for kv in keys))
+        output = run_fdbcli_command("option on READ_SYSTEM_KEYS;", "; ".join("get " + k for k, _ in keys))
+        if output.count("' is `") == len(keys):
+            return
+        time.sleep(1)
+    assert False, "couldn't set up the audit test keys: " + output
+
+
 def audit_log():
-    run_fdbcli_command(
-        "writemode on; set audit_a 1; set audit_b 2; option on ACCESS_SYSTEM_KEYS;",
-        "set \\xff\\x02/audit_a 1; set \\xff\\x02/audit_b 2",
-    )
+    set_audit_keys()
     audit_log_flags()
     audit_log_values()
     audit_log_commands()
