@@ -9621,6 +9621,12 @@ TEST_CASE("/fdbserver/storageserver/deliveredToNotAssigned") {
 	auto asserts = [&](MutationRef const& m, Version version) {
 		try {
 			shard->addMutation(version, false, m, MutationRefAndCipherKeys());
+			if (m.type != MutationRef::ClearRange) {
+				printf("dropped version=%lld key=%s value=%s\n",
+				       (long long)version,
+				       m.param1.toHexString().c_str(),
+				       m.param2.toHexString().c_str());
+			}
 			return false;
 		} catch (Error& e) {
 			ASSERT_EQ(e.code(), error_code_internal_error);
