@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-// Reproduces a hang in the client protocol-version monitor (getClusterProtocolImpl in NativeAPI.cpp).
+// Regression test for a hang in the client protocol-version monitor (getClusterProtocolImpl in NativeAPI.cpp).
 //
 // The monitor resolves the hostname of the current coordinator with Hostname::resolveWithRetry(), which retries
-// forever, and it does so *before* it starts watching the `coordinator` AsyncVar for changes. If the monitor happens
-// to pick a coordinator hostname that can never be resolved (e.g. a stale connection string that still lists
-// coordinators that were removed from DNS), it never notices that monitorProxies moved on to a working coordinator
-// and never reports the protocol version. In the multi-version client this keeps the real database from ever being
+// forever. It used to do so *before* it started watching the `coordinator` AsyncVar for changes. If the monitor
+// happened to pick a coordinator hostname that can never be resolved (e.g. a stale connection string that still lists
+// coordinators that were removed from DNS), it never noticed that monitorProxies moved on to a working coordinator
+// and never reported the protocol version. In the multi-version client this keeps the real database from ever being
 // activated, so every transaction hangs until its timeout (error 1031) even though the cluster is healthy.
 //
 // The workload opens databases with a connection string made of the real coordinators plus several hostnames in the
@@ -70,25 +70,33 @@ struct StaleCoordinatorProtocolMonitorWorkload : TestWorkload {
 	Future<Void> run(Database cx) {
 		const std::string liveConnectionString = cx->getConnectionRecord()->getConnectionString().toString();
 
+		// All databases are opened concurrently, so the worst case is a single protocolTimeout.
+		std::vector<Future<Void>> databases;
+		databases.reserve(numDatabases);
 		for (int i = 0; i < numDatabases; ++i) {
-			std::string connectionString = liveConnectionString;
-			for (int j = 0; j < numStaleCoordinators; ++j) {
-				connectionString += format(",stale-coordinator-%d-%d.invalid:4500", i, j);
-			}
+			databases.push_back(checkDatabase(liveConnectionString, i));
+		}
+		co_await waitForAll(databases);
+	}
 
-			auto record = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(connectionString));
-			Database db = Database::createDatabase(record, -1);
+	Future<Void> checkDatabase(std::string liveConnectionString, int index) {
+		std::string connectionString = liveConnectionString;
+		for (int j = 0; j < numStaleCoordinators; ++j) {
+			connectionString += format(",stale-coordinator-%d-%d.invalid:4500", index, j);
+		}
 
-			Optional<ProtocolVersion> protocolVersion = co_await timeout(db->getClusterProtocol(), protocolTimeout);
-			if (protocolVersion.present()) {
-				++completedDatabases;
-			} else {
-				++stuckDatabases;
-				TraceEvent(SevWarnAlways, "StaleCoordinatorProtocolMonitorStuck")
-				    .detail("DatabaseIndex", i)
-				    .detail("ConnectionString", connectionString)
-				    .detail("TimeoutSeconds", protocolTimeout);
-			}
+		auto record = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(connectionString));
+		Database db = Database::createDatabase(record, -1);
+
+		Optional<ProtocolVersion> protocolVersion = co_await timeout(db->getClusterProtocol(), protocolTimeout);
+		if (protocolVersion.present()) {
+			++completedDatabases;
+		} else {
+			++stuckDatabases;
+			TraceEvent(SevWarnAlways, "StaleCoordinatorProtocolMonitorStuck")
+			    .detail("DatabaseIndex", index)
+			    .detail("ConnectionString", connectionString)
+			    .detail("TimeoutSeconds", protocolTimeout);
 		}
 	}
 
