@@ -3707,6 +3707,9 @@ ACTOR Future<int64_t> lookupTenantImpl(DatabaseContext* cx, TenantName tenant) {
 }
 
 Future<int64_t> DatabaseContext::lookupTenant(TenantName tenant) {
+	if (isError()) {
+		return deferredError;
+	}
 	return lookupTenantImpl(this, tenant);
 }
 
