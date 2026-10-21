@@ -104,6 +104,31 @@ endfunction()
 
 add_grpc()
 
+# Warnings in gRPC's, abseil's and protobuf's headers are not FDB's to fix, so FDB code includes them as system headers,
+# like a prebuilt package's. (add_subdirectory(SYSTEM) does this from CMake 3.25.)
+function(mark_includes_system dir)
+  get_property(targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(target IN LISTS targets)
+    get_target_property(includes ${target} INTERFACE_INCLUDE_DIRECTORIES)
+    if(includes)
+      set_target_properties(${target} PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${includes}")
+    endif()
+  endforeach()
+  get_property(subdirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
+  foreach(subdir IN LISTS subdirs)
+    mark_includes_system("${subdir}")
+  endforeach()
+endfunction()
+mark_includes_system("${GRPC_SRC}")
+
+# Ahead of every other system include directory, which may be a shared prefix (such as Homebrew's) holding another gRPC,
+# abseil or protobuf.
+include_directories(BEFORE SYSTEM
+  "${GRPC_SRC}/include"
+  "${GRPC_SRC}/third_party/abseil-cpp"
+  "${GRPC_SRC}/third_party/protobuf/src"
+  "${GRPC_SRC}/third_party/protobuf/third_party/utf8_range")
+
 # The names FDB uses are those of an installed gRPC package.
 add_library(gRPC::grpc++ ALIAS grpc++)
 add_executable(gRPC::grpc_cpp_plugin ALIAS grpc_cpp_plugin)
