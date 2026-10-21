@@ -108,10 +108,7 @@ timeout = 7200
     abortAndRestartAfter = 0.0
     stopDifferentialAfter = 0.0
     performRestore = true
-    # One narrow range, but aligned with the data: Cycle writes 16-char lowercase hex keys
-    # (doubleToTestKey), which a random alphanumeric endpoint pair almost never overlaps, so the
-    # backup used to cover no data at all -- and whether it did was random per run. The
-    # sentinels outside this prefix still exercise --keys scoping.
+    # Must match the Cycle keyPrefix above.
     backupRangePrefix = 'd/'
     skipDirtyRestore = false
     backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'

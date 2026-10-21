@@ -109,8 +109,8 @@ extern std::atomic<int> g_bulkLoadRestoreTaskCompleteCount;
 struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	static constexpr auto NAME = "BackupS3BlobCorrectness";
 
-	// Inside normalKeys but below every alphanumeric key, so these sort outside any range this workload
-	// generates while still being ordinary user keys. The '_' after the escape keeps \x01 from swallowing
+	// Inside normalKeys but below every printable prefix, so these sort outside any prefix range this
+	// workload backs up while still being ordinary user keys. The '_' after the escape keeps \x01 from swallowing
 	// a following hex digit.
 	static inline const StringRef SENTINEL_PREFIX = "\x01_bs3bc_outside/"_sr;
 	static inline const ValueRef SENTINEL_BEFORE_BACKUP = "before_backup"_sr;
@@ -119,20 +119,17 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	double minBackupAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
 	Key backupTag;
-	int backupRangesCount, backupRangeLengthMax;
-	// backupRangePrefix: back up exactly one prefix range instead of random endpoints. Set it to the
-	// same prefix the data workload writes under, so the backup actually covers the test's data.
+	// backupRangePrefix: back up only this prefix instead of all of normalKeys. It must be a prefix the
+	// data workload writes under; start() fails if the range holds no key.
 	Key backupRangePrefix;
 	bool differentialBackup, performRestore, agentRequest;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
-	std::vector<KeyRange> skippedRestoreRanges;
 	std::vector<Key> outOfRangeSentinels;
 	Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 	static int backupAgentRequests;
 	LockDB locked{ false };
 	bool allowPauses;
 	bool shareLogRange;
-	bool shouldSkipRestoreRanges;
 	bool defaultBackup;
 	QuiescentValidation validation;
 	// -1 for a standalone backup; otherwise this instance's index in a multi-backup scenario (see MultiBackupRanges.h).
@@ -187,8 +184,6 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		restoreStartAfterBackupFinished = getOption(options, "restoreStartAfterBackupFinished"_sr, 10.0);
 		performRestore = getOption(options, "performRestore"_sr, true);
 		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
-		backupRangesCount = getOption(options, "backupRangesCount"_sr, 5);
-		backupRangeLengthMax = getOption(options, "backupRangeLengthMax"_sr, 1);
 		backupRangePrefix = getOption(options, "backupRangePrefix"_sr, ""_sr);
 		abortAndRestartAfter =
 		    getOption(options,
@@ -262,8 +257,6 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		std::vector<std::string> restorePrefixesToInclude =
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
 
-		shouldSkipRestoreRanges = deterministicRandom()->random01() < 0.3 ? true : false;
-
 		// S3-specific: Default to no encryption to simplify S3 testing
 		// Tests can explicitly enable encryption by setting encrypted=true in the toml file
 		if (getOption(options, "encrypted"_sr, false)) {
@@ -277,44 +270,13 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			MultiBackupRanges::addRanges(
 			    multiBackupScenario, std::min(multiBackupIndex, multiBackupCount - 1), multiBackupCount, backupRanges);
 		} else if (backupRangePrefix.size() > 0) {
-			// A range built from random alphanumeric endpoints almost never overlaps the data workload's
-			// keyspace -- Cycle writes 16-character lowercase hex keys via doubleToTestKey -- so the
-			// backup covers no data and a round trip proves nothing, at random, depending on the draw.
-			// Deriving the range from a shared prefix keeps the data inside it while leaving the rest of
-			// the keyspace outside, which the out-of-range sentinels below depend on.
+			// Narrower than normalKeys so the out-of-range sentinels below have an outside to occupy.
 			backupRanges.push_back_deep(backupRanges.arena(), prefixRange(backupRangePrefix));
-		} else if (backupRangesCount <= 0) {
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		} else {
-			// Add backup ranges
-			std::set<std::string> rangeEndpoints;
-			while (rangeEndpoints.size() < static_cast<size_t>(backupRangesCount) * 2) {
-				rangeEndpoints.insert(deterministicRandom()->randomAlphaNumeric(
-				    deterministicRandom()->randomInt(1, backupRangeLengthMax + 1)));
-			}
-
-			// Create ranges from the keys, in order, to prevent overlaps
-			std::vector<std::string> sortedEndpoints(rangeEndpoints.begin(), rangeEndpoints.end());
-			for (auto i = sortedEndpoints.begin(); i != sortedEndpoints.end(); ++i) {
-				const std::string& start = *i++;
-				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(start, *i));
-			}
+			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		}
 
-		// Multi-backup scenarios restore every range: skipping one could leave nothing to restore.
-		// Keyed off the actual range count, not backupRangesCount: a single-range configuration that does
-		// not set that option inherits its default and would otherwise skip its only range, leaving the
-		// restore with none and failing in restore() with a bare restore_error.
-		if (shouldSkipRestoreRanges && backupRanges.size() > 1 && multiBackupIndex < 0) {
-			skippedRestoreRanges.push_back(backupRanges[deterministicRandom()->randomInt(0, backupRanges.size())]);
-		}
-
-		for (const auto& range : backupRanges) {
-			if (std::find(skippedRestoreRanges.begin(), skippedRestoreRanges.end(), range) ==
-			    skippedRestoreRanges.end()) {
-				restoreRanges.push_back_deep(restoreRanges.arena(), range);
-			}
-		}
+		restoreRanges = backupRanges;
 
 		if (!restorePrefixesToInclude.empty()) {
 			Standalone<VectorRef<KeyRangeRef>> filteredRestoreRanges;
@@ -807,6 +769,19 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("RestoreStartAfterBackupFinished", restoreStartAfterBackupFinished)
 		    .detail("AbortAndRestartAfter", abortAndRestartAfter)
 		    .detail("DifferentialAfter", stopDifferentialAfter);
+
+		if (backupRangePrefix.size() > 0) {
+			KeyRange prefixed = prefixRange(backupRangePrefix);
+			RangeResult sample =
+			    co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {
+				    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				    return tr->getRange(prefixed, 1);
+			    });
+			if (sample.empty()) {
+				TraceEvent(SevError, "BS3BCW_BackupRangeHoldsNoData").detail("Range", printable(prefixed));
+				throw internal_error();
+			}
+		}
 
 		// S3-specific: Clean up state on every test restart to prevent restore_invalid_version errors
 		// The test harness restarts tests multiple times. Without cleanup, FDB metadata points to
