@@ -2,61 +2,33 @@
 # applying FDB's patches from cmake/patches/grpc. Deterministic simulation depends on those patches, so FDB never uses
 # a system gRPC.
 #
-# Configure fetches and patches the source (once per version and patch set); the libraries and protoc are ordinary
-# targets in the build graph, so only what FDB links is compiled, in parallel with FDB, through any compiler launcher.
+# Configure fetches and patches the source; the libraries and protoc are ordinary targets in the build graph, so only
+# what FDB links is compiled, in parallel with FDB, through any compiler launcher.
+
+include(FetchContent)
+find_package(Git REQUIRED)
 
 set(GRPC_VERSION 1.83.0)
-set(GRPC_SOURCE_DIR "" CACHE PATH
-  "Unpatched gRPC v${GRPC_VERSION} source tree including its third_party dependencies; cloned from GitHub when empty")
-
-set(GRPC_ROOT "${CMAKE_BINARY_DIR}/grpc")
-set(GRPC_SRC "${GRPC_ROOT}/src")
-
 file(GLOB GRPC_PATCHES "${CMAKE_SOURCE_DIR}/cmake/patches/grpc/*.patch")
 list(SORT GRPC_PATCHES)
 
-set(GRPC_STAMP "${GRPC_VERSION};${GRPC_SOURCE_DIR}")
-foreach(patch IN LISTS GRPC_PATCHES)
-  file(SHA256 "${patch}" patch_hash)
-  string(APPEND GRPC_STAMP ";${patch_hash}")
-endforeach()
-string(SHA256 GRPC_STAMP "${GRPC_STAMP}")
-
-set(GRPC_STAMP_FILE "${GRPC_ROOT}/fdb-source-stamp")
-set(GRPC_PREPARED_STAMP "")
-if(EXISTS "${GRPC_STAMP_FILE}")
-  file(READ "${GRPC_STAMP_FILE}" GRPC_PREPARED_STAMP)
-endif()
-
-function(grpc_run step)
-  execute_process(COMMAND ${ARGN} RESULT_VARIABLE result OUTPUT_FILE "${GRPC_ROOT}/${step}.log"
-                  ERROR_FILE "${GRPC_ROOT}/${step}.log")
-  if(NOT result EQUAL 0)
-    message(FATAL_ERROR "gRPC ${step} failed (${result}); see ${GRPC_ROOT}/${step}.log")
-  endif()
-endfunction()
-
-if(NOT GRPC_PREPARED_STAMP STREQUAL GRPC_STAMP)
-  message(STATUS "Preparing gRPC ${GRPC_VERSION} source in ${GRPC_SRC}")
-  file(REMOVE_RECURSE "${GRPC_ROOT}")
-  file(MAKE_DIRECTORY "${GRPC_ROOT}")
-  find_package(Git REQUIRED)
-  if(GRPC_SOURCE_DIR)
-    grpc_run(copy ${CMAKE_COMMAND} -E copy_directory "${GRPC_SOURCE_DIR}" "${GRPC_SRC}")
-  else()
-    grpc_run(clone ${GIT_EXECUTABLE} clone --quiet --depth 1 --branch v${GRPC_VERSION}
-             https://github.com/grpc/grpc.git "${GRPC_SRC}")
-    grpc_run(submodules ${GIT_EXECUTABLE} -C "${GRPC_SRC}" submodule update --init --depth 1
-             third_party/abseil-cpp third_party/protobuf third_party/re2 third_party/cares/cares)
-  endif()
-  foreach(patch IN LISTS GRPC_PATCHES)
-    get_filename_component(patch_name "${patch}" NAME)
-    # The ceiling keeps git from treating a copied, repository-less tree as part of an enclosing repository.
-    grpc_run("patch-${patch_name}" ${CMAKE_COMMAND} -E env "GIT_CEILING_DIRECTORIES=${GRPC_ROOT}"
-             ${GIT_EXECUTABLE} -C "${GRPC_SRC}" apply --whitespace=nowarn "${patch}")
-  endforeach()
-  file(WRITE "${GRPC_STAMP_FILE}" "${GRPC_STAMP}")
-endif()
+# FetchContent re-runs the patch step in the existing tree when the patch list changes, so the step first restores
+# the checkout. Hosts without GitHub access set FETCHCONTENT_SOURCE_DIR_GRPC to an already patched tree instead.
+FetchContent_Declare(grpc
+  GIT_REPOSITORY https://github.com/grpc/grpc.git
+  GIT_TAG v${GRPC_VERSION}
+  GIT_SHALLOW ON
+  GIT_SUBMODULES third_party/abseil-cpp third_party/protobuf third_party/re2 third_party/cares/cares
+  GIT_SUBMODULES_RECURSE OFF
+  PATCH_COMMAND ${GIT_EXECUTABLE} reset --quiet --hard --recurse-submodules
+  COMMAND ${GIT_EXECUTABLE} clean --quiet -fd
+  COMMAND ${GIT_EXECUTABLE} submodule --quiet foreach ${GIT_EXECUTABLE} clean --quiet -fd
+  COMMAND ${GIT_EXECUTABLE} apply --whitespace=nowarn ${GRPC_PATCHES}
+  # A directory without a CMakeLists.txt, so FetchContent_MakeAvailable only populates; add_grpc() adds the project
+  # with EXCLUDE_FROM_ALL, which FetchContent supports only from CMake 3.28.
+  SOURCE_SUBDIR fdb-populate-only)
+FetchContent_MakeAvailable(grpc)
+set(GRPC_SRC "${grpc_SOURCE_DIR}")
 
 # A function, so the settings below stay out of FDB's scope.
 function(add_grpc)
@@ -98,7 +70,7 @@ function(add_grpc)
   list(FILTER grpc_options EXCLUDE REGEX "-W")
   list(APPEND grpc_options -w)
   set_directory_properties(PROPERTIES COMPILE_OPTIONS "${grpc_options}")
-  add_subdirectory("${GRPC_SRC}" "${GRPC_ROOT}/build" EXCLUDE_FROM_ALL)
+  add_subdirectory("${GRPC_SRC}" "${grpc_BINARY_DIR}" EXCLUDE_FROM_ALL)
   set_directory_properties(PROPERTIES COMPILE_OPTIONS "${fdb_options}")
 endfunction()
 

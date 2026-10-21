@@ -116,9 +116,9 @@ deterministic engine. Upgrading gRPC means re-applying them and re-running the d
 
 `cmake/CompileGrpc.cmake`:
 
-1. At configure time, fetches gRPC v1.83.0 with only the submodules it needs (abseil-cpp, protobuf, re2, c-ares), or
-   copies `GRPC_SOURCE_DIR` for hosts without GitHub access. It then applies `cmake/patches/grpc/*.patch`. This repeats
-   only when the version, source directory or patches change.
+1. At configure time, `FetchContent` fetches gRPC v1.83.0 with only the submodules it needs (abseil-cpp, protobuf, re2,
+   c-ares) and applies `cmake/patches/grpc/*.patch`, restoring the checkout first so a changed version or patch list
+   re-patches cleanly. Hosts without GitHub access set `FETCHCONTENT_SOURCE_DIR_GRPC` to an already patched tree.
 2. Adds the patched tree with `add_subdirectory(... EXCLUDE_FROM_ALL)` inside a function, so its settings stay local:
    - static libraries;
    - abseil, protobuf, re2 and c-ares built as modules;
@@ -227,9 +227,9 @@ pool thread, and its blocking stop path asserts that it is not reached.
 
 ## Rollout/Migration Considerations
 
-- **Building.** Builds need either network access to GitHub at configure time or `GRPC_SOURCE_DIR` pointing at an
-  unpatched v1.83.0 source tree with the four submodules. `WITH_GRPC=OFF` remains available, and the gRPC tests are
-  registered only when gRPC is built.
+- **Building.** Builds need either network access to GitHub at configure time or `FETCHCONTENT_SOURCE_DIR_GRPC`
+  pointing at a patched v1.83.0 source tree with the four submodules. `WITH_GRPC=OFF` remains available, and the gRPC
+  tests are registered only when gRPC is built.
 - **Worker list encoding.** `FDB_PV_WORKER_LIST_VALUE` moves from the 6.2 version to 8.0 (`0x0FDB00B080000000`).
   - 8.0 decodes the gRPC address.
   - release-7.4 accepts the 8.0 tag (its limit is `0x0FDB00B081000000`) and ignores the trailing field, because its
