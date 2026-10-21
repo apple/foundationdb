@@ -34,6 +34,7 @@
 #include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 #include "flow/Error.h"
+#include "flow/Platform.h"
 #include "rapidxml/rapidxml.hpp"
 #include <openssl/sha.h>
 #include "libb64/encode.h"
