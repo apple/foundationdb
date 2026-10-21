@@ -227,6 +227,7 @@ class AuditedEvent {
 		"AuditTokenUsed",
 		"AuthzPublicKeySetApply",
 		"AuthzPublicKeySetRefreshError",
+		"FdbCliAudit",
 		"IncomingConnection",
 		"InvalidToken",
 		"N2_ConnectHandshakeError",
