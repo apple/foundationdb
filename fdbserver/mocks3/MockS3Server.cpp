@@ -728,6 +728,13 @@ public:
 			TraceEvent(SevWarn, "MockS3MissingBucketInPath").detail("Resource", resource).detail("QueryString", query);
 			throw backup_invalid_url();
 		}
+		// bucket and object become paths under persistenceDir; don't let either escape it.
+		// A leading slash in object is harmless (it's appended after a '/'), so skip it.
+		const std::string objectPath = object.starts_with('/') ? object.substr(1) : object;
+		if (bucket == "." || bucket == ".." || !relativePathIsContained(objectPath)) {
+			TraceEvent(SevWarn, "MockS3InvalidPath").detail("Resource", resource);
+			throw backup_invalid_url();
+		}
 
 		TraceEvent("MockS3ParsedPath")
 		    .detail("OriginalResource", resource)
