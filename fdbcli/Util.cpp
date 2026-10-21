@@ -25,11 +25,46 @@
 #include "fdbclient/StatusSchema.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/BulkLoading.h"
+#include "fdbclient/SystemData.h"
 #include "flow/Arena.h"
 #include "flow/ThreadHelper.h"
 #include <fmt/core.h>
 
 namespace fdb_cli {
+
+bool auditLogEnabled = false;
+AuditLogValues auditLogValues = kDefaultAuditLogValues;
+
+void auditLogReturnedKey(Database const& cx,
+                         const char* command,
+                         UID auditId,
+                         KeyRef key,
+                         Optional<ValueRef> value,
+                         Optional<NetworkAddress> storageServer) {
+	if (!auditLogEnabled) {
+		return;
+	}
+	TraceEvent ev("FdbCliAudit"_audit);
+	// -1 means no truncation. The default would cut off long keys and values, and an audit record needs them whole.
+	ev.setMaxFieldLength(-1).setMaxEventLength(-1);
+	ev.detail("Command", command)
+	    .detail("AuditID", auditId)
+	    .detail("Cluster",
+	            cx->getConnectionRecord() ? cx->getConnectionRecord()->getConnectionString().clusterKeyName() : Key());
+	// The local IP this client reaches the coordinators from, same as the IP in Machine (whose "port" is the pid)
+	static const IPAddress ip = cx->getConnectionRecord()
+	                                ? cx->getConnectionRecord()->getConnectionString().determineLocalSourceIP()
+	                                : IPAddress();
+	ev.detail("IPAddress", ip);
+	ev.detail("Key", key);
+	if (value.present() && (auditLogValues == AuditLogValues::All ||
+	                        (auditLogValues == AuditLogValues::System && key.startsWith(systemKeys.begin)))) {
+		ev.detail("Value", value.get());
+	}
+	if (storageServer.present()) {
+		ev.detail("StorageServer", storageServer.get());
+	}
+}
 
 bool tokencmp(StringRef token, const char* command) {
 	if (token.size() != strlen(command))
