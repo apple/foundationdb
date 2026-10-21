@@ -22,6 +22,7 @@
 #include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
 #include "flow/BooleanParam.h"
+#include "flow/Platform.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "BackupContainerLocalDirectory.h"
 #include "BackupContainerBlobStore.h"
@@ -242,7 +243,20 @@ public:
 		return path.substr(pos + 1);
 	}
 
+	// Listed paths are used as file names under the container (and fdbdecode --save writes them locally), so skip any
+	// that could escape it.
+	static bool listedPathIsContained(const std::string& path) {
+		if (relativePathIsContained(path)) {
+			return true;
+		}
+		TraceEvent(SevWarnAlways, "BackupContainerInvalidListedPath").suppressFor(60).detail("Path", path);
+		return false;
+	}
+
 	static bool pathToRangeFile(RangeFile& out, const std::string& path, int64_t size) {
+		if (!listedPathIsContained(path))
+			return false;
+
 		std::string name = fileNameOnly(path);
 		RangeFile f;
 		f.fileName = path;
@@ -1574,6 +1588,9 @@ public:
 	}
 
 	static bool pathToLogFile(LogFile& out, const std::string& path, int64_t size) {
+		if (!listedPathIsContained(path))
+			return false;
+
 		std::string name = fileNameOnly(path);
 		LogFile f;
 		f.fileName = path;
@@ -1604,6 +1621,9 @@ public:
 	}
 
 	static bool pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile& out, const std::string& path) {
+		if (!listedPathIsContained(path))
+			return false;
+
 		std::string name = fileNameOnly(path);
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
