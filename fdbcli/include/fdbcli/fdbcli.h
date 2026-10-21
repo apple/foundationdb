@@ -123,6 +123,21 @@ Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* worke
 Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                         std::map<std::string, StorageServerInterface>* interfaces);
 
+// Set by --audit-log or the FDB_CLI_AUDIT_LOG_ENABLE environment variable. Requires tracing to be enabled.
+extern bool auditLogEnabled;
+// Which returned values are audit logged. Set by --audit-log-values, defaults to kDefaultAuditLogValues.
+enum class AuditLogValues { None, System, All };
+constexpr AuditLogValues kDefaultAuditLogValues = AuditLogValues::System;
+extern AuditLogValues auditLogValues;
+// Audit log one key returned to the user by a read command. Whether the value is logged depends on auditLogValues.
+// The cluster description is read from cx's connection record when logging, so it follows description changes.
+void auditLogReturnedKey(Database const& cx,
+                         const char* command,
+                         UID auditId,
+                         KeyRef key,
+                         Optional<ValueRef> value = Optional<ValueRef>(),
+                         Optional<NetworkAddress> storageServer = Optional<NetworkAddress>());
+
 bool tokencmp(StringRef token, const char* command);
 void printUsage(StringRef command);
 void printLongDesc(StringRef command);
