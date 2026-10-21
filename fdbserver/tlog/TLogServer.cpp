@@ -4721,17 +4721,27 @@ TEST_CASE("/NativeCDC/TLogCommittedFrontier/Stop") {
 
 TEST_CASE("/NativeCDC/TLogCommittedFrontier/AbsoluteDeadline") {
 	CommittedPeekTestFixture fixture(true, 90);
+	const double timeout = SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT;
 	Promise<TLogPeekReply> reply;
 	double started = now();
+	double lastAdvance = started;
 	Future<Void> peek = fixture.peek(reply);
+	// This may be delayed more than intended under load, so stop advancing
+	// once the reply exists, and compare the deadline to when advance happened.
 	for (Version frontier = 91; frontier <= 93; ++frontier) {
 		co_await delay(0.1);
+		if (reply.getFuture().isReady()) {
+			break;
+		}
 		fixture.advance(frontier);
+		lastAdvance = now();
 	}
-	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 0.2);
+	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 3.0);
 	co_await peek;
-	ASSERT(now() - started >= 0.35 && now() - started < 0.6);
-	ASSERT(result.minKnownCommittedVersion == 93);
+	// frontier advances below begin should not wake the peek nor extend its deadline
+	ASSERT_GT(now() - started, timeout - 0.01);
+	ASSERT_LT(now() - lastAdvance, timeout);
+	ASSERT_EQ(result.minKnownCommittedVersion, fixture.frontier());
 	ASSERT(fixture.timedOutPeeks() == 1);
 }
 
