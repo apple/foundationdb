@@ -1168,31 +1168,10 @@ static Future<Void> invalidateCacheByAddresses(DatabaseContext* self, std::unord
 		    .detail("Phase1Yields", phase1Yields);
 
 		// Process as many ranges as possible within chunk threshold
-		auto iter = self->locationCache.rangeContaining(cursor);
-		auto endIter = self->locationCache.ranges().end();
-		bool rangesRemaining = false;
-		int currRangesScanned = 0;
-		for (; iter != endIter; ++iter) {
-			if (currRangesScanned >= rangeChunkThreshold) {
-				rangesRemaining = true;
-				break;
-			}
-			++currRangesScanned;
-			cursor = iter->end();
-			if (!iter->value()) {
-				continue;
-			}
-			auto& loc = iter->value();
-			for (int i = 0; i < loc->size(); ++i) {
-				if (addresses.contains(loc->getInterface(i).address())) {
-					rangesToInvalidate.push_back(KeyRange(KeyRangeRef(iter->begin(), iter->end())));
-					break;
-				}
-			}
-		}
-		phase1RangesScanned += currRangesScanned;
+		auto scan = self->locationCache.scanAddresses(addresses, cursor, rangeChunkThreshold, rangesToInvalidate);
+		phase1RangesScanned += scan.rangesScanned;
 
-		if (!rangesRemaining) {
+		if (!scan.more) {
 			TraceEvent("LocationCacheInvalidatedByAddresses_Phase1_End")
 			    .detail("DbId", self->dbId)
 			    .detail("AddressCount", addresses.size())
@@ -1225,7 +1204,7 @@ static Future<Void> invalidateCacheByAddresses(DatabaseContext* self, std::unord
 	int phase2Yields = 0;
 	double phase2StartT = now();
 	for (; phase2Idx < rangesToInvalidate.size(); phase2Idx++) {
-		self->locationCache.insert(rangesToInvalidate[phase2Idx], Reference<LocationInfo>());
+		self->locationCache.invalidateExact(rangesToInvalidate[phase2Idx]);
 		if ((phase2Idx + 1) % rangeChunkThreshold == 0) {
 			++phase2Yields;
 			TraceEvent("LocationCacheInvalidatedByAddresses_Phase2_Yield")
@@ -1396,8 +1375,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	snapshotRywEnabled = apiVersion.hasSnapshotRYW() ? 1 : 0;
 
 	logger = databaseLogger(this) && tssLogger(this);
-	locationCacheSize = g_network->isSimulated() ? CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE_SIM
-	                                             : CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE;
+	locationCache.setCapacity(g_network->isSimulated() ? CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE_SIM
+	                                                   : CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE);
 
 	getValueSubmitted.init("NativeAPI.GetValueSubmitted"_sr);
 	getValueCompleted.init("NativeAPI.GetValueCompleted"_sr);
@@ -1717,7 +1696,7 @@ DatabaseContext::~DatabaseContext() {
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT(server_interf.empty());
-	locationCache.insert(allKeys, Reference<LocationInfo>());
+	locationCache.clear();
 
 	DisabledTraceEvent("DatabaseContextDestructed", dbId).backtrace();
 }

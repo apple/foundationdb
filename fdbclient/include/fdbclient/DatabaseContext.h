@@ -21,6 +21,7 @@
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
 #include "fdbclient/Notified.h"
+#include "fdbclient/ClientLocationCache.h"
 #include "flow/ApiVersion.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
@@ -61,17 +62,6 @@ private:
 	DatabaseContext* cx;
 	StorageServerInfo(DatabaseContext* cx, StorageServerInterface const& interf, LocalityData const& locality)
 	  : ReferencedInterface<StorageServerInterface>(interf, locality), cx(cx) {}
-};
-
-struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
-	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
-	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
-	  : Locations(v) {}
-	LocationInfo(const LocationInfo&) = delete;
-	LocationInfo(LocationInfo&&) = delete;
-	LocationInfo& operator=(const LocationInfo&) = delete;
-	LocationInfo& operator=(LocationInfo&&) = delete;
-	Reference<Locations> locations() { return Reference<Locations>::addRef(this); }
 };
 
 using CommitProxyInfo = ModelInterface<CommitProxyInterface, ProxyCpuMetric>;
@@ -163,14 +153,6 @@ struct MutationAndVersionStream {
 struct EndpointFailureInfo {
 	double startTime = 0;
 	double lastRefreshTime = 0;
-};
-
-struct KeyRangeLocationInfo {
-	KeyRange range;
-	Reference<LocationInfo> locations;
-
-	KeyRangeLocationInfo() = default;
-	KeyRangeLocationInfo(KeyRange range, Reference<LocationInfo> locations) : range(range), locations(locations) {}
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
@@ -417,8 +399,7 @@ public:
 	ClientStatusUpdater clientStatusUpdater;
 
 	// Cache of location information
-	int locationCacheSize;
-	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
+	ClientLocationCache locationCache;
 	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
 
 	std::map<UID, StorageServerInfo*> server_interf;

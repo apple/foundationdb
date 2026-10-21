@@ -3144,7 +3144,7 @@ void addDataDistributionActors(Reference<DataDistributor> self, std::vector<Futu
 Future<Void> dataDistribution(Reference<DataDistributor> self,
                               PromiseStream<GetMetricsListRequest> getShardMetricsList) {
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
-	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
+	cx->locationCache.setCapacity(SERVER_KNOBS->DD_LOCATION_CACHE_SIZE);
 	self->txnProcessor = makeReference<DDTxnProcessor>(cx);
 
 	TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Start");
