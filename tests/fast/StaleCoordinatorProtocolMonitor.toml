@@ -1,0 +1,16 @@
+[configuration]
+buggify = false
+coordinators = 3
+
+[[test]]
+testTitle = 'StaleCoordinatorProtocolMonitor'
+runConsistencyCheck = false
+waitForQuiescenceBegin = false
+waitForQuiescenceEnd = false
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'StaleCoordinatorProtocolMonitor'
+    numDatabases = 20
+    numStaleCoordinators = 9
+    protocolTimeout = 60.0
