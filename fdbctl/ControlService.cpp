@@ -28,7 +28,8 @@ namespace fdbctl {
 
 using namespace std::chrono_literals;
 
-ControlServiceImpl::ControlServiceImpl(Reference<IDatabase> db) : Service(), db_(db) {}
+ControlServiceImpl::ControlServiceImpl(Reference<IDatabase> db)
+  : db_(db), process_(g_network->isSimulated() ? g_simulator->getCurrentProcess() : nullptr) {}
 
 } // namespace fdbctl
 #endif // FLOW_GRPC_ENABLED

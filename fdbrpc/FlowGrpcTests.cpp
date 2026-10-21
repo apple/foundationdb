@@ -111,7 +111,7 @@ TEST_CASE("/fdbrpc/grpc/no_server_running") {
 	try {
 		EchoRequest request;
 		request.set_message("Ping!");
-		EchoResponse response = co_await client.call(&TestEchoService::Stub::Echo, request);
+		co_await client.call(&TestEchoService::Stub::Echo, request);
 		ASSERT(false); // RPC should fail as there is no server running.;
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_grpc_error);
@@ -787,7 +787,7 @@ S70C3DaU2iJgFTuG+ZySAJmLL35jOGH+JUk+c22ZHYw7u1D8kSmlCNX/LzPHFb/D
 		try {
 			EchoRequest request;
 			request.set_message("Ping!");
-			EchoResponse response = co_await client.call(&TestEchoService::Stub::Echo, request);
+			co_await client.call(&TestEchoService::Stub::Echo, request);
 			ASSERT(false);
 		} catch (Error& e) {
 			ASSERT_EQ(e.code(), error_code_grpc_error);
