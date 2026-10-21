@@ -274,6 +274,7 @@ struct GrpcEchoWorkload : TestWorkload {
 		while (true) {
 			std::vector<Future<Void>> batch;
 			int n = deterministicRandom()->randomInt(1, 6);
+			batch.reserve(n);
 			for (int k = 0; k < n; ++k) {
 				batch.push_back(callOnce(c));
 			}
@@ -353,6 +354,7 @@ struct GrpcEchoWorkload : TestWorkload {
 
 	Future<Void> startImpl() {
 		std::vector<Future<Void>> loops;
+		loops.reserve(stubs.size() + 1);
 		for (int c = 0; c < static_cast<int>(stubs.size()); ++c) {
 			loops.push_back(loadLoop(c));
 		}

@@ -574,10 +574,12 @@ TEST_CASE("/fdbrpc/simgrpc/echo") {
 	checkResult("echo", harness->outcomes, harness->mismatches);
 	// grpc::Server::Shutdown() and channel teardown block on a completion queue that only this thread can drive,
 	// so the test deliberately leaks them.
+	// NOLINTBEGIN(bugprone-unused-return-value)
 	(void)server.release();
 	(void)service.release();
 	(void)new std::shared_ptr<grpc::Channel>(channel);
 	(void)harness.release();
+	// NOLINTEND(bugprone-unused-return-value)
 	co_await g_simulator->onProcess(original);
 }
 
