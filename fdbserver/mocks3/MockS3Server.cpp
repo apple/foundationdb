@@ -2094,6 +2094,69 @@ TEST_CASE("/MockS3Server/parseS3Request/ParametersWithoutValues") {
 	return Void();
 }
 
+TEST_CASE("/MockS3Server/parseS3Request/ContainedObjectPaths") {
+
+	MockS3ServerImpl server;
+	// Object names in the layouts backup and bulkload write, and names that only contain dots.
+	const std::vector<std::string> objects = {
+		"data/backup_container/kvranges/snapshot.000000000000000100/0/"
+		"range,123,0123456789abcdef0123456789abcdef,1048576",
+		"data/backup_container/plogs/0000/0000/log,100,200,0123456789abcdef0123456789abcdef,1-of-3,1048576",
+		"backups/backup_container",
+		"5676202155931feac1bbd501d491170b/ca5d8fe85737a30b59da5f2c67343fad/0/50705947-manifest.txt",
+		"a..b/.hidden/...",
+	};
+	for (const std::string& expected : objects) {
+		std::string bucket, object;
+		std::map<std::string, std::string> queryParams;
+		server.parseS3Request("/backup_bucket/" + expected, bucket, object, queryParams);
+		ASSERT_EQ(bucket, std::string("backup_bucket"));
+		ASSERT_EQ(object, expected);
+	}
+
+	// Leading slashes in the object are kept as is.
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+	server.parseS3Request("/backup_bucket//data/x", bucket, object, queryParams);
+	ASSERT_EQ(bucket, std::string("backup_bucket"));
+	ASSERT_EQ(object, std::string("/data/x"));
+
+	// The query string is not part of the path.
+	server.parseS3Request("/backup_bucket?list-type=2&prefix=../x", bucket, object, queryParams);
+	ASSERT_EQ(bucket, std::string("backup_bucket"));
+	ASSERT_EQ(queryParams["prefix"], std::string("../x"));
+
+	return Void();
+}
+
+TEST_CASE("/MockS3Server/parseS3Request/EscapingPaths") {
+
+	MockS3ServerImpl server;
+	// Bucket "." or "..", or an object with a ".." component, even after leading slashes.
+	const std::vector<std::string> resources = {
+		"/../x",
+		"/./x",
+		"/..",
+		"/bucket/../x",
+		"/bucket/a/../../x",
+		"/bucket/..",
+		"/bucket//../x",
+		"/bucket/../x?partNumber=1&uploadId=u",
+	};
+	for (const std::string& resource : resources) {
+		std::string bucket, object;
+		std::map<std::string, std::string> queryParams;
+		try {
+			server.parseS3Request(resource, bucket, object, queryParams);
+			ASSERT(false); // Should not reach here
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_backup_invalid_url);
+		}
+	}
+
+	return Void();
+}
+
 TEST_CASE("/MockS3Server/RangeHeader/SimpleByteRange") {
 	std::string rangeHeader = "bytes=0-99";
 	int64_t rangeStart, rangeEnd;

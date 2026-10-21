@@ -2652,6 +2652,105 @@ TEST_CASE("/backup/logs_continuous") {
 	return Void();
 }
 
+// writeRangeFile() paths parse; the same name under an escaping path doesn't.
+TEST_CASE("/backup/pathToRangeFile") {
+	const Version fileVersion = 123;
+	const int blockSize = 1048576;
+	const std::string name = format(
+	    "range,%" PRId64 ",%s,%d", fileVersion, deterministicRandom()->randomUniqueID().toString().c_str(), blockSize);
+	const std::string folder = BackupContainerFileSystemImpl::snapshotFolderString(100) + format("/%d/", 0);
+	const std::string oldFolder = BackupContainerFileSystemImpl::old_rangeVersionFolderString(fileVersion);
+
+	for (const std::string& path : { folder + name, oldFolder + name }) {
+		RangeFile rf;
+		ASSERT(BackupContainerFileSystemImpl::pathToRangeFile(rf, path, 4096));
+		ASSERT_EQ(rf.version, fileVersion);
+		ASSERT_EQ(rf.blockSize, blockSize);
+		ASSERT_EQ(rf.fileName, path);
+		ASSERT_EQ(rf.fileSize, 4096);
+	}
+
+	const std::vector<std::string> escaping = {
+		"kvranges/../../x/" + name,
+		folder + "../../../../" + name,
+		oldFolder + "../../../../" + name,
+		"/" + folder + name,
+	};
+	for (const std::string& path : escaping) {
+		RangeFile rf;
+		ASSERT(!BackupContainerFileSystemImpl::pathToRangeFile(rf, path, 4096));
+	}
+
+	return Void();
+}
+
+// writeLogFile() and writeTaggedLogFile() paths parse; the same names under an escaping path don't.
+TEST_CASE("/backup/pathToLogFile") {
+	const Version beginVersion = 100;
+	const Version endVersion = 200;
+	const int blockSize = 1048576;
+	const std::string uid = deterministicRandom()->randomUniqueID().toString();
+	const std::string name = format("log,%lld,%lld,%s,%d", beginVersion, endVersion, uid.c_str(), blockSize);
+	const std::string taggedName =
+	    format("log,%lld,%lld,%s,%d-of-%d,%d", beginVersion, endVersion, uid.c_str(), 1, 3, blockSize);
+	const std::string folder =
+	    BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, MutationLogType::DEFAULT);
+	const std::string taggedFolder =
+	    BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, MutationLogType::PARTITIONED_LOG);
+
+	LogFile lf;
+	ASSERT(BackupContainerFileSystemImpl::pathToLogFile(lf, folder + name, 4096));
+	ASSERT_EQ(lf.beginVersion, beginVersion);
+	ASSERT_EQ(lf.endVersion, endVersion);
+	ASSERT_EQ(lf.blockSize, blockSize);
+	ASSERT_EQ(lf.fileName, folder + name);
+	ASSERT_EQ(lf.fileSize, 4096);
+	ASSERT_EQ(lf.tagId, -1);
+
+	LogFile tagged;
+	ASSERT(BackupContainerFileSystemImpl::pathToLogFile(tagged, taggedFolder + taggedName, 4096));
+	ASSERT_EQ(tagged.beginVersion, beginVersion);
+	ASSERT_EQ(tagged.endVersion, endVersion);
+	ASSERT_EQ(tagged.blockSize, blockSize);
+	ASSERT_EQ(tagged.fileName, taggedFolder + taggedName);
+	ASSERT_EQ(tagged.tagId, 1);
+	ASSERT_EQ(tagged.totalTags, 3);
+
+	const std::vector<std::string> escaping = {
+		"logs/../../x/" + name,
+		folder + "../../../../" + name,
+		"/" + folder + name,
+		taggedFolder + "../../../../" + taggedName,
+		"/" + taggedFolder + taggedName,
+	};
+	for (const std::string& path : escaping) {
+		LogFile f;
+		ASSERT(!BackupContainerFileSystemImpl::pathToLogFile(f, path, 4096));
+	}
+
+	return Void();
+}
+
+// writeKeyspaceSnapshotFile() paths parse; the same name under an escaping path doesn't.
+TEST_CASE("/backup/pathToKeyspaceSnapshotFile") {
+	const std::string name = format("snapshot,%lld,%lld,%lld", 100LL, 200LL, 4096LL);
+	const std::string path = "snapshots/" + name;
+
+	KeyspaceSnapshotFile sf;
+	ASSERT(BackupContainerFileSystemImpl::pathToKeyspaceSnapshotFile(sf, path));
+	ASSERT_EQ(sf.beginVersion, 100);
+	ASSERT_EQ(sf.endVersion, 200);
+	ASSERT_EQ(sf.totalSize, 4096);
+	ASSERT_EQ(sf.fileName, path);
+
+	for (const std::string& escaping : { "snapshots/../../x/" + name, "/" + path }) {
+		KeyspaceSnapshotFile f;
+		ASSERT(!BackupContainerFileSystemImpl::pathToKeyspaceSnapshotFile(f, escaping));
+	}
+
+	return Void();
+}
+
 void printFileList(BackupFileList& backupFileList) {
 	printf("\nRangeFiles count:%lu", backupFileList.ranges.size());
 	for (const auto& r : backupFileList.ranges)
