@@ -2548,6 +2548,19 @@ std::string cleanPath(std::string const& path) {
 	return result.empty() ? "." : result;
 }
 
+bool relativePathIsContained(const std::string& path) {
+	if (!path.empty() && (path[0] == '/' || path[0] == CANONICAL_PATH_SEPARATOR)) {
+		return false;
+	}
+	StringRef p(path);
+	while (!p.empty()) {
+		if (p.eat(separator) == dotdot) {
+			return false;
+		}
+	}
+	return true;
+}
+
 std::string popPath(const std::string& path) {
 	int i = path.size() - 1;
 	// Skip over any trailing separators
@@ -4442,6 +4455,37 @@ void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {
 #else
 void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {}
 #endif
+
+TEST_CASE("/flow/Platform/relativePathIsContained") {
+	// Contained: relative with no ".." component, including names that merely contain dots.
+	ASSERT(relativePathIsContained(""));
+	ASSERT(relativePathIsContained("."));
+	ASSERT(relativePathIsContained("data.sst"));
+	ASSERT(relativePathIsContained("a/b/c"));
+	ASSERT(relativePathIsContained("logs/"));
+	ASSERT(relativePathIsContained("5676202155931feac1bbd501d491170b/0/data.sst"));
+	ASSERT(relativePathIsContained("kvranges/snapshot.000000000000000001//0/range,1,abc,1048576"));
+	ASSERT(relativePathIsContained("a/.hidden/b"));
+	ASSERT(relativePathIsContained("a..b/c"));
+	ASSERT(relativePathIsContained("..a"));
+	ASSERT(relativePathIsContained("..."));
+	ASSERT(relativePathIsContained("./a"));
+
+	// Not contained: absolute, or any ".." component (even one that would stay within the base).
+	ASSERT(!relativePathIsContained("/"));
+	ASSERT(!relativePathIsContained("/var/lib/foundationdb"));
+	ASSERT(!relativePathIsContained(".."));
+	ASSERT(!relativePathIsContained("../"));
+	ASSERT(!relativePathIsContained("../x"));
+	ASSERT(!relativePathIsContained("./../x"));
+	ASSERT(!relativePathIsContained("../../../../var/lib/foundationdb"));
+	ASSERT(!relativePathIsContained("a/../../etc"));
+	ASSERT(!relativePathIsContained("a/b/../../.."));
+	ASSERT(!relativePathIsContained("a/../b"));
+	ASSERT(!relativePathIsContained("a/b/.."));
+
+	return Void();
+}
 
 TEST_CASE("/flow/Platform/directoryOps") {
 	int errors = 0;
