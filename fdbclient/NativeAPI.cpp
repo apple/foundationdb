@@ -5800,10 +5800,21 @@ Future<ProtocolVersion> getClusterProtocolImpl(
 		if (!coordinator->get().present()) {
 			co_await coordinator->onChange();
 		} else {
+			// Created before resolving the hostname and reused for the race below, so a change that lands between
+			// the resolve finishing and this coroutine resuming is not missed.
+			auto coordinatorChanged = coordinator->onChange();
 			NetworkAddress coordinatorAddress;
 			if (coordinator->get().get().hostname.present()) {
 				Hostname h = coordinator->get().get().hostname.get();
-				coordinatorAddress = co_await h.resolveWithRetry();
+				// resolveWithRetry() never gives up, so a hostname that can't be resolved (e.g. a stale coordinator
+				// that was removed from DNS) must not keep us from noticing that the coordinator has changed.
+				auto resolved = co_await race(h.resolveWithRetry(), coordinatorChanged);
+				if (resolved.index() == 1) {
+					CODE_PROBE(true, "Coordinator changed while resolving the coordinator hostname");
+					needToConnect = true;
+					continue;
+				}
+				coordinatorAddress = std::get<0>(resolved);
 			} else {
 				coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
 			}
@@ -5815,7 +5826,6 @@ Future<ProtocolVersion> getClusterProtocolImpl(
 				needToConnect = false;
 			}
 
-			auto coordinatorChanged = coordinator->onChange();
 			// Older coordinators report their protocol version only in the connect packet.
 			Future<Optional<ProtocolVersion>> connectPacketVersion =
 			    coordinatorChanged.isReady() || protocolVersion.isReady()
