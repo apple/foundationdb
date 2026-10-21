@@ -31,6 +31,8 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/xxhash.h"
+#include "flow/ScopeExit.h"
+#include "flow/UnitTest.h"
 #include "flow/Error.h"
 #include "rapidxml/rapidxml.hpp"
 #include <openssl/sha.h>
@@ -1008,6 +1010,29 @@ Future<Void> copyDownFile(std::string s3url, std::string filepath) {
 	TraceEvent(SevDebug, "S3ClientCopyDownFileWrapperEnd").detail("S3URL", s3url).detail("FilePath", filepath);
 }
 
+namespace {
+
+// Lowered only by the unit test below, which triggers rejections on purpose (a SevError fails simulation runs).
+Severity invalidObjectNameSeverity = SevError;
+
+// Object names come from the bucket; don't let one escape dirpath.
+std::string copyDownFilePath(const std::string& dirpath, const std::string& resource, const std::string& objectName) {
+	std::string relativeName = objectName.substr(resource.size());
+	// copyUpDirectory names objects resource + "/" + file, so drop that one separator.
+	if (!relativeName.empty() && relativeName[0] == '/') {
+		relativeName = relativeName.substr(1);
+	}
+	if (!relativePathIsContained(relativeName)) {
+		TraceEvent(invalidObjectNameSeverity, "S3ClientCopyDownInvalidObjectName")
+		    .detail("ObjectName", objectName)
+		    .detail("Directory", dirpath);
+		throw backup_invalid_url();
+	}
+	return dirpath + "/" + relativeName;
+}
+
+} // namespace
+
 Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 	std::string resource;
 	S3BlobStoreEndpoint::ParametersT parameters;
@@ -1020,7 +1045,7 @@ Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 	    .detail("Bucket", bucket)
 	    .detail("Resource", resource);
 	for (const auto& object : objects) {
-		std::string filepath = dirpath + "/" + object.name.substr(resource.size());
+		std::string filepath = copyDownFilePath(dirpath, resource, object.name);
 		std::string s3path = object.name;
 		co_await copyDownFile(endpoint, bucket, s3path, filepath);
 	}
@@ -1190,4 +1215,33 @@ AsyncResult<std::vector<std::string>> listFiles_impl(Reference<S3BlobStoreEndpoi
 		TraceEvent(SevWarn, "S3ClientListFilesError").error(e).detail("Bucket", bucket).detail("Path", path);
 		throw;
 	}
+}
+
+TEST_CASE("/backup/s3/copyDownFilePath") {
+	ASSERT_EQ(copyDownFilePath("/tmp/down", "dir", "dir/a"), std::string("/tmp/down/a"));
+	ASSERT_EQ(copyDownFilePath("/tmp/down", "dir", "dir/sub/b.sst"), std::string("/tmp/down/sub/b.sst"));
+	ASSERT_EQ(copyDownFilePath("/tmp/down", "dir", "dir/a..b"), std::string("/tmp/down/a..b"));
+	ASSERT_EQ(copyDownFilePath("/tmp/down", "", "/a"), std::string("/tmp/down/a"));
+	ASSERT_EQ(copyDownFilePath("/tmp/down", "", "a/b"), std::string("/tmp/down/a/b"));
+
+	// The rejections below are expected, so log them below SevError for the duration of this test.
+	invalidObjectNameSeverity = SevWarnAlways;
+	ScopeExit restoreSeverity([]() { invalidObjectNameSeverity = SevError; });
+
+	const std::vector<std::pair<std::string, std::string>> rejected = {
+		{ "dir", "dir/../x" }, { "dir", "dir/a/../../x" }, { "dir", "dir//abs" },
+		{ "dir", "dir../x" },  { "dir", "dir/.." },        { "", "../x" },
+		{ "", "//abs" },
+	};
+	for (const auto& [resource, objectName] : rejected) {
+		try {
+			(void)copyDownFilePath("/tmp/down", resource, objectName);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+			continue;
+		}
+		ASSERT(false);
+	}
+
+	return Void();
 }

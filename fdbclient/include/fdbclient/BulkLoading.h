@@ -1074,7 +1074,9 @@ public:
 
 	std::string getManifestRelativePath() const { return manifestRelativePath; }
 
-	bool isValid() const { return beginKey < endKey && version != invalidVersion; }
+	bool isValid() const {
+		return beginKey < endKey && version != invalidVersion && relativePathIsContained(manifestRelativePath);
+	}
 
 	bool hasEmptyData() const { return bytes == 0; }
 
