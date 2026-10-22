@@ -557,6 +557,7 @@ else()
     $<${is_cxx_compile}:-Wno-error=format>
     $<${is_cxx_compile}:-Wunused-variable>
     $<${is_cxx_compile}:-Wno-deprecated>
+    $<${is_cxx_compile}:-Wno-deprecated-declarations> # for openssl old md5/sha1 api
     $<${is_cxx_compile}:-fvisibility=hidden>
     $<${is_cxx_compile}:-Wreturn-type>
     $<${is_cxx_compile}:-fPIC>
