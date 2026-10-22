@@ -2554,37 +2554,38 @@ Future<int> queryBackup(const char* name,
 	    .detail("RestoreTimestamp", restoreTimestamp)
 	    .detail("BackupClusterFile", originalClusterFile);
 
-	// Resolve restoreTimestamp if given
-	if (!restoreTimestamp.empty()) {
-		if (originalClusterFile.empty()) {
-			reportBackupQueryError(
-			    operationId,
-			    result,
-			    format("a cluster file must be given in order to resolve restore target timestamp '%s'",
-			           restoreTimestamp.c_str()));
-			co_return FDB_EXIT_ERROR;
-		}
-
-		if (!fileExists(originalClusterFile)) {
-			reportBackupQueryError(operationId,
-			                       result,
-			                       format("The specified original source database cluster file '%s' does not exist\n",
-			                              originalClusterFile.c_str()));
-			co_return FDB_EXIT_ERROR;
-		}
-
-		Database origDb = Database::createDatabase(originalClusterFile, ApiVersion::LATEST_VERSION);
-		Version v = co_await timeKeeperVersionFromDatetime(restoreTimestamp, origDb);
-		result["restore_timestamp"] = restoreTimestamp;
-		result["restore_timestamp_resolved_version"] = v;
-		restoreVersion = v;
-	}
-
 	int64_t totalRangeFilesSize = 0;
 	int64_t totalLogFilesSize = 0;
 	JsonBuilderArray rangeFilesJson;
 	JsonBuilderArray logFilesJson;
 	try {
+		// Resolve restoreTimestamp if given
+		if (!restoreTimestamp.empty()) {
+			if (originalClusterFile.empty()) {
+				reportBackupQueryError(
+				    operationId,
+				    result,
+				    format("a cluster file must be given in order to resolve restore target timestamp '%s'",
+				           restoreTimestamp.c_str()));
+				co_return FDB_EXIT_ERROR;
+			}
+
+			if (!fileExists(originalClusterFile)) {
+				reportBackupQueryError(
+				    operationId,
+				    result,
+				    format("The specified original source database cluster file '%s' does not exist\n",
+				           originalClusterFile.c_str()));
+				co_return FDB_EXIT_ERROR;
+			}
+
+			Database origDb = Database::createDatabase(originalClusterFile, ApiVersion::LATEST_VERSION);
+			Version v = co_await timeKeeperVersionFromDatetime(restoreTimestamp, origDb);
+			result["restore_timestamp"] = restoreTimestamp;
+			result["restore_timestamp_resolved_version"] = v;
+			restoreVersion = v;
+		}
+
 		Reference<IBackupContainer> bc = openBackupContainer(name, destinationContainer, proxy, {}, 0);
 		BackupDescription desc = co_await bc->describeBackup();
 		// Use continuous log end version for the maximum restorable version for the key ranges when a restorable
