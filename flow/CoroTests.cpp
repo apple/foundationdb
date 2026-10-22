@@ -1190,6 +1190,34 @@ TEST_CASE("/flow/coro/YieldedAsyncMap/cancel2") {
 	y2.cancel();
 }
 
+// destroyOnCancelYield's erase-on-cancel guard is only for cancellation; real errors must reach the waiter.
+TEST_CASE("/flow/coro/YieldedAsyncMap/errorsPropagate") {
+	{
+		YieldedAsyncMap<int, int> yam;
+		Future<Void> y1 = yam.onChange(1);
+		yam.sendError(0, 10, io_error());
+		Error err;
+		try {
+			co_await y1;
+		} catch (Error& e) {
+			err = e;
+		}
+		ASSERT_EQ(err.code(), error_code_io_error);
+	}
+	{
+		auto yam = std::make_unique<YieldedAsyncMap<int, int>>();
+		Future<Void> y1 = yam->onChange(1);
+		yam.reset();
+		Error err;
+		try {
+			co_await y1;
+		} catch (Error& e) {
+			err = e;
+		}
+		ASSERT_EQ(err.code(), error_code_broken_promise);
+	}
+}
+
 TEST_CASE("/flow/coro/AsyncVar/basic") {
 	AsyncVar<int> av;
 	Future<Void> ch = av.onChange();
