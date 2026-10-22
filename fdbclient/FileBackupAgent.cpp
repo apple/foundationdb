@@ -7689,10 +7689,13 @@ public:
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						Reference<IBackupContainer> bc;
 						TimestampedVersion latestRestorable;
+						MutationLogType mutationLogType;
 
 						co_await (
 						    store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))) &&
-						    store(bc, config.backupContainer().getOrThrow(tr)));
+						    store(bc, config.backupContainer().getOrThrow(tr)) &&
+						    store(mutationLogType,
+						          config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT)));
 						bc = fileBackup::getBackupContainerWithProxy(bc);
 
 						doc.setKey("Restorable", latestRestorable.present());
@@ -7707,6 +7710,7 @@ public:
 							doc.setKey("LatestRestorablePoint", o);
 						}
 						doc.setKey("DestinationURL", bc->getURL());
+						doc.setKey("MutationLogType", mutationLogTypeToString(mutationLogType));
 					}
 
 					if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
