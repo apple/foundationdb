@@ -1012,7 +1012,7 @@ static void printRestoreUsage(bool devhelp) {
 	printf("                 The restore tag to act on.  Default is 'default'\n");
 	printf("\n");
 	printf("  Options for status:\n\n");
-	printf("  --json         Emit the status as a JSON document instead of text.\n");
+	printf("  --json         Emit the status as a JSON document.\n");
 	printf("\n");
 	printf("  Options for start:\n\n");
 	printf("  -r URL         The Backup URL for the restore to read from.\n");
@@ -1144,7 +1144,7 @@ static void printDBBackupUsage(bool devhelp) {
 	       "                 The path of a file containing the connection string for the\n"
 	       "                 source FoundationDB cluster.\n");
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 20).\n");
-	printf("  --json         Emit status as a JSON document instead of text. Reports every error\n"
+	printf("  --json         Emit status as a JSON document. Reports every error\n"
 	       "                 rather than the -e maximum, which applies to the text output only.\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 	       "                 If not specified, the entire database will be backed up.\n");

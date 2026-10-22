@@ -934,7 +934,6 @@ Future<RestoreConfig::StatusSnapshot> RestoreConfig::getStatusSnapshot_impl(Rest
 	Future<Version> readVersion = tr->getReadVersion();
 
 	UID uid = restore.getUid();
-	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	co_await (success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
 	          success(fileBlocksFinished) && success(bytesWritten) && success(currentVersion) && success(lag) &&
 	          success(firstConsistentVersion) && success(tag) && success(lastError) && success(submittedTasks) &&
@@ -1013,7 +1012,6 @@ std::string RestoreConfig::renderProgressText(const StatusSnapshot& s) {
 }
 
 // {snapshot, mutation log} phase, or {nullptr, nullptr} when the state has no phase to report.
-// Shared by the text and JSON renderers so the two cannot disagree.
 std::pair<const char*, const char*> RestoreConfig::statusPhases(const StatusSnapshot& s) {
 	if (s.state == ERestoreState::COMPLETED) {
 		return { "complete", "complete" };
@@ -1027,9 +1025,8 @@ std::pair<const char*, const char*> RestoreConfig::statusPhases(const StatusSnap
 	return { s.bulkLoadComplete ? "complete" : "in_progress", s.bulkLoadComplete ? "in_progress" : "not_started" };
 }
 
-// Average bytes per triggered task, or 0 when there is none to report. Shared so the text and JSON renderers
-// cannot disagree about whether to emit it. The quotient is a double because an integer one rounds a sub-one
-// average to zero, which would drop the field from one renderer and keep it in the other.
+// Average bytes per triggered task, or 0 when there is none to report. The quotient is a double because an integer
+// one rounds a sub-one average to zero, which would wrongly suppress the field.
 double RestoreConfig::avgBytesPerTask(const StatusSnapshot& s) {
 	return s.triggeredTasks > 0 ? (double)s.bytesWritten / s.triggeredTasks : 0;
 }
