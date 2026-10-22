@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.h"
@@ -30,6 +32,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
+#include "BackupRangeSpec.h"
 
 // TODO: explain the purpose of this workload and how it different from the
 // 20+ (literally) other backup/restore workloads.
@@ -44,6 +47,11 @@ struct RestoreBackupWorkload : TestWorkload {
 	double delayFor;
 	StopWhenDone stopWhenDone{ false };
 	Optional<std::string> encryptionKeyFileName;
+	// A subset of the backup's ranges to restore; the whole backup when unset.
+	Optional<Standalone<VectorRef<KeyRangeRef>>> restoreRanges;
+	Key addPrefix;
+	Key removePrefix;
+	UID backupUID;
 	// The extra describeBackup() call is skipped in simulation so existing seeds are unaffected.
 	bool reportBackupMetrics;
 	std::vector<PerfMetric> backupMetrics;
@@ -55,6 +63,9 @@ struct RestoreBackupWorkload : TestWorkload {
 		tag = getOption(options, "tag"_sr, "default"_sr);
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, false));
+		restoreRanges = BackupRangeSpec::readOptionalRanges(options, "restoreRanges"_sr, "restoreRangePrefix"_sr);
+		addPrefix = BackupRangeSpec::readKeyOption(options, "addPrefix"_sr);
+		removePrefix = BackupRangeSpec::readKeyOption(options, "removePrefix"_sr);
 		reportBackupMetrics = getOption(options, "reportBackupMetrics"_sr, !g_network->isSimulated());
 
 		std::string keyFileName = "simfdb/" + getTestEncryptionFileName();
@@ -68,7 +79,6 @@ struct RestoreBackupWorkload : TestWorkload {
 
 	Future<Void> waitOnBackup(Database cx) {
 		Version waitForVersion{ 0 };
-		UID backupUID;
 		Transaction tr(cx);
 		while (true) {
 			Error err;
@@ -117,7 +127,8 @@ struct RestoreBackupWorkload : TestWorkload {
 
 	static double versionsToSeconds(Version v) { return double(v) / SERVER_KNOBS->VERSIONS_PER_SECOND; }
 
-	// Records metrics about the backup being restored. The snapshot is the restorable one with the greatest
+	// Records metrics about the backup being restored, which describe the whole backup even when restoreRanges
+	// selects a subset. The snapshot is the restorable one with the greatest
 	// endVersion, which is the snapshot a restore to the latest restorable version uses.
 	Future<Void> describeBackupMetrics() {
 		BackupDescription desc = co_await backupContainer->describeBackup();
@@ -152,14 +163,13 @@ struct RestoreBackupWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> clearDatabase(Database cx) {
+	static Future<Void> clearRanges(Database cx, Standalone<VectorRef<KeyRangeRef>> ranges) {
 		Transaction tr(cx);
 		while (true) {
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.clear(normalKeys);
-				for (auto& r : getSystemBackupRanges()) {
+				for (auto const& r : ranges) {
 					tr.clear(r);
 				}
 				co_await tr.commit();
@@ -169,6 +179,50 @@ struct RestoreBackupWorkload : TestWorkload {
 			}
 			co_await tr.onError(err);
 		}
+	}
+
+	static std::string describeRange(KeyRangeRef const& r) { return printable(r.begin) + ":" + printable(r.end); }
+
+	static std::string describeRanges(std::vector<KeyRange> const& ranges) {
+		std::string result;
+		for (auto const& r : ranges) {
+			result += (result.empty() ? "" : ";") + describeRange(r);
+		}
+		return result;
+	}
+
+	// Returns the ranges to restore: restoreRanges if set, else the ranges the backup covers. Every restoreRanges
+	// entry must lie within one backup range: submitBackup coalesces them, so a range spanning two is not covered.
+	Future<Standalone<VectorRef<KeyRangeRef>>> getRangesToRestore(Database cx) {
+		std::vector<KeyRange> backupRanges =
+		    co_await BackupConfig(backupUID).backupRanges().getOrThrow(cx.getReference());
+		Standalone<VectorRef<KeyRangeRef>> ranges;
+		if (restoreRanges.present()) {
+			for (auto const& r : restoreRanges.get()) {
+				bool covered = std::any_of(
+				    backupRanges.begin(), backupRanges.end(), [&](KeyRange const& b) { return b.contains(r); });
+				if (!covered) {
+					TraceEvent(SevWarnAlways, "RestoreRangeNotInBackup")
+					    .detail("RestoreRange", describeRange(r))
+					    .detail("BackupRanges", describeRanges(backupRanges));
+					throw restore_error();
+				}
+				ranges.push_back_deep(ranges.arena(), r);
+			}
+		} else {
+			for (auto const& r : backupRanges) {
+				ranges.push_back_deep(ranges.arena(), r);
+			}
+		}
+		for (auto const& r : ranges) {
+			if (!r.begin.startsWith(removePrefix) || !r.end.startsWith(removePrefix)) {
+				TraceEvent(SevWarnAlways, "RestoreRangeOutsideRemovePrefix")
+				    .detail("RestoreRange", describeRange(r))
+				    .detail("RemovePrefix", removePrefix);
+				throw restore_error();
+			}
+		}
+		co_return ranges;
 	}
 
 	Future<Void> _start(Database cx) {
@@ -185,21 +239,30 @@ struct RestoreBackupWorkload : TestWorkload {
 				TraceEvent(SevWarn, "RestoreBackupDescribeFailed").error(e);
 			}
 		}
-		co_await clearDatabase(cx);
+		Standalone<VectorRef<KeyRangeRef>> ranges = co_await getRangesToRestore(cx);
+		// An in-place restore overwrites live keys: it clears exactly the ranges it restores and takes the database
+		// lock. With a prefix change the destination must already be empty, so nothing is cleared and the restore
+		// must not block other clients or restores.
+		bool inPlace = addPrefix.empty() && removePrefix.empty();
+		if (inPlace) {
+			co_await clearRanges(cx, ranges);
+		}
 
+		LockDB lockDB(inPlace);
 		double restoreStart = now();
 		co_await backupAgent.restore(cx,
 		                             cx,
 		                             tag,
 		                             Key(backupContainer->getURL()),
 		                             backupContainer->getProxy(),
+		                             ranges,
 		                             WaitForComplete::True,
 		                             ::invalidVersion,
 		                             Verbose::True,
-		                             KeyRange(),
-		                             Key(),
-		                             Key(),
-		                             LockDB::True,
+		                             addPrefix,
+		                             removePrefix,
+		                             lockDB,
+		                             UnlockDB(lockDB),
 		                             OnlyApplyMutationLogs::False,
 		                             InconsistentSnapshotOnly::False,
 		                             ::invalidVersion,
