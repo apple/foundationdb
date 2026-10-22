@@ -2549,12 +2549,17 @@ std::string cleanPath(std::string const& path) {
 }
 
 bool relativePathIsContained(const std::string& path) {
-	if (!path.empty() && (path[0] == '/' || path[0] == CANONICAL_PATH_SEPARATOR)) {
+	const std::string unixPath{ [&path] {
+		std::string s{ path };
+		std::ranges::replace(s, CANONICAL_PATH_SEPARATOR, '/');
+		return s;
+	}() };
+	if (!unixPath.empty() && unixPath[0] == '/') {
 		return false;
 	}
-	StringRef p(path);
+	StringRef p{ unixPath };
 	while (!p.empty()) {
-		if (p.eat(separator) == dotdot) {
+		if (p.eat("/"_sr) == dotdot) {
 			return false;
 		}
 	}
