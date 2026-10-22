@@ -220,6 +220,11 @@ struct RangePartitionedBackupData {
 		if (!logSystem.get()) {
 			return;
 		}
+		// The epoch was retired while this worker still ran, e.g. a replaced worker not yet fenced. An
+		// epoch retires only once its whole range is covered, so nothing is left to pop.
+		if (backupEpoch < oldestBackupEpoch) {
+			return;
+		}
 		// Defer the pop in two cases, both to avoid losing mutations a future worker might still need:
 		//   1. An older epoch still has work to finish (backupEpoch > oldestBackupEpoch). Wait for that
 		//      older epoch to catch up before popping from this epoch.
