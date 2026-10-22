@@ -708,34 +708,25 @@ FastAllocator<Size>::ThreadData::~ThreadData() {
 int64_t getTotalUnusedAllocatedMemory() {
 	int64_t unusedMemory = 0;
 
-	unusedMemory += FastAllocator<16>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<32>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<64>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<96>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<128>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<256>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<512>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<1024>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<2048>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<4096>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<8192>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<16384>::getApproximateMemoryUnused();
+	forEachFastAllocatorSize([&]<int Size>() { unusedMemory += FastAllocator<Size>::getApproximateMemoryUnused(); });
 
 	return unusedMemory;
 }
 
-template class FastAllocator<16>;
-template class FastAllocator<32>;
-template class FastAllocator<64>;
-template class FastAllocator<96>;
-template class FastAllocator<128>;
-template class FastAllocator<256>;
-template class FastAllocator<512>;
-template class FastAllocator<1024>;
-template class FastAllocator<2048>;
-template class FastAllocator<4096>;
-template class FastAllocator<8192>;
-template class FastAllocator<16384>;
+// Explicit class instantiation also emits the early thread-local initializer.
+static_assert(FAST_ALLOCATOR_SIZES.size() == 12, "Update the explicit instantiations when changing size classes.");
+template class FastAllocator<FAST_ALLOCATOR_SIZES[0]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[1]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[2]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[3]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[4]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[5]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[6]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[7]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[8]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[9]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[10]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[11]>;
 
 #ifdef USE_JEMALLOC
 #include <jemalloc/jemalloc.h>
