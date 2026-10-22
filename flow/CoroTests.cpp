@@ -1196,25 +1196,17 @@ TEST_CASE("/flow/coro/YieldedAsyncMap/errorsPropagate") {
 		YieldedAsyncMap<int, int> yam;
 		Future<Void> y1 = yam.onChange(1);
 		yam.sendError(0, 10, io_error());
-		Error err;
-		try {
-			co_await y1;
-		} catch (Error& e) {
-			err = e;
-		}
-		ASSERT_EQ(err.code(), error_code_io_error);
+		ErrorOr<Void> result = co_await coro::errorOr(y1);
+		ASSERT(result.isError());
+		ASSERT_EQ(result.getError().code(), error_code_io_error);
 	}
 	{
 		auto yam = std::make_unique<YieldedAsyncMap<int, int>>();
 		Future<Void> y1 = yam->onChange(1);
 		yam.reset();
-		Error err;
-		try {
-			co_await y1;
-		} catch (Error& e) {
-			err = e;
-		}
-		ASSERT_EQ(err.code(), error_code_broken_promise);
+		ErrorOr<Void> result = co_await coro::errorOr(y1);
+		ASSERT(result.isError());
+		ASSERT_EQ(result.getError().code(), error_code_broken_promise);
 	}
 }
 
