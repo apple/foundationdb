@@ -4859,6 +4859,11 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 					readBytes = sourceReply.data.expectedSize() + restoredReply.data.expectedSize();
 					validatedBytes += readBytes;
 
+					// The restored copy is only kept stable while the audit runs; afterwards the caller may clear or
+					// rewrite it, which a task that arrives late would report as corruption. Checking after the reads
+					// means any difference found below was read while the audit was still running.
+					co_await checkAuditRunning(data->cx, req.getType(), req.id);
+
 					// FAST-PATH: Detect completely empty sides early and fail immediately.
 					// This prevents iterating through millions of keys when one side is empty.
 

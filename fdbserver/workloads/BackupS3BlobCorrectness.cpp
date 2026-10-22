@@ -881,7 +881,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					co_await waitForRestorable(lastBackupContainer, 150);
 
 					// Other backups' validation restores read the live data this restore is about to overwrite.
-					co_await waitForValidationsToFinish(cx);
+					co_await RestoreValidationGate::waitUntilNonePending();
 
 					// Generate a lock UID for the entire clear+restore operation
 					UID lockUID = deterministicRandom()->randomUniqueID();
