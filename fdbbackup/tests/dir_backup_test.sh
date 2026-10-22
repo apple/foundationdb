@@ -78,6 +78,22 @@ function check_status_mutation_log_type {
     err "Expected 'Mutation Log Type: ${expected}' in status output: ${status_output}"
     return 1
   fi
+
+  local json_output
+  if ! json_output=$("${local_build_dir}"/bin/fdbbackup status --json -t "${TAG}" \
+      -C "${scratch_dir}/loopback_cluster/fdb.cluster" --log --logdir="${scratch_dir}"); then
+    err "fdbbackup status --json failed: ${json_output}"
+    return 1
+  fi
+  local json_type
+  if ! json_type=$(jq -r '.MutationLogType' <<< "${json_output}"); then
+    err "Failed to parse status --json output: ${json_output}"
+    return 1
+  fi
+  if [[ "${json_type}" != "${expected}" ]]; then
+    err "Expected MutationLogType '${expected}' in status --json, got '${json_type}'"
+    return 1
+  fi
 }
 
 # Run the fdbrestore command.
