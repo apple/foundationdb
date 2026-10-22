@@ -2320,12 +2320,16 @@ struct YieldedFutureActor final : SAV<Void>,
 		}
 	}
 	void a_callback_error(ActorCallback<YieldedFutureActor, 1, Void>*, Error const& err) {
-		ASSERT(int16_t(in_error_state.code()) == UNSET_ERROR_CODE);
-		in_error_state = err;
-		if (check_yield())
-			doYield();
-		else
+		if (int16_t(in_error_state.code()) == UNSET_ERROR_CODE) {
+			in_error_state = err;
+			if (check_yield())
+				doYield();
+			else
+				finish();
+		} else {
+			// The delayed error created by a previous doYield() fired.
 			finish();
+		}
 	}
 	void finish() {
 		ActorCallback<YieldedFutureActor, 1, Void>::remove();
@@ -2349,8 +2353,13 @@ struct YieldedFutureActor final : SAV<Void>,
 		source->unwait();
 
 		// Link all the callbacks, including this one, into the ring of a delay future so that after a short time they
-		// will be fired again
-		delay(0, g_network->getCurrentTask()).addCallbackChainAndClear(static_cast<CB1*>(this));
+		// will be fired again. Only this callback has seen the source's outcome, so an error must be re-delivered as an
+		// error; a plain delay would wake the others with success.
+		TaskPriority taskID = g_network->getCurrentTask();
+		Future<Void> refire = int16_t(in_error_state.code()) == SET_ERROR_CODE
+		                          ? delay(0, taskID)
+		                          : delayed(Future<Void>(in_error_state), 0.0, taskID);
+		refire.addCallbackChainAndClear(static_cast<CB1*>(this));
 	}
 };
 
