@@ -49,7 +49,7 @@ void ResolutionBalancer::setChangesInReply(UID requestingProxy, GetCommitVersion
 }
 
 static std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_resolver,
-                                              Standalone<VectorRef<ResolverMoveRef>>& excludedRanges,
+                                              Standalone<VectorRef<ResolverMoveRef>>& movedRanges,
                                               int src,
                                               int dest) {
 	auto ranges = key_resolver.ranges();
@@ -58,8 +58,8 @@ static std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_res
 	++it;
 	if (it == ranges.end()) {
 		if (ranges.begin().value() != src ||
-		    std::find(excludedRanges.begin(), excludedRanges.end(), ResolverMoveRef(ranges.begin()->range(), dest)) !=
-		        excludedRanges.end())
+		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(ranges.begin()->range(), dest)) !=
+		        movedRanges.end())
 			throw operation_failed();
 		return std::make_pair(ranges.begin().range(), true);
 	}
@@ -68,13 +68,13 @@ static std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_res
 	// If possible expand an existing boundary between the two resolvers
 	for (; it != ranges.end(); ++it) {
 		if (it->value() == src && prev->value() == dest &&
-		    std::find(excludedRanges.begin(), excludedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
-		        excludedRanges.end()) {
+		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
+		        movedRanges.end()) {
 			return std::make_pair(it->range(), true);
 		}
 		if (it->value() == dest && prev->value() == src &&
-		    std::find(excludedRanges.begin(), excludedRanges.end(), ResolverMoveRef(prev->range(), dest)) ==
-		        excludedRanges.end()) {
+		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(prev->range(), dest)) ==
+		        movedRanges.end()) {
 			return std::make_pair(prev->range(), false);
 		}
 		if (it->value() == dest)
@@ -90,13 +90,13 @@ static std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_res
 	// If possible create a new boundary which doesn't exist yet
 	for (; it != ranges.end(); ++it) {
 		if (it->value() == src && !borders.contains(prev->value()) &&
-		    std::find(excludedRanges.begin(), excludedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
-		        excludedRanges.end()) {
+		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
+		        movedRanges.end()) {
 			return std::make_pair(it->range(), true);
 		}
 		if (prev->value() == src && !borders.contains(it->value()) &&
-		    std::find(excludedRanges.begin(), excludedRanges.end(), ResolverMoveRef(prev->range(), dest)) ==
-		        excludedRanges.end()) {
+		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(prev->range(), dest)) ==
+		        movedRanges.end()) {
 			return std::make_pair(prev->range(), false);
 		}
 		++prev;
@@ -105,13 +105,12 @@ static std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_res
 	it = ranges.begin();
 	for (; it != ranges.end(); ++it) {
 		if (it->value() == src &&
-		    std::find(excludedRanges.begin(), excludedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
-		        excludedRanges.end()) {
+		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
+		        movedRanges.end()) {
 			return std::make_pair(it->range(), true);
 		}
 	}
-	throw operation_failed(); // we are already attempting to move all of the data one resolver is assigned, so do not
-	                          // move anything
+	throw operation_failed(); // every range of src is already in movedRanges: being moved, or could not be cut
 }
 
 // Chooses ranges holding about `amount` of src's load to move to dest; throws operation_failed if nothing should move.
