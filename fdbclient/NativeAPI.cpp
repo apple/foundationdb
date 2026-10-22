@@ -3189,6 +3189,7 @@ Future<Void> getRangeStreamImpl(Reference<TransactionState> trStateInput,
 	Reference<TransactionState> trState(std::move(trStateInput));
 	PromiseStream<RangeResult> results(std::move(resultsInput));
 	KeyRange keys(std::move(keysInput));
+	ASSERT(!reverse);
 	Key currentConflictBegin = conflictBounds.begin;
 	std::vector<KeyRangeLocationInfo> locations;
 	// Keep the active streams alive through retry delays and location refreshes.
@@ -3425,9 +3426,9 @@ Future<Void> getRangeStreamImpl(Reference<TransactionState> trStateInput,
 						output.arena().dependsOn(range.arena());
 						// If it's not the last shard, set more to true and readThrough to the shard boundary.
 						output.more = true;
-						output.setReadThrough(reverse ? range.begin : range.end);
+						output.setReadThrough(range.end);
 						if (!snapshot) {
-							Key chunkEnd = reverse ? range.begin : range.end;
+							Key chunkEnd = range.end;
 							if (currentConflictBegin < chunkEnd) {
 								trState->addStreamConflictRange(KeyRangeRef(currentConflictBegin, chunkEnd));
 								currentConflictBegin = chunkEnd;
@@ -3445,7 +3446,7 @@ Future<Void> getRangeStreamImpl(Reference<TransactionState> trStateInput,
 						output.readThroughEnd = true;
 					}
 					if (!snapshot) {
-						Key chunkEnd = reverse ? output[0].key : keyAfter(output[output.size() - 1].key);
+						Key chunkEnd = keyAfter(output[output.size() - 1].key);
 						if (currentConflictBegin < chunkEnd) {
 							trState->addStreamConflictRange(KeyRangeRef(currentConflictBegin, chunkEnd));
 							currentConflictBegin = chunkEnd;
@@ -3490,6 +3491,36 @@ Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionS
                                                           KeyRange keys,
                                                           int64_t chunkSize,
                                                           int limit);
+// Evaluates selector bounds and records conflict ranges for:
+// - Empty resolved ranges (b >= e) spanning [rangeBegin, rangeEnd)
+// - Resolved end selectors with end.offset <= 0 spanning [e, rangeEnd)
+// Returns true if the range is empty (b >= e) and streaming should terminate.
+bool recordRangeStreamSelectorConflicts(Reference<TransactionState> const& trState,
+                                        Key const& b,
+                                        Key const& e,
+                                        KeySelector const& begin,
+                                        KeySelector const& end,
+                                        Snapshot snapshot,
+                                        KeyRange& conflictBounds) {
+	Key rangeBegin = std::min(b, Key(begin.getKey(), begin.arena()));
+	Key rangeEnd = std::max(e, Key(end.getKey(), end.arena()));
+
+	if (b >= e) {
+		if (!snapshot && rangeBegin < rangeEnd) {
+			trState->addStreamConflictRange(KeyRangeRef(rangeBegin, rangeEnd));
+		}
+		return true;
+	}
+
+	conflictBounds = KeyRange(KeyRangeRef(rangeBegin, rangeEnd));
+
+	if (!snapshot && end.offset <= 0 && e < rangeEnd) {
+		trState->addStreamConflictRange(KeyRangeRef(e, rangeEnd));
+	}
+
+	return false;
+}
+
 // Streams the requested key range directly from storage servers without fragment-level parallelism.
 Future<Void> getRangeStream(Reference<TransactionState> trStateInput,
                             PromiseStream<RangeResult> _resultsInput,
@@ -3503,7 +3534,7 @@ Future<Void> getRangeStream(Reference<TransactionState> trStateInput,
 	KeySelector begin(std::move(beginInput));
 	KeySelector end(std::move(endInput));
 	// FIXME: better handling to disable row limits
-	ASSERT(!limits.hasRowLimit());
+	ASSERT(!limits.hasRowLimit() && !reverse);
 	Span span("NAPI:getRangeStream"_loc, trState->spanContext);
 
 	co_await trState->startTransaction();
@@ -3516,16 +3547,14 @@ Future<Void> getRangeStream(Reference<TransactionState> trStateInput,
 	Key b = co_await fb;
 	Key e = co_await fe;
 
-	if (b >= e) {
+	KeyRange conflictBounds;
+	if (recordRangeStreamSelectorConflicts(trState, b, e, begin, end, snapshot, conflictBounds)) {
 		_results.sendError(end_of_stream());
 		co_return;
 	}
 
-	Key rangeBegin = std::min(b, Key(begin.getKey(), begin.arena()));
-	Key rangeEnd = std::max(e, Key(end.getKey(), end.arena()));
-
 	co_await getRangeStreamImpl(
-	    trState, _results, KeyRange(KeyRangeRef(b, e)), KeyRange(KeyRangeRef(rangeBegin, rangeEnd)), limits, snapshot, reverse, span.context);
+	    trState, _results, KeyRange(KeyRangeRef(b, e)), conflictBounds, limits, snapshot, reverse, span.context);
 }
 
 Future<RangeResult> getRange(Reference<TransactionState> const& trState,
@@ -4826,6 +4855,11 @@ Future<Void> Transaction::commitMutations() {
 		if (trState->options.tags.size())
 			tr.tagSet = trState->options.tags;
 
+		for (const auto& streamRange : trState->streamConflictRanges) {
+			if (streamRange.begin < streamRange.end)
+				tr.transaction.read_conflict_ranges.emplace_back(tr.arena, streamRange.begin, streamRange.end);
+		}
+
 		size_t transactionSize = getSize();
 		if (transactionSize > (uint64_t)FLOW_KNOBS->PACKET_WARNING) {
 			TraceEvent(SevWarn, "LargeTransaction")
@@ -4852,11 +4886,6 @@ Future<Void> Transaction::commitMutations() {
 			if (extraConflictRange.isReady() && extraConflictRange.get().first < extraConflictRange.get().second)
 				tr.transaction.read_conflict_ranges.emplace_back(
 				    tr.arena, extraConflictRange.get().first, extraConflictRange.get().second);
-		}
-		for (const auto& streamRange : trState->streamConflictRanges) {
-			if (streamRange.begin < streamRange.end)
-				tr.transaction.read_conflict_ranges.emplace_back(
-				    tr.arena, streamRange.begin, streamRange.end);
 		}
 
 		if (tr.idempotencyId.valid()) {
@@ -6534,6 +6563,161 @@ TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/multipleShards") {
 	ASSERT(unlimitedResults.size() == 8 && unlimitedResults[1] == "A1"_sr && unlimitedResults[2] == "A2"_sr &&
 	       unlimitedResults[3] == "B"_sr && unlimitedResults[4] == "B1"_sr && unlimitedResults[5] == "B2"_sr &&
 	       unlimitedResults[6] == "C"_sr && unlimitedResults[7] == "Z"_sr);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/streamConflictRanges/mergeContiguousAndOverlapping") {
+	auto trState = makeReference<TransactionState>(TaskPriority::DefaultEndpoint, SpanContext());
+	ASSERT(trState->streamConflictRanges.empty());
+
+	// Contiguous ranges should merge into a single range
+	trState->addStreamConflictRange(KeyRangeRef("a"_sr, "c"_sr));
+	ASSERT_EQ(trState->streamConflictRanges.size(), 1);
+	ASSERT(trState->streamConflictRanges[0] == KeyRangeRef("a"_sr, "c"_sr));
+
+	trState->addStreamConflictRange(KeyRangeRef("c"_sr, "e"_sr));
+	ASSERT_EQ(trState->streamConflictRanges.size(), 1);
+	ASSERT(trState->streamConflictRanges[0] == KeyRangeRef("a"_sr, "e"_sr));
+
+	// Overlapping range should expand bounds
+	trState->addStreamConflictRange(KeyRangeRef("d"_sr, "g"_sr));
+	ASSERT_EQ(trState->streamConflictRanges.size(), 1);
+	ASSERT(trState->streamConflictRanges[0] == KeyRangeRef("a"_sr, "g"_sr));
+
+	// Disjoint range should be kept separate
+	trState->addStreamConflictRange(KeyRangeRef("m"_sr, "p"_sr));
+	ASSERT_EQ(trState->streamConflictRanges.size(), 2);
+
+	// Bridging range should merge all touching ranges
+	trState->addStreamConflictRange(KeyRangeRef("g"_sr, "n"_sr));
+	ASSERT_EQ(trState->streamConflictRanges.size(), 1);
+	ASSERT(trState->streamConflictRanges[0] == KeyRangeRef("a"_sr, "p"_sr));
+
+	// Empty range should be ignored
+	trState->addStreamConflictRange(KeyRangeRef("z"_sr, "z"_sr));
+	ASSERT_EQ(trState->streamConflictRanges.size(), 1);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/readConflictRanges/deepCopy") {
+	Transaction tr;
+	tr.trState->addStreamConflictRange(KeyRangeRef("bar"_sr, "foo"_sr));
+
+	Standalone<VectorRef<KeyRangeRef>> ranges = tr.readConflictRanges();
+	ASSERT_EQ(ranges.size(), 1);
+	ASSERT(ranges[0] == KeyRangeRef("bar"_sr, "foo"_sr));
+
+	// Modifying trState's stream ranges should not affect the returned Standalone result
+	tr.trState->streamConflictRanges.clear();
+	ASSERT_EQ(ranges.size(), 1);
+	ASSERT(ranges[0] == KeyRangeRef("bar"_sr, "foo"_sr));
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/streamConflictRanges/emptyResolvedRange") {
+	auto trState = makeReference<TransactionState>(TaskPriority::DefaultEndpoint, SpanContext());
+
+	Key b = "z"_sr;
+	Key e = "a"_sr;
+	KeySelector begin("b"_sr, false, 1);
+	KeySelector end("y"_sr, false, 0);
+
+	KeyRange conflictBounds;
+	// Non-snapshot empty resolved range (b >= e) records [rangeBegin, rangeEnd) == ["b", "y")
+	bool isEmpty = recordRangeStreamSelectorConflicts(trState, b, e, begin, end, Snapshot::False, conflictBounds);
+	ASSERT(isEmpty);
+	ASSERT_EQ(trState->streamConflictRanges.size(), 1);
+	ASSERT(trState->streamConflictRanges[0] == KeyRangeRef("b"_sr, "y"_sr));
+
+	// Snapshot read records no conflict range
+	auto trStateSnapshot = makeReference<TransactionState>(TaskPriority::DefaultEndpoint, SpanContext());
+	isEmpty = recordRangeStreamSelectorConflicts(trStateSnapshot, b, e, begin, end, Snapshot::True, conflictBounds);
+	ASSERT(isEmpty);
+	ASSERT(trStateSnapshot->streamConflictRanges.empty());
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/streamConflictRanges/partialConsumptionAndEndSelector") {
+	auto trState = makeReference<TransactionState>(TaskPriority::DefaultEndpoint, SpanContext());
+
+	Key b = "c"_sr;
+	Key e = "v"_sr;
+	KeySelector begin("c"_sr, false, 1);
+	KeySelector end("y"_sr, false, 0); // end.offset <= 0
+
+	KeyRange conflictBounds;
+	bool isEmpty = recordRangeStreamSelectorConflicts(trState, b, e, begin, end, Snapshot::False, conflictBounds);
+	ASSERT(!isEmpty);
+	ASSERT(conflictBounds == KeyRangeRef("c"_sr, "y"_sr));
+
+	// Production helper evaluated end.offset <= 0 and registered [e, rangeEnd) == ["v", "y")
+	ASSERT_EQ(trState->streamConflictRanges.size(), 1);
+	ASSERT(trState->streamConflictRanges[0] == KeyRangeRef("v"_sr, "y"_sr));
+
+	// Partial consumption: client consumes chunk 1 ["c", "f") and abandons the stream
+	trState->addStreamConflictRange(KeyRangeRef(conflictBounds.begin, "f"_sr));
+
+	// Two disjoint ranges: consumed chunk ["c", "f") and selector ["v", "y").
+	// Unread middle interval ["f", "v") has no conflict range, preventing false aborts.
+	ASSERT_EQ(trState->streamConflictRanges.size(), 2);
+
+	// If the stream is consumed to completion, subsequent chunks ["f", "y") coalesce all ranges into ["c", "y")
+	trState->addStreamConflictRange(KeyRangeRef("f"_sr, conflictBounds.end));
+	ASSERT_EQ(trState->streamConflictRanges.size(), 1);
+	ASSERT(trState->streamConflictRanges[0] == KeyRangeRef("c"_sr, "y"_sr));
+
+	// For end selector with offset > 0 (e.g. firstGreaterOrEqual), no selector range is registered upfront
+	auto trStateForward = makeReference<TransactionState>(TaskPriority::DefaultEndpoint, SpanContext());
+	KeySelector endForward("y"_sr, false, 1);
+	isEmpty =
+	    recordRangeStreamSelectorConflicts(trStateForward, b, e, begin, endForward, Snapshot::False, conflictBounds);
+	ASSERT(!isEmpty);
+	ASSERT(trStateForward->streamConflictRanges.empty());
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/streamConflictRanges/resetClearsConflicts") {
+	auto dbInfo = makeReference<AsyncVar<ClientDBInfo>>();
+	Database cx = DatabaseContext::create(dbInfo, Future<Void>(), LocalityData(), EnableLocalityLoadBalance::False);
+	Transaction tr(cx);
+
+	tr.trState->addStreamConflictRange(KeyRangeRef("a"_sr, "b"_sr));
+	ASSERT_EQ(tr.readConflictRanges().size(), 1);
+
+	tr.reset();
+	ASSERT(tr.readConflictRanges().empty());
+
+	tr.trState->addStreamConflictRange(KeyRangeRef("c"_sr, "d"_sr));
+	ASSERT_EQ(tr.readConflictRanges().size(), 1);
+
+	tr.fullReset();
+	ASSERT(tr.readConflictRanges().empty());
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/streamConflictRanges/commitSizeCalculation") {
+	auto dbInfo = makeReference<AsyncVar<ClientDBInfo>>();
+	Database cx = DatabaseContext::create(dbInfo, Future<Void>(), LocalityData(), EnableLocalityLoadBalance::False);
+	Transaction tr(cx);
+
+	// Add a mutation so commitMutations does not early-exit as read-only
+	tr.set("foo"_sr, "bar"_sr);
+	tr.trState->addStreamConflictRange(KeyRangeRef("a"_sr, "z"_sr));
+
+	uint32_t sizeBefore = tr.getSize();
+
+	// Enforce size limit equal to sizeBefore; any added stream conflict bytes guarantee exceeding it
+	tr.trState->options.sizeLimit = sizeBefore;
+
+	auto commitFuture = tr.commitMutations();
+	ASSERT(commitFuture.isError());
+	ASSERT_EQ(commitFuture.getError().code(), error_code_transaction_too_large);
 
 	return Void();
 }

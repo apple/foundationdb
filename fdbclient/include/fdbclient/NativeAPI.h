@@ -278,9 +278,27 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	std::vector<KeyRange> streamConflictRanges;
 	void addStreamConflictRange(KeyRangeRef const& range) {
-		if (range.begin < range.end) {
-			streamConflictRanges.emplace_back(range);
+		if (range.begin >= range.end) {
+			return;
 		}
+		Key newBegin(range.begin);
+		Key newEnd(range.end);
+		std::vector<KeyRange> merged;
+		merged.reserve(streamConflictRanges.size() + 1);
+		for (const auto& existing : streamConflictRanges) {
+			if (existing.end >= newBegin && newEnd >= existing.begin) {
+				if (existing.begin < newBegin) {
+					newBegin = existing.begin;
+				}
+				if (existing.end > newEnd) {
+					newEnd = existing.end;
+				}
+			} else {
+				merged.push_back(existing);
+			}
+		}
+		merged.push_back(KeyRange(KeyRangeRef(newBegin, newEnd)));
+		streamConflictRanges = std::move(merged);
 	}
 
 	Future<Void> startFuture;
@@ -494,7 +512,7 @@ public:
 		Standalone<VectorRef<KeyRangeRef>> result(tr.transaction.read_conflict_ranges, tr.arena);
 		for (const auto& r : trState->streamConflictRanges) {
 			if (r.begin < r.end) {
-				result.push_back(result.arena(), r);
+				result.push_back(result.arena(), KeyRangeRef(result.arena(), r));
 			}
 		}
 		return result;
