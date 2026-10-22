@@ -504,10 +504,12 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 	state Future<Key> url = restore.sourceContainerURL().getD(tr);
 	state Future<Version> restoreVersion = restore.restoreVersion().getD(tr);
 	state Future<std::string> progress = restore.getProgress(tr);
+	state Future<MutationLogType> mutationLogType =
+	    restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	wait(success(ranges) && success(addPrefix) && success(removePrefix) && success(url) && success(restoreVersion) &&
-	     success(progress));
+	     success(progress) && success(mutationLogType));
 
 	std::string returnStr;
 	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
@@ -518,6 +520,7 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 	                    printable(addPrefix.get()).c_str(),
 	                    printable(removePrefix.get()).c_str(),
 	                    restoreVersion.get());
+	returnStr += format("  Mutation Log Type: %s", mutationLogTypeToString(mutationLogType.get()).c_str());
 	return returnStr;
 }
 
