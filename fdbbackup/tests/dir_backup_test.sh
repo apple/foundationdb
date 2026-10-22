@@ -145,6 +145,29 @@ function check_status_mutation_log_type {
   fi
 }
 
+# Check that 'fdbrestore status' reports the mutation log type the backup was started with.
+# $1 The build directory
+# $2 The scratch directory
+function check_restore_status_mutation_log_type {
+  local local_build_dir="${1}"
+  local scratch_dir="${2}"
+  local expected="default"
+  if [[ "${USE_PARTITIONED_LOG}" == "true" ]]; then
+    expected="partitioned-log-experimental"
+  fi
+
+  local status_output
+  if ! status_output=$("${local_build_dir}"/bin/fdbrestore status -t "${TAG}" \
+      --dest-cluster-file "${scratch_dir}/loopback_cluster/fdb.cluster" --log --logdir="${scratch_dir}" 2>&1); then
+    err "fdbrestore status failed: ${status_output}"
+    return 1
+  fi
+  if ! grep -qE "  Mutation Log Type: ${expected}( |$)" <<< "${status_output}"; then
+    err "Expected 'Mutation Log Type: ${expected}' in restore status output: ${status_output}"
+    return 1
+  fi
+}
+
 # Run the fdbrestore command.
 # $1 The build directory
 # $2 The scratch directory
@@ -229,6 +252,11 @@ function test_dir_backup_and_restore {
   log "Restore"
   if ! restore "${local_build_dir}" "${scratch_dir}" "${local_encryption_key_file}"; then
     err "Failed restore"
+    return 1
+  fi
+  log "Check restore status mutation log type"
+  if ! check_restore_status_mutation_log_type "${local_build_dir}" "${scratch_dir}"; then
+    err "Failed restore status mutation log type check"
     return 1
   fi
   log "Verify restore"

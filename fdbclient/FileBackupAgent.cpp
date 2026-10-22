@@ -1019,11 +1019,13 @@ Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restore, Ref
 	Future<ERestoreState> restoreState = restore.stateEnum().getD(tr);
 	Future<Optional<bool>> useRangeFileRestore = restore.useRangeFileRestore().get(tr);
 	Future<Optional<bool>> bulkLoadComplete = restore.bulkLoadComplete().get(tr);
+	Future<MutationLogType> mutationLogType =
+	    restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	co_await (success(ranges) && success(addPrefix) && success(removePrefix) && success(url) &&
 	          success(restoreVersion) && success(progress) && success(restoreState) && success(useRangeFileRestore) &&
-	          success(bulkLoadComplete));
+	          success(bulkLoadComplete) && success(mutationLogType));
 
 	std::string returnStr;
 	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
@@ -1039,6 +1041,7 @@ Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restore, Ref
 	bool usingBulkLoad = useRangeFileRestore.get().present() && !useRangeFileRestore.get().get();
 	std::string snapshotMethod = usingBulkLoad ? "bulkload" : "rangefile";
 	returnStr += format("  Snapshot Method: %s", snapshotMethod.c_str());
+	returnStr += format("  Mutation Log Type: %s", mutationLogTypeToString(mutationLogType.get()).c_str());
 
 	// Add phase status information
 	ERestoreState currentState = restoreState.get();
