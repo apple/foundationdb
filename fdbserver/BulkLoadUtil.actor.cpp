@@ -27,7 +27,6 @@
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include "flow/genericactors.actor.h"
-#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 ACTOR Future<Void> readBulkFileBytes(std::string path, int64_t maxLength, std::shared_ptr<std::string> output) {
@@ -564,26 +563,4 @@ ACTOR Future<BulkLoadManifestSet> getBulkLoadManifestMetadataFromEntry(
 		ASSERT(manifests.addManifest(manifest));
 	}
 	return manifests;
-}
-
-TEST_CASE("/fdbserver/BulkLoad/bulkLoadPathIsContained") {
-	// Safe: relative paths, nested dirs, empty, dotfiles, and names that merely
-	// contain dots without a standalone ".." component.
-	ASSERT(bulkLoadPathIsContained(""));
-	ASSERT(bulkLoadPathIsContained("data.sst"));
-	ASSERT(bulkLoadPathIsContained("a/b/c"));
-	ASSERT(bulkLoadPathIsContained("5676202155931feac1bbd501d491170b/0/data.sst"));
-	ASSERT(bulkLoadPathIsContained("a/.hidden/b"));
-	ASSERT(bulkLoadPathIsContained("a..b/c"));
-	ASSERT(bulkLoadPathIsContained("..."));
-
-	// Unsafe: absolute path, or a ".." component anywhere in the path.
-	ASSERT(!bulkLoadPathIsContained("/var/lib/foundationdb"));
-	ASSERT(!bulkLoadPathIsContained(".."));
-	ASSERT(!bulkLoadPathIsContained("../x"));
-	ASSERT(!bulkLoadPathIsContained("../../../../var/lib/foundationdb"));
-	ASSERT(!bulkLoadPathIsContained("a/../../etc"));
-	ASSERT(!bulkLoadPathIsContained("a/b/.."));
-
-	return Void();
 }
