@@ -24,7 +24,6 @@
 #include "flow/IAsyncFile.h"
 #include "flow/FaultInjection.h"
 #include "flow/Platform.h"
-#include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
@@ -127,9 +126,6 @@ static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(std::str
 	co_return results;
 }
 
-// Lowered only by the unit test below, which triggers rejections on purpose (a SevError fails simulation runs).
-Severity invalidPathSeverity = SevError;
-
 // Names passed to the file operations below are relative to the container directory and are joined onto it with
 // joinPath(), which does not resolve "..".  Reject any name that could resolve outside the container and, unless
 // allowContainerRoot, any name that resolves to the container directory itself.
@@ -137,7 +133,7 @@ void validatePathInContainer(const std::string& path, const std::string& contain
 	if (relativePathIsContained(path) && (allowContainerRoot || cleanPath(path) != ".")) {
 		return;
 	}
-	TraceEvent(invalidPathSeverity, "BackupContainerLocalDirectoryInvalidPath")
+	TraceEvent(SevWarnAlways, "BackupContainerLocalDirectoryInvalidPath")
 	    .detail("Path", path)
 	    .detail("ContainerPath", containerPath);
 	throw backup_invalid_info();
@@ -371,10 +367,6 @@ TEST_CASE("/backup/containers/localdir/rejectsEscapingPaths") {
 	// Nothing is read or written: every name below is rejected before the container directory is touched.
 	auto bc = makeReference<BackupContainerLocalDirectory>(
 	    "file:///nonexistent-fdb-backup-container-test", Optional<std::string>(), 0);
-
-	// The rejections below are expected, so log them below SevError for the duration of this test.
-	invalidPathSeverity = SevWarnAlways;
-	ScopeExit restoreSeverity([]() { invalidPathSeverity = SevError; });
 
 	auto expectRejected = [](std::function<void()> op) {
 		try {

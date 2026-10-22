@@ -31,7 +31,6 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/xxhash.h"
-#include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"
@@ -1013,9 +1012,6 @@ Future<Void> copyDownFile(std::string s3url, std::string filepath) {
 
 namespace {
 
-// Lowered only by the unit test below, which triggers rejections on purpose (a SevError fails simulation runs).
-Severity invalidObjectNameSeverity = SevError;
-
 // Object names come from the bucket; don't let one escape dirpath.
 std::string copyDownFilePath(const std::string& dirpath, const std::string& resource, const std::string& objectName) {
 	std::string relativeName = objectName.substr(resource.size());
@@ -1024,7 +1020,7 @@ std::string copyDownFilePath(const std::string& dirpath, const std::string& reso
 		relativeName = relativeName.substr(1);
 	}
 	if (!relativePathIsContained(relativeName)) {
-		TraceEvent(invalidObjectNameSeverity, "S3ClientCopyDownInvalidObjectName")
+		TraceEvent(SevWarnAlways, "S3ClientCopyDownInvalidObjectName")
 		    .detail("ObjectName", objectName)
 		    .detail("Directory", dirpath);
 		throw backup_invalid_url();
@@ -1224,10 +1220,6 @@ TEST_CASE("/backup/s3/copyDownFilePath") {
 	ASSERT_EQ(copyDownFilePath("/tmp/down", "dir", "dir/a..b"), std::string("/tmp/down/a..b"));
 	ASSERT_EQ(copyDownFilePath("/tmp/down", "", "/a"), std::string("/tmp/down/a"));
 	ASSERT_EQ(copyDownFilePath("/tmp/down", "", "a/b"), std::string("/tmp/down/a/b"));
-
-	// The rejections below are expected, so log them below SevError for the duration of this test.
-	invalidObjectNameSeverity = SevWarnAlways;
-	ScopeExit restoreSeverity([]() { invalidObjectNameSeverity = SevError; });
 
 	const std::vector<std::pair<std::string, std::string>> rejected = {
 		{ "dir", "dir/../x" }, { "dir", "dir/a/../../x" }, { "dir", "dir//abs" },
