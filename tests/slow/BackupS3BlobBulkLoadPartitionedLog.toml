@@ -114,5 +114,3 @@ timeout = 7200
     # The combination under test: SSTs carry the range data, and the mutation log is partitioned, so the
     # bulkload restore must replay it with the partitioned dispatcher rather than the classic one.
     mutationLogType = 1        # 1 = partitioned-log-experimental
-    # And that submitBackup refuses --encryption-key-file with a bulk mode. Backup side only; the
-    # And that submitRestore refuses --add-prefix with --mode bulkload: SSTs cannot be rewritten to a
