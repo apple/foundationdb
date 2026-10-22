@@ -96,6 +96,7 @@ timeout = 7200
 
     [[test.workload]]
     testName = 'Cycle'
+    keyPrefix = 'd/'
     nodeCount = 200
     transactionsPerSecond = 150.0
     testDuration = 30.0
@@ -107,10 +108,8 @@ timeout = 7200
     abortAndRestartAfter = 0.0
     stopDifferentialAfter = 0.0
     performRestore = true
-    # One random key range, so the backup covers a proper subrange of normalKeys. The bulk path accepts
-    # exactly one range per job; the workload plants its out-of-range sentinels beyond this range.
-    backupRangesCount = 1
-    backupRangeLengthMax = 10
+    # Must match the Cycle keyPrefix above.
+    backupRangePrefix = 'd/'
     skipDirtyRestore = false
     backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
     # BulkDump/BulkLoad integration options
