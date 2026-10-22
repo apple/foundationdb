@@ -407,7 +407,7 @@ coordinators
 
 The ``coordinators`` command is used to change cluster coordinators or description. Its syntax is ``coordinators auto|<ADDRESS...> [description=<DESC>]``.
 
-Addresses may be specified as a list of IP:port pairs (such as ``coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000``). If addresses are specified, the coordinators will be set to them. An ``fdbserver`` process must be running on each of the specified addresses.
+Addresses may be specified as a list of IP:port or hostname:port pairs (such as ``coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000`` or ``coordinators fdb1.example.com:4000 fdb2.example.com:4000 fdb3.example.com:4000``). Hostnames are saved in the cluster file as hostnames (but ``coordinators auto`` picks coordinators by IP address), and each one must resolve when you run the command. Running ``coordinators`` with no arguments shows the resolved IP addresses. If addresses are specified, the coordinators will be set to them. An ``fdbserver`` process must be running on each of the specified addresses.
 
 If ``auto`` is specified, coordinator addresses will be chosen automatically to support the configured redundancy level. Processes with class coordinator will be prioritized. (If the current set of coordinators are healthy and already support the configured redundancy level, nothing will be changed.)
 
