@@ -396,6 +396,10 @@ public:
 
 	int getMaxEventLength() const;
 
+	// Writes this event to the audit trace file (see openAuditTraceFile) instead of the main trace file, or to the main
+	// trace file if no audit trace file is open, so it's never dropped.
+	BaseTraceEvent& logToAuditFile();
+
 	BaseTraceEvent& GetLastError();
 
 	bool isEnabled() const { return static_cast<bool>(enabled); }
@@ -450,6 +454,7 @@ protected:
 	int maxEventLength;
 	int timeIndex;
 	int errorKindIndex{ -1 };
+	bool auditFile{ false };
 
 	void setSizeLimits();
 
@@ -547,6 +552,20 @@ void openTraceFile(const Optional<NetworkAddress>& na,
 void closeTraceFile();
 bool traceFileIsOpen();
 void flushTraceFileVoid();
+
+// Opens a second trace file for events marked with logToAuditFile(), named <baseOfBase>_audit.* (trace_audit.* by
+// default). Arguments mean the same as for openTraceFile, with the same defaults, plus the format (xml or json), so it
+// can be opened like the main trace file but in its own directory. The main trace file doesn't have to be open.
+// Rotation is separate, so audit files have their own max logs size budget.
+void openAuditTraceFile(const Optional<NetworkAddress>& na,
+                        uint64_t rollsize,
+                        uint64_t maxLogsSize,
+                        std::string directory = ".",
+                        std::string baseOfBase = "trace",
+                        std::string logGroup = "default",
+                        std::string identifier = "",
+                        std::string tracePartialFileSuffix = "",
+                        std::string traceFormat = "xml");
 
 // Changes the format of trace files. Returns false if the format is unrecognized. No longer safe to call after a call
 // to openTraceFile.
