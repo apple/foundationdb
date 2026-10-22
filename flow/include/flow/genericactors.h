@@ -2394,7 +2394,6 @@ public:
 					}
 					self->items.erase(key);
 				}
-				change = Future<Void>();
 			}
 		};
 
@@ -2409,8 +2408,6 @@ public:
 			throw;
 		}
 		eraseOnCancel.armed = false;
-		yielded = Future<Void>();
-		change = Future<Void>();
 	}
 };
 

@@ -1190,6 +1190,18 @@ TEST_CASE("/flow/coro/YieldedAsyncMap/cancel2") {
 	y2.cancel();
 }
 
+// Cancelling one waiter must not disturb the others on the same key.
+TEST_CASE("/flow/coro/YieldedAsyncMap/cancelKeepsOtherWaiters") {
+	YieldedAsyncMap<int, int> yam;
+	Future<Void> y1 = yam.onChange(1);
+	Future<Void> y2 = yam.onChange(1);
+	y1.cancel();
+	ASSERT_EQ(yam.count(1), 1);
+	ASSERT(!y2.isReady());
+	yam.set(1, 1);
+	co_await y2;
+}
+
 // destroyOnCancelYield's erase-on-cancel guard is only for cancellation; real errors must reach the waiter.
 TEST_CASE("/flow/coro/YieldedAsyncMap/errorsPropagate") {
 	{
