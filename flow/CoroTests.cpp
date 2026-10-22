@@ -1190,6 +1190,35 @@ TEST_CASE("/flow/coro/YieldedAsyncMap/cancel2") {
 	y2.cancel();
 }
 
+// An error must reach every yielded waiter, including the ones doYield() defers along with the first.
+TEST_CASE("/flow/coro/yieldedFuture/errorReachesAllWaiters") {
+	Promise<Void> source;
+	std::vector<Future<Void>> waiters;
+	for (int i = 0; i < 4; i++) {
+		waiters.push_back(yieldedFuture(source.getFuture()));
+	}
+	source.sendError(io_error());
+	for (auto& w : waiters) {
+		ErrorOr<Void> result = co_await coro::errorOr(w);
+		ASSERT(result.isError());
+		ASSERT_EQ(result.getError().code(), error_code_io_error);
+	}
+}
+
+TEST_CASE("/flow/coro/YieldedAsyncMap/destroyedMapBreaksAllWaiters") {
+	auto yam = std::make_unique<YieldedAsyncMap<int, int>>();
+	std::vector<Future<Void>> waiters;
+	for (int i = 0; i < 4; i++) {
+		waiters.push_back(yam->onChange(1));
+	}
+	yam.reset();
+	for (auto& w : waiters) {
+		ErrorOr<Void> result = co_await coro::errorOr(w);
+		ASSERT(result.isError());
+		ASSERT_EQ(result.getError().code(), error_code_broken_promise);
+	}
+}
+
 TEST_CASE("/flow/coro/AsyncVar/basic") {
 	AsyncVar<int> av;
 	Future<Void> ch = av.onChange();
