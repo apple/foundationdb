@@ -28,8 +28,8 @@
 #include <foundationdb/fdb_c_options.g.h>
 
 pthread_t netThread;
-#define   numKeys 100
 uint8_t** keys = NULL;
+#define numKeys 100
 
 #define KEY_SIZE 16
 #define VALUE_SIZE 100
