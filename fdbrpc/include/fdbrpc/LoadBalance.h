@@ -85,6 +85,11 @@ struct LoadBalanceRequestHooks {
 	static_assert(!LoadBalanceHooksRequired<Model>::value,
 	              "LoadBalanceRequestHooks specialization required for this queue model");
 
+	static void prepareRequest(RequestStream<Request, P> const* stream,
+	                           Request& request,
+	                           Model* model,
+	                           bool compareReplicas) {}
+
 	static void maybeDuplicate(RequestStream<Request, P> const* stream,
 	                           Request& request,
 	                           Model* model,
@@ -162,6 +167,8 @@ struct RequestData : NonCopyable {
 			response = mapAsync(delay(backoff), [this, stream, &request, model, alternatives, channel](Void _) {
 				requestStarted = true;
 				modelHolder = makeReference<ModelHolder>(model, stream->getEndpoint().token.first());
+				LoadBalanceRequestHooks<Request, Interface, Multi, Model, P>::prepareRequest(
+				    stream, request, model, compareReplicas);
 				Future<Reply> resp = stream->tryGetReply(request);
 				LoadBalanceRequestHooks<Request, Interface, Multi, Model, P>::maybeDuplicate(
 				    stream, request, model, resp, alternatives, channel);
@@ -170,6 +177,8 @@ struct RequestData : NonCopyable {
 		} else {
 			requestStarted = true;
 			modelHolder = makeReference<ModelHolder>(model, stream->getEndpoint().token.first());
+			LoadBalanceRequestHooks<Request, Interface, Multi, Model, P>::prepareRequest(
+			    stream, request, model, compareReplicas);
 			response = stream->tryGetReply(request);
 			LoadBalanceRequestHooks<Request, Interface, Multi, Model, P>::maybeDuplicate(
 			    stream, request, model, response, alternatives, channel);
