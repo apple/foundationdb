@@ -60,6 +60,10 @@ struct ValidateBackupWorkload : TestWorkload {
 	ValidationTimings timings;
 	Optional<double> snapshotMB;
 	Optional<int> validatedRangeCount;
+	// The estimate reads storage metrics from the storage servers, so it is skipped in simulation by default.
+	bool reportRangeSize;
+	int64_t liveRangeBytes = 0;
+	bool liveRangeBytesKnown = false;
 	int auditedRangeCount = 0;
 	bool passed = false;
 
@@ -73,6 +77,22 @@ struct ValidateBackupWorkload : TestWorkload {
 		validateRanges = BackupRangeSpec::readOptionalRanges(options, "validateRanges"_sr, "validateRangePrefix"_sr);
 		clearValidationData = getOption(options, "clearValidationData"_sr, true);
 		settleSeconds = getOption(options, "settleSeconds"_sr, 0.0);
+		reportRangeSize = getOption(options, "reportRangeSize"_sr, !g_network->isSimulated());
+	}
+
+	// The client gets no key or byte totals from a ValidateRestore audit. This adds the size of the live range, which
+	// the audit covered, to a total that bounds what was validated; it is not the audit's own count.
+	Future<Void> addLiveRangeEstimate(Database cx, KeyRange range) {
+		try {
+			StorageMetrics metrics = co_await cx->getStorageMetrics(range, -1);
+			liveRangeBytes += metrics.bytes;
+			liveRangeBytesKnown = true;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "ValidateBackupRangeSizeFailed").error(e).detail("Range", range);
+		}
 	}
 
 	// Waits until data distribution has no queued or in-flight work and the storage queues are small, or
@@ -195,12 +215,29 @@ struct ValidateBackupWorkload : TestWorkload {
 			    .detail("Range", audit.range)
 			    .detail("Phase", static_cast<int>(audit.getPhase()));
 		}
+		if (reportRangeSize) {
+			std::vector<Future<Void>> estimates;
+			estimates.reserve(audits.size());
+			for (const auto& audit : audits) {
+				estimates.push_back(addLiveRangeEstimate(cx, audit.range));
+			}
+			co_await waitForAll(estimates);
+		}
 		if (!anyData) {
 			TraceEvent(SevWarnAlways, "ValidateBackupNothingAudited")
 			    .detail("Tag", tag)
 			    .detail("Audits", audits.size());
 			throw audit_storage_failed();
 		}
+		TraceEvent("ValidateBackupSummary")
+		    .detail("Tag", tag)
+		    .detail("ValidatedRanges", validatedRangeCount.orDefault(0))
+		    .detail("AuditedRanges", auditedRangeCount)
+		    .detail("WaitForRestorableSeconds", waitForRestorableSeconds.orDefault(-1))
+		    .detail("RestoreSeconds", timings.restoreSeconds)
+		    .detail("AuditSeconds", timings.auditSeconds)
+		    .detail("SnapshotMB", snapshotMB.orDefault(-1))
+		    .detail("LiveRangeEstimatedMB", liveRangeBytesKnown ? liveRangeBytes / 1e6 : -1.0);
 
 		if (clearValidationData && settleSeconds > 0) {
 			co_await waitToSettle(cx);
@@ -229,6 +266,9 @@ struct ValidateBackupWorkload : TestWorkload {
 		m.emplace_back("Audited range count", auditedRangeCount, Averaged::False);
 		if (snapshotMB.present()) {
 			m.emplace_back("Validated snapshot size (MB)", snapshotMB.get(), Averaged::False);
+		}
+		if (liveRangeBytesKnown) {
+			m.emplace_back("Validated live data estimate (MB)", liveRangeBytes / 1e6, Averaged::False);
 		}
 		m.emplace_back("Validation passed", passed ? 1 : 0, Averaged::False);
 	}
