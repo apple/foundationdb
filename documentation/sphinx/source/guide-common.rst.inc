@@ -10,7 +10,7 @@
     The ``ID`` is an arbitrary value containing alphanumeric characters (a-z, A-Z, 0-9). We recommend using a random eight-character identifier (such as the output of ``mktemp -u XXXXXXXX``). Note that the ``ID`` will change when coordinators change.
 
 .. |cluster-file-rule3| replace::
-    The list of ``IP:PORT`` pairs specify the set of coordination servers. A majority of these servers must be available for the database to be operational so they should be chosen carefully. The number of coordination servers should therefore be odd and must be more than one to support fault-tolerance. We recommend using five coordination servers when using ``triple`` mode to maintain the ability to tolerate two simultaneous machine failures.
+    The list of ``IP:PORT`` or ``HOSTNAME:PORT`` pairs specify the set of coordination servers. A majority of these servers must be available for the database to be operational so they should be chosen carefully. The number of coordination servers should therefore be odd and must be more than one to support fault-tolerance. We recommend using five coordination servers when using ``triple`` mode to maintain the ability to tolerate two simultaneous machine failures.
 
 .. |simple-installation-mode-warnings| replace::
     FoundationDB installs in a single-server mode appropriate for a development workstation. In this mode data is not replicated, and therefore the database is **not failure tolerant**. This default database is also configured to use the memory storage engine which, while using the disk for durability, **requires data to fit in RAM**.

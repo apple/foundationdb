@@ -205,6 +205,40 @@ function restore {
   fi
 }
 
+# fdbbackup query reports failure as a JSON object on stdout, so only the exit status distinguishes it from success.
+# $1 build directory
+# $2 a url that does not hold a backup
+# $3 the url of an existing backup; empty to skip the success check, as query has no way to be given an
+#    encryption key
+function test_query_exit_codes {
+  local local_build_dir="${1}"
+  local bad_url="${2}"
+  local good_url="${3:-}"
+
+  local out
+  local rc
+  if [[ -n "${good_url}" ]]; then
+    set +e
+    out=$("${local_build_dir}"/bin/fdbbackup query -d "${good_url}" 2>/dev/null)
+    rc=$?
+    set -e
+    if (( rc != 0 )); then
+      err "fdbbackup query on an existing backup exited ${rc}; output: ${out}"
+      return 1
+    fi
+  fi
+
+  set +e
+  out=$("${local_build_dir}"/bin/fdbbackup query -d "${bad_url}" 2>/dev/null)
+  rc=$?
+  set -e
+  if (( rc == 0 )); then
+    err "fdbbackup query on a missing backup exited 0; output: ${out}"
+    return 1
+  fi
+  log "fdbbackup query exit codes OK (missing backup exit: ${rc})"
+}
+
 # Run a backup to the fs and then a restore.
 # $1 build directory
 # $2 the scratch directory
@@ -248,6 +282,16 @@ function test_dir_backup_and_restore {
   fi
   backup_name=$(basename "${backup}")
   test_encryption_mismatches "${local_build_dir}" "${scratch_dir}" "file://${scratch_dir}/backups/${backup_name}" "${TAG}" "${local_encryption_key_file}"
+
+  log "Testing fdbbackup query exit codes"
+  local query_url=
+  if [[ -z "${local_encryption_key_file}" ]]; then
+    query_url="file://${scratch_dir}/backups/${backup_name}"
+  fi
+  if ! test_query_exit_codes "${local_build_dir}" "file://${scratch_dir}/no_such_backup" "${query_url}"; then
+    err "Failed fdbbackup query exit code test"
+    return 1
+  fi
 
   log "Restore"
   if ! restore "${local_build_dir}" "${scratch_dir}" "${local_encryption_key_file}"; then

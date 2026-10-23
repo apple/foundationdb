@@ -47,7 +47,6 @@ connectionFailuresDisableDuration = 90
     validateAfter = 50.0
     differentialBackup = true
     stopDifferentialAfter = 55.0
-    backupRangesCount = -1
     skipDirtyRestore = false
     backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_containerA?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
 
@@ -62,7 +61,6 @@ connectionFailuresDisableDuration = 90
     validateAfter = 50.0
     differentialBackup = true
     stopDifferentialAfter = 70.0
-    backupRangesCount = -1
     skipDirtyRestore = false
     backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_containerB?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
 
@@ -77,6 +75,5 @@ connectionFailuresDisableDuration = 90
     validateAfter = 50.0
     differentialBackup = true
     stopDifferentialAfter = 85.0
-    backupRangesCount = -1
     skipDirtyRestore = false
     backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_containerC?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'

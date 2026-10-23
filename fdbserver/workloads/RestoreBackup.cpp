@@ -44,12 +44,18 @@ struct RestoreBackupWorkload : TestWorkload {
 	double delayFor;
 	StopWhenDone stopWhenDone{ false };
 	Optional<std::string> encryptionKeyFileName;
+	// The extra describeBackup() call is skipped in simulation so existing seeds are unaffected.
+	bool reportBackupMetrics;
+	std::vector<PerfMetric> backupMetrics;
+	Optional<double> restoreDuration;
+	Optional<double> snapshotMB;
 
 	explicit RestoreBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
 		tag = getOption(options, "tag"_sr, "default"_sr);
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, false));
+		reportBackupMetrics = getOption(options, "reportBackupMetrics"_sr, !g_network->isSimulated());
 
 		std::string keyFileName = "simfdb/" + getTestEncryptionFileName();
 		// Only set encryptionKeyFileName if the encryption key file exists during backup.
@@ -109,6 +115,43 @@ struct RestoreBackupWorkload : TestWorkload {
 		}
 	}
 
+	static double versionsToSeconds(Version v) { return double(v) / SERVER_KNOBS->VERSIONS_PER_SECOND; }
+
+	// Records metrics about the backup being restored. The snapshot is the restorable one with the greatest
+	// endVersion, which is the snapshot a restore to the latest restorable version uses.
+	Future<Void> describeBackupMetrics() {
+		BackupDescription desc = co_await backupContainer->describeBackup();
+		const KeyspaceSnapshotFile* snapshot = nullptr;
+		for (const auto& s : desc.snapshots) {
+			if (s.restorable.orDefault(false) && (!snapshot || s.endVersion > snapshot->endVersion)) {
+				snapshot = &s;
+			}
+		}
+		if (snapshot) {
+			snapshotMB = snapshot->totalSize / 1e6;
+			backupMetrics.emplace_back("Backup snapshot duration (s)",
+			                           versionsToSeconds(snapshot->endVersion - snapshot->beginVersion),
+			                           Averaged::False);
+			backupMetrics.emplace_back("Backup snapshot size (MB)", snapshotMB.get(), Averaged::False);
+		}
+		if (desc.minLogBegin.present() && desc.maxLogEnd.present()) {
+			backupMetrics.emplace_back("Backup log coverage (s)",
+			                           versionsToSeconds(desc.maxLogEnd.get() - desc.minLogBegin.get()),
+			                           Averaged::False);
+		}
+		if (desc.minLogBegin.present() && desc.contiguousLogEnd.present()) {
+			backupMetrics.emplace_back("Backup contiguous log coverage (s)",
+			                           versionsToSeconds(desc.contiguousLogEnd.get() - desc.minLogBegin.get()),
+			                           Averaged::False);
+		}
+		if (desc.minRestorableVersion.present() && desc.maxRestorableVersion.present()) {
+			backupMetrics.emplace_back(
+			    "Backup restorable window (s)",
+			    versionsToSeconds(desc.maxRestorableVersion.get() - desc.minRestorableVersion.get()),
+			    Averaged::False);
+		}
+	}
+
 	static Future<Void> clearDatabase(Database cx) {
 		Transaction tr(cx);
 		while (true) {
@@ -132,8 +175,19 @@ struct RestoreBackupWorkload : TestWorkload {
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		co_await delay(delayFor);
 		co_await waitOnBackup(cx);
+		if (reportBackupMetrics) {
+			try {
+				co_await describeBackupMetrics();
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				TraceEvent(SevWarn, "RestoreBackupDescribeFailed").error(e);
+			}
+		}
 		co_await clearDatabase(cx);
 
+		double restoreStart = now();
 		co_await backupAgent.restore(cx,
 		                             cx,
 		                             tag,
@@ -150,12 +204,24 @@ struct RestoreBackupWorkload : TestWorkload {
 		                             InconsistentSnapshotOnly::False,
 		                             ::invalidVersion,
 		                             encryptionKeyFileName);
+		restoreDuration = now() - restoreStart;
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(cx); }
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(std::vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {
+		m.insert(m.end(), backupMetrics.begin(), backupMetrics.end());
+		if (!restoreDuration.present()) {
+			return;
+		}
+		m.emplace_back("Restore duration (s)", restoreDuration.get(), Averaged::False);
+		// Mutation log bytes are not exposed by BackupDescription, so this is snapshot-only.
+		if (snapshotMB.present() && restoreDuration.get() > 0) {
+			m.emplace_back(
+			    "Restore snapshot throughput (MB/s)", snapshotMB.get() / restoreDuration.get(), Averaged::False);
+		}
+	}
 };
 
 WorkloadFactory<RestoreBackupWorkload> RestoreBackupWorkloadFactory;

@@ -45,7 +45,6 @@
 #include "fdbserver/checkpoint/BulkSstFiles.h"
 #include "fdbserver/checkpoint/Checkpoint.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
-#include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/kvstore/FDBExecHelper.h"
@@ -107,6 +106,14 @@
 #include "flow/CoroUtils.h"
 #include "flow/TDMetric.h"
 #include "flow/genericactors.h"
+
+#ifdef WITH_ROCKSDB
+#include "fdbserver/core/FDBRocksDBVersion.h"
+#else
+#define FDB_ROCKSDB_MAJOR 0
+#define FDB_ROCKSDB_MINOR 0
+#define FDB_ROCKSDB_PATCH 0
+#endif
 
 #ifndef __INTEL_COMPILER
 #pragma region Data Structures
@@ -4851,6 +4858,11 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 
 					readBytes = sourceReply.data.expectedSize() + restoredReply.data.expectedSize();
 					validatedBytes += readBytes;
+
+					// The restored copy is only kept stable while the audit runs; afterwards the caller may clear or
+					// rewrite it, which a task that arrives late would report as corruption. Checking after the reads
+					// means any difference found below was read while the audit was still running.
+					co_await checkAuditRunning(data->cx, req.getType(), req.id);
 
 					// FAST-PATH: Detect completely empty sides early and fail immediately.
 					// This prevents iterating through millions of keys when one side is empty.
@@ -12257,6 +12269,7 @@ Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
 	    self->thisServerID.toString() + "/StorageMetrics",
 	    [self = self](TraceEvent& te) {
 		    te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
+		    // if not WITH_ROCKSDB: "0.0.0"
 		    te.detail("RocksDBVersion", format("%d.%d.%d", FDB_ROCKSDB_MAJOR, FDB_ROCKSDB_MINOR, FDB_ROCKSDB_PATCH));
 		    te.detail("Tag", self->tag.toString());
 		    std::vector<int> rpr = self->readPriorityRanks;

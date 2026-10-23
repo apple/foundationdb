@@ -3144,7 +3144,7 @@ void addDataDistributionActors(Reference<DataDistributor> self, std::vector<Futu
 Future<Void> dataDistribution(Reference<DataDistributor> self,
                               PromiseStream<GetMetricsListRequest> getShardMetricsList) {
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
-	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
+	cx->locationCache.setCapacity(SERVER_KNOBS->DD_LOCATION_CACHE_SIZE);
 	self->txnProcessor = makeReference<DDTxnProcessor>(cx);
 
 	TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Start");
@@ -3995,6 +3995,11 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 	try {
 		ASSERT(audit != nullptr);
 		ASSERT(audit->coreState.ddId == self->ddId);
+		// Stop here if this data distributor lost the lock, or the audit was completed or taken over by another one:
+		// tasks dispatched for an audit that is over run against data that nothing keeps consistent. This covers the
+		// start of a generation only; tasks scheduled later within it are not re-checked.
+		co_await checkAuditRunningUnderLock(
+		    self->txnProcessor->context(), auditType, auditID, self->ddId, lockInfo, self->context->isDDEnabled());
 		loadAndDispatchAudit(self, audit);
 		TraceEvent(SevInfo, "DDAuditStorageCoreScheduled", self->ddId)
 		    .detail("Context", audit->getDDAuditContext())
