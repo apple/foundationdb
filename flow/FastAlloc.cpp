@@ -67,7 +67,6 @@
 #elif defined(__APPLE__)
 #define INIT_SEG __attribute__((init_priority(1000)))
 // WARNING: init_priority for macOS linker is just "within single module" not "entire application"
-#define INIT_SEG
 #else
 #error Where am I?
 #endif
