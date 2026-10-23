@@ -252,9 +252,11 @@ public:
 		return sum<int64_t>([](IDataDistributionTeam const& team) { return team.getDataInFlightToTeam(); });
 	}
 
-	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
-		return sum<int64_t>([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
-			return team.getLoadBytes(includeInFlight, inflightPenalty);
+	int64_t getLoadBytes(bool includeInFlight = true,
+	                     double inflightPenalty = 1.0,
+	                     bool rankOnWorstMember = false) const override {
+		return sum<int64_t>([includeInFlight, inflightPenalty, rankOnWorstMember](IDataDistributionTeam const& team) {
+			return team.getLoadBytes(includeInFlight, inflightPenalty, rankOnWorstMember);
 		});
 	}
 
@@ -1807,9 +1809,17 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 						}
 					} else {
 						double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
+						// Re-replication and exclude moves are the ones that can bury a member that is
+						// already filling: they place continuously for as long as the exclude runs, and the
+						// team mean divides one full member's excess across the replication factor. Ranking
+						// them on their worst member is what stops a single host being chosen all the way to
+						// the disk threshold.
+						bool rankOnWorstMember = false;
 						if (rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
-						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
+						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) {
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
+							rankOnWorstMember = SERVER_KNOBS->DD_RANK_UNHEALTHY_DEST_ON_WORST_MEMBER;
+						}
 						if (rd.healthPriority == SERVER_KNOBS->PRIORITY_POPULATE_REGION ||
 						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
 						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
@@ -1841,6 +1851,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 						req.storageQueueAware = SERVER_KNOBS->ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION;
 						req.findTeamForBulkLoad = doBulkLoading;
 						req.wantTrueBestIfMoveout = wantTrueBestIfMoveout;
+						req.rankOnWorstMember = rankOnWorstMember;
 
 						if (enableShardMove && tciIndex == 1) {
 							ASSERT(physicalShardIDCandidate != UID().first() &&
@@ -3411,6 +3422,142 @@ TEST_CASE("/DataDistribution/DDQueue/ReplacementPreservesPipelineCapacity") {
 	ASSERT_EQ(self.pipelineSize(), SERVER_KNOBS->DD_MAX_PIPELINE_MOVES - 1);
 	ASSERT(!self.pipelineFull->get());
 	ASSERT(capacityChanged.isReady());
+	return Void();
+}
+
+// queueRelocation splits any queued relocation that a new request only partially overlaps. The two
+// split paths account for the resulting fragments differently, and this pins that difference down:
+// a relocation still awaiting source discovery has every fragment counted, while one that already
+// has its source servers keeps a count of 1 no matter how many fragments queueMap ends up holding.
+// Which of the two is intended is not settled here; only that they disagree.
+TEST_CASE("/DataDistribution/DDQueue/FragmentAccountingDiffersBySourceDiscoveryState") {
+	const int rebalancePriority = SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
+	const int excludePriority = SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY;
+	const int punches = SERVER_KNOBS->DD_REBALANCE_PARALLELISM + 5;
+	const UID srcServer(9, 0);
+
+	// Bounds must outlive every call below: queueMap stores non-owning KeyRangeRefs.
+	std::vector<Key> bounds;
+	for (int i = 0; i < 2 * punches; i++) {
+		bounds.push_back(Key(format("k%06d", i)));
+	}
+
+	for (bool sourceDiscovered : { false, true }) {
+		DDQueue self;
+		self.pipelineFull = makeReference<AsyncVar<bool>>(false);
+		self.rawProcessingUnhealthy = makeReference<AsyncVar<bool>>(false);
+		self.rawProcessingWiggle = makeReference<AsyncVar<bool>>(false);
+		// Zero permits keeps getSourceServersForRange from running, so this needs no database.
+		self.fetchSourceLock = makeReference<FlowLock>(0);
+
+		RelocateData rebalance(
+		    RelocateShard(KeyRangeRef("a"_sr, "z"_sr), rebalancePriority, RelocateReason::REBALANCE_DISK, UID(1, 0)));
+		if (sourceDiscovered) {
+			rebalance.src.push_back(srcServer);
+			rebalance.startTime = now();
+			rebalance.workFactor = 1.0;
+		}
+		self.queueMap.insert(rebalance.keys, rebalance);
+		if (sourceDiscovered) {
+			self.queue[srcServer].insert(rebalance);
+		} else {
+			self.fetchingSourcesQueue.insert(rebalance);
+		}
+		self.queuedRelocations++;
+		self.startRelocation(rebalancePriority, rebalancePriority);
+		ASSERT_EQ(self.priority_relocations[rebalancePriority], 1);
+
+		// Higher-priority traffic punches disjoint interior holes, splitting that one range.
+		std::set<UID> serversToLaunchFrom;
+		for (int i = 0; i < punches; i++) {
+			self.queueRelocation(RelocateShard(KeyRangeRef(bounds[2 * i], bounds[2 * i + 1]),
+			                                   excludePriority,
+			                                   RelocateReason::OTHER,
+			                                   UID(2 + i, 0)),
+			                     serversToLaunchFrom);
+		}
+
+		int fragments = 0;
+		for (auto r : self.queueMap.ranges()) {
+			if (r.value().priority == rebalancePriority) {
+				fragments++;
+			}
+		}
+		// Both paths fragment the range identically: n disjoint interior punches leave n+1 pieces.
+		ASSERT_EQ(fragments, punches + 1);
+		ASSERT_EQ(self.priority_relocations[excludePriority], punches);
+
+		if (sourceDiscovered) {
+			// Every fragment after the first fails to re-register, so the counter that
+			// DD_REBALANCE_PARALLELISM gates on never moves off 1.
+			ASSERT_EQ(self.priority_relocations[rebalancePriority], 1);
+		} else {
+			// Every fragment re-registers at the original priority with no compensating
+			// finishRelocation, so the counter tracks fragments and passes the gate.
+			ASSERT_EQ(self.priority_relocations[rebalancePriority], punches + 1);
+			ASSERT_GT(self.priority_relocations[rebalancePriority], SERVER_KNOBS->DD_REBALANCE_PARALLELISM);
+		}
+	}
+	return Void();
+}
+
+// Busyness::addWork charges every ledger bucket 0..prio/100 while canLaunch reads only bucket
+// prio/100, so re-replication work consumes the rebalance launch budget on a source server but not
+// the reverse. During a long exclude that starves rebalancing for the duration, which is intended
+// priority preemption rather than a defect — this pins the asymmetry so a change to it is deliberate.
+TEST_CASE("/DataDistribution/DDQueue/ReplicationWorkStarvesRebalanceLaunchBudget") {
+	const int teamSize = 3;
+	const int singleRegionTeamSize = 3;
+	const UID srcServer(1, 0);
+	const int excludePriority = SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY;
+	const int rebalancePriority = SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
+
+	auto relocation = [&](int priority, int healthPriority) {
+		RelocateData rd;
+		rd.keys = KeyRangeRef("a"_sr, "b"_sr);
+		rd.priority = priority;
+		rd.healthPriority = healthPriority;
+		rd.src.push_back(srcServer);
+		rd.workFactor = 0;
+		return rd;
+	};
+
+	RelocateData excludeProbe = relocation(excludePriority, excludePriority);
+	RelocateData rebalanceProbe = relocation(rebalancePriority, 0);
+	const int excludeWork = getSrcWorkFactor(excludeProbe, singleRegionTeamSize);
+	const int rebalanceWork = getSrcWorkFactor(rebalanceProbe, singleRegionTeamSize);
+	// Both fall through getSrcWorkFactor's trailing branch, so neither can be free.
+	ASSERT_GT(excludeWork, 0);
+	ASSERT_GT(rebalanceWork, 0);
+
+	// Saturate one source server with exclude (re-replication) work.
+	std::map<UID, Busyness> excludeBusy;
+	int excludeMovesBooked = 0;
+	while (excludeBusy[srcServer].canLaunch(excludePriority, excludeWork)) {
+		excludeBusy[srcServer].addWork(excludePriority, excludeWork);
+		excludeMovesBooked++;
+	}
+	ASSERT_GT(excludeMovesBooked, 0);
+
+	// A rebalance move off that server is now refused: addWork(700) charged bucket 1, which is the
+	// bucket canLaunch(120) reads.
+	RelocateData blockedRebalance = relocation(rebalancePriority, 0);
+	ASSERT(!canLaunchSrc(blockedRebalance, teamSize, singleRegionTeamSize, excludeBusy, {}));
+
+	// The converse does not hold. Saturate the same server with rebalance work instead: addWork(120)
+	// never reaches bucket 7, so re-replication still launches freely.
+	std::map<UID, Busyness> rebalanceBusy;
+	int rebalanceMovesBooked = 0;
+	while (rebalanceBusy[srcServer].canLaunch(rebalancePriority, rebalanceWork)) {
+		rebalanceBusy[srcServer].addWork(rebalancePriority, rebalanceWork);
+		rebalanceMovesBooked++;
+	}
+	ASSERT_GT(rebalanceMovesBooked, 0);
+
+	RelocateData blockedRebalance2 = relocation(rebalancePriority, 0);
+	ASSERT(!canLaunchSrc(blockedRebalance2, teamSize, singleRegionTeamSize, rebalanceBusy, {}));
+	RelocateData unblockedExclude = relocation(excludePriority, excludePriority);
+	ASSERT(canLaunchSrc(unblockedExclude, teamSize, singleRegionTeamSize, rebalanceBusy, {}));
 	return Void();
 }
 
