@@ -1337,6 +1337,10 @@ void advanceRetiredLogQueues(TLogData* self) {
 		log->second->queuePoppedVersion = std::max(log->second->queuePoppedVersion, log->second->version.get());
 		self->popOrder.pop_front();
 	}
+	if (self->popOrder.empty()) {
+		// Include commit padding and recovery repair bytes only when no generation can still reference the queue.
+		self->persistentQueue->pop(self->rawPersistentQueue->getNextPushLocation());
+	}
 }
 
 Future<bool> waitForRetirementStep(Future<Void> step, Future<Void> removed) {
@@ -1410,6 +1414,8 @@ Future<Void> retireRecoveredLog(TLogData* self, Reference<LogData> logData) {
 
 	logData->retired = true;
 	advanceRetiredLogQueues(self);
+	co_await ioTimeoutError(
+	    self->persistentQueue->commit(), SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "TLogRetireQueueCommit");
 }
 
 Reference<LogData> getNextRecoveredLogToRetire(TLogData* self) {
@@ -3776,6 +3782,17 @@ Future<Void> tLogCore(TLogData* self, Reference<LogData> logData, TLogInterface 
 
 		                                                 StorageBytes sbQueue =
 		                                                     self->rawPersistentQueue->getStorageBytes();
+		                                                 int activeLogs = 0, retiredLogs = 0;
+		                                                 for (const auto& [id, log] : self->id_data) {
+			                                                 activeLogs += !log->stopped();
+			                                                 retiredLogs += log->retired;
+		                                                 }
+		                                                 te.detail("SharedTLogID", self->dbgid.toString());
+		                                                 te.detail("SharedLogCount", self->id_data.size());
+		                                                 te.detail("ActiveLogCount", activeLogs);
+		                                                 te.detail("RetiredLogCount", retiredLogs);
+		                                                 te.detail("QueueDiskEmptyLimit",
+		                                                           self->rawPersistentQueue->getMaxEmptyQueueBytes());
 		                                                 te.detail("QueueDiskBytesUsed", sbQueue.used);
 		                                                 te.detail("QueueDiskBytesFree", sbQueue.free);
 		                                                 te.detail("QueueDiskBytesAvailable", sbQueue.available);
@@ -4455,6 +4472,11 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 
 		if (restoreFromDisk) {
 			co_await restorePersistentState(&self, locality, oldLog, recovered, tlogRequests);
+			// Complete recovery repair writes and establish the committed boundary even if no new log is recruited.
+			co_await ioTimeoutError(
+			    self.persistentQueue->commit(), SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "TLogRestoreQueueCommit");
+			self.queueCommitBegin = 1;
+			self.queueCommitEnd.set(1);
 		} else {
 			co_await ioTimeoutError(checkEmptyQueue(&self) && initPersistentStorage(&self),
 			                        SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,

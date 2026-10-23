@@ -91,6 +91,8 @@ public:
 	                                           // that immediately followed this call
 
 	virtual StorageBytes getStorageBytes() const = 0;
+	// Maximum file capacity retained by an empty queue; zero if the implementation owns no queue files.
+	virtual int64_t getMaxEmptyQueueBytes() const = 0;
 };
 
 template <>
