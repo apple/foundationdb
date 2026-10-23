@@ -609,6 +609,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin-version", SO_REQ_SEP },
 	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent-snapshot-only", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
+	{ OPT_JSON, "--json", SO_NONE },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -1016,6 +1017,9 @@ static void printRestoreUsage(bool devhelp) {
 	printf("  -t, --tagname TAGNAME\n");
 	printf("                 The restore tag to act on.  Default is 'default'\n");
 	printf("\n");
+	printf("  Options for status:\n\n");
+	printf("  --json         Emit the status as a JSON document.\n");
+	printf("\n");
 	printf("  Options for start:\n\n");
 	printf("  -r URL         The Backup URL for the restore to read from.\n");
 	printBackupContainerInfo();
@@ -1146,7 +1150,7 @@ static void printDBBackupUsage(bool devhelp) {
 	       "                 The path of a file containing the connection string for the\n"
 	       "                 source FoundationDB cluster.\n");
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 20).\n");
-	printf("  --json         Emit status as a JSON document instead of text. Reports every error\n"
+	printf("  --json         Emit status as a JSON document. Reports every error\n"
 	       "                 rather than the -e maximum, which applies to the text output only.\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 	       "                 If not specified, the entire database will be backed up.\n");
@@ -4396,10 +4400,12 @@ int main(int argc, char* argv[]) {
 				// If no tag is specifically provided then print all tag status, don't just use "default"
 				if (tagProvided)
 					tag = tagName;
-				f = stopAfter(map(ba.restoreStatus(db, KeyRef(tag)), [](std::string s) -> Void {
-					printf("%s\n", s.c_str());
-					return Void();
-				}));
+				f = stopAfter(
+				    map(jsonOutput ? ba.restoreStatusJSON(db, KeyRef(tag)) : ba.restoreStatus(db, KeyRef(tag)),
+				        [](std::string s) -> Void {
+					        printf("%s\n", s.c_str());
+					        return Void();
+				        }));
 				break;
 			default:
 				throw restore_error();
