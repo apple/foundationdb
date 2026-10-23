@@ -6265,12 +6265,13 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 	}
 
 	// TaskBucket commits after finish() returns, outside the dispatcher's error handling. Own the commit
-	// here so transaction_too_large can rebuild a smaller dispatch. New tasks, their continuation cursor,
+	// here so oversized or expired transactions can rebuild a smaller dispatch. New tasks, their continuation cursor,
 	// and retirement of the current task must commit together to make retries safe.
 	static Future<Void> dispatchWithRetry(Database cx,
 	                                      Reference<TaskBucket> taskBucket,
 	                                      Reference<FutureBucket> futureBucket,
-	                                      Reference<Task> task) {
+	                                      Reference<Task> task,
+	                                      std::function<void(int)> beforeCommitForTest = {}) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		int taskBatchSize =
 		    std::max(1, Params.dispatchTaskLimit().getOrDefault(task, CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE));
@@ -6288,7 +6289,10 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				co_await taskBucket->keepRunning(tr, task);
 				Params.dispatchTaskLimit().set(task, taskBatchSize);
 				co_await dispatch(tr, taskBucket, futureBucket, task, taskBatchSize);
-				if (taskBatchSize > 1 && buggify()) {
+				if (beforeCommitForTest) {
+					ASSERT(g_network->isSimulated());
+					beforeCommitForTest(taskBatchSize);
+				} else if (taskBatchSize > 1 && buggify()) {
 					throw transaction_too_large();
 				}
 				co_await tr->commit();
@@ -6296,18 +6300,28 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.code() == error_code_transaction_too_large && taskBatchSize > 1) {
+			bool reduceTaskLimit = taskBatchSize > 1 && (err.code() == error_code_transaction_too_large ||
+			                                             err.code() == error_code_transaction_too_old);
+			if (reduceTaskLimit) {
 				// The failed transaction persisted neither tasks nor cursor. Rebuild from the current task's
 				// original cursor, with fewer blocks; the successor receives the new cursor only on commit.
+				// Serial task creation can also exhaust the transaction lifetime without hitting the byte limit.
 				int oldLimit = taskBatchSize;
 				taskBatchSize /= 2;
-				tr->reset();
-				CODE_PROBE(true, "Partitioned restore dispatch shrank after transaction_too_large");
+				CODE_PROBE(err.code() == error_code_transaction_too_large,
+				           "Partitioned restore dispatch shrank after transaction_too_large");
+				CODE_PROBE(err.code() == error_code_transaction_too_old,
+				           "Partitioned restore dispatch shrank after transaction_too_old");
 				TraceEvent("FileRestorePartitionDispatchResize")
 				    .detail("RestoreUID", RestoreConfig(task).getUid())
+				    .detail("ErrorCode", err.code())
 				    .detail("OldTaskLimit", oldLimit)
 				    .detail("NewTaskLimit", taskBatchSize);
+			}
+			if (reduceTaskLimit && err.code() == error_code_transaction_too_large) {
+				tr->reset();
 			} else {
+				// Preserve the normal retry delay for transaction_too_old, including at the minimum task limit.
 				co_await tr->onError(err);
 			}
 		}
@@ -6329,6 +6343,116 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 };
 StringRef RestoreDispatchPartitionedTaskFunc::name = "restore_dispatch_partitioned"_sr;
 REGISTER_TASKFUNC(RestoreDispatchPartitionedTaskFunc);
+
+Future<Void> testRestoreDispatchRecovery(Database cx) {
+	ASSERT(g_network->isSimulated());
+	using Dispatch = RestoreDispatchPartitionedTaskFunc;
+	RestoreConfig restore(deterministicRandom()->randomUniqueID());
+	std::string tagName = "dispatch-recovery-" + restore.getUid().toString();
+	Reference<IBackupContainer> bc =
+	    IBackupContainer::openContainer("file://" + abspath("simfdb/" + tagName), {}, {}, 0);
+	Subspace testSpace("dispatch-recovery/"_sr.withPrefix(restore.mutationLogPrefix()));
+	auto taskBucket = makeReference<TaskBucket>(testSpace.get("tasks"_sr), AccessSystemKeys::True);
+	auto futureBucket = makeReference<FutureBucket>(testSpace.get("futures"_sr), AccessSystemKeys::True);
+	// Dispatch reads only this metadata; the range tasks are inspected without reading a backup file.
+	RestoreFile file{ 1, "range-file", true, 4096, 32 * 4096 };
+	auto task = makeReference<Task>(Dispatch::name, Dispatch::version);
+	KeyBackedTaskConfig::TaskParams.uid().set(task, restore.getUid());
+	TaskBucket::setValidationCondition(
+	    task, restore.sourceContainer().key, TupleCodec<Reference<IBackupContainer>>::pack(bc));
+	Dispatch::Params.firstVersion().set(task, 1);
+	Dispatch::Params.beginVersion().set(task, 1);
+	Dispatch::Params.endVersion().set(task, 2);
+	Dispatch::Params.dispatchTaskLimit().set(task, 16);
+	co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		// Replacing the isolated setup also makes an unknown commit result safe to retry.
+		tr->clear(testSpace.range());
+		restore.sourceContainer().set(tr, bc);
+		restore.tag().set(tr, tagName);
+		makeRestoreTag(tagName).set(tr, { restore.getUid(), false });
+		restore.restoreVersion().set(tr, 2);
+		restore.rangeFileSet().insert(tr, file);
+		taskBucket->addTask(tr, task);
+		return Void();
+	});
+	while (true) {
+		task = co_await taskBucket->getOne(cx);
+		if (task) {
+			break;
+		}
+		co_await delay(1.0);
+	}
+	int rejectedLimit = 0;
+	int ageFailures = 0;
+	co_await Dispatch::dispatchWithRetry(cx, taskBucket, futureBucket, task, [&](int limit) {
+		// Model persistent latency: retrying an expired chunk unchanged must fail this test promptly.
+		if (rejectedLimit) {
+			ASSERT_LT(limit, rejectedLimit);
+		}
+		if (limit > 4) {
+			rejectedLimit = limit;
+			++ageFailures;
+			throw transaction_too_old();
+		}
+	});
+	ASSERT_GT(ageFailures, 0);
+	int committedLimit = Dispatch::Params.dispatchTaskLimit().get(task);
+	ASSERT_LE(committedLimit, 4);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
+	while (true) {
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			ASSERT(co_await taskBucket->isFinished(tr, task));
+			ASSERT_EQ(co_await taskBucket->getTaskCount(tr), committedLimit + 1);
+			Subspace space = taskBucket->getAvailableSpace(1);
+			RangeResult rows = co_await tr->getRange(space.range(), 1000);
+			ASSERT(!rows.empty() && !rows.more);
+			auto continuation = makeReference<Task>();
+			Key key = space.unpack(rows[0].key).getString(0);
+			for (const auto& row : rows) {
+				Tuple tuple = space.unpack(row.key);
+				ASSERT_EQ(tuple.getString(0), key);
+				continuation->params[tuple.getString(1)] = row.value;
+			}
+			ASSERT_EQ(continuation->params[Task::reservedTaskParamKeyType], Dispatch::name);
+			ASSERT_EQ(Dispatch::Params.beginRangeVersion().get(continuation), file.version);
+			ASSERT_EQ(Dispatch::Params.beginRangeFile().get(continuation), file.fileName);
+			ASSERT_EQ(Dispatch::Params.beginRangeBlock().get(continuation), committedLimit);
+			ASSERT_EQ(Dispatch::Params.dispatchTaskLimit().get(continuation), committedLimit);
+			space = taskBucket->getAvailableSpace();
+			rows = co_await tr->getRange(space.range(), 1000);
+			ASSERT(!rows.more);
+			std::set<int64_t> offsets;
+			for (const auto& row : rows) {
+				if (space.unpack(row.key).getString(1) == RestoreRangeTaskFunc::Params.readOffset().key) {
+					ASSERT(offsets.insert(TupleCodec<int64_t>::unpack(row.value)).second);
+				}
+			}
+			ASSERT_EQ(offsets.size(), committedLimit);
+			for (int i = 0; i < committedLimit; ++i) {
+				ASSERT(offsets.count(i * file.blockSize));
+			}
+			Key batchKey = co_await restore.batchFuture().getOrThrow(tr);
+			ASSERT(!(co_await futureBucket->unpack(batchKey)->isSet(tr)));
+			break;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr->onError(err);
+	}
+	co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->clear(testSpace.range());
+		makeRestoreTag(tagName).clear(tr);
+		restore.clear(tr);
+		return Void();
+	});
+	TraceEvent("RestoreDispatchRecoveryTestPassed")
+	    .detail("AgeFailures", ageFailures)
+	    .detail("CommittedTaskLimit", committedLimit);
+}
 
 struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 	static StringRef name;
