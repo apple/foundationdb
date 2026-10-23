@@ -364,7 +364,7 @@ endif()
 
 ################################################################################
 
-set(WITH_GRPC ON CACHE BOOL "Build FDB with gRPC support")
+set(WITH_GRPC OFF CACHE BOOL "Build FDB with gRPC support")
 
 if (WITH_GRPC)
   # Setup search paths.
