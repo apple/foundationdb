@@ -2372,25 +2372,42 @@ public:
 		return yieldedFuture(item.change.getFuture());
 	}
 
-	static Future<Void> destroyOnCancelYield(YieldedAsyncMap* self, K key, Future<Void> change) {
+	// Every RPC reply races one of these (FailureMonitor::onStateChanged) and cancels it when the reply wins, so
+	// cancellation destroys the frame instead of throwing; EraseOnCancel does the cleanup a catch block cannot.
+	static Future<Void> destroyOnCancelYield(YieldedAsyncMap* self, K key, Future<Void> change, NoThrowOnCancel = {}) {
+		struct EraseOnCancel {
+			YieldedAsyncMap* self;
+			K const& key;
+			Future<Void>& change;
+			Future<Void>& yielded;
+			bool armed = true;
+			~EraseOnCancel() {
+				if (!armed) {
+					return;
+				}
+				yielded = Future<Void>();
+				if (!self->destructing && change.getFutureReferenceCount() == 1 &&
+				    change.getPromiseReferenceCount() == 1) {
+					if (EXPENSIVE_VALIDATION) {
+						auto& p = self->items[key];
+						ASSERT_ABORT(p.change.getFuture() == change);
+					}
+					self->items.erase(key);
+				}
+			}
+		};
+
 		Future<Void> yielded = yieldedFuture(change);
+		EraseOnCancel eraseOnCancel{ self, key, change, yielded };
 		try {
 			co_await yielded;
-			yielded = Future<Void>();
-			change = Future<Void>();
 		} catch (Error& e) {
-			yielded = Future<Void>();
-			if (e.code() == error_code_actor_cancelled && !self->destructing && change.getFutureReferenceCount() == 1 &&
-			    change.getPromiseReferenceCount() == 1) {
-				if (EXPENSIVE_VALIDATION) {
-					auto& p = self->items[key];
-					ASSERT(p.change.getFuture() == change);
-				}
-				self->items.erase(key);
+			if (e.code() != error_code_actor_cancelled) {
+				eraseOnCancel.armed = false;
 			}
-			change = Future<Void>();
 			throw;
 		}
+		eraseOnCancel.armed = false;
 	}
 };
 
