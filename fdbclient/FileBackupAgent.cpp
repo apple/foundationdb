@@ -682,6 +682,7 @@ public:
 		Key removePrefix;
 		Key url;
 		bool bulkLoadComplete;
+		MutationLogType mutationLogType;
 	};
 
 	static Future<StatusSnapshot> getStatusSnapshot_impl(RestoreConfig restore,
@@ -1001,6 +1002,8 @@ Future<RestoreConfig::StatusSnapshot> RestoreConfig::getStatusSnapshot_impl(Rest
 	Future<Version> restoreVersion = restore.restoreVersion().getD(tr);
 	Future<ERestoreState> restoreState = restore.stateEnum().getD(tr);
 	Future<Optional<bool>> bulkLoadComplete = restore.bulkLoadComplete().get(tr);
+	Future<MutationLogType> mutationLogType =
+	    restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
 	Future<Version> readVersion = tr->getReadVersion();
 
 	UID uid = restore.getUid();
@@ -1009,7 +1012,8 @@ Future<RestoreConfig::StatusSnapshot> RestoreConfig::getStatusSnapshot_impl(Rest
 	          success(firstConsistentVersion) && success(tag) && success(lastError) && success(submittedTasks) &&
 	          success(triggeredTasks) && success(runningTasks) && success(totalTasks) && success(useRangeFileRestore) &&
 	          success(ranges) && success(addPrefix) && success(removePrefix) && success(url) &&
-	          success(restoreVersion) && success(restoreState) && success(bulkLoadComplete) && success(readVersion));
+	          success(restoreVersion) && success(restoreState) && success(bulkLoadComplete) &&
+	          success(mutationLogType) && success(readVersion));
 
 	StatusSnapshot s;
 	s.uid = uid;
@@ -1037,6 +1041,7 @@ Future<RestoreConfig::StatusSnapshot> RestoreConfig::getStatusSnapshot_impl(Rest
 	s.removePrefix = removePrefix.get();
 	s.url = url.get();
 	s.bulkLoadComplete = bulkLoadComplete.get().present() && bulkLoadComplete.get().get();
+	s.mutationLogType = mutationLogType.get();
 
 	TraceEvent("FileRestoreProgress")
 	    .detail("RestoreUID", s.uid)
@@ -1112,6 +1117,7 @@ std::string RestoreConfig::renderFullStatusText(const StatusSnapshot& s) {
 	                    s.restoreVersion);
 
 	returnStr += format("  Snapshot Method: %s", s.useRangeFile ? "rangefile" : "bulkload");
+	returnStr += format("  Mutation Log Type: %s", mutationLogTypeToString(s.mutationLogType).c_str());
 
 	auto [snapshotPhase, mutationLogPhase] = statusPhases(s);
 	if (snapshotPhase != nullptr) {
@@ -1127,6 +1133,7 @@ JsonBuilderObject RestoreConfig::renderStatusJSON(const StatusSnapshot& s) {
 	doc.setKey("UID", s.uid.toString());
 	doc.setKey("State", s.stateText);
 	doc.setKey("SnapshotMethod", s.useRangeFile ? "rangefile" : "bulkload");
+	doc.setKey("MutationLogType", mutationLogTypeToString(s.mutationLogType));
 	doc.setKey("URL", s.url.toString());
 
 	JsonBuilderArray rangeList;
@@ -7857,10 +7864,13 @@ public:
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						Reference<IBackupContainer> bc;
 						TimestampedVersion latestRestorable;
+						MutationLogType mutationLogType;
 
 						co_await (
 						    store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))) &&
-						    store(bc, config.backupContainer().getOrThrow(tr)));
+						    store(bc, config.backupContainer().getOrThrow(tr)) &&
+						    store(mutationLogType,
+						          config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT)));
 						bc = fileBackup::getBackupContainerWithProxy(bc);
 
 						doc.setKey("Restorable", latestRestorable.present());
@@ -7875,6 +7885,7 @@ public:
 							doc.setKey("LatestRestorablePoint", o);
 						}
 						doc.setKey("DestinationURL", bc->getURL());
+						doc.setKey("MutationLogType", mutationLogTypeToString(mutationLogType));
 					}
 
 					if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
@@ -8130,6 +8141,10 @@ public:
 						throw backup_error();
 					}
 					statusText += format("Snapshot Mode: %s\n", snapshotModeText.c_str());
+
+					MutationLogType mutationLogType =
+					    co_await config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
+					statusText += format("Mutation Log Type: %s\n", mutationLogTypeToString(mutationLogType).c_str());
 
 					// Check if backup is BulkLoad compatible (has bulkdump_data/).
 					// In rangefile mode no bulkdump task ever runs, so the answer is

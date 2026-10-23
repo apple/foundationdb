@@ -106,6 +106,68 @@ function backup {
   fi
 }
 
+# Check that 'fdbbackup status' reports the mutation log type the backup was started with.
+# $1 The build directory
+# $2 The scratch directory
+function check_status_mutation_log_type {
+  local local_build_dir="${1}"
+  local scratch_dir="${2}"
+  local expected="default"
+  if [[ "${USE_PARTITIONED_LOG}" == "true" ]]; then
+    expected="partitioned-log-experimental"
+  fi
+
+  local status_output
+  if ! status_output=$("${local_build_dir}"/bin/fdbbackup status -t "${TAG}" \
+      -C "${scratch_dir}/loopback_cluster/fdb.cluster" --log --logdir="${scratch_dir}" 2>&1); then
+    err "fdbbackup status failed: ${status_output}"
+    return 1
+  fi
+  if ! grep -qx "Mutation Log Type: ${expected}" <<< "${status_output}"; then
+    err "Expected 'Mutation Log Type: ${expected}' in status output: ${status_output}"
+    return 1
+  fi
+
+  local json_output
+  if ! json_output=$("${local_build_dir}"/bin/fdbbackup status --json -t "${TAG}" \
+      -C "${scratch_dir}/loopback_cluster/fdb.cluster" --log --logdir="${scratch_dir}"); then
+    err "fdbbackup status --json failed: ${json_output}"
+    return 1
+  fi
+  local json_type
+  if ! json_type=$(jq -r '.MutationLogType' <<< "${json_output}"); then
+    err "Failed to parse status --json output: ${json_output}"
+    return 1
+  fi
+  if [[ "${json_type}" != "${expected}" ]]; then
+    err "Expected MutationLogType '${expected}' in status --json, got '${json_type}'"
+    return 1
+  fi
+}
+
+# Check that 'fdbrestore status' reports the mutation log type the backup was started with.
+# $1 The build directory
+# $2 The scratch directory
+function check_restore_status_mutation_log_type {
+  local local_build_dir="${1}"
+  local scratch_dir="${2}"
+  local expected="default"
+  if [[ "${USE_PARTITIONED_LOG}" == "true" ]]; then
+    expected="partitioned-log-experimental"
+  fi
+
+  local status_output
+  if ! status_output=$("${local_build_dir}"/bin/fdbrestore status -t "${TAG}" \
+      --dest-cluster-file "${scratch_dir}/loopback_cluster/fdb.cluster" --log --logdir="${scratch_dir}" 2>&1); then
+    err "fdbrestore status failed: ${status_output}"
+    return 1
+  fi
+  if ! grep -qE "  Mutation Log Type: ${expected}( |$)" <<< "${status_output}"; then
+    err "Expected 'Mutation Log Type: ${expected}' in restore status output: ${status_output}"
+    return 1
+  fi
+}
+
 # Run the fdbrestore command.
 # $1 The build directory
 # $2 The scratch directory
@@ -197,6 +259,11 @@ function test_dir_backup_and_restore {
     err "Failed backup"
     return 1
   fi
+  log "Check status mutation log type"
+  if ! check_status_mutation_log_type "${local_build_dir}" "${scratch_dir}"; then
+    err "Failed status mutation log type check"
+    return 1
+  fi
 
   test_fdbcli_status_json_for_bkup "${local_build_dir}" "${scratch_dir}"
 
@@ -229,6 +296,11 @@ function test_dir_backup_and_restore {
   log "Restore"
   if ! restore "${local_build_dir}" "${scratch_dir}" "${local_encryption_key_file}"; then
     err "Failed restore"
+    return 1
+  fi
+  log "Check restore status mutation log type"
+  if ! check_restore_status_mutation_log_type "${local_build_dir}" "${scratch_dir}"; then
+    err "Failed restore status mutation log type check"
     return 1
   fi
   log "Verify restore"
