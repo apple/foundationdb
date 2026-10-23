@@ -495,35 +495,15 @@ else()
       $<${is_cxx_compile}:-Wno-delete-non-abstract-non-virtual-dtor>
       $<${is_cxx_compile}:-Wno-range-loop-construct>
       $<${is_cxx_compile}:-Wno-reorder-ctor>
-      # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
-      # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
-      $<${is_cxx_compile}:-Wno-unused-command-line-argument>
+      $<${is_cxx_compile}:-Wno-unused-function>
+      # Needed for clang 13 ?
+      $<${is_cxx_compile}:-Wno-unused-private-field>
+      $<${is_cxx_compile}:-Wno-nullability-completeness>
       # Disable C++ 20 warning for ambiguous operator.
       $<${is_cxx_compile}:-Wno-ambiguous-reversed-operator>
       # Disable for clang 19
       $<${is_cxx_compile}:-Wno-vla-cxx-extension>
       )
-    # These need to be disabled for FDB's RocksDB storage server implementation
-    add_compile_options(
-      $<${is_cxx_compile}:-Wno-deprecated-copy>
-      $<${is_cxx_compile}:-Wno-delete-non-abstract-non-virtual-dtor>
-      $<${is_cxx_compile}:-Wno-range-loop-construct>
-      $<${is_cxx_compile}:-Wno-reorder-ctor>
-      $<${is_cxx_compile}:-Wno-unused-function>
-    )
-    # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
-    # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
-    add_compile_options(
-      $<${is_cxx_compile}:-Wno-unused-command-line-argument>
-      $<${is_cxx_compile}:-Wno-unused-private-field>
-      $<${is_cxx_compile}:-Wno-nullability-completeness>
-      $<${is_cxx_compile}:-Wno-macro-redefined>
-    )
-    if (USE_CCACHE)
-      add_compile_options(
-        $<${is_cxx_compile}:-Wno-register>
-      )
-    endif()
     if (PROFILE_INSTR_GENERATE)
       add_compile_options($<${is_cxx_compile}:-fprofile-instr-generate>)
       add_link_options($<${is_cxx_link}:-fprofile-instr-generate>)
