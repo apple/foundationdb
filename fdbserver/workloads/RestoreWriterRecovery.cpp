@@ -22,7 +22,8 @@
 
 namespace fileBackup {
 Future<Void> testRestoreWriterRecovery(Database cx);
-}
+Future<Void> testRestoreDispatchRecovery(Database cx);
+} // namespace fileBackup
 
 struct RestoreWriterRecoveryWorkload : TestWorkload {
 	static constexpr auto NAME = "RestoreWriterRecovery";
@@ -38,3 +39,18 @@ struct RestoreWriterRecoveryWorkload : TestWorkload {
 };
 
 WorkloadFactory<RestoreWriterRecoveryWorkload> RestoreWriterRecoveryWorkloadFactory;
+
+struct RestoreDispatchRecoveryWorkload : TestWorkload {
+	static constexpr auto NAME = "RestoreDispatchRecovery";
+	explicit RestoreDispatchRecoveryWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
+		return clientId == 0 ? fileBackup::testRestoreDispatchRecovery(cx) : Void();
+	}
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(std::vector<PerfMetric>& m) override {}
+};
+
+WorkloadFactory<RestoreDispatchRecoveryWorkload> RestoreDispatchRecoveryWorkloadFactory;
