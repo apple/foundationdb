@@ -273,7 +273,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			// An idle instance still needs non-empty ranges to construct; reuse the last active backup's.
 			MultiBackupRanges::addRanges(
 			    multiBackupScenario, std::min(multiBackupIndex, multiBackupCount - 1), multiBackupCount, backupRanges);
-		} else if (backupRangePrefix.size() > 0) {
+		} else if (!backupRangePrefix.empty()) {
 			// Narrower than normalKeys so the out-of-range sentinels below have an outside to occupy.
 			backupRanges.push_back_deep(backupRanges.arena(), prefixRange(backupRangePrefix));
 		} else {
@@ -774,7 +774,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("AbortAndRestartAfter", abortAndRestartAfter)
 		    .detail("DifferentialAfter", stopDifferentialAfter);
 
-		if (backupRangePrefix.size() > 0) {
+		if (!backupRangePrefix.empty()) {
 			KeyRange prefixed = prefixRange(backupRangePrefix);
 			RangeResult sample =
 			    co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {
