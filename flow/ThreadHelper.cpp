@@ -144,13 +144,23 @@ void testOnMainThreadLifetime(bool ready, bool error, bool cancel, bool releaseE
 	if (!releaseEarly) {
 		if (cancel || error) {
 			ASSERT(client.isError());
-			ASSERT(client.getError().code() == (cancel ? error_code_actor_cancelled : error_code_operation_failed));
+			ASSERT(client.getError().code() == (cancel ? actor_cancelled() : operation_failed()).code());
 		} else {
 			ASSERT(client.get() == 42);
 		}
 		client.cancel();
 		ASSERT(destroyed);
 	}
+}
+
+Future<int> onMainThreadTestOperation(int i) {
+	if (i % 2) {
+		co_await delay(0);
+	}
+	if (i % 3 == 0) {
+		throw operation_failed();
+	}
+	co_return 42;
 }
 
 } // namespace
@@ -173,18 +183,11 @@ TEST_CASE("/flow/onMainThread/ConcurrentDestroy") {
 	std::atomic<int> completed{ 0 };
 	std::atomic<int> failures{ 0 };
 	std::vector<std::thread> workers;
+	workers.reserve(4);
 	for (int worker = 0; worker < 4; ++worker) {
 		workers.emplace_back([&] {
 			for (int i = 0; i < 1000; ++i) {
-				auto result = onMainThread([i]() -> Future<int> {
-					if (i % 2) {
-						co_await delay(0);
-					}
-					if (i % 3 == 0) {
-						throw operation_failed();
-					}
-					co_return 42;
-				});
+				auto result = onMainThread([i] { return onMainThreadTestOperation(i); });
 				if (i % 5 == 0) {
 					result.cancel(); // Also exercise destruction before the operation completes.
 					continue;
