@@ -212,6 +212,13 @@ struct RestoreBackupWorkload : TestWorkload {
 		}
 
 		LockDB lockDB(inPlace);
+		TraceEvent("RestoreBackupStart")
+		    .detail("Tag", tag)
+		    .detail("InPlace", inPlace)
+		    .detail("RangeCount", ranges.size())
+		    .detail("AddPrefix", addPrefix)
+		    .detail("RemovePrefix", removePrefix)
+		    .detail("SnapshotMB", snapshotMB.orDefault(-1));
 		double restoreStart = now();
 		BackupSteps::RestoreSpec spec;
 		spec.tag = tag;
@@ -223,6 +230,7 @@ struct RestoreBackupWorkload : TestWorkload {
 		spec.encryptionKeyFileName = encryptionKeyFileName;
 		co_await BackupSteps::restoreBackup(cx, &backupAgent, version, spec);
 		restoreDuration = now() - restoreStart;
+		TraceEvent("RestoreBackupDone").detail("Tag", tag).detail("DurationSeconds", restoreDuration.get());
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
