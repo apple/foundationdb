@@ -6294,7 +6294,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				                                                       TaskCompletionKey::joinWith(allPartsDone)));
 				++beginRangeBlock;
 				++blocksDispatched;
-				// addTask may yield before adding its metadata; measure only once those writes are buffered.
+				// addTask may yield before adding its metadata; wait so the size check includes those writes.
+				// This serializes task creation and may slow dispatch, but avoids accumulating unmeasured writes.
 				co_await addTaskFutures.back();
 				txFull = tr->getApproximateSize() >= CLIENT_KNOBS->RESTORE_DISPATCH_TX_SIZE;
 			}
