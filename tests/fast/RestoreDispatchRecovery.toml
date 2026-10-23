@@ -1,0 +1,15 @@
+testClass = "Backup"
+buggify = false
+
+[[knobs]]
+# Let the injected age failures, rather than the byte target, bound dispatch.
+restore_dispatch_tx_size = 4194304
+
+[configuration]
+tenantModes = ['disabled']
+
+[[test]]
+testTitle = 'RestoreDispatchRecovery'
+
+    [[test.workload]]
+    testName = 'RestoreDispatchRecovery'
