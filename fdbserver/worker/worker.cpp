@@ -1990,8 +1990,6 @@ bool replyToCachedLogRouter(WorkerCache<TLogInterface>& cache, InitializeLogRout
 Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionRecord> ccr) {
 	if (GrpcServer::instance() == nullptr) {
 		co_await Future<Void>(Never());
-	} else if (g_network->isSimulated()) {
-		co_await Future<Void>(Never());
 	}
 
 	auto db = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION);

@@ -1,0 +1,99 @@
+Subject: [PATCH 1/2] FDB sim: insertion-ordered resolver/LB queued-call sets
+ in ClientChannelFilter
+
+---
+ .../client_channel/client_channel_filter.h    |  5 +-
+ src/core/util/insertion_ordered_set.h         | 51 +++++++++++++++++++
+ 2 files changed, 54 insertions(+), 2 deletions(-)
+ create mode 100644 src/core/util/insertion_ordered_set.h
+
+diff --git a/src/core/client_channel/client_channel_filter.h b/src/core/client_channel/client_channel_filter.h
+index 0e3248a..3a7b52b 100644
+--- a/src/core/client_channel/client_channel_filter.h
++++ b/src/core/client_channel/client_channel_filter.h
+@@ -56,6 +56,7 @@
+ #include "src/core/resolver/resolver.h"
+ #include "src/core/service_config/service_config.h"
+ #include "src/core/telemetry/call_tracer.h"
++#include "src/core/util/insertion_ordered_set.h"
+ #include "src/core/util/orphanable.h"
+ #include "src/core/util/ref_counted.h"
+ #include "src/core/util/ref_counted_ptr.h"
+@@ -267,7 +268,7 @@ class ClientChannelFilter final {
+   //
+   mutable Mutex resolution_mu_;
+   // List of calls queued waiting for resolver result.
+-  absl::flat_hash_set<CallData*> resolver_queued_calls_
++  InsertionOrderedSet<CallData*> resolver_queued_calls_
+       ABSL_GUARDED_BY(resolution_mu_);
+   // Data from service config.
+   absl::Status resolver_transient_failure_error_
+@@ -283,7 +284,7 @@ class ClientChannelFilter final {
+   mutable Mutex lb_mu_;
+   RefCountedPtr<LoadBalancingPolicy::SubchannelPicker> picker_
+       ABSL_GUARDED_BY(lb_mu_);
+-  absl::flat_hash_set<RefCountedPtr<LoadBalancedCall>,
++  InsertionOrderedSet<RefCountedPtr<LoadBalancedCall>,
+                       RefCountedPtrHash<LoadBalancedCall>,
+                       RefCountedPtrEq<LoadBalancedCall>>
+       lb_queued_calls_ ABSL_GUARDED_BY(lb_mu_);
+diff --git a/src/core/util/insertion_ordered_set.h b/src/core/util/insertion_ordered_set.h
+new file mode 100644
+index 0000000..0114bf4
+--- /dev/null
++++ b/src/core/util/insertion_ordered_set.h
+@@ -0,0 +1,51 @@
++// FDB simulation patch: a set that iterates in insertion order, for containers whose iteration order is observable
++// (e.g. the order queued calls are released). absl::flat_hash_set iterates in an order that depends on the hash seed
++// and, for pointer keys, on heap addresses, which makes gRPC's behaviour differ between otherwise identical runs.
++
++#ifndef GRPC_SRC_CORE_UTIL_INSERTION_ORDERED_SET_H
++#define GRPC_SRC_CORE_UTIL_INSERTION_ORDERED_SET_H
++
++#include <functional>
++#include <list>
++#include <utility>
++
++#include "absl/container/flat_hash_map.h"
++#include "absl/hash/hash.h"
++
++namespace grpc_core {
++
++template <typename T, typename Hash = absl::Hash<T>, typename Eq = std::equal_to<T>>
++class InsertionOrderedSet {
++ public:
++  using iterator = typename std::list<T>::iterator;
++
++  bool insert(T value) {
++    if (index_.contains(value)) return false;
++    auto it = items_.insert(items_.end(), std::move(value));
++    index_.emplace(*it, it);
++    return true;
++  }
++  size_t erase(const T& value) {
++    auto found = index_.find(value);
++    if (found == index_.end()) return 0;
++    items_.erase(found->second);
++    index_.erase(found);
++    return 1;
++  }
++  void clear() {
++    index_.clear();
++    items_.clear();
++  }
++  bool empty() const { return items_.empty(); }
++  size_t size() const { return items_.size(); }
++  iterator begin() { return items_.begin(); }
++  iterator end() { return items_.end(); }
++
++ private:
++  std::list<T> items_;
++  absl::flat_hash_map<T, iterator, Hash, Eq> index_;
++};
++
++}  // namespace grpc_core
++
++#endif  // GRPC_SRC_CORE_UTIL_INSERTION_ORDERED_SET_H
+-- 
+2.53.0
+

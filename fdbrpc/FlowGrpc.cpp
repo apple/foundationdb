@@ -45,7 +45,7 @@ void FlowGrpc::init(TLSConfig* tls_config, const std::optional<NetworkAddress>& 
 // ---- GrpcServer definitions ------
 
 GrpcServer::GrpcServer(const NetworkAddress& addr, std::shared_ptr<GrpcCredentialProvider> provider)
-  : pool_(1), address_(addr), credential_provider_(provider) {
+  : pool_(g_network->isSimulated() ? 0 : 1), address_(addr), credential_provider_(provider) {
 
 	if (provider == nullptr) {
 		credential_provider_ = std::make_shared<GrpcInsecureCredentialProvider>();
@@ -67,6 +67,9 @@ Future<Void> GrpcServer::run() {
 		run_actor_ = runInternal();
 		co_await run_actor_;
 	} catch (Error& err) {
+		if (err.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		if (err.code() != error_code_operation_cancelled) {
 			TraceEvent(SevError, "GrpcServerRunError").error(err).detail("Endpoint", address_);
 			throw;
@@ -144,6 +147,8 @@ Future<Void> GrpcServer::stopServer() {
 	}
 
 	state_ = State::Stopping;
+	// Blocking shutdown would deadlock simulation, whose gRPC I/O runs on this thread.
+	ASSERT(!g_network->isSimulated());
 	co_await pool_.post([&]() {
 		stopServerSyncInternal();
 		return Void();

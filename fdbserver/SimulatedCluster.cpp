@@ -46,6 +46,10 @@
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileNonDurable.h"
+#ifdef FLOW_GRPC_ENABLED
+#include "fdbrpc/FlowGrpc.h"
+#include "fdbrpc/grpc/SimEventEngine.h"
+#endif
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/BackupAgent.h"
@@ -435,6 +439,9 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "simHTTPServerEnabled") {
 				simHTTPServerEnabled = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "grpcEnabled") {
+				grpcEnabled = strcmp(value.c_str(), "true") == 0;
+			}
 			if (attrib == "injectSSTargetedRestart") {
 				injectTargetedSSRestart = strcmp(value.c_str(), "true") == 0;
 			}
@@ -483,6 +490,7 @@ public:
 	Optional<std::string> remoteConfig;
 	bool randomlyRenameZoneId = false;
 	bool simHTTPServerEnabled = true;
+	bool grpcEnabled = false;
 
 	bool injectTargetedSSRestart = false;
 	bool injectSSDelay = false;
@@ -558,6 +566,7 @@ public:
 		    .add("extraMachineCountDC", &extraMachineCountDC)
 		    .add("extraStorageMachineCountPerDC", &extraStorageMachineCountPerDC)
 		    .add("simHTTPServerEnabled", &simHTTPServerEnabled)
+		    .add("grpcEnabled", &grpcEnabled)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
 		    .add("injectSSDelay", &injectSSDelay)
@@ -829,6 +838,14 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 					NetworkAddress n(ip, listenPort, true, sslEnabled && listenPort == port);
 					futures.push_back(FlowTransport::transport().bind(n, n));
 				}
+#ifdef FLOW_GRPC_ENABLED
+				if (fdbSimulationPolicyState().grpcEnabled && processRunFDBD(processMode)) {
+					NetworkAddress grpcAddress(ip, port + SIM_GRPC_PORT_OFFSET, true, false);
+					g_simulator->addProcessListener(process, grpcAddress);
+					FlowGrpc::init(nullptr, grpcAddress);
+					futures.push_back(GrpcServer::instance()->run());
+				}
+#endif
 				if (processRunFDBD(processMode)) {
 					futures.push_back(fdbd(connRecord,
 					                       localities,
@@ -2252,6 +2269,13 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           ProtocolVersion protocolVersion) {
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
+
+#ifdef FLOW_GRPC_ENABLED
+	if (testConfig.grpcEnabled) {
+		fdbSimulationPolicyState().grpcEnabled = true;
+		sim_grpc::installSimEventEngine();
+	}
+#endif
 
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
