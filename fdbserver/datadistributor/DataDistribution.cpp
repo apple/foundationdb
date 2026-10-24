@@ -748,12 +748,17 @@ public:
 			    .detail("UnhealthyServers", 0)
 			    .detail("HighestPriority", 0)
 			    .detail("HighestTeamPriority", -1)
+			    .detail("HighestPrimaryTeamPriority", -1)
+			    .detail("HighestRemoteTeamPriority", self->configuration.usableRegions > 1 ? -1 : 0)
 			    .trackLatest(self->totalDataInFlightEventHolder->trackingKey);
 			TraceEvent("TotalDataInFlight", self->ddId)
 			    .detail("Primary", false)
 			    .detail("TotalBytes", 0)
 			    .detail("UnhealthyServers", 0)
 			    .detail("HighestPriority", self->configuration.usableRegions > 1 ? 0 : -1)
+			    .detail("HighestTeamPriority", -1)
+			    .detail("HighestPrimaryTeamPriority", -1)
+			    .detail("HighestRemoteTeamPriority", self->configuration.usableRegions > 1 ? -1 : 0)
 			    .trackLatest(self->totalDataInFlightRemoteEventHolder->trackingKey);
 		}
 	}
