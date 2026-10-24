@@ -35,9 +35,11 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	toolscache "k8s.io/client-go/tools/cache"
@@ -77,14 +79,24 @@ func setupCache(namespace string, podName string, nodeName string) (client.WithW
 		return nil, nil, err
 	}
 
+	return setupCacheWithConfig(config, namespace, podName, nodeName)
+}
+
+func setupCacheWithConfig(config *rest.Config, namespace string, podName string, nodeName string) (client.WithWatch, cache.Cache, error) {
 	scheme := runtime.NewScheme()
-	err = clientgoscheme.AddToScheme(scheme)
+	err := clientgoscheme.AddToScheme(scheme)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	// These core resources have fixed scopes; discovery would bypass informer retries during startup
+	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{corev1.SchemeGroupVersion})
+	mapper.Add(corev1.SchemeGroupVersion.WithKind("Pod"), meta.RESTScopeNamespace)
+	mapper.Add(corev1.SchemeGroupVersion.WithKind("Node"), meta.RESTScopeRoot)
+
 	internalCache, err := cache.New(config, cache.Options{
 		Scheme: scheme,
+		Mapper: mapper,
 		DefaultNamespaces: map[string]cache.Config{
 			namespace: {},
 		},
@@ -105,6 +117,7 @@ func setupCache(namespace string, podName string, nodeName string) (client.WithW
 	// Create the new client for writes. This client will also be used to setup the cache.
 	internalClient, err := client.NewWithWatch(config, client.Options{
 		Scheme: scheme,
+		Mapper: mapper,
 		Cache: &client.CacheOptions{
 			Reader:       internalCache,
 			Unstructured: false,
