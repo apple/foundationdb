@@ -1,10 +1,12 @@
 #include <algorithm>
+#include <map>
 #include <set>
 #include <string>
 
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
+#include "flow/CodeProbe.h"
 #include "flow/TDMetric.h"
 #include "flow/Trace.h"
 #include "flow/genericactors.h"
@@ -39,6 +41,13 @@ Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInf
 }
 
 std::set<std::pair<std::string, std::string>> g_roles;
+
+// Role bookkeeping is per-process in simulation, but endRole() can run under a different process
+// than startRole() did: machine teardown destroys one process's ActorCollection while another is
+// current, and the detached actors resume synchronously under that caller. Removing against the
+// ambient address then decrements the wrong process, which silently corrupts the counts and
+// eventually trips the ASSERT in TraceLog::removeRole.
+std::map<std::pair<std::string, std::string>, NetworkAddress> g_roleAddresses;
 
 Standalone<StringRef> roleString(std::set<std::pair<std::string, std::string>> roles, bool with_ids) {
 	std::string result;
@@ -165,6 +174,10 @@ void startRole(const Role& role,
 		addTraceRole(role.abbreviation);
 	}
 
+	if (g_network->isSimulated()) {
+		g_roleAddresses[{ role.roleName, roleId.shortString() }] = g_network->getLocalAddress();
+	}
+
 	TraceEvent ev("Role", roleId);
 	ev.detail("As", role.roleName)
 	    .detail("Transition", "Begin")
@@ -207,15 +220,26 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 
 	latestEventCache.clear(id.shortString());
 
-	g_roles.erase({ role.roleName, id.shortString() });
+	const auto roleKey = std::make_pair(role.roleName, id.shortString());
+	g_roles.erase(roleKey);
 	StringMetricHandle("Roles"_sr) = roleString(g_roles, false);
 	StringMetricHandle("RolesWithIDs"_sr) = roleString(g_roles, true);
+
+	NetworkAddress roleAddress = g_network->getLocalAddress();
 	if (g_network->isSimulated()) {
-		g_simulator->removeRole(g_network->getLocalAddress(), role.roleName);
+		auto itr = g_roleAddresses.find(roleKey);
+		if (itr != g_roleAddresses.end()) {
+			CODE_PROBE(itr->second != roleAddress,
+			           "endRole ran under a different process than startRole",
+			           probe::decoration::rare);
+			roleAddress = itr->second;
+			g_roleAddresses.erase(itr);
+		}
+		g_simulator->removeRole(roleAddress, role.roleName);
 	}
 
 	if (role.includeInTraceRoles) {
-		removeTraceRole(role.abbreviation);
+		removeTraceRole(role.abbreviation, roleAddress);
 	}
 }
 
