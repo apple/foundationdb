@@ -55,7 +55,7 @@ type Argument struct {
 	// Value provides the value for a Literal type argument.
 	Value string `json:"value,omitempty"`
 
-	// Values provides the sub-values for a Concatenate type argument.
+	// Values provides the sub-values for a Concatenate or Sum type argument.
 	Values []Argument `json:"values,omitempty"`
 
 	// Source provides the name of the environment variable to use for an
@@ -95,6 +95,10 @@ const (
 	// IPListArgumentType defines an argument that is a comma-separated list of
 	// IP addresses, provided through an environment variable.
 	IPListArgumentType = "IPList"
+
+	// SumArgumentType defines an argument that is the sum of other arguments.
+	// Every sub-value must generate an integer.
+	SumArgumentType = "Sum"
 )
 
 // GenerateArgument processes an argument and generates its string representation.
@@ -121,6 +125,20 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 		}
 		number = number + argument.Offset
 		return strconv.Itoa(number), nil
+	case SumArgumentType:
+		sum := 0
+		for _, childArgument := range argument.Values {
+			childValue, err := childArgument.GenerateArgument(processNumber, env)
+			if err != nil {
+				return "", err
+			}
+			number, err := strconv.Atoi(childValue)
+			if err != nil {
+				return "", fmt.Errorf("value %q of sum argument is not an integer: %w", childValue, err)
+			}
+			sum += number
+		}
+		return strconv.Itoa(sum), nil
 	case EnvironmentArgumentType, IPListArgumentType:
 		return argument.LookupEnv(env)
 	default:
