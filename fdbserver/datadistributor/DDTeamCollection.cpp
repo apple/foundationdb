@@ -6593,6 +6593,7 @@ public:
 		primary->configuration.usableRegions = 2;
 		remote->primary = false;
 		primary->teamCollections = { primary.get(), remote.get() };
+		remote->teamCollections = primary->teamCollections;
 		primary->initialFailureReactionDelay = Future<Void>(Void());
 		remote->initialFailureReactionDelay = Future<Void>(Void());
 		primary->priority_teams = { { SERVER_KNOBS->PRIORITY_TEAM_HEALTHY, 1 } };

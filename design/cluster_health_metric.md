@@ -92,8 +92,9 @@ Fields used:
 Behavior:
 - Uses live storage team priorities for replication severity. Relocation counts can change before or after team health changes.
 - Uses the data distributor's current primary and remote team collections, so the regional roles follow failover.
-- Returns `OUTAGE` if a team in the primary region has no replicas left.
-- Returns `METRICS_MISSING` if a required team summary is uninitialized or unavailable, unless a known team in the primary region has no replicas left. A database with one region treats the absent remote region as healthy.
+- Returns `METRICS_MISSING` if an event contains only one of the two regional priority fields.
+- Returns `OUTAGE` if a team in the primary region has no replicas left, even when the remote priority is `-1` (unknown).
+- Otherwise, returns `METRICS_MISSING` if a required team summary is unknown. A database with one region treats the absent remote region as healthy.
 - Returns `CRITICAL_INTERVENTION_REQUIRED` if a team in the remote region has no replicas left. It also returns this level if a team in either region has one replica left and the configured storage team size is 3.
 - Returns `SELF_HEALING` if a team is unhealthy or data movement is queued or in flight to restore replication.
 - Returns `HEALTHY` otherwise.
