@@ -404,8 +404,8 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationF
 	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
 
 	TraceEventFields partialRegionalMetrics;
-	partialRegionalMetrics.addField("HighestTeamPriority", std::to_string(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY));
-	partialRegionalMetrics.addField("HighestPrimaryTeamPriority", std::to_string(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY));
+	partialRegionalMetrics.addField("HighestTeamPriority", std::to_string(SERVER_KNOBS->PRIORITY_TEAM_0_LEFT));
+	partialRegionalMetrics.addField("HighestPrimaryTeamPriority", std::to_string(SERVER_KNOBS->PRIORITY_TEAM_0_LEFT));
 	provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(partialRegionalMetrics));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
