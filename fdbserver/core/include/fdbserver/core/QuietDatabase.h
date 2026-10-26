@@ -29,6 +29,7 @@
 Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
 Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
                                                      Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
+Optional<int64_t> getSimTLogQueueFileBytes(NetworkAddress address, UID sharedId);
 // During simulation, wait for retired TLog files and data to disappear after full recovery.
 // If supplied, the target must still exist and must report that all its logs have retired.
 Future<bool> checkRetiredTLogDisks(Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,

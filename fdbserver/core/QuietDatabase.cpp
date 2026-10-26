@@ -1002,6 +1002,53 @@ static Optional<UID> sharedTLogIdFromFilename(StringRef name) {
 	return UID::fromStringThrowsOnFailure(id.toString());
 }
 
+template <class Visitor>
+static int visitSimTLogDiskFiles(const ISimulator::ProcessInfo& process, const std::string& folder, Visitor&& visit) {
+	const auto absoluteFolder = abspath(folder);
+	auto names = platform::listFiles(folder);
+	auto dirs = platform::listDirectories(folder);
+	names.insert(names.end(), dirs.begin(), dirs.end());
+	int ignoredUnlinks = 0;
+	for (const auto& name : names) {
+		auto id = sharedTLogIdFromFilename(name);
+		if (!id.present()) {
+			continue;
+		}
+		if (process.machine->nonDurablyUnlinkedFiles.contains(joinPath(absoluteFolder, name))) {
+			++ignoredUnlinks;
+			continue;
+		}
+		visit(id.get(), name, joinPath(folder, name), std::binary_search(dirs.begin(), dirs.end(), name));
+	}
+	return ignoredUnlinks;
+}
+
+// The workload ranks active stores by their queue files before choosing one to retire.
+Optional<int64_t> getSimTLogQueueFileBytes(NetworkAddress address, UID sharedId) {
+	const auto* process = g_simulator->findProcessByAddress(address);
+	if (!process || !process->machine || process->failed || process->rebooting) {
+		return {};
+	}
+	Optional<int64_t> bytes;
+	try {
+		visitSimTLogDiskFiles(
+		    *process, process->dataFolder, [&](UID id, const auto& name, const auto& path, bool directory) {
+			    if (id == sharedId && !directory && name.starts_with("logqueue-") && name.ends_with(".fdq")) {
+				    bytes = bytes.orDefault(0) + fileSize(path);
+			    }
+		    });
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		TraceEvent("GcGenerationsQueueTargetReadError", sharedId)
+		    .detail("Worker", address)
+		    .detail("ErrorCode", e.code());
+		return {};
+	}
+	return bytes;
+}
+
 static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                          Optional<UID> requiredIdleStore) {
 	Optional<LogEpoch> epoch;
@@ -1070,12 +1117,31 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 				continue;
 			}
 			for (const auto& folder : { process->dataFolder, process->dataFolder + "-tlog-spill" }) {
-				std::string absoluteFolder;
-				std::vector<std::string> names, dirs;
 				try {
-					absoluteFolder = abspath(folder);
-					names = platform::listFiles(folder);
-					dirs = platform::listDirectories(folder);
+					nonDurableUnlinks += visitSimTLogDiskFiles(
+					    *process, folder, [&](UID id, const auto& name, const auto& path, bool directory) {
+						    ++filesChecked;
+						    auto owner = folders.find(id);
+						    if (owner != folders.end() && owner->second == process->dataFolder) {
+							    observed.insert(id);
+							    if (!directory && name.starts_with("logqueue-")) {
+								    if (name.ends_with(".fdq")) {
+									    queueStores.insert(id);
+								    }
+								    // Include temporary replacement files until their rename or unlink is visible.
+								    queueBytes[id] += fileSize(path);
+							    }
+						    } else {
+							    ++staleFiles;
+							    TraceEvent(severity, "RetiredTLogFilePresent", id)
+							        .detail("Epoch", epoch.get())
+							        .detail("Worker", worker.interf.address())
+							        .detail("SharedTLogID", id.toString())
+							        .detail("File", path)
+							        .detail("Bytes", directory ? -1 : fileSize(path))
+							        .detail("Deadline", deadline);
+						    }
+					    });
 				} catch (Error& e) {
 					if (e.code() == error_code_actor_cancelled) {
 						throw;
@@ -1086,41 +1152,6 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 					    .detail("Worker", worker.interf.address())
 					    .detail("Folder", folder)
 					    .detail("ErrorCode", e.code());
-					continue;
-				}
-				names.insert(names.end(), dirs.begin(), dirs.end());
-				for (const auto& name : names) {
-					auto id = sharedTLogIdFromFilename(name);
-					if (!id.present()) {
-						continue;
-					}
-					if (process->machine->nonDurablyUnlinkedFiles.contains(joinPath(absoluteFolder, name))) {
-						++nonDurableUnlinks;
-						continue;
-					}
-					++filesChecked;
-					const auto path = joinPath(folder, name);
-					const bool directory = std::binary_search(dirs.begin(), dirs.end(), name);
-					auto owner = folders.find(id.get());
-					if (owner != folders.end() && owner->second == process->dataFolder) {
-						observed.insert(id.get());
-						if (!directory && name.starts_with("logqueue-")) {
-							if (name.ends_with(".fdq")) {
-								queueStores.insert(id.get());
-							}
-							// Include temporary replacement files until their rename or unlink is visible.
-							queueBytes[id.get()] += fileSize(path);
-						}
-					} else {
-						++staleFiles;
-						TraceEvent(severity, "RetiredTLogFilePresent", id.get())
-						    .detail("Epoch", epoch.get())
-						    .detail("Worker", worker.interf.address())
-						    .detail("SharedTLogID", id.get().toString())
-						    .detail("File", path)
-						    .detail("Bytes", directory ? -1 : fileSize(path))
-						    .detail("Deadline", deadline);
-					}
 				}
 			}
 		}

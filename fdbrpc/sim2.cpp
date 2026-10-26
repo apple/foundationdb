@@ -3059,7 +3059,6 @@ int sf_open(const char* filename, int flags, int convFlags, int mode) {
 
 // Opens a file for asynchronous I/O
 Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {
-	g_simulator->getCurrentProcess()->machine->nonDurablyUnlinkedFiles.erase(filename);
 	ASSERT((flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) || !(flags & IAsyncFile::OPEN_CREATE) ||
 	       StringRef(filename).endsWith(
 	           ".fdb-lock"_sr)); // We don't use "ordinary" non-atomic file creation right now except for
@@ -3070,9 +3069,10 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 
 	if (flags & IAsyncFile::OPEN_UNCACHED) {
 		auto& machineCache = g_simulator->getCurrentProcess()->machine->openFiles;
-		std::string actualFilename = filename;
-		if (flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) {
-			actualFilename = filename + ".part";
+		const bool atomicCreate = flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE;
+		const std::string actualFilename = atomicCreate ? filename + ".part" : filename;
+		g_simulator->getCurrentProcess()->machine->nonDurablyUnlinkedFiles.erase(actualFilename);
+		if (atomicCreate) {
 			auto partFile = machineCache.find(actualFilename);
 			if (partFile != machineCache.end()) {
 				Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second.get());
