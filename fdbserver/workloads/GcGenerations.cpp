@@ -39,6 +39,8 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 
+#include <tuple>
+
 // This workload tests that when TRACK_TLOG_RECOVERY is turned on, older TLog generations can be garbage collected
 // during the recovery before reaching fully_recovered.
 struct GcGenerationsWorkload : TestWorkload {
@@ -349,14 +351,19 @@ struct GcGenerationsWorkload : TestWorkload {
 		const double deadline = now() + 30.0;
 		while (!targetDisk.present()) {
 			const auto& info = dbInfo->get();
+			// Prefer an independent worker. In a small region both local logs can host leaders.
+			const auto rank = [&](NetworkAddress address, int64_t bytes) {
+				return std::tuple(address != info.clusterInterface.address(), address != info.master.address(), bytes);
+			};
 			for (const auto& set : info.logSystemConfig.tLogs) {
 				for (const auto& log : set.tLogs) {
-					if (!set.isLocal || !log.present() || log.interf().address() == info.master.address() ||
-					    log.interf().address() == info.clusterInterface.address()) {
+					if (!set.isLocal || !log.present()) {
 						continue;
 					}
 					auto disk = getSimTLogDiskTarget(log.interf().address(), log.interf().getSharedTLogID());
-					if (disk.present() && (!targetDisk.present() || disk->queueBytes > targetDisk->queueBytes)) {
+					if (disk.present() &&
+					    (!targetDisk.present() || rank(log.interf().address(), disk->queueBytes) >
+					                                  rank(target.address(), targetDisk->queueBytes))) {
 						target = log.interf();
 						targetDisk = disk;
 					}
@@ -381,8 +388,11 @@ struct GcGenerationsWorkload : TestWorkload {
 		Future<Void> replacementReboot =
 		    replacement ? rebootDuringQueueReplacement(target, replacement, rebootStarted) : Future<Void>(Void());
 		UID previousMaster = dbInfo->get().master.id();
+		const NetworkAddress masterAddress = dbInfo->get().master.address();
 		rebootProcess(target.address());
-		rebootProcess(dbInfo->get().master.address());
+		if (target.address() != masterAddress) {
+			rebootProcess(masterAddress);
+		}
 		while (dbInfo->get().master.id() == previousMaster ||
 		       dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
 			co_await dbInfo->onChange();
