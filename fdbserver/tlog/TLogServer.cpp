@@ -3877,11 +3877,7 @@ Future<Void> initPersistentStorage(TLogData* self) {
 }
 
 // Recovery persistent state of tLog from disk
-Future<Void> restorePersistentState(TLogData* self,
-                                    LocalityData locality,
-                                    Promise<Void> oldLog,
-                                    Promise<Void> recovered,
-                                    PromiseStream<InitializeTLogRequest> tlogRequests) {
+Future<Void> restorePersistentState(TLogData* self, LocalityData locality) {
 	double startt = now();
 	Reference<LogData> logData;
 	// PERSIST: Read basic state from persistentData; replay persistentQueue but don't erase it
@@ -4565,7 +4561,7 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 		co_await ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit");
 
 		if (restoreFromDisk) {
-			co_await restorePersistentState(&self, locality, oldLog, recovered, tlogRequests);
+			co_await restorePersistentState(&self, locality);
 			// Complete recovery repair writes and establish the committed boundary even if no new log is recruited.
 			co_await ioTimeoutError(
 			    self.persistentQueue->commit(), SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "TLogRestoreQueueCommit");
@@ -4637,6 +4633,10 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 				it.second->recoveryComplete.sendError(end_of_stream());
 			}
 		}
+	}
+	// Recruitment must move to a new shared store while this one's files are being deleted.
+	if (oldLog.canBeSet()) {
+		oldLog.send(Void());
 	}
 	error.cancel();
 	co_await finishTLogStore(tlogId, persistentData, self.persistentQueue, termination);

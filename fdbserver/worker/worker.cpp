@@ -2382,6 +2382,7 @@ class WorkerServerCore {
 				filesClosed.add(queue->onClosed());
 
 				logData.push_back(SharedLogsValue());
+				Promise<Void> oldLog;
 				Future<Void> tLogCore = tLogFn(data,
 				                               queue,
 				                               dbInfo,
@@ -2390,7 +2391,7 @@ class WorkerServerCore {
 				                               logId,
 				                               interf.id(),
 				                               false,
-				                               Promise<Void>(),
+				                               oldLog,
 				                               Promise<Void>(),
 				                               folder,
 				                               degraded,
@@ -2400,7 +2401,7 @@ class WorkerServerCore {
 				tLogCore = handleIOErrors(tLogCore, data, logId);
 				tLogCore = handleIOErrors(tLogCore, queue, logId);
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore));
-				logData.back().actor = tLogCore;
+				logData.back().actor = oldLog.getFuture() || tLogCore;
 				logData.back().uid = logId;
 			}
 			logData.back().requests.send(req);

@@ -1,0 +1,12 @@
+[configuration]
+buggify = false
+faultInjection = false
+
+[[test]]
+testTitle = 'InterruptedTLogStoreDisposal'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    testsMatching = '/fdbserver/TLog/ResumeInterruptedStoreDisposal'
