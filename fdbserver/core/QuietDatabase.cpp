@@ -1068,31 +1068,38 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 		}
 
 		const auto owners = info.logSystemConfig.allSharedLogs();
+		const std::map<UID, NetworkAddress> advertised(owners.begin(), owners.end());
+		const bool targetAdvertised = targetId.present() && advertised.contains(targetId.get());
 		std::map<UID, std::vector<UID>> current;
 		for (const auto& log : info.logSystemConfig.allPresentLogs()) {
 			current[log.getSharedTLogID()].push_back(log.id());
 		}
-		std::map<UID, std::string> folders;
+		std::set<NetworkAddress> workerAddresses;
+		for (const auto& worker : workers) {
+			workerAddresses.insert(worker.interf.address());
+		}
+		auto storeWorkers = advertised;
 		std::map<UID, Future<ErrorOr<SimTLogDiskCheckReply>>> audits;
 		const auto& endpoints = fdbSimulationPolicyState().tLogDiskCheckEndpoints;
-		bool targetAdvertised = false;
-		for (const auto& [id, address] : owners) {
-			targetAdvertised |= targetId == id;
-			if (const auto* owner = g_simulator->findProcessByAddress(address)) {
-				folders[id] = owner->dataFolder;
+		for (const auto& [id, endpoint] : endpoints) {
+			Endpoint remote = endpoint;
+			remote.choosePrimaryAddress();
+			const auto& address = remote.getPrimaryAddress();
+			if (!workerAddresses.contains(address)) {
+				continue;
 			}
-			auto endpoint = endpoints.find(id);
-			if (endpoint != endpoints.end()) {
-				SimTLogDiskCheckRequest req;
-				auto logs = current.find(id);
-				if (logs != current.end()) {
-					req.currentLogs = logs->second;
-				}
-				Endpoint remote = endpoint->second;
-				remote.choosePrimaryAddress();
-				RequestStream<SimTLogDiskCheckRequest> stream(remote);
-				audits.emplace(id, errorOr(timeoutError(stream.getReply(req), 5.0)));
+			// Recovery can stop advertising a generation before its worker releases the shared store.
+			// Audit that store on its actual worker, even when there are no current log IDs to send.
+			if (storeWorkers.try_emplace(id, address).first->second != address) {
+				continue;
 			}
+			SimTLogDiskCheckRequest req;
+			auto logs = current.find(id);
+			if (logs != current.end()) {
+				req.currentLogs = logs->second;
+			}
+			RequestStream<SimTLogDiskCheckRequest> stream(remote);
+			audits.emplace(id, errorOr(timeoutError(stream.getReply(req), 5.0)));
 		}
 		for (const auto& [id, audit] : audits) {
 			co_await audit;
@@ -1129,8 +1136,8 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 					    *process, folder, [&](UID id, const auto& name, const auto& path, bool directory) {
 						    ++filesChecked;
 						    targetFiles += targetId == id;
-						    auto owner = folders.find(id);
-						    if (owner != folders.end() && owner->second == process->dataFolder) {
+						    auto owner = storeWorkers.find(id);
+						    if (owner != storeWorkers.end() && owner->second == worker.interf.address()) {
 							    observed.insert(id);
 							    if (!directory && name.starts_with("logqueue-")) {
 								    if (name.ends_with(".fdq")) {
@@ -1178,27 +1185,34 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 			answered.insert(id);
 			const auto& reply = result.get();
 			const bool idle = !current.contains(id);
+			const bool listed = advertised.contains(id);
 			const int64_t bytes = queueBytes[id];
 			targetIdle |= targetId == id && idle && reply.allLogsRetired && queueStores.contains(id);
-			if (reply.staleSpillId.present() || (idle && bytes > reply.emptyQueueLimit)) {
+			if (reply.staleSpillId.present() || (idle && bytes > reply.emptyQueueLimit) ||
+			    (!listed && observed.contains(id) && (!reply.allLogsRetired || !queueStores.contains(id)))) {
 				staleData = true;
 				TraceEvent(severity, "RetiredTLogDataPresent", id)
 				    .detail("Epoch", epoch.get())
 				    .detail("SharedTLogID", id.toString())
 				    .detail("OldLog", reply.staleSpillId)
 				    .detail("Idle", idle)
+				    .detail("Advertised", listed)
+				    .detail("AllLogsRetired", reply.allLogsRetired)
+				    .detail("QueueFilePresent", queueStores.contains(id))
 				    .detail("QueueBytes", bytes)
 				    .detail("EmptyQueueLimit", reply.emptyQueueLimit);
 			} else if (idle && reply.allLogsRetired && queueStores.contains(id)) {
+				CODE_PROBE(!listed, "Checked idle TLog disk no longer advertised", probe::assert::simOnly);
 				TraceEvent("RetiredTLogIdleQueueChecked", id)
 				    .detail("Epoch", epoch.get())
 				    .detail("SharedTLogID", id.toString())
+				    .detail("Advertised", listed)
 				    .detail("QueueBytes", bytes)
 				    .detail("EmptyQueueLimit", reply.emptyQueueLimit);
 			}
 		}
 		// A historical store may already have been disposed. Every current store must exist,
-		// and every advertised store that still has files must answer for its contents.
+		// and every store that still owns files must answer for their contents.
 		const bool complete = !current.empty() && recoveringWorkers == 0 && unreadableFolders == 0 &&
 		                      std::all_of(current.begin(),
 		                                  current.end(),

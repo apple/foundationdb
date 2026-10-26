@@ -4483,10 +4483,9 @@ static Future<Void> serveSimTLogDiskChecks(TLogData* self) {
 			req.reply.sendError(e);
 			continue;
 		}
-		reply.allLogsRetired =
-		    !self->id_data.empty() && std::all_of(self->id_data.begin(), self->id_data.end(), [](const auto& entry) {
-			    return entry.second->stopped() && entry.second->retired;
-		    });
+		reply.allLogsRetired = std::all_of(self->id_data.begin(), self->id_data.end(), [](const auto& entry) {
+			return entry.second->stopped() && entry.second->retired;
+		});
 		reply.emptyQueueLimit = self->rawPersistentQueue->getMaxEmptyQueueBytes();
 		req.reply.send(reply);
 	}
