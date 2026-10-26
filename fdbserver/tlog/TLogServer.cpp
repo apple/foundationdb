@@ -19,6 +19,7 @@
  */
 
 #include "flow/Hash3.h"
+#include "flow/Platform.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/Notified.h"
@@ -806,24 +807,6 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			    .detail("LocalBytesDurable", bytesDurable.getValue());
 
 			ASSERT_ABORT(tLogData->bytesDurable <= tLogData->bytesInput);
-
-			Key logIdKey = BinaryWriter::toValue(logId, Unversioned());
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)));
-			tLogData->persistentData->clear(
-			    singleKeyRange(logIdKey.withPrefix(persistKnownCommittedVersionKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLocalityKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLogRouterTagsKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTxsTagsKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistProtocolVersionKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTLogSpillTypeKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryLocationKey)));
-			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
-			tLogData->persistentData->clear(KeyRangeRef(msgKey, strinc(msgKey)));
-			Key msgRefKey = logIdKey.withPrefix(persistTagMessageRefsKeys.begin);
-			tLogData->persistentData->clear(KeyRangeRef(msgRefKey, strinc(msgRefKey)));
-			Key poppedKey = logIdKey.withPrefix(persistTagPoppedKeys.begin);
-			tLogData->persistentData->clear(KeyRangeRef(poppedKey, strinc(poppedKey)));
 		}
 
 		for (auto it = peekTracker.begin(); it != peekTracker.end(); ++it) {
@@ -832,6 +815,23 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 					seq.second.sendError(timed_out());
 				}
 			}
+		}
+	}
+
+	void clearPersistentState() {
+		Key logIdKey = BinaryWriter::toValue(logId, Unversioned());
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistKnownCommittedVersionKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLocalityKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLogRouterTagsKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTxsTagsKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistProtocolVersionKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTLogSpillTypeKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryLocationKey)));
+		for (const auto& range : { persistTagMessagesKeys, persistTagMessageRefsKeys, persistTagPoppedKeys }) {
+			Key prefix = logIdKey.withPrefix(range.begin);
+			tLogData->persistentData->clear(KeyRangeRef(prefix, strinc(prefix)));
 		}
 	}
 
@@ -1106,6 +1106,10 @@ Future<Void> popDiskQueue(TLogData* self, Reference<LogData> logData) {
 }
 
 Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logData, Version newPersistentDataVersion) {
+	// The generation can be removed while this update waits for the shared store's commit lock.
+	if (!self->id_data.contains(logData->logId)) {
+		co_return;
+	}
 	BinaryWriter wr(Unversioned());
 	// PERSIST: Changes self->persistentDataVersion and writes and commits the relevant changes
 	ASSERT(newPersistentDataVersion <= logData->version.get());
@@ -3483,7 +3487,7 @@ Future<Void> serveTLogInterface(TLogData* self,
 	co_await server.run();
 }
 
-void removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerIfEmpty = true) {
+Future<Void> removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerIfEmpty = true) {
 	TraceEvent("TLogRemoved", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Input", logData->bytesInput.getValue())
@@ -3509,6 +3513,14 @@ void removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerI
 	if (self->id_data.empty() && terminateWorkerIfEmpty) {
 		throw worker_removed();
 	}
+	// Queue commits and peeks can still hold LogData after removal. A shared store may never write again.
+	// Serialize with any in-flight spill and durably remove this generation while the store is still open.
+	Reference<FlowLock> lock = self->persistentDataCommitLock;
+	co_await lock->take();
+	FlowLock::Releaser release(*lock);
+	logData->clearPersistentState();
+	co_await ioTimeoutError(self->persistentData->commit(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogRemoveCommit");
+	TraceEvent("TLogRemovedPersistentState", self->dbgid).detail("LogId", logData->logId);
 }
 
 double effectiveTLogMinAvailableSpaceRatio() {
@@ -3757,7 +3769,7 @@ Future<Void> tLogCore(TLogData* self, Reference<LogData> logData, TLogInterface 
 			throw logData->removed.getError();
 		}
 
-		removeLog(self, logData);
+		co_await removeLog(self, logData);
 		co_return;
 	}
 
@@ -3817,16 +3829,16 @@ Future<Void> tLogCore(TLogData* self, Reference<LogData> logData, TLogInterface 
 		                  true));
 	}
 
+	bool terminateWorkerIfEmpty;
 	try {
 		co_await error;
 		throw internal_error();
 	} catch (Error& e) {
 		if (e.code() != error_code_worker_removed && e.code() != error_code_recruitment_failed)
 			throw;
-
-		removeLog(self, logData, e.code() != error_code_recruitment_failed);
-		co_return;
+		terminateWorkerIfEmpty = e.code() != error_code_recruitment_failed;
 	}
+	co_await removeLog(self, logData, terminateWorkerIfEmpty);
 }
 
 Future<Void> checkEmptyQueue(TLogData* self) {
@@ -4412,7 +4424,7 @@ Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, LocalityData l
 		// before any are removed.
 		co_await delay(0.0);
 
-		removeLog(self, logData, removePersistentState);
+		co_await removeLog(self, logData, removePersistentState);
 		co_return;
 	}
 
@@ -4602,6 +4614,68 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 }
 
 // UNIT TESTS
+TEST_CASE("/fdbserver/TLog/RemoveSpillWithOutstandingReference") {
+	const UID sharedId = deterministicRandom()->randomUniqueID();
+	const std::string file = joinPath(params.getDataDir(), sharedId.toString() + ".sqlite");
+	auto* store = keyValueStoreSQLite(file, sharedId, KeyValueStoreType::SSD_BTREE_V2);
+	auto closed = store->onClosed();
+	bool passed;
+	{
+		ScopeExit dispose([&] { store->dispose(); });
+		co_await store->init();
+		TLogData shared(sharedId,
+		                deterministicRandom()->randomUniqueID(),
+		                store,
+		                nullptr,
+		                makeReference<AsyncVar<ServerDBInfo>>(ServerDBInfo()),
+		                makeReference<AsyncVar<bool>>(false),
+		                makeReference<AsyncVar<bool>>(false),
+		                "",
+		                makeReference<AsyncVar<bool>>(false));
+		std::unique_ptr<TLogQueue> queue(shared.persistentQueue);
+		ScopeExit terminate([&] { shared.terminated.send(Void()); });
+		auto addLog = [&] {
+			auto log = makeReference<LogData>(&shared,
+			                                  TLogInterface(LocalityData()),
+			                                  invalidTag,
+			                                  true,
+			                                  0,
+			                                  0,
+			                                  UID(),
+			                                  g_network->protocolVersion(),
+			                                  TLogSpillType::REFERENCE,
+			                                  std::vector<Tag>(),
+			                                  "RemoveSpillTest");
+			shared.id_data.emplace(log->logId, log);
+			return log;
+		};
+		auto removed = addLog();
+		UID current = addLog()->logId;
+		for (const auto id : { removed->logId, current }) {
+			store->set(KeyValueRef(persistTagMessagesKey(id, txsTag, 1), "value"_sr));
+			store->set(KeyValueRef(persistTagMessageRefsKey(id, Tag(0, 0), 1), "reference"_sr));
+		}
+		co_await store->commit();
+		co_await removeLog(&shared, removed);
+		std::vector<UID> currentLogs{ current };
+		auto stale = co_await findRetiredSpillData(store, std::move(currentLogs));
+		auto value = co_await store->readValue(persistTagMessagesKey(current, txsTag, 1));
+		auto reference = co_await store->readValue(persistTagMessageRefsKey(current, Tag(0, 0), 1));
+		passed = !stale.present() && value.present() && reference.present();
+		if (!passed) {
+			TraceEvent(SevError, "RemovedTLogSpillCheckFailed", sharedId)
+			    .detail("RemovedLog", removed->logId)
+			    .detail("StaleLog", stale)
+			    .detail("CurrentValuePresent", value.present())
+			    .detail("CurrentReferencePresent", reference.present());
+		}
+	}
+	co_await closed;
+	if (!passed) {
+		throw test_failed();
+	}
+}
+
 namespace {
 
 class CommittedPeekTestKnobs : NonCopyable {
@@ -4672,8 +4746,7 @@ public:
 	}
 
 	~CommittedPeekTestFixture() {
-		// This fixture only exercises in-memory peeks and duplicate commits. Termination prevents
-		// LogData's normal persistent-state removal from dereferencing the absent disk stores.
+		// The fixture only exercises in-memory peeks and duplicate commits.
 		shared.terminated.send(Void());
 	}
 
