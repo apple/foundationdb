@@ -35,7 +35,7 @@ struct RollbackWorkload : FailureInjectionWorkload {
 	static constexpr auto NAME = "Rollback";
 
 	bool enableFailures = false, multiple = true, enabled;
-	double meanDelay = 20.0, clogDuration = clogDuration = 3.0, testDuration = 10.0;
+	double meanDelay = 20.0, clogDuration = 3.0, testDuration = 10.0;
 
 	RollbackWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {}
 
