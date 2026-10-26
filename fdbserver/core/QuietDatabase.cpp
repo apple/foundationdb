@@ -1052,37 +1052,13 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 			continue;
 		}
 		const Severity severity = now() >= deadline ? SevError : SevInfo;
-		std::set<UID> answered;
-		bool staleData = false;
-		bool targetIdle = false;
-		for (const auto& [id, audit] : audits) {
-			const auto& result = audit.get();
-			if (result.isError()) {
-				continue;
-			}
-			answered.insert(id);
-			const auto& reply = result.get();
-			const bool idle = !current.contains(id);
-			targetIdle |= requiredIdleStore == id && idle && reply.allLogsRetired;
-			if (reply.staleSpillId.present() || (idle && reply.queueBytes > reply.emptyQueueLimit)) {
-				staleData = true;
-				TraceEvent(severity, "RetiredTLogDataPresent", id)
-				    .detail("Epoch", epoch.get())
-				    .detail("OldLog", reply.staleSpillId)
-				    .detail("Idle", idle)
-				    .detail("QueueBytes", reply.queueBytes)
-				    .detail("EmptyQueueLimit", reply.emptyQueueLimit);
-			} else if (idle && reply.allLogsRetired) {
-				TraceEvent("RetiredTLogIdleQueueChecked", id)
-				    .detail("Epoch", epoch.get())
-				    .detail("QueueBytes", reply.queueBytes)
-				    .detail("EmptyQueueLimit", reply.emptyQueueLimit);
-			}
-		}
 		std::set<UID> observed;
+		std::set<UID> queueStores;
+		std::map<UID, int64_t> queueBytes;
 		int filesChecked = 0;
 		int nonDurableUnlinks = 0;
 		int recoveringWorkers = 0;
+		int unreadableFolders = 0;
 		int staleFiles = 0;
 		for (const auto& worker : workers) {
 			const auto* process = g_simulator->findProcessByAddress(worker.interf.address());
@@ -1094,9 +1070,24 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 				continue;
 			}
 			for (const auto& folder : { process->dataFolder, process->dataFolder + "-tlog-spill" }) {
-				const auto absoluteFolder = abspath(folder);
-				auto names = platform::listFiles(folder);
-				auto dirs = platform::listDirectories(folder);
+				std::string absoluteFolder;
+				std::vector<std::string> names, dirs;
+				try {
+					absoluteFolder = abspath(folder);
+					names = platform::listFiles(folder);
+					dirs = platform::listDirectories(folder);
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw;
+					}
+					++unreadableFolders;
+					TraceEvent(severity, "TLogDiskInventoryReadError")
+					    .detail("Epoch", epoch.get())
+					    .detail("Worker", worker.interf.address())
+					    .detail("Folder", folder)
+					    .detail("ErrorCode", e.code());
+					continue;
+				}
 				names.insert(names.end(), dirs.begin(), dirs.end());
 				for (const auto& name : names) {
 					auto id = sharedTLogIdFromFilename(name);
@@ -1108,31 +1099,69 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 						continue;
 					}
 					++filesChecked;
+					const auto path = joinPath(folder, name);
+					const bool directory = std::binary_search(dirs.begin(), dirs.end(), name);
 					auto owner = folders.find(id.get());
 					if (owner != folders.end() && owner->second == process->dataFolder) {
 						observed.insert(id.get());
+						if (!directory && name.starts_with("logqueue-")) {
+							if (name.ends_with(".fdq")) {
+								queueStores.insert(id.get());
+							}
+							// Include temporary replacement files until their rename or unlink is visible.
+							queueBytes[id.get()] += fileSize(path);
+						}
 					} else {
 						++staleFiles;
-						const auto path = joinPath(folder, name);
 						TraceEvent(severity, "RetiredTLogFilePresent", id.get())
 						    .detail("Epoch", epoch.get())
 						    .detail("Worker", worker.interf.address())
+						    .detail("SharedTLogID", id.get().toString())
 						    .detail("File", path)
-						    .detail("Bytes", std::binary_search(dirs.begin(), dirs.end(), name) ? -1 : fileSize(path))
+						    .detail("Bytes", directory ? -1 : fileSize(path))
 						    .detail("Deadline", deadline);
 					}
 				}
 			}
 		}
+		std::set<UID> answered;
+		bool staleData = false;
+		bool targetIdle = false;
+		for (const auto& [id, audit] : audits) {
+			const auto& result = audit.get();
+			if (result.isError()) {
+				continue;
+			}
+			answered.insert(id);
+			const auto& reply = result.get();
+			const bool idle = !current.contains(id);
+			const int64_t bytes = queueBytes[id];
+			targetIdle |= requiredIdleStore == id && idle && reply.allLogsRetired && queueStores.contains(id);
+			if (reply.staleSpillId.present() || (idle && bytes > reply.emptyQueueLimit)) {
+				staleData = true;
+				TraceEvent(severity, "RetiredTLogDataPresent", id)
+				    .detail("Epoch", epoch.get())
+				    .detail("SharedTLogID", id.toString())
+				    .detail("OldLog", reply.staleSpillId)
+				    .detail("Idle", idle)
+				    .detail("QueueBytes", bytes)
+				    .detail("EmptyQueueLimit", reply.emptyQueueLimit);
+			} else if (idle && reply.allLogsRetired && queueStores.contains(id)) {
+				TraceEvent("RetiredTLogIdleQueueChecked", id)
+				    .detail("Epoch", epoch.get())
+				    .detail("SharedTLogID", id.toString())
+				    .detail("QueueBytes", bytes)
+				    .detail("EmptyQueueLimit", reply.emptyQueueLimit);
+			}
+		}
 		// A historical store may already have been disposed. Every current store must exist,
 		// and every advertised store that still has files must answer for its contents.
-		const bool complete = !current.empty() && recoveringWorkers == 0 &&
+		const bool complete = !current.empty() && recoveringWorkers == 0 && unreadableFolders == 0 &&
 		                      std::all_of(current.begin(),
 		                                  current.end(),
-		                                  [&](const auto& entry) { return observed.contains(entry.first); }) &&
+		                                  [&](const auto& entry) { return queueStores.contains(entry.first); }) &&
 		                      std::includes(answered.begin(), answered.end(), observed.begin(), observed.end());
-		const bool targetChecked =
-		    !requiredIdleStore.present() || (targetIdle && observed.contains(requiredIdleStore.get()));
+		const bool targetChecked = !requiredIdleStore.present() || targetIdle;
 		if (complete && targetChecked && !staleData && staleFiles == 0) {
 			TraceEvent("RetiredTLogDisksChecked")
 			    .detail("Epoch", epoch.get())
@@ -1146,7 +1175,8 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 			if (!targetChecked) {
 				TraceEvent(SevError, "GcGenerationsQueueNotIdle", requiredIdleStore.get())
 				    .detail("Epoch", epoch.get())
-				    .detail("FilesPresent", observed.contains(requiredIdleStore.get()))
+				    .detail("SharedTLogID", requiredIdleStore.get().toString())
+				    .detail("QueueFilePresent", queueStores.contains(requiredIdleStore.get()))
 				    .detail("Responded", answered.contains(requiredIdleStore.get()))
 				    .detail("StillCurrent", current.contains(requiredIdleStore.get()));
 			}
@@ -1156,7 +1186,8 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 				    .detail("CurrentSharedTLogs", current.size())
 				    .detail("ObservedSharedTLogs", observed.size())
 				    .detail("AnsweredAudits", answered.size())
-				    .detail("RecoveringWorkers", recoveringWorkers);
+				    .detail("RecoveringWorkers", recoveringWorkers)
+				    .detail("UnreadableFolders", unreadableFolders);
 			}
 			co_return false;
 		}

@@ -60,12 +60,11 @@ struct SimTLogDiskCheckReply {
 	constexpr static FileIdentifier file_identifier = 10983439;
 	Optional<UID> staleSpillId;
 	bool allLogsRetired = false;
-	int64_t queueBytes = 0;
 	int64_t emptyQueueLimit = 0;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, staleSpillId, allLogsRetired, queueBytes, emptyQueueLimit);
+		serializer(ar, staleSpillId, allLogsRetired, emptyQueueLimit);
 	}
 };
 
