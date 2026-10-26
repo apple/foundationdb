@@ -1691,7 +1691,7 @@ Future<Void> updateStorage(TLogData* self) {
 					co_await delay(getTLogStorageUpdateDelayDuration(), TaskPriority::UpdateStorage);
 				}
 
-				if (logData->removed.isReady()) {
+				if (logData->removed.isReady() || !self->id_data.contains(logData->logId)) {
 					break;
 				}
 			}
