@@ -19,6 +19,7 @@
  */
 
 #include "flow/Hash3.h"
+#include "flow/IAsyncFile.h"
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/NativeAPI.h"
@@ -237,6 +238,7 @@ private:
 // persistFormat has been mostly invalidated by TLogVersion, and can probably be removed when
 // 4.6's TLog code is removed.
 static const KeyValueRef persistFormat("Format"_sr, "FoundationDB/LogServer/3/0"_sr);
+static const KeyValueRef persistDisposing("Disposing"_sr, "1"_sr);
 static const KeyRangeRef persistFormatReadableRange("FoundationDB/LogServer/3/0"_sr, "FoundationDB/LogServer/4/0"_sr);
 static const KeyRangeRef persistProtocolVersionKeys("ProtocolVersion/"_sr, "ProtocolVersion0"_sr);
 static const KeyRangeRef persistTLogSpillTypeKeys("TLogSpillType/"_sr, "TLogSpillType0"_sr);
@@ -3887,6 +3889,7 @@ Future<Void> restorePersistentState(TLogData* self,
 
 	IKeyValueStore* storage = self->persistentData;
 	Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
+	Future<Optional<Value>> fDisposing = storage->readValue(persistDisposing.key);
 	Future<Optional<Value>> fRecoveryLocation = storage->readValue(persistRecoveryLocationKey);
 	Future<RangeResult> fVers = storage->readRange(persistCurrentVersionKeys);
 	Future<RangeResult> fKnownCommitted = storage->readRange(persistKnownCommittedVersionKeys);
@@ -3899,8 +3902,14 @@ Future<Void> restorePersistentState(TLogData* self,
 
 	// FIXME: metadata in queue?
 
-	std::vector<Future<Optional<Value>>> pointFutures = { fFormat, fRecoveryLocation };
+	std::vector<Future<Optional<Value>>> pointFutures = { fFormat, fRecoveryLocation, fDisposing };
 	co_await waitForAll(pointFutures);
+	if (fDisposing.get().present()) {
+		// A crash may have interrupted deletion between the two queue files. Never open that queue for recovery.
+		TraceEvent("TLogResumeStoreDisposal", self->dbgid);
+		CODE_PROBE(true, "Resume interrupted TLog store disposal");
+		throw worker_removed();
+	}
 	std::vector<Future<RangeResult>> rangeFutures = { fVers,    fKnownCommitted, fLocality,         fLogRouterTags,
 		                                              fTxsTags, fRecoverCounts,  fProtocolVersions, fTLogSpillTypes };
 	co_await waitForAll(rangeFutures);
@@ -4162,12 +4171,32 @@ Future<Void> restorePersistentState(TLogData* self,
 		registerWithCC.send(Void());
 }
 
-bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* persistentQueue, Error const& e) {
+Future<Void> markTLogStoreForDisposal(IKeyValueStore* store) {
+	store->set(persistDisposing);
+	return store->commit();
+}
+
+Future<Void> finishTLogStore(UID id, IKeyValueStore* persistentData, TLogQueue* persistentQueue, Error e) {
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just
 	// close it.
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
+		try {
+			// The worker discovers the store from its spill database. Keep that database until every queue file
+			// is gone, so a restart can distinguish an interrupted disposal from a damaged live queue.
+			co_await markTLogStoreForDisposal(persistentData);
+			TraceEvent("TLogStoreDisposalRecorded", id);
+			auto queueClosed = persistentQueue->onClosed();
+			persistentQueue->dispose();
+			persistentQueue = nullptr;
+			co_await queueClosed;
+		} catch (Error&) {
+			if (persistentQueue) {
+				persistentQueue->close();
+			}
+			persistentData->close();
+			throw;
+		}
 		persistentData->dispose();
-		persistentQueue->dispose();
 	} else {
 		persistentData->close();
 		persistentQueue->close();
@@ -4175,11 +4204,10 @@ bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* p
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
 	    e.code() == error_code_file_not_found) {
-		TraceEvent("TLogTerminated", self->dbgid).errorUnsuppressed(e);
-		return true;
-	} else {
-		return false;
+		TraceEvent("TLogTerminated", id).errorUnsuppressed(e);
+		co_return;
 	}
+	throw e;
 }
 
 Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, LogSystemConfig recoverFrom) {
@@ -4531,6 +4559,7 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 	Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
 	TraceEvent("SharedTLog", tlogId);
+	Error termination;
 	try {
 		co_await ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit");
 
@@ -4592,6 +4621,7 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 			}
 		}
 	} catch (Error& e) {
+		termination = e;
 		self.terminated.send(Void());
 		TraceEvent("TLogError", tlogId).errorUnsuppressed(e);
 		if (recovered.canBeSet())
@@ -4606,14 +4636,83 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 				it.second->recoveryComplete.sendError(end_of_stream());
 			}
 		}
+	}
+	error.cancel();
+	co_await finishTLogStore(tlogId, persistentData, self.persistentQueue, termination);
+}
 
-		if (!tlogTerminated(&self, persistentData, self.persistentQueue, e)) {
-			throw;
+// UNIT TESTS
+TEST_CASE("/fdbserver/TLog/ResumeInterruptedStoreDisposal") {
+	for (bool marked : { false, true }) {
+		const UID id = deterministicRandom()->randomUniqueID();
+		const std::string base = joinPath(params.getDataDir(), id.toString() + "-");
+		const std::string spill = base + "spill.sqlite";
+		auto openSpill = [&] { return keyValueStoreSQLite(spill, id, KeyValueStoreType::SSD_BTREE_V2); };
+		auto openQueue = [&] { return openDiskQueue(base, "fdq", id, DiskQueueVersion::V2); };
+		auto* store = openSpill();
+		auto* queue = openQueue();
+		auto closed = store->onClosed() && queue->onClosed();
+		co_await store->init();
+		store->set(persistFormat);
+		store->set(KeyValueRef("keep"_sr, "payload"_sr));
+		co_await store->commit();
+		co_await queue->initializeRecovery(0);
+		queue->push("payload"_sr);
+		co_await queue->commit();
+		if (marked) {
+			co_await markTLogStoreForDisposal(store);
+		}
+		store->close();
+		queue->close();
+		co_await closed;
+		// Model a restart with only the second canonical file left.
+		co_await IAsyncFileSystem::filesystem()->deleteFile(base + "0.fdq", true);
+
+		store = openSpill();
+		queue = openQueue();
+		closed = store->onClosed() && queue->onClosed();
+		co_await tLog(store,
+		              queue,
+		              makeReference<AsyncVar<ServerDBInfo>>(ServerDBInfo()),
+		              LocalityData(),
+		              PromiseStream<InitializeTLogRequest>(),
+		              id,
+		              deterministicRandom()->randomUniqueID(),
+		              true,
+		              Promise<Void>(),
+		              Promise<Void>(),
+		              params.getDataDir(),
+		              makeReference<AsyncVar<bool>>(false),
+		              makeReference<AsyncVar<bool>>(false),
+		              makeReference<AsyncVar<UID>>(UID()),
+		              makeReference<AsyncVar<bool>>(false));
+		co_await closed;
+		const bool queuePresent = fileExists(base + "1.fdq");
+		const bool spillPresent = fileExists(spill);
+		if (queuePresent == marked || spillPresent == marked || fileExists(base + "0.fdq")) {
+			TraceEvent(SevError, "IncompleteTLogDisposalCheckFailed", id)
+			    .detail("Marked", marked)
+			    .detail("QueuePresent", queuePresent)
+			    .detail("SpillPresent", spillPresent);
+			throw test_failed();
+		}
+		if (!marked) {
+			store = openSpill();
+			queue = openQueue();
+			closed = store->onClosed() && queue->onClosed();
+			co_await store->init();
+			auto payload = co_await store->readValue("keep"_sr);
+			store->dispose();
+			queue->dispose();
+			co_await closed;
+			if (!payload.present() || payload.get() != "payload"_sr) {
+				TraceEvent(SevError, "IncompleteTLogDisposalCheckFailed", id).detail("Marked", marked);
+				throw test_failed();
+			}
 		}
 	}
 }
 
-// UNIT TESTS
 TEST_CASE("/fdbserver/TLog/RemoveSpillWithOutstandingReference") {
 	const UID sharedId = deterministicRandom()->randomUniqueID();
 	const std::string file = joinPath(params.getDataDir(), sharedId.toString() + ".sqlite");
