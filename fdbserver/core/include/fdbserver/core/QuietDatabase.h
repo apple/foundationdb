@@ -29,12 +29,17 @@
 Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
 Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
                                                      Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
-Optional<int64_t> getSimTLogQueueFileBytes(NetworkAddress address, UID sharedId);
+struct SimTLogDiskTarget {
+	UID sharedId;
+	std::string dataFolder;
+	int64_t queueBytes;
+};
+Optional<SimTLogDiskTarget> getSimTLogDiskTarget(NetworkAddress address, UID sharedId);
 // During simulation, wait for retired TLog files and data to disappear after full recovery.
-// If supplied, the target must still exist and must report that all its logs have retired.
+// A selected store must be retired and audited, or fully removed from its original recovered disk.
 Future<bool> checkRetiredTLogDisks(Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                    double maxWait,
-                                   Optional<UID> requiredIdleStore = {});
+                                   Optional<SimTLogDiskTarget> target = {});
 Future<int64_t> getMaxStorageServerQueueSize(Database cx,
                                              Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                              Version version);

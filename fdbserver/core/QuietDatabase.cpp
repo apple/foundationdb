@@ -1023,8 +1023,8 @@ static int visitSimTLogDiskFiles(const ISimulator::ProcessInfo& process, const s
 	return ignoredUnlinks;
 }
 
-// The workload ranks active stores by their queue files before choosing one to retire.
-Optional<int64_t> getSimTLogQueueFileBytes(NetworkAddress address, UID sharedId) {
+// Record the disk as well as the size so that a later empty scan checks the original disk.
+Optional<SimTLogDiskTarget> getSimTLogDiskTarget(NetworkAddress address, UID sharedId) {
 	const auto* process = g_simulator->findProcessByAddress(address);
 	if (!process || !process->machine || process->failed || process->rebooting) {
 		return {};
@@ -1046,11 +1046,12 @@ Optional<int64_t> getSimTLogQueueFileBytes(NetworkAddress address, UID sharedId)
 		    .detail("ErrorCode", e.code());
 		return {};
 	}
-	return bytes;
+	return bytes.map([&](int64_t n) { return SimTLogDiskTarget{ sharedId, process->dataFolder, n }; });
 }
 
 static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                         Optional<UID> requiredIdleStore) {
+                                         Optional<SimTLogDiskTarget> target) {
+	const Optional<UID> targetId = target.map(&SimTLogDiskTarget::sharedId);
 	Optional<LogEpoch> epoch;
 	double deadline = 0;
 	while (true) {
@@ -1074,7 +1075,9 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 		std::map<UID, std::string> folders;
 		std::map<UID, Future<ErrorOr<SimTLogDiskCheckReply>>> audits;
 		const auto& endpoints = fdbSimulationPolicyState().tLogDiskCheckEndpoints;
+		bool targetAdvertised = false;
 		for (const auto& [id, address] : owners) {
+			targetAdvertised |= targetId == id;
 			if (const auto* owner = g_simulator->findProcessByAddress(address)) {
 				folders[id] = owner->dataFolder;
 			}
@@ -1095,7 +1098,8 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 			co_await audit;
 		}
 		if (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED ||
-		    dbInfo->get().logSystemConfig.epoch != epoch.get()) {
+		    dbInfo->get().logSystemConfig.epoch != epoch.get() ||
+		    dbInfo->get().logSystemConfig.allSharedLogs() != owners) {
 			continue;
 		}
 		const Severity severity = now() >= deadline ? SevError : SevInfo;
@@ -1107,6 +1111,8 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 		int recoveringWorkers = 0;
 		int unreadableFolders = 0;
 		int staleFiles = 0;
+		bool targetDiskScanned = false;
+		int targetFiles = 0;
 		for (const auto& worker : workers) {
 			const auto* process = g_simulator->findProcessByAddress(worker.interf.address());
 			if (process && process->failed) {
@@ -1116,11 +1122,13 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 				++recoveringWorkers;
 				continue;
 			}
+			const int priorReadErrors = unreadableFolders;
 			for (const auto& folder : { process->dataFolder, process->dataFolder + "-tlog-spill" }) {
 				try {
 					nonDurableUnlinks += visitSimTLogDiskFiles(
 					    *process, folder, [&](UID id, const auto& name, const auto& path, bool directory) {
 						    ++filesChecked;
+						    targetFiles += targetId == id;
 						    auto owner = folders.find(id);
 						    if (owner != folders.end() && owner->second == process->dataFolder) {
 							    observed.insert(id);
@@ -1154,6 +1162,10 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 					    .detail("ErrorCode", e.code());
 				}
 			}
+			if (target.present() && process->dataFolder == target->dataFolder && priorReadErrors == unreadableFolders &&
+			    directoryExists(target->dataFolder)) {
+				targetDiskScanned = true;
+			}
 		}
 		std::set<UID> answered;
 		bool staleData = false;
@@ -1167,7 +1179,7 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 			const auto& reply = result.get();
 			const bool idle = !current.contains(id);
 			const int64_t bytes = queueBytes[id];
-			targetIdle |= requiredIdleStore == id && idle && reply.allLogsRetired && queueStores.contains(id);
+			targetIdle |= targetId == id && idle && reply.allLogsRetired && queueStores.contains(id);
 			if (reply.staleSpillId.present() || (idle && bytes > reply.emptyQueueLimit)) {
 				staleData = true;
 				TraceEvent(severity, "RetiredTLogDataPresent", id)
@@ -1192,24 +1204,42 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 		                                  current.end(),
 		                                  [&](const auto& entry) { return queueStores.contains(entry.first); }) &&
 		                      std::includes(answered.begin(), answered.end(), observed.begin(), observed.end());
-		const bool targetChecked = !requiredIdleStore.present() || targetIdle;
+		// A new recovery can remove a retained role between worker restarts. A missing reply alone
+		// cannot prove disposal. Require a complete scan of the original disk and no remaining owner.
+		const bool targetDisposed = target.present() && targetDiskScanned && targetFiles == 0 && !targetAdvertised &&
+		                            !endpoints.contains(target->sharedId);
+		const bool targetChecked = !target.present() || (targetDiskScanned && targetIdle) || targetDisposed;
 		if (complete && targetChecked && !staleData && staleFiles == 0) {
+			if (target.present()) {
+				CODE_PROBE(targetIdle, "Checked retained idle TLog disk", probe::assert::simOnly);
+				CODE_PROBE(targetDisposed, "Checked disposed TLog disk", probe::assert::simOnly);
+				TraceEvent("RetiredTLogTargetChecked", target->sharedId)
+				    .detail("Epoch", epoch.get())
+				    .detail("SharedTLogID", target->sharedId.toString())
+				    .detail("DataFolder", target->dataFolder)
+				    .detail("InitialQueueBytes", target->queueBytes)
+				    .detail("QueueBytes", queueBytes[target->sharedId])
+				    .detail("TargetFiles", targetFiles)
+				    .detail("Disposed", targetDisposed);
+			}
 			TraceEvent("RetiredTLogDisksChecked")
 			    .detail("Epoch", epoch.get())
 			    .detail("CurrentSharedTLogs", current.size())
 			    .detail("NonDurableUnlinks", nonDurableUnlinks)
-			    .detail("RequiredIdleStore", requiredIdleStore)
+			    .detail("TargetStore", targetId)
 			    .detail("TLogFiles", filesChecked);
 			co_return true;
 		}
 		if (now() >= deadline) {
 			if (!targetChecked) {
-				TraceEvent(SevError, "GcGenerationsQueueNotIdle", requiredIdleStore.get())
+				TraceEvent(SevError, "GcGenerationsQueueNotIdle", target->sharedId)
 				    .detail("Epoch", epoch.get())
-				    .detail("SharedTLogID", requiredIdleStore.get().toString())
-				    .detail("QueueFilePresent", queueStores.contains(requiredIdleStore.get()))
-				    .detail("Responded", answered.contains(requiredIdleStore.get()))
-				    .detail("StillCurrent", current.contains(requiredIdleStore.get()));
+				    .detail("SharedTLogID", target->sharedId.toString())
+				    .detail("TargetDiskScanned", targetDiskScanned)
+				    .detail("TargetFiles", targetFiles)
+				    .detail("Advertised", targetAdvertised)
+				    .detail("Responded", answered.contains(target->sharedId))
+				    .detail("StillCurrent", current.contains(target->sharedId));
 			}
 			if (!complete) {
 				TraceEvent(SevError, "TLogDiskInventoryIncomplete")
@@ -1228,13 +1258,13 @@ static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const>
 
 Future<bool> checkRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                    double maxWait,
-                                   Optional<UID> requiredIdleStore) {
-	auto result = co_await timeout(pollRetiredTLogDisks(dbInfo, requiredIdleStore), maxWait);
+                                   Optional<SimTLogDiskTarget> target) {
+	auto result = co_await timeout(pollRetiredTLogDisks(dbInfo, target), maxWait);
 	if (!result.present()) {
 		TraceEvent(SevError, "TLogDiskCheckTimedOut")
 		    .detail("Epoch", dbInfo->get().logSystemConfig.epoch)
 		    .detail("RecoveryState", dbInfo->get().recoveryState)
-		    .detail("RequiredIdleStore", requiredIdleStore);
+		    .detail("TargetStore", target.map(&SimTLogDiskTarget::sharedId));
 		co_return false;
 	}
 	co_return result.get();

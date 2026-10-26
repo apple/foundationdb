@@ -345,9 +345,9 @@ struct GcGenerationsWorkload : TestWorkload {
 	Future<Void> checkRetainedQueueCleanup(Database cx) {
 		co_await dbAvailable(this, false);
 		TLogInterface target;
-		Optional<int64_t> largestQueue;
+		Optional<SimTLogDiskTarget> targetDisk;
 		const double deadline = now() + 30.0;
-		while (!largestQueue.present()) {
+		while (!targetDisk.present()) {
 			const auto& info = dbInfo->get();
 			for (const auto& set : info.logSystemConfig.tLogs) {
 				for (const auto& log : set.tLogs) {
@@ -355,14 +355,14 @@ struct GcGenerationsWorkload : TestWorkload {
 					    log.interf().address() == info.clusterInterface.address()) {
 						continue;
 					}
-					auto bytes = getSimTLogQueueFileBytes(log.interf().address(), log.interf().getSharedTLogID());
-					if (bytes.present() && (!largestQueue.present() || bytes.get() > largestQueue.get())) {
+					auto disk = getSimTLogDiskTarget(log.interf().address(), log.interf().getSharedTLogID());
+					if (disk.present() && (!targetDisk.present() || disk->queueBytes > targetDisk->queueBytes)) {
 						target = log.interf();
-						largestQueue = bytes;
+						targetDisk = disk;
 					}
 				}
 			}
-			if (!largestQueue.present()) {
+			if (!targetDisk.present()) {
 				if (now() >= deadline) {
 					TraceEvent(SevError, "GcGenerationsQueueTargetMissing").detail("Epoch", info.logSystemConfig.epoch);
 					throw test_failed();
@@ -372,7 +372,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		}
 		TraceEvent("GcGenerationsQueueCleanupTarget", target.getSharedTLogID())
 		    .detail("SharedTLogID", target.getSharedTLogID().toString())
-		    .detail("QueueBytes", largestQueue.get())
+		    .detail("QueueBytes", targetDisk->queueBytes)
 		    .detail("Address", target.address());
 		const AddressExclusion exclusion(target.address().ip, target.address().port);
 		co_await excludeServers(cx, { exclusion });
@@ -389,6 +389,10 @@ struct GcGenerationsWorkload : TestWorkload {
 		}
 		Optional<Error> error;
 		try {
+			// Check the first recovered epoch before additional reboots can retire the whole store.
+			if (!(co_await checkRetiredTLogDisks(dbInfo, 300.0, targetDisk))) {
+				throw test_failed();
+			}
 			// Restart through the normal machine failure path, including recovery and retirement I/O.
 			for (int i = 0; i < cleanupRestarts; ++i) {
 				const UID previousWorker = co_await waitForRestoredWorker(target.address());
@@ -402,7 +406,7 @@ struct GcGenerationsWorkload : TestWorkload {
 				    .detail("PreviousWorker", previousWorker)
 				    .detail("RestoredWorker", restoredWorker);
 			}
-			if (!(co_await checkRetiredTLogDisks(dbInfo, 300.0, target.getSharedTLogID()))) {
+			if (!(co_await checkRetiredTLogDisks(dbInfo, 300.0, targetDisk))) {
 				throw test_failed();
 			}
 			// An idle queue already below its allocation limit does not need to replace a file.
@@ -415,7 +419,7 @@ struct GcGenerationsWorkload : TestWorkload {
 					throw test_failed();
 				}
 				// Read the restored target again after the reboot during atomic file replacement.
-				if (!(co_await checkRetiredTLogDisks(dbInfo, 300.0, target.getSharedTLogID()))) {
+				if (!(co_await checkRetiredTLogDisks(dbInfo, 300.0, targetDisk))) {
 					throw test_failed();
 				}
 			} else if (replacement) {
