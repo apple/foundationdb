@@ -1,0 +1,27 @@
+[configuration]
+config = 'single'
+singleRegion = true
+commitProxyCount = 1
+grvProxyCount = 1
+resolverCount = 1
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 2
+native_cdc_tag_balancing_enabled = false
+# Require every status/removal transaction to acquire its own read version from the proxy.
+force_grv_cache_off = true
+
+[[test]]
+testTitle = 'NativeCdcRemovalUnderGrvThrottle'
+useDB = true
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+timeout = 240
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    testRemovalUnderGrvThrottle = true
+    operationTimeout = 180.0

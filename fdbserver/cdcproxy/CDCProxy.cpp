@@ -625,12 +625,12 @@ class CDCProxy {
 	Future<Void> acknowledge(CDCAckRequest request);
 	Future<Void> registerStream(CDCRegisterStreamRequest request);
 	Future<Void> registerOrderedStream(CDCRegisterOrderedStreamRequest request);
-	Future<Void> removeStream(CDCRemoveStreamRequest request);
+	Future<Void> removeStream(CDCRemoveStreamRequest request, TransactionPriority priority);
 	Future<Void> serveConsumeRequests(FutureStream<CDCConsumeRequest> requests);
 	Future<Void> serveAcknowledgeRequests(FutureStream<CDCAckRequest> requests);
 	Future<Void> serveRegisterStreamRequests(FutureStream<CDCRegisterStreamRequest> requests);
 	Future<Void> serveRegisterOrderedStreamRequests(FutureStream<CDCRegisterOrderedStreamRequest> requests);
-	Future<Void> serveRemoveStreamRequests(FutureStream<CDCRemoveStreamRequest> requests);
+	Future<Void> serveRemoveStreamRequests(FutureStream<CDCRemoveStreamRequest> requests, TransactionPriority priority);
 	Future<Void> serveStatusRequests(FutureStream<GetCDCProxyStatusRequest> requests);
 	Future<Void> serveHaltForTestingRequests(FutureStream<HaltCDCProxyRequest> requests);
 	Future<Void> serveBufferStatusForTestingRequests(FutureStream<GetCDCProxyBufferStatusRequest> requests);
@@ -1775,10 +1775,36 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 	}
 }
 
+// An ordinary pop scan can already be waiting for admission when a removal commits. Only probe for durable retired
+// work in that case: a proxy restart loses the removal notification, but not the retirement watermark.
+Future<Void> waitForRetiredTagPop(Database cx) {
+	co_await delay(SERVER_KNOBS->CDC_PROXY_POP_SCAN_INTERVAL);
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			if (!(co_await tr.getRange(cdcRetiredTagPopVersionKeys, 1)).empty()) {
+				co_return;
+			}
+			tr.reset();
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			co_await tr.onError(err);
+		}
+		co_await delay(SERVER_KNOBS->CDC_PROXY_POP_SCAN_INTERVAL);
+	}
+}
+
 // Post-GA optimization: persist per-tag safe-pop state or coordinate pops centrally instead of rebuilding minima from
 // all stream history on every acknowledgement scan. Revisit if acknowledgement volume makes this scan material.
 AsyncResult<CDCPopState> readPopState(Database cx) {
 	Transaction tr(cx);
+	bool drainRetiredTags = false;
 	while (true) {
 		Error err;
 		try {
@@ -1786,7 +1812,18 @@ AsyncResult<CDCPopState> readPopState(Database cx) {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			CDCPopState result;
-			result.readVersion = co_await tr.getReadVersion();
+			if (drainRetiredTags) {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				result.readVersion = co_await tr.getReadVersion();
+			} else {
+				auto ready = co_await race(tr.getReadVersion(), waitForRetiredTagPop(cx));
+				if (ready.index() == 1) {
+					drainRetiredTags = true;
+					tr.reset();
+					continue;
+				}
+				result.readVersion = std::get<0>(ready);
+			}
 			Key begin = cdcMinVersionKeys.begin;
 			while (begin < cdcMinVersionKeys.end) {
 				RangeResult minima =
@@ -1857,6 +1894,7 @@ Future<Void> clearCompletedRetiredTagPops(Database cx, std::unordered_map<Tag, V
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			for (const auto& [tag, completedVersion] : completedPopVersions) {
 				Optional<Value> retiredVersionValue = co_await tr.get(cdcRetiredTagPopVersionKeyFor(tag));
@@ -2254,14 +2292,14 @@ Future<Void> CDCProxy::registerOrderedStream(CDCRegisterOrderedStreamRequest req
 	}
 }
 
-Future<Void> CDCProxy::removeStream(CDCRemoveStreamRequest request) {
+Future<Void> CDCProxy::removeStream(CDCRemoveStreamRequest request, TransactionPriority priority) {
 	try {
-		if (co_await removeNativeCdcOrderedStream(cx, request.name, request.streamId)) {
+		if (co_await removeNativeCdcOrderedStream(cx, request.name, request.streamId, priority)) {
 			requestAcknowledgedDataPop();
 			request.reply.send(Void());
 			co_return;
 		}
-		const bool removed = co_await removeNativeCdcStream(cx, request.name, request.streamId, id);
+		const bool removed = co_await removeNativeCdcStream(cx, request.name, request.streamId, id, priority);
 		if (removed) {
 			auto stream = streams.find(request.streamId);
 			if (stream != streams.end()) {
@@ -2306,10 +2344,11 @@ Future<Void> CDCProxy::serveRegisterOrderedStreamRequests(FutureStream<CDCRegist
 	}
 }
 
-Future<Void> CDCProxy::serveRemoveStreamRequests(FutureStream<CDCRemoveStreamRequest> requests) {
+Future<Void> CDCProxy::serveRemoveStreamRequests(FutureStream<CDCRemoveStreamRequest> requests,
+                                                 TransactionPriority priority) {
 	while (true) {
 		CDCRemoveStreamRequest request = co_await requests;
-		actors.add(removeStream(std::move(request)));
+		actors.add(removeStream(std::move(request), priority));
 	}
 }
 
@@ -2534,7 +2573,8 @@ Future<Void> CDCProxy::run(CDCProxyInterface proxy, uint64_t recoveryCount) {
 	actors.add(serveAcknowledgeRequests(proxy.ack.getFuture()));
 	actors.add(serveRegisterStreamRequests(proxy.registerStream.getFuture()));
 	actors.add(serveRegisterOrderedStreamRequests(proxy.registerOrderedStream.getFuture()));
-	actors.add(serveRemoveStreamRequests(proxy.removeStream.getFuture()));
+	actors.add(serveRemoveStreamRequests(proxy.removeStream.getFuture(), TransactionPriority::DEFAULT));
+	actors.add(serveRemoveStreamRequests(proxy.removeStreamGuarded.getFuture(), TransactionPriority::IMMEDIATE));
 	actors.add(serveStatusRequests(proxy.getStatus.getFuture()));
 	actors.add(serveHaltForTestingRequests(proxy.haltForTesting.getFuture()));
 	actors.add(serveBufferStatusForTestingRequests(proxy.getBufferStatusForTesting.getFuture()));

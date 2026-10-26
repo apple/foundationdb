@@ -42,6 +42,7 @@
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/ScopeExit.h"
 
 // Exercises native CDC by registering overlapping streams, writing mutations, consuming and acknowledging them,
 // and checking delivery, retention, assignment publication, failure recovery, and drain behavior. Test options
@@ -194,6 +195,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	bool testRetiredRecovery;
 	bool blockRetiredPopWithLiveStream;
 	bool testRetiredSharedTagSnapshot;
+	bool testRemovalUnderGrvThrottle;
 	bool testThroughputRetagging;
 	bool testRetagCompatibility;
 	bool testRetaggingMemoryBound;
@@ -2798,6 +2800,87 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
+	Future<Void> validateRemovalUnderGrvThrottle(Database cx) {
+		ASSERT(g_network->isSimulated());
+		while (cx->clientInfo->get().cdcProxies.empty()) {
+			co_await cx->clientInfo->onChange();
+		}
+		ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 2);
+		const Key name = "cdc-grv-physical"_sr;
+		const Key orderedName = "cdc-grv-ordered"_sr;
+		const std::vector<KeyRange> ranges{ KeyRangeRef(keyForIndex(0), keyForIndex(2)) };
+		const std::vector<Key> splits{ keyForIndex(1) };
+
+		// Give the original name to a replacement before the throttle. A stale operator request
+		// must preserve it, even when ordinary transactions cannot get a read version.
+		const CDCStreamId staleId = co_await registerNativeCdcStreamClient(cx, name, ranges);
+		ASSERT(co_await removeNativeCdcStreamGuarded(cx, name, staleId) == NativeCdcRemoveResult::Removed);
+		co_await waitForRetiredTagCleanup(cx);
+		const CDCStreamId physical = co_await registerNativeCdcStreamClient(cx, name, ranges);
+		ASSERT_NE(physical, staleId);
+		const CDCStreamId ordered = co_await registerNativeCdcOrderedStreamClient(cx, orderedName, ranges, splits);
+		const CDCProxyInterface owner = co_await waitForAssignedProxy(cx, physical);
+		co_await writeValue(cx, keyForIndex(1), "retained"_sr);
+
+		Transaction ordinary(cx);
+		ordinary.setOption(FDBTransactionOptions::SKIP_GRV_CACHE);
+		Future<Version> ordinaryRead;
+		Future<ErrorOr<Void>> legacyRemove;
+		{
+			// The GRV proxy applies this per-release cap only to normal and batch work.
+			// Changing it after registration avoids throttling cluster/fixture setup.
+			const double previous = SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START;
+			ScopeExit restore([previous]() {
+				setServerKnob("start_transaction_max_transactions_to_start", KnobValueRef::create(previous));
+			});
+			setServerKnob("start_transaction_max_transactions_to_start", KnobValueRef::create(0.0));
+			ordinaryRead = ordinary.getReadVersion();
+			// The original endpoint must not let an old client bypass normal admission.
+			// Its stale ID cannot remove the replacement even after admission resumes.
+			legacyRemove = owner.removeStream.tryGetReply(CDCRemoveStreamRequest(name, staleId));
+			Transaction system(cx);
+			system.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			system.setOption(FDBTransactionOptions::SKIP_GRV_CACHE);
+			ASSERT_GT(co_await system.getReadVersion(), invalidVersion);
+			ASSERT(!ordinaryRead.isReady());
+
+			ASSERT(co_await removeNativeCdcStreamGuarded(cx, name, staleId) == NativeCdcRemoveResult::StreamReplaced);
+			const NativeCdcStatus before = co_await getNativeCdcStatus(cx);
+			ASSERT(before.metadataComplete);
+			// One physical stream, one ordered parent and its two partitions.
+			ASSERT_EQ(before.streams.size(), 4);
+			ASSERT(std::any_of(before.streams.begin(), before.streams.end(), [&](auto const& stream) {
+				return stream.info.name == name && stream.info.streamId == physical;
+			}));
+			ASSERT(co_await removeNativeCdcStreamGuarded(cx, name, physical) == NativeCdcRemoveResult::Removed);
+			ASSERT(co_await removeNativeCdcStreamGuarded(cx, name, physical) == NativeCdcRemoveResult::AlreadyAbsent);
+			// The unacknowledged ordered partitions cover both tags, so the removed stream's
+			// tag must remain retired until its last live reader disappears.
+			const NativeCdcStatus pending = co_await getNativeCdcStatus(cx);
+			ASSERT(pending.metadataComplete);
+			ASSERT_EQ(pending.streams.size(), 3);
+			ASSERT(std::any_of(pending.tags.begin(), pending.tags.end(), [](auto const& tag) {
+				return tag.pendingRetiredPop && tag.safePopVersion < tag.retiredPopVersion;
+			}));
+			ASSERT(co_await removeNativeCdcStreamGuarded(cx, orderedName, ordered) == NativeCdcRemoveResult::Removed);
+			while (true) {
+				const NativeCdcStatus drained = co_await getNativeCdcStatus(cx);
+				ASSERT(drained.metadataComplete);
+				ASSERT(drained.streams.empty());
+				if (std::none_of(drained.tags.begin(), drained.tags.end(), [](auto const& tag) {
+					    return tag.pendingRetiredPop;
+				    })) {
+					break;
+				}
+				co_await delay(0.2);
+			}
+			ASSERT(!ordinaryRead.isReady());
+			ASSERT(!legacyRemove.isReady());
+		}
+		ASSERT_GT(co_await ordinaryRead, invalidVersion);
+		ASSERT((co_await legacyRemove).present());
+	}
+
 	Future<Void> validateRetiredSharedTagSnapshot(Database cx) {
 		ASSERT(streams.empty());
 		ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 1);
@@ -3232,6 +3315,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> run(Database cx) {
+		if (testRemovalUnderGrvThrottle) {
+			co_await timeoutError(validateRemovalUnderGrvThrottle(cx), operationTimeout);
+			co_return;
+		}
 		if (testRetagCompatibility) {
 			co_await validateRetagCompatibility(cx);
 			co_return;
@@ -3365,6 +3452,7 @@ public:
 		testRetiredRecovery = getOption(options, "testRetiredRecovery"_sr, false);
 		blockRetiredPopWithLiveStream = getOption(options, "blockRetiredPopWithLiveStream"_sr, false);
 		testRetiredSharedTagSnapshot = getOption(options, "testRetiredSharedTagSnapshot"_sr, false);
+		testRemovalUnderGrvThrottle = getOption(options, "testRemovalUnderGrvThrottle"_sr, false);
 		testThroughputRetagging = getOption(options, "testThroughputRetagging"_sr, false);
 		testRetagCompatibility = getOption(options, "testRetagCompatibility"_sr, false);
 		testRetaggingMemoryBound = getOption(options, "testRetaggingMemoryBound"_sr, false);
@@ -3432,7 +3520,7 @@ public:
 		if (testThroughputRetagging || testRetagCompatibility || testRetaggingMemoryBound) {
 			return initializeRetaggingStreams(cx);
 		}
-		if (testRetiredSharedTagSnapshot) {
+		if (testRetiredSharedTagSnapshot || testRemovalUnderGrvThrottle) {
 			return Void();
 		}
 		if (testOversizedPeek) {
