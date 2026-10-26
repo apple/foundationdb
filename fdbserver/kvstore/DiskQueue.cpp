@@ -1711,7 +1711,10 @@ TEST_CASE("/fdbserver/DiskQueue/DisposeInterruptedReplacement") {
 	const std::vector<std::string> parts = { base + "0.fdq.part", base + "1.fdq.part" };
 	for (int i = 0; i < parts.size(); ++i) {
 		auto staging = co_await IAsyncFileSystem::filesystem()->open(
-		    parts[i], IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED, 0600);
+		    parts[i],
+		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE |
+		        IAsyncFile::OPEN_UNCACHED,
+		    0600);
 		co_await staging->truncate(i * _PAGE_SIZE);
 		co_await staging->sync();
 	}
