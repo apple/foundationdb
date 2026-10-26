@@ -1804,7 +1804,7 @@ Future<Void> waitForRetiredTagPop(Database cx) {
 // all stream history on every acknowledgement scan. Revisit if acknowledgement volume makes this scan material.
 AsyncResult<CDCPopState> readPopState(Database cx) {
 	Transaction tr(cx);
-	bool drainRetiredTags = false;
+	Future<Void> retiredWork;
 	while (true) {
 		Error err;
 		try {
@@ -1812,17 +1812,23 @@ AsyncResult<CDCPopState> readPopState(Database cx) {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			CDCPopState result;
-			if (drainRetiredTags) {
+			// Keep the probe alive across admission errors; a full GRV queue can reject every ordinary attempt
+			// before a new probe's first tick.
+			if (!retiredWork.isValid()) {
+				retiredWork = waitForRetiredTagPop(cx);
+			}
+			if (retiredWork.isReady()) {
+				retiredWork.get();
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				result.readVersion = co_await tr.getReadVersion();
 			} else {
-				auto ready = co_await race(tr.getReadVersion(), waitForRetiredTagPop(cx));
-				if (ready.index() == 1) {
-					drainRetiredTags = true;
+				auto ready = co_await race(retiredWork, tr.getReadVersion());
+				if (ready.index() == 0) {
 					tr.reset();
 					continue;
 				}
-				result.readVersion = std::get<0>(ready);
+				result.readVersion = std::get<1>(ready);
+				retiredWork = Future<Void>();
 			}
 			Key begin = cdcMinVersionKeys.begin;
 			while (begin < cdcMinVersionKeys.end) {

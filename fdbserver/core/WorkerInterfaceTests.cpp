@@ -67,6 +67,7 @@ TEST_CASE("/NativeCDC/InternalInterfaceFlatBufferRoundTrip") {
 	CDCProxyInterface cdcProxy;
 	cdcProxy.consume = PublicRequestStream<CDCConsumeRequest>(Endpoint({ cdcAddress }, UID(5, 6)));
 	cdcProxy.supportsOrderedStreams = true;
+	cdcProxy.supportsGuardedRemoval = true;
 
 	RegisterMasterRequest request;
 	request.id = UID(7, 8);
@@ -84,6 +85,16 @@ TEST_CASE("/NativeCDC/InternalInterfaceFlatBufferRoundTrip") {
 	ASSERT(decodedRequest.cdcProxies.front().supportsOrderedStreams);
 	ASSERT_EQ(decodedRequest.cdcProxies.front().registerOrderedStream.getEndpoint().token,
 	          cdcProxy.consume.getEndpoint().getAdjustedEndpoint(9).token);
+	ASSERT(decodedRequest.cdcProxies.front().supportsGuardedRemoval);
+
+	CachedSerialization<ClientDBInfo> clientInfo;
+	clientInfo.mutate().cdcProxies = decodedRequest.cdcProxies;
+	const auto published = ObjectReader::fromStringRef<ErrorOr<EnsureTable<ClientDBInfo>>>(
+	    clientInfo.getCache(), AssumeVersion(g_network->protocolVersion()));
+	const auto& proxies = published.get().asUnderlyingType().cdcProxies;
+	ASSERT_EQ(proxies.size(), 1);
+	ASSERT(proxies.front().supportsGuardedRemoval);
+	ASSERT(proxies.front().removeStreamGuarded.getEndpoint() == cdcProxy.consume.getEndpoint().getAdjustedEndpoint(10));
 
 	return Void();
 }
