@@ -524,14 +524,24 @@ else()
     add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-Werror>)
   endif()
   if (GCC)
-    add_compile_options(-Wno-pragmas)
-    # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
-    # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
-    add_compile_options(-Wno-attributes)
-    # Needed for gcc 13
-    #add_compile_options($<${is_cxx_compile}:-Wno-missing-template-keyword>)
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-missing-template-keyword>)
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-free-nonheap-object>)
+    # TODO consolidate common GCC and Clang warning options, for now GCC is minimal
+    add_compile_options(
+      $<${is_cxx_compile}:-Wall>
+      $<${is_cxx_compile}:-Wno-sign-compare>
+      $<${is_cxx_compile}:-Wno-unused-function>
+      $<${is_cxx_compile}:-Wno-pragmas>           # rapidjson "unknown option after '#pragma GCC diagnostic' kind"
+      $<${is_cxx_compile}:-Wno-unknown-pragmas>   # "ignoring '#pragma clang diagnostic'"
+      $<${is_cxx_compile}:-Wno-attributes>        # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
+      $<${is_cxx_compile}:-Wno-comment>           # multi-line c++ style comment (trailing '\', usually benign)
+      # Needed for gcc 13
+      $<${is_cxx_compile}:-Wno-array-compare>     # comparison between two arrays is deprecated in C++20
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-reorder>     # "X will be initialized after Y"
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-catch-value> # "catching polymorphic type XX by value"
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-maybe-uninitialized> # false positives that vary with inlining and gcc version
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-delete-non-virtual-dtor>
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-missing-template-keyword>
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-free-nonheap-object>
+    )
   endif()
   add_compile_options(
     $<${is_cxx_compile}:-Wno-error=format>
