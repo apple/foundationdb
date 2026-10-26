@@ -1715,7 +1715,9 @@ TEST_CASE("/fdbserver/DiskQueue/DisposeInterruptedReplacement") {
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE |
 		        IAsyncFile::OPEN_UNCACHED,
 		    0600);
-		co_await staging->truncate(i * _PAGE_SIZE);
+		if (i != 0) {
+			co_await staging->zeroRange(0, _PAGE_SIZE);
+		}
 		co_await staging->sync();
 	}
 	auto closed = queue->onClosed();
