@@ -649,6 +649,15 @@ public:
 				TraceEvent("DiskQueueShutdownDeleting", self->dbgid)
 				    .detail("File0", self->filename(0))
 				    .detail("File1", self->filename(1));
+				// A crash before the atomic rename leaves a staging file beside the canonical queue.
+				// Remove it durably while the queue is still identifiable by its canonical files.
+				for (int i = 0; i < 2; ++i) {
+					const std::string part = self->filename(i) + ".part";
+					if (fileExists(part)) {
+						co_await IAsyncFileSystem::filesystem()->deleteFile(part, true);
+						CODE_PROBE(true, "Disposed abandoned disk queue replacement");
+					}
+				}
 				co_await IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename(0), false);
 				co_await IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename(1), true);
 			}
@@ -1692,6 +1701,29 @@ IDiskQueue* openDiskQueue(std::string basename,
                           DiskQueueVersion dqv,
                           int64_t fileSizeWarningLimit) {
 	return new DiskQueue_PopUncommitted(basename, ext, dbgid, dqv, fileSizeWarningLimit);
+}
+
+TEST_CASE("/fdbserver/DiskQueue/DisposeInterruptedReplacement") {
+	const UID id = deterministicRandom()->randomUniqueID();
+	const std::string base = joinPath(params.getDataDir(), id.toString() + "-");
+	IDiskQueue* queue = openDiskQueue(base, "fdq", id, DiskQueueVersion::V2);
+	co_await queue->initializeRecovery(0);
+	const std::vector<std::string> parts = { base + "0.fdq.part", base + "1.fdq.part" };
+	for (int i = 0; i < parts.size(); ++i) {
+		auto staging = co_await IAsyncFileSystem::filesystem()->open(
+		    parts[i], IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED, 0600);
+		co_await staging->truncate(i * _PAGE_SIZE);
+		co_await staging->sync();
+	}
+	auto closed = queue->onClosed();
+	queue->dispose();
+	co_await closed;
+	for (const auto& part : parts) {
+		if (fileExists(part)) {
+			TraceEvent(SevError, "DisposedDiskQueueStagingFilePresent", id).detail("File", part);
+			throw test_failed();
+		}
+	}
 }
 
 TEST_CASE("performance/fdbserver/DiskQueue") {
