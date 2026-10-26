@@ -291,6 +291,8 @@ public:
 	virtual void disconnectPair(const IPAddress& from, const IPAddress& to, double seconds) = 0;
 	virtual void reconnectPair(const IPAddress& from, const IPAddress& to) = 0;
 	virtual std::vector<ProcessInfo*> getAllProcesses() const = 0;
+	// A simulated process can be absent while its machine reboots.
+	virtual ProcessInfo* findProcessByAddress(NetworkAddress const& address) = 0;
 	virtual ProcessInfo* getProcessByAddress(NetworkAddress const& address) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;
 	virtual MachineInfo* getMachineById(Optional<Standalone<StringRef>> const& machineId) = 0;

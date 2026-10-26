@@ -47,6 +47,7 @@
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/Histogram.h"
+#include "flow/ScopeExit.h"
 #include "flow/DebugTrace.h"
 #include "flow/genericactors.h"
 #include "flow/network.h"
@@ -4439,6 +4440,59 @@ Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Reference<Asy
 	}
 }
 
+static Future<Optional<UID>> findRetiredSpillData(IKeyValueStore* store, std::vector<UID> currentLogs) {
+	for (const auto& range : { persistTagMessagesKeys, persistTagMessageRefsKeys }) {
+		Key begin = range.begin;
+		while (begin < range.end) {
+			auto rows = co_await store->readRange(KeyRangeRef(begin, range.end), 1);
+			if (rows.empty()) {
+				break;
+			}
+			KeyRef idPrefix = rows[0].key.substr(0, range.begin.size() + sizeof(UID));
+			UID id = BinaryReader::fromStringRef<UID>(idPrefix.removePrefix(range.begin), Unversioned());
+			if (std::find(currentLogs.begin(), currentLogs.end(), id) == currentLogs.end()) {
+				co_return id;
+			}
+			// Skip all tags and versions for this generation in one seek.
+			begin = strinc(idPrefix);
+		}
+	}
+	co_return Optional<UID>();
+}
+
+static Future<Void> serveSimTLogDiskChecks(TLogData* self) {
+	RequestStream<SimTLogDiskCheckRequest> requests;
+	auto& endpoints = fdbSimulationPolicyState().tLogDiskCheckEndpoints;
+	const auto endpoint = requests.getEndpoint();
+	endpoints[self->dbgid] = endpoint;
+	ScopeExit unregister([&] {
+		auto it = endpoints.find(self->dbgid);
+		if (it != endpoints.end() && it->second == endpoint) {
+			endpoints.erase(it);
+		}
+	});
+	while (true) {
+		auto req = co_await requests.getFuture();
+		SimTLogDiskCheckReply reply;
+		try {
+			reply.staleSpillId = co_await findRetiredSpillData(self->persistentData, std::move(req.currentLogs));
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			req.reply.sendError(e);
+			continue;
+		}
+		reply.allLogsRetired =
+		    !self->id_data.empty() && std::all_of(self->id_data.begin(), self->id_data.end(), [](const auto& entry) {
+			    return entry.second->stopped() && entry.second->retired;
+		    });
+		reply.queueBytes = self->rawPersistentQueue->getStorageBytes().used;
+		reply.emptyQueueLimit = self->rawPersistentQueue->getMaxEmptyQueueBytes();
+		req.reply.send(reply);
+	}
+}
+
 // New tLog (if !recoverFrom.size()) or restore from network
 Future<Void> tLog(IKeyValueStore* persistentData,
                   IDiskQueue* persistentQueue,
@@ -4493,6 +4547,9 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 		self.sharedActors.send(commitQueue(&self));
 		self.sharedActors.send(updateStorageLoop(&self));
 		self.sharedActors.send(monitorRetainedOldLogs(&self));
+		if (g_network->isSimulated()) {
+			self.sharedActors.send(serveSimTLogDiskChecks(&self));
+		}
 		self.sharedActors.send(traceRole(Role::SHARED_TRANSACTION_LOG, tlogId));
 		Future<Void> activeSharedChange = Void();
 

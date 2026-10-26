@@ -290,9 +290,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					}
 
 					// Check that nothing is in the TLog queues
-					if (g_network->isSimulated()) {
-						co_await waitForTLogQueueCleanup();
-					}
 					std::pair<int64_t, int64_t> maxTLogQueueInfo = co_await getTLogQueueInfo(cx, self->dbInfo);
 					if (maxTLogQueueInfo.first > 1e5) // FIXME: Should be zero?
 					{

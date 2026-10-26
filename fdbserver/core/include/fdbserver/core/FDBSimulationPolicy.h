@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbrpc/fdbrpc.h"
 
 #include <cstdint>
 #include <limits>
@@ -55,6 +56,30 @@ enum FDBSimConsistencyScanState {
 };
 enum FDBSimConsistencyScanCorruptionType { FlipMoreFlag = 0, AddToEmpty = 1, RemoveLastRow = 2, ChangeFirstValue = 3 };
 
+struct SimTLogDiskCheckReply {
+	constexpr static FileIdentifier file_identifier = 10983439;
+	Optional<UID> staleSpillId;
+	bool allLogsRetired = false;
+	int64_t queueBytes = 0;
+	int64_t emptyQueueLimit = 0;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, staleSpillId, allLogsRetired, queueBytes, emptyQueueLimit);
+	}
+};
+
+struct SimTLogDiskCheckRequest {
+	constexpr static FileIdentifier file_identifier = 8130612;
+	std::vector<UID> currentLogs;
+	ReplyPromise<SimTLogDiskCheckReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, currentLogs, reply);
+	}
+};
+
 struct FDBSimulationPolicyState {
 	// Exercise retained old roles independently of automatic role deletion.
 	bool retainOldLogRoles = false;
@@ -78,6 +103,7 @@ struct FDBSimulationPolicyState {
 	FDBBackupAgentType backupAgents = FDBBackupAgentType::WaitForType;
 	FDBBackupAgentType drAgents = FDBBackupAgentType::WaitForType;
 	bool disableTLogRecoveryFinish = false;
+	std::map<UID, Endpoint> tLogDiskCheckEndpoints;
 	std::string disablePrimary;
 	std::string disableRemote;
 	std::string originalRegions;

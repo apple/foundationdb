@@ -18,16 +18,20 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <cinttypes>
 #include <vector>
 #include <map>
+#include <set>
 
 #include <boost/lexical_cast.hpp>
 #include <fmt/ranges.h>
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
+#include "flow/Platform.h"
 #include "flow/flow.h"
 #include "flow/ProcessEvents.h"
 #include "flow/Trace.h"
@@ -240,72 +244,6 @@ Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx, Reference<Asyn
 	}
 
 	co_return std::make_pair(maxQueueSize, maxPoppedVersionLag);
-}
-
-static std::map<UID, std::pair<int64_t, int64_t>> getIdleTLogQueueDiskState(double newerThan) {
-	ASSERT(g_network->isSimulated());
-	// Each generation reports shared queue metrics. Use the newest report for each shared queue.
-	std::map<UID, std::pair<double, TraceEventFields>> latest;
-	for (const auto& event : latestEventCache.getAllUnsafe()) {
-		std::string type, sharedId;
-		if (!event.tryGetValue("Type", type) || type != "TLogMetrics" || !event.tryGetValue("SharedTLogID", sharedId)) {
-			continue;
-		}
-		const double time = boost::lexical_cast<double>(event.getValue("Time"));
-		if (time <= newerThan || now() - time > 2 * SERVER_KNOBS->STORAGE_LOGGING_DELAY + 5.0) {
-			continue;
-		}
-		UID id = UID::fromString(sharedId);
-		if (!latest.contains(id) || time > latest.at(id).first) {
-			latest[id] = { time, event };
-		}
-	}
-	std::map<UID, std::pair<int64_t, int64_t>> bytes;
-	for (const auto& [id, report] : latest) {
-		const auto& event = report.second;
-		const int logs = event.getInt("SharedLogCount");
-		if (logs > 0 && event.getInt("ActiveLogCount") == 0 && event.getInt("RetiredLogCount") == logs) {
-			bytes.emplace(id,
-			              std::make_pair(event.getInt64("QueueDiskBytesUsed"), event.getInt64("QueueDiskEmptyLimit")));
-		}
-	}
-	return bytes;
-}
-
-std::map<UID, int64_t> getIdleTLogQueueDiskBytes(double newerThan) {
-	std::map<UID, int64_t> bytes;
-	for (const auto& [id, state] : getIdleTLogQueueDiskState(newerThan)) {
-		bytes.emplace(id, state.first);
-	}
-	return bytes;
-}
-
-Future<Void> waitForTLogQueueCleanup(double timeout) {
-	ASSERT(g_network->isSimulated());
-	const double deadline = now() + timeout;
-	while (true) {
-		bool cleaned = true;
-		const auto queues = getIdleTLogQueueDiskState(0.0);
-		for (const auto& [id, state] : queues) {
-			const auto [bytes, emptyLimit] = state;
-			const int64_t allowedBytes = emptyLimit;
-			if (bytes > allowedBytes) {
-				cleaned = false;
-				TraceEvent(now() >= deadline ? SevError : SevInfo, "TLogQueueCleanupPending", id)
-				    .detail("QueueDiskBytesUsed", bytes)
-				    .detail("AllowedBytes", allowedBytes)
-				    .detail("Deadline", deadline);
-			}
-		}
-		if (cleaned) {
-			TraceEvent("TLogQueueCleanupChecked").detail("IdleQueues", queues.size());
-			co_return;
-		}
-		if (now() >= deadline) {
-			throw timed_out();
-		}
-		co_await delay(1.0);
-	}
 }
 
 Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority) {
@@ -889,13 +827,8 @@ struct QuietDatabaseChecker {
 				    .detail("Reasons", reasons)
 				    .detail("FailedAfter", now() - start)
 				    .detail("Timeout", maxDDRunTime);
-				if (timedOut) {
-					// this bool is just created to make the assertion more readable
-					bool ddGotStuck = true;
-					// This assertion is here to make the test fail more quickly. If quietDatabase takes this
-					// long without completing, we can assume that the test will eventually time out. However,
-					// time outs are more annoying to debug. This will hopefully be easier to track down.
-					ASSERT(!ddGotStuck || !g_network->isSimulated());
+				if (timedOut && g_network->isSimulated()) {
+					throw test_failed();
 				}
 				return false;
 			}
@@ -1048,6 +981,203 @@ Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompletion) {
 	printf("Consistency scan complete.\n");
 }
 
+// Queue files, spill files, and spill directories all carry the shared TLog ID. A single
+// shared store can serve several generations, so a logical TLog ID cannot identify its files.
+static Optional<UID> sharedTLogIdFromFilename(StringRef name) {
+	StringRef prefix = name.eat("-"_sr);
+	if (prefix != "logqueue"_sr && prefix != "log2"_sr && prefix != "log"_sr) {
+		return {};
+	}
+	if (name.startsWith("V_"_sr)) {
+		name.eat("-"_sr);
+	}
+	if (name.size() <= 32 || (name[32] != '-' && name[32] != '.')) {
+		return {};
+	}
+	const auto id = name.substr(0, 32);
+	if (!std::all_of(
+	        id.begin(), id.end(), [](uint8_t c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); })) {
+		return {};
+	}
+	return UID::fromStringThrowsOnFailure(id.toString());
+}
+
+static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                         Optional<UID> requiredIdleStore) {
+	Optional<LogEpoch> epoch;
+	double deadline = 0;
+	while (true) {
+		auto workers = co_await getWorkers(dbInfo);
+		const auto& info = dbInfo->get();
+		if (info.recoveryState != RecoveryState::FULLY_RECOVERED) {
+			epoch.reset();
+			co_await dbInfo->onChange();
+			continue;
+		}
+		if (!epoch.present() || epoch.get() != info.logSystemConfig.epoch) {
+			epoch = info.logSystemConfig.epoch;
+			deadline = now() + 120.0;
+		}
+
+		const auto owners = info.logSystemConfig.allSharedLogs();
+		std::map<UID, std::vector<UID>> current;
+		for (const auto& log : info.logSystemConfig.allPresentLogs()) {
+			current[log.getSharedTLogID()].push_back(log.id());
+		}
+		std::map<UID, std::string> folders;
+		std::map<UID, Future<ErrorOr<SimTLogDiskCheckReply>>> audits;
+		const auto& endpoints = fdbSimulationPolicyState().tLogDiskCheckEndpoints;
+		for (const auto& [id, address] : owners) {
+			if (const auto* owner = g_simulator->findProcessByAddress(address)) {
+				folders[id] = owner->dataFolder;
+			}
+			auto endpoint = endpoints.find(id);
+			if (endpoint != endpoints.end()) {
+				SimTLogDiskCheckRequest req;
+				auto logs = current.find(id);
+				if (logs != current.end()) {
+					req.currentLogs = logs->second;
+				}
+				Endpoint remote = endpoint->second;
+				remote.choosePrimaryAddress();
+				RequestStream<SimTLogDiskCheckRequest> stream(remote);
+				audits.emplace(id, errorOr(timeoutError(stream.getReply(req), 5.0)));
+			}
+		}
+		for (const auto& [id, audit] : audits) {
+			co_await audit;
+		}
+		if (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED ||
+		    dbInfo->get().logSystemConfig.epoch != epoch.get()) {
+			continue;
+		}
+		const Severity severity = now() >= deadline ? SevError : SevInfo;
+		std::set<UID> answered;
+		bool staleData = false;
+		bool targetIdle = false;
+		for (const auto& [id, audit] : audits) {
+			const auto& result = audit.get();
+			if (result.isError()) {
+				continue;
+			}
+			answered.insert(id);
+			const auto& reply = result.get();
+			const bool idle = !current.contains(id);
+			targetIdle |= requiredIdleStore == id && idle && reply.allLogsRetired;
+			if (reply.staleSpillId.present() || (idle && reply.queueBytes > reply.emptyQueueLimit)) {
+				staleData = true;
+				TraceEvent(severity, "RetiredTLogDataPresent", id)
+				    .detail("Epoch", epoch.get())
+				    .detail("OldLog", reply.staleSpillId)
+				    .detail("Idle", idle)
+				    .detail("QueueBytes", reply.queueBytes)
+				    .detail("EmptyQueueLimit", reply.emptyQueueLimit);
+			} else if (idle && reply.allLogsRetired) {
+				TraceEvent("RetiredTLogIdleQueueChecked", id)
+				    .detail("Epoch", epoch.get())
+				    .detail("QueueBytes", reply.queueBytes)
+				    .detail("EmptyQueueLimit", reply.emptyQueueLimit);
+			}
+		}
+		std::set<UID> observed;
+		int filesChecked = 0;
+		int nonDurableUnlinks = 0;
+		int recoveringWorkers = 0;
+		int staleFiles = 0;
+		for (const auto& worker : workers) {
+			const auto* process = g_simulator->findProcessByAddress(worker.interf.address());
+			if (process && process->failed) {
+				continue;
+			}
+			if (!process || !process->machine || process->rebooting || !worker.recoveredDiskFiles) {
+				++recoveringWorkers;
+				continue;
+			}
+			for (const auto& folder : { process->dataFolder, process->dataFolder + "-tlog-spill" }) {
+				const auto absoluteFolder = abspath(folder);
+				auto names = platform::listFiles(folder);
+				auto dirs = platform::listDirectories(folder);
+				names.insert(names.end(), dirs.begin(), dirs.end());
+				for (const auto& name : names) {
+					auto id = sharedTLogIdFromFilename(name);
+					if (!id.present()) {
+						continue;
+					}
+					if (process->machine->nonDurablyUnlinkedFiles.contains(joinPath(absoluteFolder, name))) {
+						++nonDurableUnlinks;
+						continue;
+					}
+					++filesChecked;
+					auto owner = folders.find(id.get());
+					if (owner != folders.end() && owner->second == process->dataFolder) {
+						observed.insert(id.get());
+					} else {
+						++staleFiles;
+						const auto path = joinPath(folder, name);
+						TraceEvent(severity, "RetiredTLogFilePresent", id.get())
+						    .detail("Epoch", epoch.get())
+						    .detail("Worker", worker.interf.address())
+						    .detail("File", path)
+						    .detail("Bytes", std::binary_search(dirs.begin(), dirs.end(), name) ? -1 : fileSize(path))
+						    .detail("Deadline", deadline);
+					}
+				}
+			}
+		}
+		// A historical store may already have been disposed. Every current store must exist,
+		// and every advertised store that still has files must answer for its contents.
+		const bool complete = !current.empty() && recoveringWorkers == 0 &&
+		                      std::all_of(current.begin(),
+		                                  current.end(),
+		                                  [&](const auto& entry) { return observed.contains(entry.first); }) &&
+		                      std::includes(answered.begin(), answered.end(), observed.begin(), observed.end());
+		const bool targetChecked =
+		    !requiredIdleStore.present() || (targetIdle && observed.contains(requiredIdleStore.get()));
+		if (complete && targetChecked && !staleData && staleFiles == 0) {
+			TraceEvent("RetiredTLogDisksChecked")
+			    .detail("Epoch", epoch.get())
+			    .detail("CurrentSharedTLogs", current.size())
+			    .detail("NonDurableUnlinks", nonDurableUnlinks)
+			    .detail("RequiredIdleStore", requiredIdleStore)
+			    .detail("TLogFiles", filesChecked);
+			co_return true;
+		}
+		if (now() >= deadline) {
+			if (!targetChecked) {
+				TraceEvent(SevError, "GcGenerationsQueueNotIdle", requiredIdleStore.get())
+				    .detail("Epoch", epoch.get())
+				    .detail("FilesPresent", observed.contains(requiredIdleStore.get()))
+				    .detail("Responded", answered.contains(requiredIdleStore.get()))
+				    .detail("StillCurrent", current.contains(requiredIdleStore.get()));
+			}
+			if (!complete) {
+				TraceEvent(SevError, "TLogDiskInventoryIncomplete")
+				    .detail("Epoch", epoch.get())
+				    .detail("CurrentSharedTLogs", current.size())
+				    .detail("ObservedSharedTLogs", observed.size())
+				    .detail("AnsweredAudits", answered.size())
+				    .detail("RecoveringWorkers", recoveringWorkers);
+			}
+			co_return false;
+		}
+		co_await delay(5.0);
+	}
+}
+
+Future<bool> checkRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                   double maxWait,
+                                   Optional<UID> requiredIdleStore) {
+	auto result = co_await timeout(pollRetiredTLogDisks(dbInfo, requiredIdleStore), maxWait);
+	if (!result.present()) {
+		TraceEvent(SevError, "TLogDiskCheckTimedOut")
+		    .detail("Epoch", dbInfo->get().logSystemConfig.epoch)
+		    .detail("RecoveryState", dbInfo->get().recoveryState)
+		    .detail("RequiredIdleStore", requiredIdleStore);
+		co_return false;
+	}
+	co_return result.get();
+}
+
 // Waits until a database quiets down (no data in flight, small tlog queue, low SQ, no active data distribution). This
 // requires the database to be available and healthy in order to succeed.
 Future<Void> waitForQuietDatabase(Database cx,
@@ -1096,10 +1226,9 @@ Future<Void> waitForQuietDatabase(Database cx,
 			    .detail("RecoveryState", (int)dbInfo->get().recoveryState)
 			    .detail("WaitedFor", now() - checker.start)
 			    .detail("Timeout", checker.maxDDRunTime);
-			// Mirror the ddGotStuck assertion below: in simulation, a cluster that cannot fully
-			// recover within the budget is a failure we want surfaced quickly. On a real cluster,
-			// fall through and let the checks below keep retrying.
-			ASSERT(!g_network->isSimulated());
+			if (g_network->isSimulated()) {
+				throw test_failed();
+			}
 			break;
 		}
 		co_await (dbInfo->onChange() || delay(5.0));
@@ -1232,6 +1361,10 @@ Future<Void> waitForQuietDatabase(Database cx,
 		if (retryDelay.present()) {
 			co_await delay(retryDelay.get());
 		}
+	}
+	if (g_network->isSimulated() && phase != "Start" &&
+	    !(co_await checkRetiredTLogDisks(dbInfo, checker.maxDDRunTime))) {
+		throw test_failed();
 	}
 }
 

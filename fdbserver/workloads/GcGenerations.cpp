@@ -74,7 +74,15 @@ struct GcGenerationsWorkload : TestWorkload {
 		else
 			return Void();
 	}
-	Future<bool> check(Database const& cx) override { return !g_network->isSimulated() || !enabled || completed; }
+	Future<bool> check(Database const& cx) override {
+		if (g_network->isSimulated() && enabled && !completed) {
+			TraceEvent(SevError, "GcGenerationsDidNotComplete")
+			    .detail("RecoveryState", dbInfo->get().recoveryState)
+			    .detail("Epoch", dbInfo->get().logSystemConfig.epoch);
+			return false;
+		}
+		return true;
+	}
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	// Ensure simulator state is cleaned up even if the workload is cancelled by timeout.
@@ -134,8 +142,13 @@ struct GcGenerationsWorkload : TestWorkload {
 				ips.push_back(ip);
 			}
 		}
-		ASSERT(!ips.empty());
-		ASSERT(!remoteIps.empty());
+		if (ips.empty() || remoteIps.empty()) {
+			TraceEvent(SevError, "GcGenerationsMissingDatacenter")
+			    .detail("InactiveDC", inactiveDcId)
+			    .detail("AvailableIPs", ips.size())
+			    .detail("RemoteIPs", remoteIps.size());
+			throw test_failed();
+		}
 
 		for (const auto& ip : ips) {
 			for (const auto& remoteIp : remoteIps) {
@@ -151,9 +164,23 @@ struct GcGenerationsWorkload : TestWorkload {
 		    .detail("CloggedRemoteProcess", describe(remoteIps));
 	}
 
+	static ISimulator::ProcessInfo* liveProcess(NetworkAddress address) {
+		auto* process = g_simulator->findProcessByAddress(address);
+		return process && process->machine && !process->failed && !process->rebooting ? process : nullptr;
+	}
+
+	static void rebootProcess(NetworkAddress address) {
+		auto* process = liveProcess(address);
+		if (!process) {
+			TraceEvent(SevError, "GcGenerationsProcessUnavailable").detail("Address", address);
+			throw test_failed();
+		}
+		g_simulator->rebootProcess(process, ISimulator::KillType::Reboot);
+	}
+
 	bool isMasterInCloggedDc(GcGenerationsWorkload* self) {
 		auto masterAddr = self->dbInfo->get().master.address();
-		auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
+		auto* masterProc = liveProcess(masterAddr);
 		return !masterProc || !masterProc->locality.dcId().present() ||
 		       masterProc->locality.dcId() == self->cloggedDcId;
 	}
@@ -170,7 +197,7 @@ struct GcGenerationsWorkload : TestWorkload {
 			if (rebootCloggedDcMaster && self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS &&
 			    self->isMasterInCloggedDc(self)) {
 				auto masterAddr = self->dbInfo->get().master.address();
-				auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
+				auto* masterProc = liveProcess(masterAddr);
 				TraceEvent("DbAvailableRebootRemoteMaster").detail("MasterAddr", masterAddr);
 				if (masterProc) {
 					g_simulator->rebootProcess(masterProc, ISimulator::KillType::Reboot);
@@ -202,7 +229,7 @@ struct GcGenerationsWorkload : TestWorkload {
 			self->forceCloggedDcMasterRetry = false;
 			if (forcedRetry || self->isMasterInCloggedDc(self)) {
 				auto masterAddr = self->dbInfo->get().master.address();
-				auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
+				auto* masterProc = liveProcess(masterAddr);
 				TraceEvent("RetryingRemoteDcMaster")
 				    .detail("Iteration", successfulReboots)
 				    .detail("MasterAddr", masterAddr)
@@ -217,7 +244,7 @@ struct GcGenerationsWorkload : TestWorkload {
 			const int previousGenerationCount = self->dbInfo->get().logSystemConfig.oldTLogs.size();
 			auto masterAddr = self->dbInfo->get().master.address();
 			TraceEvent("RebootingPrimaryDcMaster").detail("Iteration", successfulReboots).detail("Master", masterAddr);
-			g_simulator->rebootProcess(g_simulator->getProcessByAddress(masterAddr), ISimulator::KillType::Reboot);
+			rebootProcess(masterAddr);
 
 			// Wait for recovery to create a new generation.
 			while (self->dbInfo->get().logSystemConfig.epoch <= previousEpoch ||
@@ -230,7 +257,6 @@ struct GcGenerationsWorkload : TestWorkload {
 			    .detail("NewEpoch", self->dbInfo->get().logSystemConfig.epoch)
 			    .detail("PreviousCount", previousGenerationCount)
 			    .detail("NewCount", self->dbInfo->get().logSystemConfig.oldTLogs.size());
-			ASSERT(self->dbInfo->get().logSystemConfig.epoch > previousEpoch);
 			++successfulReboots;
 		}
 		TraceEvent("AfterMultipleRecovery")
@@ -254,6 +280,7 @@ struct GcGenerationsWorkload : TestWorkload {
 			self->unclogAll();
 			disableConnectionFailures("GcGenerations");
 			fdbSimulationPolicyState().disableTLogRecoveryFinish = false;
+			fdbSimulationPolicyState().retainOldLogRoles = false;
 		});
 		fdbSimulationPolicyState().disableTLogRecoveryFinish = true;
 		fdbSimulationPolicyState().retainOldLogRoles = self->checkQueueCleanup;
@@ -285,7 +312,7 @@ struct GcGenerationsWorkload : TestWorkload {
 			co_await self->dbAvailable(self, /*rebootCloggedDcMaster=*/false);
 			auto masterAddr = self->dbInfo->get().master.address();
 			TraceEvent("RebootMasterForGC").detail("Master", masterAddr);
-			g_simulator->rebootProcess(g_simulator->getProcessByAddress(masterAddr), ISimulator::KillType::Reboot);
+			rebootProcess(masterAddr);
 			// Give this recovery cycle time to GC before retrying.
 			co_await delay(60);
 			co_await self->dbAvailable(self, /*rebootCloggedDcMaster=*/false);
@@ -314,23 +341,25 @@ struct GcGenerationsWorkload : TestWorkload {
 				}
 			}
 		}
-		ASSERT(target.getSharedTLogID() != UID());
+		if (target.getSharedTLogID() == UID()) {
+			TraceEvent(SevError, "GcGenerationsQueueTargetMissing")
+			    .detail("Epoch", dbInfo->get().logSystemConfig.epoch);
+			throw test_failed();
+		}
 		const AddressExclusion exclusion(target.address().ip, target.address().port);
 		co_await excludeServers(cx, { exclusion });
-		Future<double> replacementCrash = cleanupRestarts > 0
-		                                      ? crashQueueReplacement(target, deterministicRandom()->randomInt(1, 3))
-		                                      : Future<double>(now());
+		const int replacement = cleanupRestarts > 0 ? deterministicRandom()->randomInt(1, 3) : 0;
+		Future<Void> replacementReboot =
+		    replacement ? rebootDuringQueueReplacement(target, replacement) : Future<Void>(Void());
 		UID previousMaster = dbInfo->get().master.id();
-		g_simulator->rebootProcess(g_simulator->getProcessByAddress(target.address()), ISimulator::KillType::Reboot);
-		g_simulator->rebootProcess(g_simulator->getProcessByAddress(dbInfo->get().master.address()),
-		                           ISimulator::KillType::Reboot);
+		rebootProcess(target.address());
+		rebootProcess(dbInfo->get().master.address());
 		while (dbInfo->get().master.id() == previousMaster ||
 		       dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
 			co_await dbInfo->onChange();
 		}
 		Optional<Error> error;
 		try {
-			double restoredAt = now();
 			// Restart through the normal machine failure path, including recovery and retirement I/O.
 			for (int i = 0; i < cleanupRestarts; ++i) {
 				UID previousWorker;
@@ -340,8 +369,9 @@ struct GcGenerationsWorkload : TestWorkload {
 					}
 				}
 				co_await delay(deterministicRandom()->random01() * 0.1);
-				g_simulator->rebootProcess(g_simulator->getProcessByAddress(target.address()),
-				                           ISimulator::KillType::Reboot);
+				if (liveProcess(target.address())) {
+					rebootProcess(target.address());
+				}
 				while (true) {
 					bool restored = false;
 					for (const auto& worker : co_await getWorkers(dbInfo)) {
@@ -355,15 +385,24 @@ struct GcGenerationsWorkload : TestWorkload {
 					}
 					co_await delay(0.1);
 				}
-				restoredAt = now();
 			}
-			co_await checkIdleQueue(target.getSharedTLogID(), restoredAt);
-			if (cleanupRestarts > 0) {
-				const double rebootedAt = co_await timeoutError(replacementCrash, 120.0);
-				co_await checkIdleQueue(target.getSharedTLogID(), std::max(restoredAt, rebootedAt));
+			if (!(co_await checkRetiredTLogDisks(dbInfo, 300.0, target.getSharedTLogID()))) {
+				throw test_failed();
+			}
+			if (replacement) {
+				if (!(co_await timeout(replacementReboot, 120.0)).present()) {
+					TraceEvent(SevError, "GcGenerationsQueueReplacementNotObserved", target.getSharedTLogID())
+					    .detail("Replacement", replacement)
+					    .detail("Address", target.address());
+					throw test_failed();
+				}
+				// Read the restored target again after the reboot during atomic file replacement.
+				if (!(co_await checkRetiredTLogDisks(dbInfo, 300.0, target.getSharedTLogID()))) {
+					throw test_failed();
+				}
 			}
 		} catch (Error& e) {
-			replacementCrash.cancel();
+			replacementReboot.cancel();
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
@@ -373,8 +412,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		// The old master can still advertise its retained graph. Restore normal behavior only in a new recovery.
 		previousMaster = dbInfo->get().master.id();
 		fdbSimulationPolicyState().disableTLogRecoveryFinish = true;
-		g_simulator->rebootProcess(g_simulator->getProcessByAddress(dbInfo->get().master.address()),
-		                           ISimulator::KillType::Reboot);
+		rebootProcess(dbInfo->get().master.address());
 		while (dbInfo->get().master.id() == previousMaster ||
 		       dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
 			co_await dbInfo->onChange();
@@ -390,26 +428,14 @@ struct GcGenerationsWorkload : TestWorkload {
 		TraceEvent("GcGenerationsQueueCleanupComplete").detail("Restarts", cleanupRestarts);
 	}
 
-	Future<Void> checkIdleQueue(UID sharedId, double restoredAt) {
-		// Require an observed idle queue so role deletion cannot make this check pass without exercising cleanup.
-		const double deadline = now() + 120.0;
-		while (!getIdleTLogQueueDiskBytes(restoredAt).contains(sharedId)) {
-			if (now() >= deadline) {
-				TraceEvent(SevError, "GcGenerationsQueueNotIdle", sharedId);
-				throw timed_out();
-			}
-			co_await delay(0.5);
-		}
-		TraceEvent("GcGenerationsIdleQueue", sharedId)
-		    .detail("QueueDiskBytesUsed", getIdleTLogQueueDiskBytes().at(sharedId))
-		    .detail("Restarts", cleanupRestarts);
-		co_await waitForTLogQueueCleanup();
-	}
-
-	Future<double> crashQueueReplacement(TLogInterface target, int replacement) {
+	Future<Void> rebootDuringQueueReplacement(TLogInterface target, int replacement) {
 		std::set<std::string> observed;
 		while (true) {
-			auto* process = g_simulator->getProcessByAddress(target.address());
+			auto* process = liveProcess(target.address());
+			if (!process) {
+				co_await delay(0.1);
+				continue;
+			}
 			Optional<std::string> replacementFile;
 			for (auto& [name, weakFile] : process->machine->openFiles) {
 				if (name.find("logqueue-") == std::string::npos ||
@@ -418,24 +444,26 @@ struct GcGenerationsWorkload : TestWorkload {
 				    !process->machine->openFiles.contains(name.substr(0, name.size() - 5))) {
 					continue;
 				}
-				auto file = weakFile.get();
-				if (file.isReady() && !file.isError() && observed.insert(name).second &&
+				if (weakFile.getPtrIfReady().present() && observed.insert(name).second &&
 				    observed.size() == replacement) {
 					replacementFile = name;
 					break;
 				}
 			}
 			if (replacementFile.present()) {
-				TraceEvent("GcGenerationsQueueFileCrash", target.getSharedTLogID())
+				TraceEvent("GcGenerationsQueueFileReboot", target.getSharedTLogID())
 				    .detail("Replacement", replacement)
 				    .detail("Filename", replacementFile.get())
 				    .detail("Address", target.address());
 				UID previousProcess = process->uid;
 				g_simulator->rebootProcess(process, ISimulator::KillType::Reboot);
-				while (g_simulator->getProcessByAddress(target.address())->uid == previousProcess) {
+				while (true) {
+					const auto* restored = liveProcess(target.address());
+					if (restored && restored->uid != previousProcess) {
+						co_return;
+					}
 					co_await delay(0.1);
 				}
-				co_return now();
 			}
 			co_await delay(0.0001);
 		}

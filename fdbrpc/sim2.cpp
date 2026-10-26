@@ -1041,6 +1041,7 @@ public:
 				}
 				g_simulator->corruptedBlocks.erase(begin, end);
 				renameFile(sourceFilename.c_str(), this->filename.c_str());
+				g_simulator->getCurrentProcess()->machine->nonDurablyUnlinkedFiles.erase(this->filename);
 
 				machineCache[this->filename] = machineCache[sourceFilename];
 				machineCache.erase(sourceFilename);
@@ -1577,6 +1578,7 @@ public:
 			co_await g_simulator->onProcess(currentProcess, currentTaskID);
 			throw err;
 		} else {
+			g_simulator->getCurrentProcess()->machine->nonDurablyUnlinkedFiles.insert(filename);
 			TraceEvent(SevDebug, "Sim2DeleteFileImplNonDurable")
 			    .detail("Filename", filename)
 			    .detail("Durable", mustBeDurable);
@@ -2362,11 +2364,15 @@ public:
 		}
 		return processes;
 	}
-	ProcessInfo* getProcessByAddress(NetworkAddress const& address) override {
+	ProcessInfo* findProcessByAddress(NetworkAddress const& address) override {
 		NetworkAddress normalizedAddress(address.ip, address.port, true, address.isTLS());
-		ASSERT(addressMap.count(normalizedAddress));
-		// NOTE: addressMap[normalizedAddress]->address may not equal to normalizedAddress
-		return addressMap[normalizedAddress];
+		auto it = addressMap.find(normalizedAddress);
+		return it == addressMap.end() ? nullptr : it->second;
+	}
+	ProcessInfo* getProcessByAddress(NetworkAddress const& address) override {
+		auto* process = findProcessByAddress(address);
+		ASSERT(process);
+		return process;
 	}
 
 	MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) override {
@@ -3053,6 +3059,7 @@ int sf_open(const char* filename, int flags, int convFlags, int mode) {
 
 // Opens a file for asynchronous I/O
 Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {
+	g_simulator->getCurrentProcess()->machine->nonDurablyUnlinkedFiles.erase(filename);
 	ASSERT((flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) || !(flags & IAsyncFile::OPEN_CREATE) ||
 	       StringRef(filename).endsWith(
 	           ".fdb-lock"_sr)); // We don't use "ordinary" non-atomic file creation right now except for
@@ -3131,6 +3138,7 @@ Future<Void> renameFileImpl(std::string from, std::string to) {
 	g_simulator->corruptedBlocks.erase(begin, end);
 	// do the rename
 	::renameFile(from, to);
+	g_simulator->getCurrentProcess()->machine->nonDurablyUnlinkedFiles.erase(to);
 	co_await delay(0.5 * deterministicRandom()->random01());
 	co_return;
 }
