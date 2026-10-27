@@ -88,7 +88,7 @@ struct StreamingReadWorkload : TestWorkload {
 		memset(data, '.', keyBytes);
 
 		double d = double(index) / nodeCount;
-		emplaceIndex(data, 0, *(int64_t*)&d);
+		emplaceIndex(data, 0, std::bit_cast<int64_t>(d));
 
 		return result;
 	}
