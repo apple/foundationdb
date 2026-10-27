@@ -205,22 +205,19 @@ void resetFileFolder(const std::string& folderPath) {
 }
 
 // Defense-in-depth guard for the bulk-load sink. Before we wipe and repopulate
-// the local staging folder, verify it resolves to a location at or under the
+// the local staging folder, verify it is at or under the
 // (operator-supplied) local root. Parse-time validation in BulkLoadFileSet
 // already rejects ".."/absolute manifest fields; this is the last-resort check
 // right before eraseDirectoryRecursive() so that any traversal that slips
 // through cannot drive the wipe/writes to an arbitrary path (e.g. the FDB data
 // directory or TLS material). Throws rather than proceed.
 void assertLocalFolderContained(const BulkLoadFileSet& localFileSet, const UID& logId) {
-	std::string resolvedRoot = abspath(localFileSet.getRootPath());
-	std::string resolvedFolder = abspath(localFileSet.getFolder());
-	// Compare against root + separator so a sibling like "/data-evil" is not
-	// accepted for root "/data"; the exact-root case is allowed on its own.
-	bool contained = resolvedFolder == resolvedRoot || resolvedFolder.starts_with(resolvedRoot + "/");
-	if (!contained) {
+	// getFolder() is the root joined with the relative path, so a contained relative path keeps the folder at or
+	// under the root.
+	if (!relativePathIsContained(localFileSet.getRelativePath())) {
 		TraceEvent(SevError, "BulkLoadLocalFolderEscapesRoot", logId)
-		    .detail("ResolvedRoot", resolvedRoot)
-		    .detail("ResolvedFolder", resolvedFolder)
+		    .detail("RootPath", localFileSet.getRootPath())
+		    .detail("RelativePath", localFileSet.getRelativePath())
 		    .detail("FileSet", localFileSet.toString());
 		throw bulkload_fileset_invalid_filepath();
 	}
