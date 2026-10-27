@@ -152,7 +152,6 @@ void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* 
 	uint32_t kLen = reader->consumeNetworkUInt32();
 	const uint8_t* k = reader->consume(kLen);
 	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-	KeyRef prevKey = KeyRef(k, kLen);
 	// Read kv pairs and end key
 	while (1) {
 		// Read a key.
