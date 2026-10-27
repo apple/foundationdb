@@ -1151,9 +1151,13 @@ struct LoadSaveHelper : Context {
 		current += sizeof(uint32_t);
 		auto inserter = VectorTraits::insert(member, numEntries, this->context());
 		for (uint32_t i = 0; i < numEntries; ++i) {
+			// GCC can't see that moving a T only reads a member Optional's payload when it is present.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
 			T value;
 			load_helper(value, current, this->context());
 			*inserter = std::move(value);
+#pragma GCC diagnostic pop
 			++inserter;
 			current += fb_size<T>;
 		}
