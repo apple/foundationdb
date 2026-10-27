@@ -274,6 +274,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.toml IGNORE) # TODO re-enable once read hot detection is enabled.
   add_fdb_test(TEST_FILES fast/ReportConflictingKeys.toml)
   add_fdb_test(TEST_FILES fast/RESTUnit.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/RestoreDispatchRecovery.toml)
+  add_fdb_test(TEST_FILES fast/RestoreWriterRecovery.toml)
   add_fdb_test(TEST_FILES fast/SelectorCorrectness.toml)
   add_fdb_test(TEST_FILES fast/ShardedRocksNondeterministicTest.toml)
   add_fdb_test(TEST_FILES fast/StaleCoordinatorProtocolMonitor.toml)
