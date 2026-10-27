@@ -6044,6 +6044,13 @@ Future<Void> testRestoreWriterRecovery(Database cx) {
 		}
 		co_await file->finish();
 		ASSERT_LT(file->size(), blockSize);
+		if (writer == 0) {
+			// A bare range file is not a complete backup; deletion requires a snapshot manifest or log.
+			std::vector<std::string> snapshotFiles{ file->getFileName() };
+			std::vector<std::pair<Key, Key>> snapshotRanges{ { dataRange.begin, dataRange.end } };
+			co_await bc->writeKeyspaceSnapshotFile(
+			    snapshotFiles, snapshotRanges, file->size(), IncludeKeyRangeMap::True);
+		}
 		RestoreFile input{ 1, file->getFileName(), writer == 0, blockSize, file->size(), recordCount + 1, 0, 1 };
 		auto task = makeReference<Task>(taskName, 1);
 		RestoreFileTaskFuncBase::InputParams::inputFile().set(task, input);
@@ -6076,7 +6083,21 @@ Future<Void> testRestoreWriterRecovery(Database cx) {
 		}
 		RestoreWriterTestState test;
 		if (writer == 0) {
-			co_await RestoreRangeTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+			while (true) {
+				try {
+					co_await RestoreRangeTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+					break;
+				} catch (Error& e) {
+					// The direct call bypasses TaskBucket's retry of transient errors injected by the range decoder.
+					// Only restart before writing, so retries cannot hide a writer failure or duplicate the counters.
+					if (test.commits != 0 ||
+					    (e.code() != error_code_http_request_failed && e.code() != error_code_connection_failed &&
+					     e.code() != error_code_timed_out && e.code() != error_code_lookup_failed)) {
+						throw;
+					}
+				}
+				co_await delay(1.0);
+			}
 		} else if (writer == 1) {
 			co_await RestoreLogDataTaskFunc::_execute(cx, taskBucket, {}, task, &test);
 		} else {
@@ -6488,6 +6509,20 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				// Preserve the normal retry delay for transaction_too_old, including at the minimum task limit.
 				co_await tr->onError(err);
 			}
+			if (reduceTaskLimit) {
+				// Persist the smaller limit under the current lease so a handoff cannot restore the original batch.
+				// Keep the timeout key stable: an earlier dispatch may have committed with an unknown result.
+				Params.dispatchTaskLimit().set(task, taskBatchSize);
+				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> resizeTr) {
+					return map(taskBucket->keepRunning(resizeTr, task), [=](Void) {
+						resizeTr->set(taskBucket->timeouts.get(task->timeoutVersion)
+						                  .get(task->key)
+						                  .pack(Params.dispatchTaskLimit().key),
+						              TupleCodec<int>::pack(taskBatchSize));
+						return Void();
+					});
+				});
+			}
 		}
 	}
 
@@ -6517,6 +6552,7 @@ Future<Void> testRestoreDispatchRecovery(Database cx) {
 	    IBackupContainer::openContainer("file://" + abspath("simfdb/" + tagName), {}, {}, 0);
 	Subspace testSpace("dispatch-recovery/"_sr.withPrefix(restore.mutationLogPrefix()));
 	auto taskBucket = makeReference<TaskBucket>(testSpace.get("tasks"_sr), AccessSystemKeys::True);
+	taskBucket->timeout = 5 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 	auto futureBucket = makeReference<FutureBucket>(testSpace.get("futures"_sr), AccessSystemKeys::True);
 	// Dispatch reads only this metadata; the range tasks are inspected without reading a backup file.
 	RestoreFile file{ 1, "range-file", true, 4096, 32 * 4096 };
@@ -6549,7 +6585,8 @@ Future<Void> testRestoreDispatchRecovery(Database cx) {
 	}
 	int rejectedLimit = 0;
 	int ageFailures = 0;
-	co_await Dispatch::dispatchWithRetry(cx, taskBucket, futureBucket, task, [&](int limit) {
+	bool handedOff = false;
+	auto beforeCommit = [&](int limit) {
 		// Model persistent latency: retrying an expired chunk unchanged must fail this test promptly.
 		if (rejectedLimit) {
 			ASSERT_LT(limit, rejectedLimit);
@@ -6559,7 +6596,30 @@ Future<Void> testRestoreDispatchRecovery(Database cx) {
 			++ageFailures;
 			throw transaction_too_old();
 		}
-	});
+		if (!handedOff) {
+			handedOff = true;
+			throw task_interrupted();
+		}
+	};
+	try {
+		co_await Dispatch::dispatchWithRetry(cx, taskBucket, futureBucket, task, beforeCommit);
+		ASSERT(false);
+	} catch (Error& e) {
+		if (e.code() != error_code_task_interrupted || !handedOff) {
+			throw;
+		}
+	}
+	// Drop the in-memory task and let a new owner reclaim its persisted parameters after the lease expires.
+	task.clear();
+	while (true) {
+		task = co_await taskBucket->getOne(cx);
+		if (task) {
+			break;
+		}
+		co_await delay(1.0);
+	}
+	ASSERT_LE(Dispatch::Params.dispatchTaskLimit().get(task), 4);
+	co_await Dispatch::dispatchWithRetry(cx, taskBucket, futureBucket, task, beforeCommit);
 	ASSERT_GT(ageFailures, 0);
 	int committedLimit = Dispatch::Params.dispatchTaskLimit().get(task);
 	ASSERT_LE(committedLimit, 4);
@@ -6589,9 +6649,13 @@ Future<Void> testRestoreDispatchRecovery(Database cx) {
 			rows = co_await tr->getRange(space.range(), 1000);
 			ASSERT(!rows.more);
 			std::set<int64_t> offsets;
+			std::vector<Key> rangeDoneKeys;
 			for (const auto& row : rows) {
 				if (space.unpack(row.key).getString(1) == RestoreRangeTaskFunc::Params.readOffset().key) {
 					ASSERT(offsets.insert(TupleCodec<int64_t>::unpack(row.value)).second);
+				}
+				if (space.unpack(row.key).getString(1) == Task::reservedTaskParamKeyDone) {
+					rangeDoneKeys.push_back(row.value);
 				}
 			}
 			ASSERT_EQ(offsets.size(), committedLimit);
@@ -6599,7 +6663,16 @@ Future<Void> testRestoreDispatchRecovery(Database cx) {
 				ASSERT(offsets.count(i * file.blockSize));
 			}
 			Key batchKey = co_await restore.batchFuture().getOrThrow(tr);
-			ASSERT(!(co_await futureBucket->unpack(batchKey)->isSet(tr)));
+			auto batch = futureBucket->unpack(batchKey);
+			ASSERT(!(co_await batch->isSet(tr)));
+			ASSERT_EQ(rangeDoneKeys.size(), committedLimit);
+			for (const auto& key : rangeDoneKeys) {
+				co_await futureBucket->unpack(key)->set(tr, taskBucket);
+			}
+			// Finishing every dispatched block must still leave the continuation holding the batch open.
+			ASSERT(!(co_await batch->isSet(tr)));
+			co_await futureBucket->unpack(continuation->params[Task::reservedTaskParamKeyDone])->set(tr, taskBucket);
+			ASSERT(co_await batch->isSet(tr));
 			break;
 		} catch (Error& e) {
 			err = e;
