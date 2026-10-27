@@ -39,8 +39,10 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/IThreadPool.h"
+#include "flow/Platform.h"
 #include "flow/ThreadHelper.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/flow.h"
 
 #ifdef WITH_ROCKSDB
@@ -1060,6 +1062,25 @@ Future<Void> RocksDBCFCheckpointReader::close() {
 	return doClose(this);
 }
 
+// RocksDB file names start with '/'; joinPath() drops it, so check the rest. The name must be a file inside the
+// checkpoint directory, not the directory itself.
+static bool checkpointFileNameIsContained(const std::string& name) {
+	const std::string relativeName = name.starts_with('/') ? name.substr(1) : name;
+	return relativePathIsContained(relativeName) && cleanPath(relativeName) != ".";
+}
+
+// Names as RocksDB reports them pass; names that could resolve outside the checkpoint directory, or to the directory
+// itself, don't.
+TEST_CASE("/fdbserver/checkpoint/checkpointFileNameIsContained") {
+	for (const std::string& name : { "/000012.sst", "000012.sst", "/a..b.sst" }) {
+		ASSERT(checkpointFileNameIsContained(name));
+	}
+	for (const std::string& name : { "/../000012.sst", "../000012.sst", "/a/../000012.sst", "/..", "", "/", "/." }) {
+		ASSERT(!checkpointFileNameIsContained(name));
+	}
+	return Void();
+}
+
 // Fetch a single sst file from storage server. The progress is checkpointed via cFun.
 Future<Void> fetchCheckpointFile(Database cx,
                                  std::shared_ptr<CheckpointMetaData> metaData,
@@ -1069,13 +1090,18 @@ Future<Void> fetchCheckpointFile(Database cx,
                                  int maxRetries = 3) {
 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(*metaData);
 
+	const std::string remoteFile = rocksCF.sstFiles[idx].name;
+	if (!checkpointFileNameIsContained(remoteFile)) {
+		TraceEvent(SevWarnAlways, "FetchCheckpointFileInvalidName").detail("Name", remoteFile).detail("Dir", dir);
+		throw checkpoint_not_found();
+	}
+
 	// Skip fetched file.
 	if (rocksCF.sstFiles[idx].fetched && rocksCF.sstFiles[idx].db_path == dir) {
 		co_return;
 	}
 
-	const std::string remoteFile = rocksCF.sstFiles[idx].name;
-	const std::string localFile = joinPath(dir, rocksCF.sstFiles[idx].name);
+	const std::string localFile = joinPath(dir, remoteFile);
 	ASSERT_EQ(metaData->src.size(), 1);
 	const UID ssId = metaData->src.front();
 
