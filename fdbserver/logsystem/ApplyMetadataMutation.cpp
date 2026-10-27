@@ -1029,7 +1029,7 @@ private:
 		// CDC tags may be shared and acknowledgement minima are stored outside transaction state.
 		// A durable retired-tag watermark lets any CDC proxy finish pops after stream removal.
 		if (!initialCommit) {
-			for (const KeyRangeRef cdcRange :
+			for (const KeyRangeRef& cdcRange :
 			     { cdcStreamNameKeys, cdcStreamKeys, cdcTagHistoryKeys, cdcRetiredTagPopKeys, cdcProxyKeys }) {
 				if (cdcRange.intersects(range)) {
 					txnStateStore->clear(cdcRange & range);

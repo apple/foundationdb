@@ -2531,7 +2531,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		void action(CommitAction& a) {
-			double commitBeginTime;
+			double commitBeginTime = 0;
 			if (a.sample) {
 				commitBeginTime = timer_monotonic();
 				latencyMetrics->writeActionQueueWait->sampleSeconds(commitBeginTime - a.startTime);
