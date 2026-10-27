@@ -43,15 +43,15 @@ const uint8_t Tuple::UUID_CODE = 0x30;
 const uint8_t Tuple::VERSIONSTAMP_96_CODE = 0x33;
 
 static float bigEndianFloat(float orig) {
-	int32_t big = *(int32_t*)&orig;
+	auto big = std::bit_cast<int32_t>(orig);
 	big = bigEndian32(big);
-	return *(float*)&big;
+	return std::bit_cast<float>(big);
 }
 
 static double bigEndianDouble(double orig) {
-	int64_t big = *(int64_t*)&orig;
+	auto big = std::bit_cast<int64_t>(orig);
 	big = bigEndian64(big);
-	return *(double*)&big;
+	return std::bit_cast<double>(big);
 }
 
 static size_t find_string_terminator(const StringRef data, size_t offset) {
