@@ -7062,6 +7062,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		mutationLogType = co_await restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
 		restoreVersion = co_await restore.restoreVersion().getOrThrow(tr);
 
+		// Set only on the bulkload path: the log dispatch below waits for the SST ingest to finish.
+		Reference<TaskFuture> bulkLoadDone;
+
 		if (!useRangeFileRestore) {
 			// Use BulkLoad for range data restoration, then apply logs
 			Reference<IBackupContainer> bc = co_await restore.sourceContainer().getOrThrow(tr);
@@ -7083,7 +7086,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			    .detail("RestoreVersion", restoreVersion);
 
 			// Create a future that BulkLoad will signal when done
-			Reference<TaskFuture> bulkLoadDone = futureBucket->future(tr);
+			bulkLoadDone = futureBucket->future(tr);
 
 			// Add BulkLoad task for range data
 			co_await BulkLoadRestoreTaskFunc::addTask(tr,
@@ -7098,8 +7101,22 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			// replay logs only. submitRestore rejects --incremental with bulkload, so this can only ever
 			// overwrite false.
 			restore.onlyApplyMutationLogs().set(tr, true);
+		}
 
-			// Add RestoreDispatch task that waits for BulkLoad to complete
+		// The log replay is independent of where the range data came from, so the dispatcher follows the
+		// container's log layout on both paths.
+		if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
+			Version endVersion =
+			    std::min(firstVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE, restoreVersion);
+			co_await RestoreDispatchPartitionedTaskFunc::addTask(tr,
+			                                                     taskBucket,
+			                                                     task,
+			                                                     firstVersion,
+			                                                     firstVersion,
+			                                                     endVersion,
+			                                                     TaskCompletionKey::noSignal(),
+			                                                     bulkLoadDone);
+		} else {
 			co_await RestoreDispatchTaskFunc::addTask(tr,
 			                                          taskBucket,
 			                                          task,
@@ -7110,16 +7127,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			                                          0,
 			                                          TaskCompletionKey::noSignal(),
 			                                          bulkLoadDone);
-		} else if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
-			// Traditional restore with partitioned logs
-			Version endVersion =
-			    std::min(firstVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE, restoreVersion);
-			co_await RestoreDispatchPartitionedTaskFunc::addTask(
-			    tr, taskBucket, task, firstVersion, firstVersion, endVersion);
-		} else {
-			// Traditional restore with non-partitioned logs
-			co_await RestoreDispatchTaskFunc::addTask(
-			    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE);
 		}
 
 		// Initialize apply mutations map.

@@ -115,3 +115,4 @@ timeout = 7200
     # BulkDump/BulkLoad integration options
     snapshotMode = 1           # 1 = BULKDUMP (creates SST files instead of range files)
     useRangeFileRestore = false # false = use BulkLoad for restore
+    mutationLogType = -1       # -1 = classic or partitioned logs, chosen per seed
