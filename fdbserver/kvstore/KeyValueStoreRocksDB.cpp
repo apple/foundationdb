@@ -1319,37 +1319,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			a.done.send(Void());
 		}
 
-		struct CompactRangeAction : TypedAction<Writer, CompactRangeAction> {
-			explicit CompactRangeAction(KeyRangeRef range) : range(range) {}
-
-			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
-
-			const KeyRange range;
-			ThreadReturnPromise<Void> done;
-		};
-
-		void action(CompactRangeAction& a) {
-			// Configure compaction options
-			rocksdb::CompactRangeOptions options;
-			// Force RocksDB to rewrite file to last level
-			options.bottommost_level_compaction = rocksdb::BottommostLevelCompaction::kForceOptimized;
-
-			// Convert key range to slices
-			auto begin = toSlice(a.range.begin);
-			auto end = toSlice(a.range.end);
-
-			// Perform the compaction
-			rocksdb::Status status = db->CompactRange(options, cf, &begin, &end);
-
-			if (!status.ok()) {
-				logRocksDBError(id, status, "CompactRange");
-				a.done.sendError(statusToError(status));
-				return;
-			}
-
-			a.done.send(Void());
-		}
-
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			std::string path;
 			ThreadReturnPromise<Void> done;
@@ -1983,6 +1952,47 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	};
 
+	struct CompactionWorker : IThreadPoolReceiver {
+		UID id;
+		DB& db;
+		CF& cf;
+
+		explicit CompactionWorker(UID id, DB& db, CF& cf) : id(id), db(db), cf(cf) {}
+
+		void init() override {}
+
+		struct CompactRangeAction : TypedAction<CompactionWorker, CompactRangeAction> {
+			explicit CompactRangeAction(KeyRangeRef range) : range(range) {}
+
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
+			const KeyRange range;
+			ThreadReturnPromise<Void> done;
+		};
+
+		void action(CompactRangeAction& a) {
+			// Configure compaction options
+			rocksdb::CompactRangeOptions options;
+			// Force RocksDB to rewrite file to last level
+			options.bottommost_level_compaction = rocksdb::BottommostLevelCompaction::kForceOptimized;
+
+			// Convert key range to slices
+			auto begin = toSlice(a.range.begin);
+			auto end = toSlice(a.range.end);
+
+			// Perform the compaction
+			rocksdb::Status status = db->CompactRange(options, cf, &begin, &end);
+
+			if (!status.ok()) {
+				logRocksDBError(id, status, "CompactRange");
+				a.done.sendError(statusToError(status));
+				return;
+			}
+
+			a.done.send(Void());
+		}
+	};
+
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
 	  : id(id), sharedState(std::make_shared<SharedRocksDBState>(id)), path(path),
 	    perfContextMetrics(new PerfContextMetrics()),
@@ -2017,9 +2027,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (g_network->isSimulated()) {
 			writeThread = CoroThreadPool::createThreadPool();
 			readThreads = CoroThreadPool::createThreadPool();
+			compactionThread = CoroThreadPool::createThreadPool();
 		} else {
 			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
 			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
+			compactionThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_COMPACTION_THREAD_PRIORITY);
+
 		}
 		if (SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0) {
 			collection = actorCollection(addActor.getFuture());
@@ -2058,6 +2071,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			               SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0 ? metricPromiseStreams[i].get() : nullptr),
 			    "fdb-rocksdb-re");
 		}
+		compactionThread->addThread(new CompactionWorker(id, db, defaultFdbCF), "fdb-rocksdb-cw");
 	}
 
 	Future<Void> updateHistogram(ThreadFutureStream<std::pair<std::string, double>> metricFutureStream) {
@@ -2506,7 +2520,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) override {
 		auto a = new Writer::CheckpointAction(request);
-
 		auto res = a->reply.getFuture();
 		writeThread->post(a);
 		return res;
@@ -2552,9 +2565,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Void> compactRange(KeyRangeRef range) override {
-		auto a = new Writer::CompactRangeAction(range);
+		auto a = new CompactionWorker::CompactRangeAction(range);
 		auto res = a->done.getFuture();
-		writeThread->post(a);
+		compactionThread->post(a);
 		return res;
 	}
 
@@ -2566,6 +2579,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	UID id;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
+	Reference<IThreadPool> compactionThread;
 	std::shared_ptr<RocksDBErrorListener> errorListener;
 	std::shared_ptr<RocksDBEventListener> eventListener;
 	Future<Void> errorFuture;
