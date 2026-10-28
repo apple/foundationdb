@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cinttypes>
+#include <memory>
 
 class BackupContainerFileSystemImpl {
 public:
@@ -90,19 +91,18 @@ public:
 				    .detail("Limit", CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE);
 				co_return std::string();
 			}
-			std::string buf;
-			buf.resize(size);
+			auto buf = std::make_shared<std::string>(size, '\0');
 			for (int64_t offset = 0; offset < size;) {
 				int toRead =
 				    static_cast<int>(std::min<int64_t>(CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE, size - offset));
-				int r = co_await f->read((uint8_t*)buf.data() + offset, toRead, offset);
+				int r = co_await uncancellable(holdWhile(buf, f->read(buf->data() + offset, toRead, offset)));
 				if (r != toRead) {
 					throw restore_bad_read();
 				}
 				offset += r;
 			}
 			json_spirit::mValue json;
-			if (!json_spirit::read_string(buf, json)) {
+			if (!json_spirit::read_string(*buf, json)) {
 				throw restore_corrupted_data();
 			}
 			JSONDoc doc(json);
@@ -957,10 +957,11 @@ public:
 			}
 		}
 
-		// Earlier bulkdump descriptors used the job start as a point snapshot. Correct their
-		// bounds before computing restorability, including the safety check used by expire.
+		// Verify the job and use its actual bounds before computing restorability. Older
+		// descriptors recorded the job start as a point snapshot. Even a correctly bounded
+		// descriptor cannot protect an earlier snapshot from expiration if its job is missing.
 		for (auto& s : desc.snapshots) {
-			if (s.totalSize != 0 || !s.isSingleVersion() || s.endVersion < desc.unreliableEndVersion.orDefault(0)) {
+			if (s.totalSize != 0 || s.endVersion < desc.unreliableEndVersion.orDefault(0)) {
 				continue;
 			}
 			try {
@@ -2229,14 +2230,14 @@ Future<std::vector<BulkDumpRangeVersion>> BackupContainerFileSystem::readBulkDum
 	std::string line;
 	for (int64_t offset = 0; offset < size;) {
 		int length = std::min<int64_t>(std::min(CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE, 64 * 1024), size - offset);
-		std::string chunk(length, '\0');
-		if (co_await file->read(chunk.data(), length, offset) != length) {
+		auto chunk = std::make_shared<std::string>(length, '\0');
+		if (co_await uncancellable(holdWhile(chunk, file->read(chunk->data(), length, offset))) != length) {
 			throw restore_bad_read();
 		}
 		offset += length;
-		for (size_t begin = 0; begin < chunk.size();) {
-			size_t end = chunk.find(bulkLoadJobManifestLineTerminator, begin);
-			line.append(chunk, begin, end == std::string::npos ? std::string::npos : end - begin);
+		for (size_t begin = 0; begin < chunk->size();) {
+			size_t end = chunk->find(bulkLoadJobManifestLineTerminator, begin);
+			line.append(*chunk, begin, end == std::string::npos ? std::string::npos : end - begin);
 			if (end == std::string::npos && offset < size) {
 				break;
 			}
@@ -3504,6 +3505,36 @@ TEST_CASE("/backup/containers/localdir/bulkDumpRestoreVersions") {
 	ASSERT(explicitTarget.present() && explicitTarget.get().bulkDumpJobId == job);
 	auto latestWithMissing = co_await getBulk(invalidVersion);
 	ASSERT(latestWithMissing.present() && latestWithMissing.get().targetVersion == 400);
+	co_await c->deleteContainer();
+}
+
+TEST_CASE("/backup/containers/localdir/expireMissingBulkDump") {
+	auto c = IBackupContainer::openContainer(
+	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}, {}, 0);
+	co_await c->create();
+	auto file = co_await c->writeRangeFile(90, 0, 90, 1024);
+	co_await testWriteSnapshotFile(file, ""_sr, "z"_sr, 1024);
+	std::vector<std::string> files{ file->getFileName() };
+	std::vector<std::pair<Key, Key>> bounds{ { ""_sr, "z"_sr } };
+	co_await c->writeKeyspaceSnapshotFile(files, bounds, 1024, IncludeKeyRangeMap::False);
+	for (auto [begin, end] : { std::pair{ 90, 100 }, std::pair{ 100, 151 } }) {
+		auto log = co_await c->writeLogFile(begin, end, 1024);
+		co_await log->append("x", 1);
+		co_await log->finish();
+	}
+	// This newer descriptor has accurate bounds but its job manifest has disappeared.
+	auto job = deterministicRandom()->randomUniqueID().toString();
+	co_await c->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(job, 120, 140, 0));
+	auto desc = co_await c->describeBackup();
+	ASSERT(!desc.snapshots.back().restorable.orDefault(true));
+	try {
+		co_await c->expireData(100, false, nullptr, 150);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_backup_cannot_expire);
+	}
+	ASSERT((co_await c->getRestoreSet(150)).present());
 	co_await c->deleteContainer();
 }
 
