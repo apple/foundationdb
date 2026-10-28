@@ -57,8 +57,16 @@ struct TLogWriteAntiQuorumWorkload : TestWorkload {
 			}
 			Key marker("TLogWriteAntiQuorum/" + deterministicRandom()->randomUniqueID().toString());
 			Transaction tr(cx);
-			Optional<Value> before = co_await tr.get(marker);
-			ASSERT(!before.present());
+			while (true) {
+				auto before = co_await errorOr(tr.get(marker));
+				if (!before.isError()) {
+					ASSERT(!before.get().present());
+					break;
+				}
+				TraceEvent("TLogAntiQuorumInitialReadRetry").error(before.getError());
+				co_await tr.onError(before.getError());
+				tr.setOption(FDBTransactionOptions::SKIP_GRV_CACHE);
+			}
 			Version readVersion = co_await tr.getReadVersion();
 			const ServerDBInfo initial = dbInfo->get();
 			ASSERT_EQ(initial.client.commitProxies.size(), 1);
