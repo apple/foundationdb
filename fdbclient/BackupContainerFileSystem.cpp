@@ -107,8 +107,17 @@ public:
 			}
 			JSONDoc doc(json);
 			std::string jobId;
-			if (doc.tryGet("bulkDumpJobId", jobId)) {
+			if (doc.tryGet("bulkDumpJobId", jobId) && !jobId.empty()) {
 				co_return jobId;
+			}
+			if (restoring) {
+				// Without a dump job, only a traditional snapshot with actual range files is usable.
+				std::string type;
+				const auto& files = doc.create("files");
+				if (snapshot.snapshotType == "bulk" || (doc.tryGet("snapshotType", type) && type == "bulkdump") ||
+				    files.type() != json_spirit::array_type || files.get_array().empty()) {
+					throw restore_corrupted_data();
+				}
 			}
 			co_return std::string();
 		} catch (Error& e) {
