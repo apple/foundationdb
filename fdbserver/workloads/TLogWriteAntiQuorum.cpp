@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/simulator.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/ScopeExit.h"
@@ -26,7 +27,10 @@
 struct TLogWriteAntiQuorumWorkload : TestWorkload {
 	static constexpr auto NAME = "TLogWriteAntiQuorum";
 
-	explicit TLogWriteAntiQuorumWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	const bool requireUnicast;
+
+	explicit TLogWriteAntiQuorumWorkload(WorkloadContext const& wcx)
+	  : TestWorkload(wcx), requireUnicast(getOption(options, "requireUnicast"_sr, false)) {}
 
 	Future<Void> start(Database const& cx) override { return clientId == 0 ? run(cx) : Void(); }
 	Future<bool> check(Database const& cx) override { return true; }
@@ -40,6 +44,12 @@ struct TLogWriteAntiQuorumWorkload : TestWorkload {
 
 	Future<Void> run(Database cx) {
 		ASSERT(g_network->isSimulated());
+		if (requireUnicast) {
+			ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR);
+			ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST);
+			ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_REPLY_RECOVERY);
+			ASSERT(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
+		}
 		const char* phase = "InitialRead";
 		try {
 			while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
@@ -57,6 +67,7 @@ struct TLogWriteAntiQuorumWorkload : TestWorkload {
 			ASSERT(logSet.isLocal);
 			ASSERT_EQ(logSet.tLogs.size(), 3);
 			ASSERT_EQ(logSet.tLogReplicationFactor, 3);
+			ASSERT_EQ(logSet.tLogWriteAntiQuorum, 1);
 			const LogEpoch oldEpoch = initial.logSystemConfig.epoch;
 			const auto proxy = initial.client.commitProxies.front().address();
 			// The proxy must still be able to reach the sequencer and resolvers to commit.
@@ -87,6 +98,8 @@ struct TLogWriteAntiQuorumWorkload : TestWorkload {
 				    .detail("CommitProxy", proxy)
 				    .detail("SlowTLog", slow->id())
 				    .detail("SlowAddress", slowAddress)
+				    .detail("Unicast", SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST)
+				    .detail("ReplyRecovery", SERVER_KNOBS->ENABLE_VERSION_VECTOR_REPLY_RECOVERY)
 				    .detail("AntiQuorum", logSet.tLogWriteAntiQuorum)
 				    .detail("ReadVersion", readVersion);
 				tr.set(marker, "acknowledged"_sr);
