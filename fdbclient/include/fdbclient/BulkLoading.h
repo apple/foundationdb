@@ -1003,6 +1003,8 @@ public:
 		}
 	}
 
+	size_t getManifestCount() const { return manifestCount; }
+
 	bool isValid() const { return formatVersion > 0 && manifestCount > 0; }
 
 	// Generate human-readable string and the string is stored in the bulkload job-manifest.txt file.
@@ -1077,6 +1079,8 @@ public:
 	bool isValid() const {
 		return beginKey < endKey && version != invalidVersion && relativePathIsContained(manifestRelativePath);
 	}
+
+	Version getVersion() const { return version; }
 
 	bool hasEmptyData() const { return bytes == 0; }
 
