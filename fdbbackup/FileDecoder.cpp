@@ -789,16 +789,16 @@ Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Ref
 
 	for (int i = 0; i < snapshots.size(); i++) {
 		try {
-			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
+			KeyspaceSnapshotContents results =
 			    co_await (dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->readKeyspaceSnapshot(snapshots[i]);
-			for (const auto& rangeFile : results.first) {
+			for (const auto& rangeFile : results.ranges) {
 				// No prefix filter, or a manifest with no per-file key ranges (encrypted backups), selects
 				// every file. An empty RangeMapFilters matches nothing, so it cannot answer this.
-				if (params->prefixes.empty() || results.second.empty()) {
+				if (params->prefixes.empty() || results.keyRanges.empty()) {
 					files.push_back(rangeFile);
 					continue;
 				}
-				const auto& keyRange = results.second.at(rangeFile.fileName);
+				const auto& keyRange = results.keyRanges.at(rangeFile.fileName);
 				if (params->matchFilters(keyRange)) {
 					files.push_back(rangeFile);
 				}

@@ -126,9 +126,8 @@ public:
 
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of
 	// megabytes.
-	static AsyncResult<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
-	    Reference<BackupContainerFileSystem> bc,
-	    KeyspaceSnapshotFile snapshot) {
+	static AsyncResult<KeyspaceSnapshotContents> readKeyspaceSnapshot(Reference<BackupContainerFileSystem> bc,
+	                                                                  KeyspaceSnapshotFile snapshot) {
 		// Read the range file list for the specified version range, and then index them by fileName.
 		// This is so we can verify that each of the files listed in the manifest file are also in the container at this
 		// time.
@@ -142,19 +141,9 @@ public:
 		Reference<IAsyncFile> f = co_await bc->readFile(snapshot.fileName);
 		int64_t size = co_await f->size();
 		traceManifestSize(snapshot.fileName, size);
-		// A manifest is normally a few hundred MB. Read it into a std::string in chunks; std::string and the
-		// chunked reads guard against an unexpectedly large manifest overflowing the int length that read() takes.
 		// TODO (optimization): the whole manifest is loaded into memory before parsing. Explore if a streaming JSON
 		// parser would avoid this.
-		std::string buf;
-		buf.resize(size);
-		for (int64_t offset = 0; offset < size;) {
-			int toRead = static_cast<int>(std::min<int64_t>(CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE, size - offset));
-			int r = co_await f->read((uint8_t*)buf.data() + offset, toRead, offset);
-			if (r != toRead)
-				throw restore_corrupted_data();
-			offset += r;
-		}
+		std::string buf = co_await BackupContainerFileSystem::readManifestFile(f, size);
 		json_spirit::mValue json;
 		if (!json_spirit::read_string(buf, json)) {
 			fprintf(stderr,
@@ -224,7 +213,11 @@ public:
 			}
 		}
 
-		co_return std::make_pair(std::move(results), std::move(fileKeyRanges));
+		KeyspaceSnapshotContents contents;
+		contents.ranges = std::move(results);
+		contents.keyRanges = std::move(fileKeyRanges);
+		doc.tryGet("snapshotType", contents.snapshotType);
+		co_return contents;
 	}
 
 	// Find what should be the filename of a path by finding whatever is after the last forward or backward slash, or
@@ -283,10 +276,11 @@ public:
 		bool isBulkDump = metadata.present() && metadata.get().isBulkDump();
 
 		if (isBulkDump) {
-			// For BulkDump snapshots, version comes from metadata
-			ASSERT(metadata.get().snapshotVersion != invalidVersion);
-			minVer = metadata.get().snapshotVersion;
-			maxVer = metadata.get().snapshotVersion;
+			// No range files to derive a span from; each shard was dumped at its own version.
+			ASSERT(metadata.get().snapshotBeginVersion != invalidVersion);
+			ASSERT(metadata.get().snapshotEndVersion >= metadata.get().snapshotBeginVersion);
+			minVer = metadata.get().snapshotBeginVersion;
+			maxVer = metadata.get().snapshotEndVersion;
 			// fileNames is empty for BulkDump (files are referenced by job ID)
 		} else {
 			ASSERT(!fileNames.empty() && fileNames.size() == beginEndKeys.size());
@@ -1406,11 +1400,13 @@ public:
 	// If "logsOnly" is true, then only log files are returned and "keyRangesFilter" is ignored,
 	// because the log can contain mutations of the whole key space, unlike range files that each
 	// is limited to a smaller key range.
-	static Future<Optional<RestorableFileSet>> getRestoreSet(Reference<BackupContainerFileSystem> bc,
-	                                                         Version targetVersion,
-	                                                         VectorRef<KeyRangeRef> keyRangesFilter,
-	                                                         bool logsOnly = false,
-	                                                         Version beginVersion = invalidVersion) {
+	static Future<Optional<RestorableFileSet>> getRestoreSet(
+	    Reference<BackupContainerFileSystem> bc,
+	    Version targetVersion,
+	    VectorRef<KeyRangeRef> keyRangesFilter,
+	    bool logsOnly = false,
+	    Version beginVersion = invalidVersion,
+	    RestoreSnapshotKind snapshotKind = RestoreSnapshotKind::Any) {
 		for (const auto& range : keyRangesFilter) {
 			TraceEvent("BackupContainerGetRestoreSet").detail("RangeFilter", printable(range));
 		}
@@ -1445,19 +1441,32 @@ public:
 			Version minKeyRangeVersion = MAX_VERSION;
 			Version maxKeyRangeVersion = -1;
 
-			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
-			    co_await bc->readKeyspaceSnapshot(snapshots[i]);
+			KeyspaceSnapshotContents results = co_await bc->readKeyspaceSnapshot(snapshots[i]);
+
+			// See RestoreSnapshotKind for what an empty range file list implies in each direction.
+			const bool usableForRangeFiles = !results.ranges.empty();
+			const bool isBulkDump = results.snapshotType == "bulkdump";
+			if ((snapshotKind == RestoreSnapshotKind::RangeFiles && !usableForRangeFiles) ||
+			    (snapshotKind == RestoreSnapshotKind::BulkDump && !isBulkDump)) {
+				TraceEvent("BackupContainerSkippedSnapshotOfWrongKind")
+				    .detail("SnapshotFile", snapshots[i].fileName)
+				    .detail("BeginVersion", snapshots[i].beginVersion)
+				    .detail("EndVersion", snapshots[i].endVersion)
+				    .detail("HasRangeFiles", usableForRangeFiles)
+				    .detail("SnapshotType", results.snapshotType);
+				continue;
+			}
 
 			// If there is no key ranges filter for the restore OR if the snapshot contains no per-file key range info
 			// then return all of the range files
-			if (keyRangesFilter.empty() || results.second.empty()) {
-				restorable.ranges = std::move(results.first);
-				restorable.keyRanges = std::move(results.second);
+			if (keyRangesFilter.empty() || results.keyRanges.empty()) {
+				restorable.ranges = std::move(results.ranges);
+				restorable.keyRanges = std::move(results.keyRanges);
 				minKeyRangeVersion = snapshots[i].beginVersion;
 				maxKeyRangeVersion = snapshots[i].endVersion;
 			} else {
-				for (const auto& rangeFile : results.first) {
-					const auto& keyRange = results.second.at(rangeFile.fileName);
+				for (const auto& rangeFile : results.ranges) {
+					const auto& keyRange = results.keyRanges.at(rangeFile.fileName);
 					if (keyRange.intersects(keyRangesFilter)) {
 						restorable.ranges.push_back(rangeFile);
 						restorable.keyRanges[rangeFile.fileName] = keyRange;
@@ -1816,8 +1825,20 @@ Future<Void> BackupContainerFileSystem::writePartitionListFile(Version v, std::s
 	                       contents);
 }
 
-AsyncResult<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>>
-BackupContainerFileSystem::readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
+Future<std::string> BackupContainerFileSystem::readManifestFile(Reference<IAsyncFile> file, int64_t size) {
+	std::string buf;
+	buf.resize(size);
+	for (int64_t offset = 0; offset < size;) {
+		int toRead = static_cast<int>(std::min<int64_t>(CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE, size - offset));
+		int r = co_await file->read((uint8_t*)buf.data() + offset, toRead, offset);
+		if (r != toRead)
+			throw restore_corrupted_data();
+		offset += r;
+	}
+	co_return buf;
+}
+
+AsyncResult<KeyspaceSnapshotContents> BackupContainerFileSystem::readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
 	return BackupContainerFileSystemImpl::readKeyspaceSnapshot(Reference<BackupContainerFileSystem>::addRef(this),
 	                                                           snapshot);
 }
@@ -2080,9 +2101,14 @@ Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeF
 Future<Optional<RestorableFileSet>> BackupContainerFileSystem::getRestoreSet(Version targetVersion,
                                                                              VectorRef<KeyRangeRef> keyRangesFilter,
                                                                              bool logsOnly,
-                                                                             Version beginVersion) {
-	return BackupContainerFileSystemImpl::getRestoreSet(
-	    Reference<BackupContainerFileSystem>::addRef(this), targetVersion, keyRangesFilter, logsOnly, beginVersion);
+                                                                             Version beginVersion,
+                                                                             RestoreSnapshotKind snapshotKind) {
+	return BackupContainerFileSystemImpl::getRestoreSet(Reference<BackupContainerFileSystem>::addRef(this),
+	                                                    targetVersion,
+	                                                    keyRangesFilter,
+	                                                    logsOnly,
+	                                                    beginVersion,
+	                                                    snapshotKind);
 }
 
 Future<Optional<Version>> BackupContainerFileSystem::VersionProperty::get() {
@@ -3132,13 +3158,13 @@ Future<Void> testExpireBulkDumpData(std::string url) {
 	Version early = 100;
 	Version late = 5000;
 	co_await bc->writeKeyspaceSnapshotFile(
-	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(expiringJob, early, 0, 0));
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(expiringJob, early, early, 0, 0));
 	co_await bc->writeKeyspaceSnapshotFile(
-	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(sharedJob, early + 1, 0, 0));
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(sharedJob, early + 1, early + 1, 0, 0));
 	co_await bc->writeKeyspaceSnapshotFile(
-	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(straddlingJob, early + 2, 0, 0));
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(straddlingJob, early + 2, early + 2, 0, 0));
 	co_await bc->writeKeyspaceSnapshotFile(
-	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(sharedJob, late, 0, 0));
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(sharedJob, late, late, 0, 0));
 
 	// A log file ending exactly at the expire point. It must not straddle that point: expireData rolls
 	// the actual expiration back to a straddling log's begin version, which would move it before the
@@ -3297,7 +3323,9 @@ TEST_CASE("/backup/containers/localdir/readKeyspaceSnapshot/chunked") {
 	std::vector<KeyspaceSnapshotFile> snapshots = co_await bcfs->listKeyspaceSnapshots();
 	ASSERT_EQ(snapshots.size(), 1);
 
-	auto [files, keyRanges] = co_await bcfs->readKeyspaceSnapshot(snapshots[0]);
+	KeyspaceSnapshotContents contents = co_await bcfs->readKeyspaceSnapshot(snapshots[0]);
+	auto& files = contents.ranges;
+	auto& keyRanges = contents.keyRanges;
 	ASSERT_EQ(files.size(), rangeFileNames.size());
 	ASSERT_EQ(keyRanges.size(), expected.size());
 	for (const auto& [fileName, range] : expected) {
@@ -3402,6 +3430,93 @@ TEST_CASE("/backup/rangeMapFilters/emptyMatchesNothing") {
 	ASSERT(!fromRanges.match(KeyRangeRef("x"_sr, "y"_sr)));
 
 	return Void();
+}
+
+// A bulkdump keyspace snapshot lists no range files: its data lives in per-shard SSTs referenced by
+// bulkDumpJobId. getRestoreSet otherwise accepts such a snapshot as a valid restorable set, so a
+// range file restore that selects one restores nothing and still reports success, and a bulkload
+// restore that selects a range file snapshot takes its log replay begin version from the wrong
+// snapshot. Under snapshotMode=BOTH both kinds coexist in one container.
+TEST_CASE("/backup/containers/localdir/getRestoreSet/snapshotKind") {
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await c->create();
+
+	int blockSize = 3 * sizeof(uint32_t) + 8;
+
+	// A range file snapshot at a single version, so it is restorable to that version without logs.
+	const Version rangeFileSnapshotVersion = 1000;
+	std::vector<std::string> rangeFileNames;
+	std::vector<std::pair<Key, Key>> beginEndKeys;
+	Reference<IBackupFile> range =
+	    co_await c->writeRangeFile(rangeFileSnapshotVersion, 0, rangeFileSnapshotVersion, blockSize);
+	co_await testWriteSnapshotFile(range, ""_sr, ""_sr, blockSize);
+	rangeFileNames.push_back(range->getFileName());
+	beginEndKeys.push_back({ ""_sr, ""_sr });
+	co_await c->writeKeyspaceSnapshotFile(rangeFileNames, beginEndKeys, 1234, IncludeKeyRangeMap(false));
+
+	// A newer bulkdump snapshot carrying no range files at all.
+	const Version bulkDumpSnapshotVersion = 1500;
+	co_await c->writeKeyspaceSnapshotFile(
+	    {},
+	    beginEndKeys,
+	    0,
+	    IncludeKeyRangeMap(false),
+	    SnapshotMetadata::bulkDump("deadbeef", bulkDumpSnapshotVersion, bulkDumpSnapshotVersion, 0, 0));
+
+	BackupFileList listing = co_await c->dumpFileList();
+	ASSERT_EQ(listing.snapshots.size(), 2);
+
+	// Negative control: without the filter the newer, range-file-less bulkdump snapshot is selected and
+	// returned with nothing to restore. This is the shape of the defect.
+	Optional<RestorableFileSet> unfiltered = co_await c->getRestoreSet(bulkDumpSnapshotVersion,
+	                                                                   {},
+	                                                                   /*logsOnly=*/false,
+	                                                                   /*beginVersion=*/invalidVersion,
+	                                                                   RestoreSnapshotKind::Any);
+	ASSERT(unfiltered.present());
+	ASSERT(unfiltered.get().ranges.empty());
+
+	// Rejected, and nothing else can serve this target: the range file snapshot is older and would need
+	// logs, which this test does not write.
+	Optional<RestorableFileSet> filtered = co_await c->getRestoreSet(bulkDumpSnapshotVersion,
+	                                                                 {},
+	                                                                 /*logsOnly=*/false,
+	                                                                 /*beginVersion=*/invalidVersion,
+	                                                                 RestoreSnapshotKind::RangeFiles);
+	ASSERT(!filtered.present() || !filtered.get().ranges.empty());
+
+	// The filter must not disturb an ordinary range file restore.
+	Optional<RestorableFileSet> rangeFileRestore = co_await c->getRestoreSet(rangeFileSnapshotVersion,
+	                                                                         {},
+	                                                                         /*logsOnly=*/false,
+	                                                                         /*beginVersion=*/invalidVersion,
+	                                                                         RestoreSnapshotKind::RangeFiles);
+	ASSERT(rangeFileRestore.present());
+	ASSERT_EQ(rangeFileRestore.get().ranges.size(), 1);
+	ASSERT_EQ(rangeFileRestore.get().snapshot.endVersion, rangeFileSnapshotVersion);
+
+	// Reverse direction: a bulkload restore must land on the bulkdump snapshot even with an eligible range
+	// file snapshot present, or it takes its replay begin version from that snapshot and restores its range
+	// files alongside the SST ingest.
+	Optional<RestorableFileSet> bulkLoadRestore = co_await c->getRestoreSet(bulkDumpSnapshotVersion,
+	                                                                        {},
+	                                                                        /*logsOnly=*/false,
+	                                                                        /*beginVersion=*/invalidVersion,
+	                                                                        RestoreSnapshotKind::BulkDump);
+	ASSERT(bulkLoadRestore.present());
+	ASSERT(bulkLoadRestore.get().ranges.empty());
+	ASSERT_EQ(bulkLoadRestore.get().snapshot.endVersion, bulkDumpSnapshotVersion);
+
+	// And it must not silently fall back to a range file snapshot when no bulkdump snapshot is eligible.
+	Optional<RestorableFileSet> bulkLoadTooEarly = co_await c->getRestoreSet(rangeFileSnapshotVersion,
+	                                                                         {},
+	                                                                         /*logsOnly=*/false,
+	                                                                         /*beginVersion=*/invalidVersion,
+	                                                                         RestoreSnapshotKind::BulkDump);
+	ASSERT(!bulkLoadTooEarly.present());
+
+	co_await c->deleteContainer();
 }
 
 } // namespace backup_test

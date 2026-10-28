@@ -1084,6 +1084,8 @@ public:
 
 	Key getEndKey() const { return endKey; }
 
+	Version getVersion() const { return version; }
+
 private:
 	Key beginKey;
 	Key endKey;

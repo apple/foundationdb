@@ -195,6 +195,56 @@ Future<bool> verifyBulkDumpDatasetCompleteness(Reference<IBackupContainer> bc, s
 	}
 }
 
+// The version span a bulkdump image covers, from the job manifest's per-range versions.
+//
+// A bulkdump reads each shard independently, so with more than one dumped range the image spans
+// versions. describeBackup treats beginVersion == endVersion as "needs no mutation logs", so labelling
+// a multi-version image with one version suppresses the log replay that makes the restore consistent.
+// A job whose manifest will not read or parse has no defensible span, so the error propagates rather
+// than defaulting to a claim of single-version consistency.
+Future<std::pair<Version, Version>> getBulkDumpVersionSpan(Reference<IBackupContainer> bc, std::string bulkDumpJobId) {
+	Reference<BackupContainerFileSystem> bcfs = bc.castTo<BackupContainerFileSystem>();
+	if (!bcfs) {
+		TraceEvent(SevWarnAlways, "BulkDumpVersionSpanCannotCast").detail("BulkDumpJobId", bulkDumpJobId);
+		throw backup_error();
+	}
+
+	std::string path = "bulkdump_data/" + bulkDumpJobId + "/" + getBulkLoadJobManifestFileName();
+	Reference<IAsyncFile> file = co_await bcfs->readFile(path);
+	int64_t size = co_await file->size();
+	std::string buf = co_await BackupContainerFileSystem::readManifestFile(file, size);
+
+	Version minVersion = MAX_VERSION;
+	Version maxVersion = invalidVersion;
+	int entryCount = 0;
+	std::vector<std::string> lines = splitString(buf, "\n");
+	for (int i = 1; i < lines.size(); ++i) { // line 0 is the header
+		if (lines[i].empty()) {
+			continue;
+		}
+		BulkLoadJobFileManifestEntry entry(lines[i]);
+		minVersion = std::min(minVersion, entry.getVersion());
+		maxVersion = std::max(maxVersion, entry.getVersion());
+		++entryCount;
+	}
+
+	if (entryCount == 0) {
+		TraceEvent(SevWarnAlways, "BulkDumpVersionSpanNoEntries")
+		    .detail("BulkDumpJobId", bulkDumpJobId)
+		    .detail("Path", path)
+		    .detail("LineCount", lines.size());
+		throw backup_error();
+	}
+
+	TraceEvent("BulkDumpVersionSpan")
+	    .detail("BulkDumpJobId", bulkDumpJobId)
+	    .detail("BeginVersion", minVersion)
+	    .detail("EndVersion", maxVersion)
+	    .detail("EntryCount", entryCount);
+
+	co_return std::make_pair(minVersion, maxVersion);
+}
+
 // Note: BulkLoad configuration validation (shard_encode_location_metadata, enable_read_lock_on_range)
 // is performed by the BulkLoad system on the server side. Client-side validation is not possible
 // because SERVER_KNOBS are not accessible from fdbclient.
@@ -4084,8 +4134,8 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				// This is essential for the restore process to find the snapshot
 				if (completed) {
 					// Verify that BulkDump data was actually written before writing snapshot
-					bool datasetComplete =
-					    co_await verifyBulkDumpDatasetCompleteness(bc, bulkDumpJob.getJobId().toString());
+					const std::string jobId = bulkDumpJob.getJobId().toString();
+					bool datasetComplete = co_await verifyBulkDumpDatasetCompleteness(bc, jobId);
 					if (!datasetComplete) {
 						TraceEvent(SevError, "BulkDumpTaskDatasetIncomplete")
 						    .detail("BackupUID", config.getUid())
@@ -4100,17 +4150,15 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 						beginEndKeys.emplace_back(range.begin, range.end);
 					}
 
-					// Create BulkDump snapshot metadata
-					// Note: totalBytes and totalKeys are set to 0 here. Unlike traditional range file backups
-					// which accumulate fileSize from each RangeSlice, BulkDump writes its data to manifest files
-					// in the backup container (one per shard). To get accurate byte/key counts, we would need to:
-					//   1. List all manifest files under bc->getURL()/bulkDumpJobId/
-					//   2. Read each BulkLoadManifest and call getTotalBytes()/getKeyCount()
-					//   3. Aggregate the totals
-					// For now, zeros are acceptable since the critical field is bulkDumpJobId which BulkLoad
-					// uses to locate the data. TODO: Fix. The byte counts are informational for status display.
-					SnapshotMetadata metadata =
-					    SnapshotMetadata::bulkDump(bulkDumpJob.getJobId().toString(), snapshotVersion, 0, 0);
+					// Not snapshotVersion: that is the backup's begin version, captured before anything was
+					// dumped, so using it as both ends claims single-version consistency the image may not
+					// have and suppresses the log replay that would reconcile it.
+					//
+					// totalBytes/totalKeys stay 0. The manifest carries per-range byte counts, but
+					// totalBytes is encoded in the snapshot file name and surfaces as snapshotBytes, so
+					// changing it is separate work.
+					auto [spanBegin, spanEnd] = co_await getBulkDumpVersionSpan(bc, jobId);
+					SnapshotMetadata metadata = SnapshotMetadata::bulkDump(jobId, spanBegin, spanEnd, 0, 0);
 
 					// Write the snapshot file - empty file list since BulkDump uses job manifests, not range files
 					co_await bc->writeKeyspaceSnapshotFile({}, // No individual range files for BulkDump
@@ -4164,6 +4212,13 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 		    .detail("BackupUID", config.getUid())
 		    .detail("SnapshotVersion", snapshotVersion)
 		    .detail("BulkDumpJobId", jobId);
+
+		// TODO(BulkDump): the *EndVersion fields below are set from snapshotVersion, which is the backup's
+		// BEGIN version rather than where the dumped data ends. getLatestRestorableVersion() takes
+		// min(firstSnapshotEndVersion, bulkDumpSnapshotEndVersion) as the threshold the logs must pass, so a
+		// value this low calls a mode=BOTH backup restorable earlier than its data supports. The true end is
+		// the max manifest version the keyspace snapshot now records. Deferred: correcting it moves
+		// restorability timing and needs its own validation.
 
 		// Set latestSnapshotEndVersion so BackupLogsDispatchTask knows we're restorable
 		// This is critical for the backup to complete when using BulkDump
@@ -4534,7 +4589,6 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 						std::vector<KeyspaceSnapshotFile> snapshots = co_await bcfs->listKeyspaceSnapshots();
 						int snapIdx = snapshots.size() - 1;
 						while (snapIdx >= 0 && bulkDumpJobId.empty()) {
-							// For BulkDump snapshots: beginVersion == endVersion == snapshotVersion
 							// Accept any snapshot that is at or before our restore version
 							if (snapshots[snapIdx].endVersion <= restoreVersion) {
 								// Read the snapshot file to get bulkDumpJobId
@@ -6768,6 +6822,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		std::vector<KeyRange> ranges;
 		bool logsOnly{ false };
 		bool inconsistentSnapshotOnly{ false };
+		bool useRangeFileRestore{ true };
 
 		while (true) {
 			Error err;
@@ -6782,6 +6837,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				ranges = co_await restore.getRestoreRangesOrDefault(tr);
 				logsOnly = co_await restore.onlyApplyMutationLogs().getD(tr, Snapshot::False, false);
 				inconsistentSnapshotOnly = co_await restore.inconsistentSnapshotOnly().getD(tr, Snapshot::False, false);
+				useRangeFileRestore = co_await restore.useRangeFileRestore().getD(tr, Snapshot::False, true);
 				co_await taskBucket->keepRunning(tr, task);
 
 				ERestoreState oldState = co_await restore.stateEnum().getD(tr);
@@ -6840,8 +6896,12 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		for (auto const& r : ranges) {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
-		Optional<RestorableFileSet> restorable =
-		    co_await bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion);
+		Optional<RestorableFileSet> restorable = co_await bc->getRestoreSet(
+		    restoreVersion,
+		    keyRangesFilter,
+		    logsOnly,
+		    beginVersion,
+		    useRangeFileRestore ? RestoreSnapshotKind::RangeFiles : RestoreSnapshotKind::BulkDump);
 		if (!restorable.present())
 			throw restore_missing_data();
 
@@ -8435,8 +8495,12 @@ public:
 		if (!beginVersions.empty()) {
 			beginVersion = *std::min_element(beginVersions.begin(), beginVersions.end());
 		}
-		Optional<RestorableFileSet> restoreSet =
-		    co_await bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion);
+		Optional<RestorableFileSet> restoreSet = co_await bc->getRestoreSet(
+		    targetVersion,
+		    ranges,
+		    onlyApplyMutationLogs,
+		    beginVersion,
+		    useRangeFileRestore ? RestoreSnapshotKind::RangeFiles : RestoreSnapshotKind::BulkDump);
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")

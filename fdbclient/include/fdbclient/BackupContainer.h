@@ -162,22 +162,36 @@ struct KeyspaceSnapshotFile {
 	}
 };
 
+// What a keyspace snapshot manifest contains.
+struct KeyspaceSnapshotContents {
+	std::vector<RangeFile> ranges;
+	std::map<std::string, KeyRange> keyRanges; // per-file key ranges; empty for encrypted backups
+	std::string snapshotType; // manifest's snapshotType; empty for a range file snapshot
+};
+
 // Extended metadata for snapshot files, supporting both traditional range files and BulkDump
 struct SnapshotMetadata {
 	std::string snapshotType = "rangefile"; // "rangefile" or "bulkdump"
 	std::string bulkDumpJobId; // Only used for bulkdump snapshots
 	int64_t totalKeys = 0; // Key count (primarily for bulkdump)
-	Version snapshotVersion = invalidVersion; // For bulkdump: the snapshot version (beginVersion == endVersion)
-	                                          // For rangefile: ignored (derived from files)
+	// For bulkdump: the span the dumped image covers. Must be the real span -- describeBackup reads
+	// beginVersion == endVersion as "requires no mutation logs". Ignored for rangefile.
+	Version snapshotBeginVersion = invalidVersion;
+	Version snapshotEndVersion = invalidVersion;
 
 	bool isBulkDump() const { return snapshotType == "bulkdump"; }
 
 	// Factory for creating BulkDump metadata
-	static SnapshotMetadata bulkDump(const std::string& jobId, Version version, int64_t totalBytes, int64_t keys) {
+	static SnapshotMetadata bulkDump(const std::string& jobId,
+	                                 Version beginVersion,
+	                                 Version endVersion,
+	                                 int64_t totalBytes,
+	                                 int64_t keys) {
 		SnapshotMetadata m;
 		m.snapshotType = "bulkdump";
 		m.bulkDumpJobId = jobId;
-		m.snapshotVersion = version;
+		m.snapshotBeginVersion = beginVersion;
+		m.snapshotEndVersion = endVersion;
 		m.totalKeys = keys;
 		return m;
 	}
@@ -189,6 +203,31 @@ struct BackupFileList {
 	std::vector<KeyspaceSnapshotFile> snapshots;
 
 	void toStream(FILE* fout) const;
+};
+
+// Which kind of keyspace snapshot a restore can use. Both kinds coexist under snapshotMode=BOTH and are
+// not interchangeable: a bulkdump snapshot lists no range files (its data is SSTs referenced by
+// bulkDumpJobId), so a range file restore that picks one restores nothing while reporting success, and a
+// bulkload restore that picks a range file snapshot takes its replay begin version from the wrong
+// snapshot.
+//
+// Selection tests whether the manifest lists range files, which means something different in each
+// direction. For RangeFiles that is the property itself: a snapshot listing no range files cannot serve
+// a range file restore whatever produced it. For BulkDump it is an inference from there being a single
+// producer of bulkdump snapshots, which writes no range file list; if that ever changes, the selection
+// finds nothing and the restore fails rather than restoring the wrong data.
+//
+// Each direction tests what is authoritative for it. RangeFiles tests whether the manifest lists range
+// files, which is the property itself: a snapshot listing none cannot serve a range file restore whatever
+// produced it. BulkDump tests the manifest's snapshotType, written by every bulkdump snapshot since
+// bulkdump existed.
+//
+// KeyspaceSnapshotFile::snapshotType is not used: it comes from the file name, whose type suffix only
+// exists when a collision forced one.
+enum class RestoreSnapshotKind {
+	Any, // no filtering; for read-only inspection paths such as describeBackup and query
+	RangeFiles, // caller restores range data and needs a snapshot that lists range files
+	BulkDump // caller ingests SSTs and needs the snapshot that carries no range files
 };
 
 // Mutation log types for backup
@@ -364,11 +403,14 @@ public:
 	// Get exactly the files necessary to restore the key space filtered by the specified key ranges to targetVersion.
 	// If targetVersion is 'latestVersion', use the minimum restorable version in a snapshot.
 	// If logsOnly is set, only use log files in [beginVersion, targetVervions) in restore set.
+	// snapshotKind restricts which snapshots may be selected; see RestoreSnapshotKind.
 	// Returns non-present if restoring to the given version is not possible.
-	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
-	                                                          VectorRef<KeyRangeRef> keyRangesFilter = {},
-	                                                          bool logsOnly = false,
-	                                                          Version beginVersion = -1) = 0;
+	virtual Future<Optional<RestorableFileSet>> getRestoreSet(
+	    Version targetVersion,
+	    VectorRef<KeyRangeRef> keyRangesFilter = {},
+	    bool logsOnly = false,
+	    Version beginVersion = -1,
+	    RestoreSnapshotKind snapshotKind = RestoreSnapshotKind::Any) = 0;
 
 	// Get an IBackupContainer based on a container spec string
 	static Reference<IBackupContainer> openContainer(const std::string& url,

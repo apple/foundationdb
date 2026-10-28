@@ -120,8 +120,10 @@ public:
 	                                              Version fileVersion,
 	                                              int blockSize) override;
 
-	AsyncResult<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
-	    KeyspaceSnapshotFile snapshot);
+	// Read a whole manifest file. Chunked because read() takes an int length and a manifest can exceed 2 GB.
+	static Future<std::string> readManifestFile(Reference<IAsyncFile> file, int64_t size);
+
+	AsyncResult<KeyspaceSnapshotContents> readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot);
 
 	Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
 	                                       const std::vector<std::pair<Key, Key>>& beginEndKeys,
@@ -165,7 +167,8 @@ public:
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
 	                                                  VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                  bool logsOnly,
-	                                                  Version beginVersion) final;
+	                                                  Version beginVersion,
+	                                                  RestoreSnapshotKind snapshotKind) final;
 	static Future<Void> createTestEncryptionKeyFile(std::string const& filename);
 
 	Future<Void> writeEncryptionMetadata(int encryptionBlockSize) override;
