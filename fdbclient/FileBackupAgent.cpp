@@ -6835,25 +6835,31 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			// Only log mutations newer than the SST covering their key may be applied.
 			// Initialize the map before dispatch can run, in bounded, retryable transactions.
 			const auto& batches = restorable.get().bulkDumpRanges;
+			tr->reset();
 			for (size_t i = 0; i < batches.size();) {
-				size_t next =
-				    co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<size_t> {
-					    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					    co_await taskBucket->keepRunning(tr, task);
-					    size_t j = i;
-					    int bytes = 0;
-					    for (; j < batches.size() && j - i < 32 && bytes < 1e6; ++j) {
-						    const auto& batch = batches[j];
-						    co_await krmSetRange(tr,
-						                         restore.applyMutationsMapPrefix(),
-						                         batch.range,
-						                         BinaryWriter::toValue(batch.version, Unversioned()));
-						    bytes += batch.range.expectedSize() + sizeof(Version);
-					    }
-					    co_return j;
-				    });
-				i = next;
+				Error err;
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					co_await taskBucket->keepRunning(tr, task);
+					size_t next = i;
+					int bytes = 0;
+					for (; next < batches.size() && next - i < 32 && bytes < 1e6; ++next) {
+						const auto& batch = batches[next];
+						co_await krmSetRange(tr,
+						                     restore.applyMutationsMapPrefix(),
+						                     batch.range,
+						                     BinaryWriter::toValue(batch.version, Unversioned()));
+						bytes += batch.range.expectedSize() + sizeof(Version);
+					}
+					co_await tr->commit();
+					i = next;
+					tr->reset();
+					continue;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr->onError(err);
 			}
 		}
 		// First version for which log data should be applied
