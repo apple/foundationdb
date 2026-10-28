@@ -6003,6 +6003,7 @@ Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 		if (nLocs == 0 || locations.back().range.end >= keys.end) {
 			co_return total;
 		}
+		CODE_PROBE(true, "getStorageMetricsLargeKeyRange fetches shard locations in multiple batches");
 		keys = KeyRangeRef(locations.back().range.end, keys.end);
 	}
 }
