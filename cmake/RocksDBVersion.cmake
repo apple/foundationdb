@@ -16,8 +16,8 @@
 # OPTION 1: RocksDB Release Number
 # If you use this option, make sure Option 2 below is commented out.
 ###############################################################################
-set(ROCKSDB_VERSION "8.11.5")
-set(ROCKSDB_VERSION_SHA256 "2641eb63ee2d691c0e96de0a55edfcc4cab181d9b6c31fa4a33c478423062196")
+set(ROCKSDB_VERSION "8.11.4")
+set(ROCKSDB_VERSION_SHA256 "1b84c7d7214360fd536349917c57ebd5030d5b4fc214a343ba628b0c6e3d2711")
 
 ###############################################################################
 # OPTION 2: RocksDB Git Commit Hash
