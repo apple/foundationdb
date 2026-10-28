@@ -30,6 +30,7 @@
 #include "fdbrpc/FlowTransport.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.h"
+#include <algorithm>
 #include <set>
 #include "flow/CoroUtils.h"
 
@@ -171,18 +172,17 @@ struct StalePeerTestWorkload : TestWorkload {
 		return proc->global(INetwork::enFlowTransport) != nullptr;
 	}
 
-	// Count inspected source processes that currently hold a reference to `addr`:
-	// either a live tracked interface copy (per-role Delta > 0) or a live peer
-	// reference. Used pre-kill to establish non-vacuity (the target is actually
-	// referenced) and to pick the most-referenced storage server to kill.
-	int countSourcesReferencing(const NetworkAddress& addr, const std::string& trackerRole) const {
+	// Raw peer references also establish pre-kill coverage, but only tracked interface copies must drain.
+	int countSourcesReferencing(const NetworkAddress& addr,
+	                            const std::string& trackerRole,
+	                            bool includePeerRefs = true) const {
 		int n = 0;
 		for (auto* proc : g_simulator->getAllProcesses()) {
 			if (!isInspectedSource(proc))
 				continue;
 			auto* transport = static_cast<FlowTransport*>((void*)proc->global(INetwork::enFlowTransport));
 			bool hasRef = !trackerRole.empty() && transport->interfaceTracker.getDelta(addr, trackerRole) > 0;
-			if (!hasRef) {
+			if (!hasRef && includePeerRefs) {
 				const auto& allPeers = transport->getAllPeers();
 				auto it = allPeers.find(addr);
 				hasRef = (it != allPeers.end() && it->second->peerReferences > 0);
@@ -191,6 +191,18 @@ struct StalePeerTestWorkload : TestWorkload {
 				++n;
 		}
 		return n;
+	}
+
+	Future<Void> waitForStorageServerRemovalOrDrain(Database cx, NetworkAddress addr, std::string trackerRole) const {
+		while (countSourcesReferencing(addr, trackerRole, false) > 0) {
+			if (std::ranges::none_of(co_await getStorageServers(cx),
+			                         [addr](const StorageServerInterface& ss) { return ss.address() == addr; })) {
+				TraceEvent("StalePeerTestStorageServerRemoved").detail("OldAddress", addr);
+				co_return;
+			}
+			co_await delay(1.0);
+		}
+		co_return;
 	}
 
 	// Find a process address for the given role.
@@ -468,6 +480,22 @@ struct StalePeerTestWorkload : TestWorkload {
 			    .detail("Note", "Cluster did not return to FULLY_RECOVERED; skipping peer-ref check");
 			self->skippedClusterUnhealthy = true;
 			co_return;
+		}
+
+		if (self->dstKillRole == "ss" && self->countSourcesReferencing(oldAddr, trackerRole, false) > 0) {
+			// Until DD finishes moving the killed server's shards, a client can evict its interface and
+			// immediately reacquire it from a proxy. Only require these remaining refs to drain after retirement.
+			auto result = co_await timeout(self->waitForStorageServerRemovalOrDrain(cx, oldAddr, trackerRole),
+			                               self->waitAfterKill);
+			if (!result.present() && self->countSourcesReferencing(oldAddr, trackerRole, false) > 0) {
+				TraceEvent(SevError, "StalePeerTestStorageServerRemovalTimeout").detail("OldAddress", oldAddr);
+				self->testPassed = false;
+				co_return;
+			}
+			const double deadline = now() + self->waitAfterKill;
+			while (self->countSourcesReferencing(oldAddr, trackerRole, false) > 0 && now() < deadline) {
+				co_await delay(std::min(1.0, deadline - now()));
+			}
 		}
 
 		// Pass criterion: per-role InterfaceTracker Delta == 0 at the killed
