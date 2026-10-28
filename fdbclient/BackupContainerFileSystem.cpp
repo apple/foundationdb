@@ -52,6 +52,14 @@ public:
 		}
 	}
 
+	// A bad snapshot need not prevent restoring through another snapshot. Transport errors
+	// and cancellation still belong to the operation, not to an individual dump.
+	static bool unusableSnapshot(Error e) {
+		return e.code() == error_code_file_not_found || e.code() == error_code_file_corrupt ||
+		       e.code() == error_code_restore_bad_read || e.code() == error_code_restore_corrupted_data ||
+		       e.code() == error_code_bulkload_manifest_decode_error;
+	}
+
 	// Returns the bulkdump job id recorded in a keyspace snapshot, or empty if the snapshot has none or
 	// cannot be read. The job id is only in the snapshot's JSON body -- the filename carries the snapshot
 	// type but not the id -- and it is what locates the SST tree under bulkdump_data/<jobId>/.
@@ -966,7 +974,7 @@ public:
 				s.beginVersion = bounds.first->version;
 				s.endVersion = bounds.second->version;
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
+				if (!unusableSnapshot(e)) {
 					throw;
 				}
 				TraceEvent(SevWarn, "BackupDescribeUnreadableBulkDump").error(e).detail("Snapshot", s.fileName);
@@ -1386,7 +1394,7 @@ public:
 		// for each range in tags, check all tags from 1 are continouous
 		for (const auto& [beginEnd, count] : tags) {
 			for (int i = 1; i < count; i++) {
-				if (!isContinuous(files, tagIndices[i], beginEnd.first, std::min(beginEnd.second - 1, end), nullptr)) {
+				if (!isContinuous(files, tagIndices[i], beginEnd.first, beginEnd.second, nullptr)) {
 					TraceEvent(SevWarn, "BackupFileNotContinuous")
 					    .detail("Partition", i)
 					    .detail("RangeBegin", beginEnd.first)
@@ -1489,11 +1497,22 @@ public:
 				if (snapshots[i].totalSize != 0) {
 					continue;
 				}
-				restorable.bulkDumpJobId = co_await readBulkDumpJobId(bc, snapshots[i], true);
-				if (restorable.bulkDumpJobId.empty()) {
+				std::vector<BulkDumpRangeVersion> ranges;
+				try {
+					restorable.bulkDumpJobId = co_await readBulkDumpJobId(bc, snapshots[i], true);
+					if (restorable.bulkDumpJobId.empty()) {
+						continue;
+					}
+					ranges = co_await BackupContainerFileSystem::readBulkDumpRanges(bc, restorable.bulkDumpJobId);
+				} catch (Error& e) {
+					if (!unusableSnapshot(e)) {
+						throw;
+					}
+					TraceEvent(SevWarn, "BackupRestoreUnreadableBulkDump")
+					    .error(e)
+					    .detail("Snapshot", snapshots[i].fileName);
 					continue;
 				}
-				auto ranges = co_await BackupContainerFileSystem::readBulkDumpRanges(bc, restorable.bulkDumpJobId);
 				KeyRange coverage(KeyRangeRef(ranges.front().range.begin, ranges.back().range.end));
 				if (std::any_of(keyRangesFilter.begin(), keyRangesFilter.end(), [&](KeyRangeRef r) {
 					    return !coverage.contains(r);
@@ -2626,6 +2645,10 @@ TEST_CASE("/backup/continuous") {
 	ASSERT(!BackupContainerFileSystemImpl::isPartitionedLogsContinuous(files, 0, 99));
 	ASSERT(BackupContainerFileSystemImpl::getPartitionedLogsContinuousEndVersion(files, 0) == 0);
 
+	files.push_back({ 0, 99, 10, "short", 200, 1, 2 });
+	ASSERT(!BackupContainerFileSystemImpl::isPartitionedLogsContinuous(files, 0, 99));
+	files.pop_back();
+
 	files.push_back({ 0, 100, 10, "file2", 200, 1, 2 }); // Tag 1: 0-100
 	std::sort(files.begin(), files.end());
 	ASSERT(BackupContainerFileSystemImpl::isPartitionedLogsContinuous(files, 0, 99));
@@ -3448,8 +3471,9 @@ TEST_CASE("/backup/containers/localdir/bulkDumpRestoreVersions") {
 	// Keep an older ordinary snapshot when it is the only way to restore to 100.
 	auto rangeFile = co_await c->writeRangeFile(90, 0, 90, 1024);
 	co_await testWriteSnapshotFile(rangeFile, ""_sr, "z"_sr, 1024);
-	co_await c->writeKeyspaceSnapshotFile(
-	    { rangeFile->getFileName() }, { { ""_sr, "z"_sr } }, 1024, IncludeKeyRangeMap::False);
+	std::vector<std::string> rangeFiles{ rangeFile->getFileName() };
+	std::vector<std::pair<Key, Key>> rangeBounds{ { ""_sr, "z"_sr } };
+	co_await c->writeKeyspaceSnapshotFile(rangeFiles, rangeBounds, 1024, IncludeKeyRangeMap::False);
 	auto earlyLog = co_await c->writeTaggedLogFile(90, 101, 1024, 0, 1);
 	co_await earlyLog->append("x", 1);
 	co_await earlyLog->finish();
@@ -3469,6 +3493,17 @@ TEST_CASE("/backup/containers/localdir/bulkDumpRestoreVersions") {
 	ASSERT_EQ(desc.snapshots.back().beginVersion, 200);
 	ASSERT_EQ(desc.snapshots.back().endVersion, 300);
 	ASSERT(desc.snapshots.back().restorable.orDefault(false));
+	// An unreadable newer dump must not hide a usable older one. Nor may an older
+	// unreadable dump invalidate a result already found when searching all snapshots.
+	for (Version marker : { 50, 325 }) {
+		auto missingJob = deterministicRandom()->randomUniqueID().toString();
+		co_await c->writeKeyspaceSnapshotFile(
+		    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(missingJob, marker, marker, 0));
+	}
+	auto explicitTarget = co_await getBulk(350);
+	ASSERT(explicitTarget.present() && explicitTarget.get().bulkDumpJobId == job);
+	auto latestWithMissing = co_await getBulk(invalidVersion);
+	ASSERT(latestWithMissing.present() && latestWithMissing.get().targetVersion == 400);
 	co_await c->deleteContainer();
 }
 
