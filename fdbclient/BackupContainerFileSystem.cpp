@@ -3526,8 +3526,20 @@ TEST_CASE("/backup/containers/localdir/expireMissingBulkDump") {
 	auto job = deterministicRandom()->randomUniqueID().toString();
 	co_await c->writeKeyspaceSnapshotFile(
 	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(job, 120, 140, 0));
+	// An empty or omitted job ID also leaves nothing for bulkload to ingest.
+	co_await c->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump("", 121, 141, 0));
+	auto bc = c.castTo<BackupContainerFileSystem>();
+	co_await bc->writeEntireFile("snapshots/snapshot,122,142,0",
+	                             R"({"files":[],"beginVersion":122,"endVersion":142,"snapshotType":"bulkdump"})");
+	// Without a type field, an empty file list still cannot be a traditional snapshot.
+	co_await bc->writeEntireFile("snapshots/snapshot,123,143,0", R"({"files":[],"beginVersion":123,"endVersion":143})");
 	auto desc = co_await c->describeBackup();
-	ASSERT(!desc.snapshots.back().restorable.orDefault(true));
+	ASSERT_EQ(desc.snapshots.size(), 5);
+	ASSERT(desc.snapshots.front().restorable.orDefault(false));
+	for (size_t i = 1; i < desc.snapshots.size(); ++i) {
+		ASSERT(!desc.snapshots[i].restorable.orDefault(true));
+	}
 	try {
 		co_await c->expireData(100, false, nullptr, 150);
 		ASSERT(false);
