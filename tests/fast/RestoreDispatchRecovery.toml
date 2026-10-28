@@ -4,6 +4,8 @@ buggify = false
 [[knobs]]
 # Let the injected age failures, rather than the byte target, bound dispatch.
 restore_dispatch_tx_size = 4194304
+# Reclaim the abandoned task promptly to exercise persisted limits across lease handoff.
+taskbucket_timeout_versions = 5000000
 
 [configuration]
 tenantModes = ['disabled']

@@ -6514,13 +6514,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				// Keep the timeout key stable: an earlier dispatch may have committed with an unknown result.
 				Params.dispatchTaskLimit().set(task, taskBatchSize);
 				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> resizeTr) {
-					return map(taskBucket->keepRunning(resizeTr, task), [=](Void) {
-						resizeTr->set(taskBucket->timeouts.get(task->timeoutVersion)
-						                  .get(task->key)
-						                  .pack(Params.dispatchTaskLimit().key),
-						              TupleCodec<int>::pack(taskBatchSize));
-						return Void();
-					});
+					return taskBucket->updateTaskParam(
+					    resizeTr, task, Params.dispatchTaskLimit().key, TupleCodec<int>::pack(taskBatchSize));
 				});
 			}
 		}
@@ -6552,7 +6547,6 @@ Future<Void> testRestoreDispatchRecovery(Database cx) {
 	    IBackupContainer::openContainer("file://" + abspath("simfdb/" + tagName), {}, {}, 0);
 	Subspace testSpace("dispatch-recovery/"_sr.withPrefix(restore.mutationLogPrefix()));
 	auto taskBucket = makeReference<TaskBucket>(testSpace.get("tasks"_sr), AccessSystemKeys::True);
-	taskBucket->timeout = 5 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 	auto futureBucket = makeReference<FutureBucket>(testSpace.get("futures"_sr), AccessSystemKeys::True);
 	// Dispatch reads only this metadata; the range tasks are inspected without reading a backup file.
 	RestoreFile file{ 1, "range-file", true, 4096, 32 * 4096 };
