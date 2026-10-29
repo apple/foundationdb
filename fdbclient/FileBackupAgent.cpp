@@ -4100,29 +4100,32 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 						beginEndKeys.emplace_back(range.begin, range.end);
 					}
 
-					// Create BulkDump snapshot metadata
-					// Note: totalBytes and totalKeys are set to 0 here. Unlike traditional range file backups
-					// which accumulate fileSize from each RangeSlice, BulkDump writes its data to manifest files
-					// in the backup container (one per shard). To get accurate byte/key counts, we would need to:
-					//   1. List all manifest files under bc->getURL()/bulkDumpJobId/
-					//   2. Read each BulkLoadManifest and call getTotalBytes()/getKeyCount()
-					//   3. Aggregate the totals
-					// For now, zeros are acceptable since the critical field is bulkDumpJobId which BulkLoad
-					// uses to locate the data. TODO: Fix. The byte counts are informational for status display.
-					SnapshotMetadata metadata =
-					    SnapshotMetadata::bulkDump(bulkDumpJob.getJobId().toString(), snapshotVersion, 0, 0);
+					// Storage servers choose a read version for each SST batch independently.
+					auto batches =
+					    co_await BackupContainerFileSystem::readBulkDumpRanges(bc, bulkDumpJob.getJobId().toString());
+					if (batches.front().range.begin != backupRanges.front().begin ||
+					    batches.back().range.end != backupRanges.front().end) {
+						throw backup_error();
+					}
+					auto bounds = std::minmax_element(batches.begin(), batches.end(), [](const auto& a, const auto& b) {
+						return a.version < b.version;
+					});
+					SnapshotMetadata metadata = SnapshotMetadata::bulkDump(
+					    bulkDumpJob.getJobId().toString(), bounds.first->version, bounds.second->version, 0);
+					Params.snapshotVersion().set(task, metadata.endVersion);
 
 					// Write the snapshot file - empty file list since BulkDump uses job manifests, not range files
 					co_await bc->writeKeyspaceSnapshotFile({}, // No individual range files for BulkDump
 					                                       beginEndKeys,
-					                                       0, // See comment above about totalBytes
+					                                       0, // BulkDump descriptors do not list individual SST sizes.
 					                                       IncludeKeyRangeMap::False,
 					                                       metadata);
 
 					TraceEvent("BulkDumpTaskWroteSnapshot")
 					    .detail("BackupUID", config.getUid())
 					    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
-					    .detail("SnapshotVersion", snapshotVersion)
+					    .detail("BeginVersion", metadata.beginVersion)
+					    .detail("EndVersion", metadata.endVersion)
 					    .detail("RangeCount", backupRanges.size());
 				}
 
@@ -4524,69 +4527,14 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 
 				std::vector<KeyRange> restoreRanges = co_await restore.getRestoreRangesOrDefault(tr);
 
-				// If bulkDumpJobId is empty, read it from the snapshot file metadata
 				if (bulkDumpJobId.empty()) {
-					// Use the backup container we already opened to find the snapshot file for our restore version
-					auto* bcfsPtr = dynamic_cast<BackupContainerFileSystem*>(bcRef.getPtr());
-					if (bcfsPtr != nullptr) {
-						Reference<BackupContainerFileSystem> bcfs =
-						    Reference<BackupContainerFileSystem>::addRef(bcfsPtr);
-						std::vector<KeyspaceSnapshotFile> snapshots = co_await bcfs->listKeyspaceSnapshots();
-						int snapIdx = snapshots.size() - 1;
-						while (snapIdx >= 0 && bulkDumpJobId.empty()) {
-							// For BulkDump snapshots: beginVersion == endVersion == snapshotVersion
-							// Accept any snapshot that is at or before our restore version
-							if (snapshots[snapIdx].endVersion <= restoreVersion) {
-								// Read the snapshot file to get bulkDumpJobId
-								std::string snapFileName = snapshots[snapIdx].fileName;
-								Reference<IAsyncFile> snapFile = co_await bcfs->readFile(snapFileName);
-								int64_t snapSize = co_await snapFile->size();
-								Standalone<StringRef> snapBuf = makeString(snapSize);
-								int bytesRead = co_await snapFile->read(mutateString(snapBuf), snapSize, 0);
-								if (bytesRead == snapSize) {
-									json_spirit::mValue json;
-									if (json_spirit::read_string(snapBuf.toString(), json)) {
-										JSONDoc doc(json);
-										std::string jobId;
-										if (doc.tryGet("bulkDumpJobId", jobId) && !jobId.empty()) {
-											bulkDumpJobId = jobId;
-											TraceEvent("BulkLoadRestoreFoundJobId")
-											    .detail("RestoreUID", restore.getUid())
-											    .detail("BulkDumpJobId", bulkDumpJobId)
-											    .detail("SnapshotFile", snapFileName);
-										}
-									}
-								}
-							}
-							snapIdx--;
-						}
-					}
+					// A restore dispatched before per-range versions were recorded cannot safely resume.
+					co_await abortBulkLoadRestore(
+					    cx, restore, "Restart the bulkload restore to initialize its SST versions");
+					throw restore_bulkload_failed();
 				}
-
-				// Create BulkLoad job from the BulkDump data
-				// BulkDump stores data under data/<container>/bulkdump_data/ subdirectory.
-				// DD appends the jobId via getBulkLoadJobRoot(jobRoot, jobId) when accessing files.
 				std::string jobRoot = getBackupDataPath(backupUrl, "bulkdump_data");
-				UID dumpJobUid;
-				if (!bulkDumpJobId.empty()) {
-					dumpJobUid = UID::fromString(bulkDumpJobId);
-				} else {
-					// No BulkDump job ID found - this is a permanent error for BulkLoad restore.
-					// Abort the restore immediately instead of retrying forever.
-					TraceEvent(SevError, "BulkLoadRestoreNoBulkDumpJobId")
-					    .detail("RestoreUID", restore.getUid())
-					    .detail("BackupUrl", backupUrl)
-					    .detail("Action", "Aborting restore - backup is not BulkLoad compatible");
-					co_await restore.logError(
-					    cx, restore_missing_data(), "BulkLoad restore failed: backup has no bulkdump data", nullptr);
-					// Abort the restore by setting state to ABORTED
-					auto abortTr = makeReference<ReadYourWritesTransaction>(cx);
-					abortTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					abortTr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					restore.stateEnum().set(abortTr, ERestoreState::ABORTED);
-					co_await abortTr->commit();
-					throw restore_missing_data();
-				}
+				UID dumpJobUid = UID::fromString(bulkDumpJobId);
 
 				// Verify BulkDump dataset completeness before proceeding
 				bool datasetComplete = co_await verifyBulkDumpDatasetCompleteness(bcRef, bulkDumpJobId);
@@ -4748,18 +4696,6 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 			// Set both dispatched and finished to match total to indicate all range data is done
 			restore.filesBlocksDispatched().set(tr, totalBlocks);
 			restore.fileBlocksFinished().set(tr, totalBlocks);
-		}
-
-		// Set firstConsistentVersion if not already set
-		// For BulkLoad restore, this is the snapshot version from the BulkDump
-		Version firstConsistentVer =
-		    co_await restore.firstConsistentVersion().getD(tr, Snapshot::False, invalidVersion);
-		if (firstConsistentVer == invalidVersion) {
-			// Get the restore version as the first consistent version
-			Version restoreVer = co_await restore.restoreVersion().getD(tr, Snapshot::False, invalidVersion);
-			if (restoreVer != invalidVersion) {
-				restore.firstConsistentVersion().set(tr, restoreVer);
-			}
 		}
 
 		TraceEvent("BulkLoadRestoreTaskFinished")
@@ -6767,6 +6703,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		Reference<IBackupContainer> bc;
 		std::vector<KeyRange> ranges;
 		bool logsOnly{ false };
+		bool useRangeFileRestore{ true };
 		bool inconsistentSnapshotOnly{ false };
 
 		while (true) {
@@ -6780,6 +6717,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				restoreVersion = co_await restore.restoreVersion().getOrThrow(tr);
 				ranges = co_await restore.getRestoreRangesOrDefault(tr);
+				useRangeFileRestore = co_await restore.useRangeFileRestore().getD(tr, Snapshot::False, true);
 				logsOnly = co_await restore.onlyApplyMutationLogs().getD(tr, Snapshot::False, false);
 				inconsistentSnapshotOnly = co_await restore.inconsistentSnapshotOnly().getD(tr, Snapshot::False, false);
 				co_await taskBucket->keepRunning(tr, task);
@@ -6794,6 +6732,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				}
 				restore.stateEnum().set(tr, ERestoreState::STARTING);
 				restore.fileSet().clear(tr);
+				if (!useRangeFileRestore) {
+					restore.logFileSet().clear(tr);
+				}
 				restore.fileBlockCount().clear(tr);
 				restore.fileCount().clear(tr);
 				Reference<IBackupContainer> _bc = co_await restore.sourceContainer().getOrThrow(tr);
@@ -6841,7 +6782,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
 		Optional<RestorableFileSet> restorable =
-		    co_await bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion);
+		    co_await bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion, !useRangeFileRestore);
 		if (!restorable.present())
 			throw restore_missing_data();
 
@@ -6887,6 +6828,40 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    { f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.tagId, f.totalTags });
 			}
 		}
+		if (!useRangeFileRestore) {
+			if (!inconsistentSnapshotOnly || restorable.get().snapshot.isSingleVersion()) {
+				firstConsistentVersion = restorable.get().snapshot.endVersion;
+			}
+			// Only log mutations newer than the SST covering their key may be applied.
+			// Initialize the map before dispatch can run, in bounded, retryable transactions.
+			const auto& batches = restorable.get().bulkDumpRanges;
+			tr->reset();
+			for (size_t i = 0; i < batches.size();) {
+				Error err;
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					co_await taskBucket->keepRunning(tr, task);
+					size_t next = i;
+					int bytes = 0;
+					for (; next < batches.size() && next - i < 32 && bytes < 1e6; ++next) {
+						const auto& batch = batches[next];
+						co_await krmSetRange(tr,
+						                     restore.applyMutationsMapPrefix(),
+						                     batch.range,
+						                     BinaryWriter::toValue(batch.version, Unversioned()));
+						bytes += batch.range.expectedSize() + sizeof(Version);
+					}
+					co_await tr->commit();
+					i = next;
+					tr->reset();
+					continue;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr->onError(err);
+			}
+		}
 		// First version for which log data should be applied
 		Params.firstVersion().set(task, beginVersion);
 
@@ -6897,6 +6872,10 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				restore.firstConsistentVersion().set(tr, firstConsistentVersion);
+				if (!useRangeFileRestore) {
+					co_await taskBucket->keepRunning(tr, task);
+					restore.bulkDumpJobId().set(tr, restorable.get().bulkDumpJobId);
+				}
 				co_await tr->commit();
 				break;
 			} catch (Error& e) {
@@ -7103,11 +7082,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			                                          bc->getURL(),
 			                                          bulkDumpJobId,
 			                                          TaskCompletionKey::signal(bulkLoadDone));
-
-			// Sequencing, not user intent: the SSTs carry the range data, so the dispatch that follows must
-			// replay logs only. submitRestore rejects --incremental with bulkload, so this can only ever
-			// overwrite false.
-			restore.onlyApplyMutationLogs().set(tr, true);
 		}
 
 		// The log replay is independent of where the range data came from, so the dispatcher follows the
@@ -8424,8 +8398,9 @@ public:
 		}
 
 		printf("Backup Description\n%s", desc.toString().c_str());
-		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present())
+		if (useRangeFileRestore && targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
 			targetVersion = desc.maxRestorableVersion.get();
+		}
 
 		if (targetVersion == invalidVersion && onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 			targetVersion = desc.contiguousLogEnd.get() - 1;
@@ -8435,8 +8410,8 @@ public:
 		if (!beginVersions.empty()) {
 			beginVersion = *std::min_element(beginVersions.begin(), beginVersions.end());
 		}
-		Optional<RestorableFileSet> restoreSet =
-		    co_await bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion);
+		Optional<RestorableFileSet> restoreSet = co_await bc->getRestoreSet(
+		    targetVersion, ranges, onlyApplyMutationLogs, beginVersion, !useRangeFileRestore);
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -8445,6 +8420,8 @@ public:
 			    .detail("TargetVersion", targetVersion);
 			throw restore_invalid_version();
 		}
+
+		targetVersion = restoreSet.get().targetVersion;
 
 		if (verbose) {
 			printf("Restoring backup to version: %lld\n", (long long)targetVersion);

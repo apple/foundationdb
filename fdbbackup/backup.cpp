@@ -2296,7 +2296,7 @@ Future<Void> runRestore(Database db,
 		Reference<IBackupContainer> bc = openBackupContainer(
 		    exeRestore.toString().c_str(), container, proxy, encryptionKeyFile, /*encryptionBlockSize=*/0);
 		// If targetVersion is unset then use the maximum restorable version from the backup description
-		if (targetVersion == invalidVersion) {
+		if (restoreMode == RestoreMode::RANGEFILE && targetVersion == invalidVersion) {
 			if (verbose)
 				printf(
 				    "No restore target version given, will use maximum restorable version from backup description.\n");
@@ -2344,7 +2344,8 @@ Future<Void> runRestore(Database db,
 				fmt::print("Restored to version {}\n", restoredVersion);
 			}
 		} else {
-			Optional<RestorableFileSet> rset = co_await bc->getRestoreSet(targetVersion, ranges);
+			Optional<RestorableFileSet> rset = co_await bc->getRestoreSet(
+			    targetVersion, ranges, false, invalidVersion, restoreMode == RestoreMode::BULKLOAD);
 
 			if (!rset.present()) {
 				fmt::print(stderr,
@@ -2353,7 +2354,7 @@ Future<Void> runRestore(Database db,
 				throw restore_invalid_version();
 			}
 
-			fmt::print("Backup can be used to restore to version {}\n", targetVersion);
+			fmt::print("Backup can be used to restore to version {}\n", rset.get().targetVersion);
 		}
 
 	} catch (Error& e) {
