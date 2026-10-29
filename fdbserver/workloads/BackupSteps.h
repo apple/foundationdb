@@ -49,6 +49,25 @@ inline Future<Void> discontinueBackup(Database cx, FileBackupAgent* agent, Key t
 	}
 }
 
+// Discontinues the backup `tag` and waits until it is COMPLETED, so that no backup work is left on the cluster.
+inline Future<Void> stopBackup(Database cx, FileBackupAgent* agent, Key tag) {
+	co_await discontinueBackup(cx, agent, tag);
+	co_await agent->waitBackup(cx, tag.toString(), StopWhenDone::True);
+}
+
+inline Future<Optional<Key>> firstKeyInTx(Reference<ReadYourWritesTransaction> tr, KeyRange range) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	RangeResult first = co_await tr->getRange(range, 1);
+	co_return first.empty() ? Optional<Key>() : Optional<Key>(first[0].key);
+}
+
+// The first key in `range`, if any. It reads system keys and is lock-aware, so it works for the validation prefix and
+// while the database is locked.
+inline Future<Optional<Key>> firstKeyIn(Database cx, KeyRange range) {
+	return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return firstKeyInTx(tr, range); });
+}
+
 // The restorable snapshot with the greatest endVersion, which is the one a restore to the latest restorable version
 // uses.
 inline const KeyspaceSnapshotFile* latestRestorableSnapshot(BackupDescription const& desc) {
