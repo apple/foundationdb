@@ -9272,7 +9272,6 @@ ShardInfo* ShardInfo::newShard(StorageServer* data, const StorageServerShard& sh
 }
 
 void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
-	ASSERT((void*)this);
 	ASSERT(keys.contains(mutation.param1));
 	if (adding) {
 		adding->addMutation(version, fromFetch, mutation);

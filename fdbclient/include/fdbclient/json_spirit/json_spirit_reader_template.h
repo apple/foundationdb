@@ -135,6 +135,11 @@ template <class String_type>
 String_type substitute_esc_chars(typename String_type::const_iterator begin, typename String_type::const_iterator end) {
 	typedef typename String_type::const_iterator Iter_type;
 
+	// Help GCC 13 be sure that (end - begin) is not negative;
+	// otherwise -Wrestrict warns of a huge memcpy() in String_type().
+	if (end < begin)
+		return String_type();
+
 	if (end - begin < 2)
 		return String_type(begin, end);
 

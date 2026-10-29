@@ -1072,10 +1072,10 @@ static bool checkpointFileNameIsContained(const std::string& name) {
 // Names as RocksDB reports them pass; names that could resolve outside the checkpoint directory, or to the directory
 // itself, don't.
 TEST_CASE("/fdbserver/checkpoint/checkpointFileNameIsContained") {
-	for (const std::string& name : { "/000012.sst", "000012.sst", "/a..b.sst" }) {
+	for (const char* name : { "/000012.sst", "000012.sst", "/a..b.sst" }) {
 		ASSERT(checkpointFileNameIsContained(name));
 	}
-	for (const std::string& name : { "/../000012.sst", "../000012.sst", "/a/../000012.sst", "/..", "", "/", "/." }) {
+	for (const char* name : { "/../000012.sst", "../000012.sst", "/a/../000012.sst", "/..", "", "/", "/." }) {
 		ASSERT(!checkpointFileNameIsContained(name));
 	}
 	return Void();
