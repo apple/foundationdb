@@ -6,6 +6,18 @@ if(NOT WIN32)
       COMMAND $<TARGET_FILE:authz_tls_unittest>)
     set_tests_properties(authorization_tls_unittest PROPERTIES TIMEOUT 120)
   endif()
+
+  add_flow_target(EXECUTABLE NAME tls_handshake_pool_test SRCS TlsHandshakePoolTest.cpp)
+  target_link_libraries(tls_handshake_pool_test PRIVATE flow fmt::fmt)
+  if(FDB_REGISTER_UNIT_TESTS)
+    add_dependencies(unit_tests tls_handshake_pool_test)
+    add_test(NAME unit/tls_handshake_pool_test/native
+      COMMAND $<TARGET_FILE:tls_handshake_pool_test>)
+    set_tests_properties(unit/tls_handshake_pool_test/native PROPERTIES
+      LABELS "unit;native;tls_handshake_pool_test"
+      TIMEOUT 60
+      ENVIRONMENT "${SANITIZER_OPTIONS}")
+  endif()
 endif()
 
 if(WITH_GRPC)
