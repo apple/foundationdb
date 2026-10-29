@@ -520,8 +520,9 @@ public:
 	// The DC whose storage servers perform bulkdump uploads, or empty when the cluster has no
 	// region configuration. Resolved per dispatch rather than cached so it follows a failover.
 	std::string bulkDumpTargetDcId() const {
-		const std::vector<Optional<Key>>& dcIds =
-		    SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION ? remoteDcIds : primaryDcId;
+		// With usable_regions == 1 the remote DC is configured but holds no storage servers.
+		const bool useRemote = SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION && configuration.usableRegions > 1;
+		const std::vector<Optional<Key>>& dcIds = useRemote ? remoteDcIds : primaryDcId;
 		if (!dcIds.empty() && dcIds[0].present()) {
 			return dcIds[0].get().toString();
 		}
