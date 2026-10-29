@@ -299,6 +299,10 @@ public:
 	double TSS_RECRUITMENT_TIMEOUT;
 	double TSS_DD_CHECK_INTERVAL;
 	double DATA_DISTRIBUTION_LOGGING_INTERVAL;
+	// Cadence of DDServerEligibility. Coarse because it gauges conditions that persist for hours. A new
+	// team collection emits immediately, so distributor restarts are captured at any value. Lower it
+	// while watching a migration.
+	double DD_SERVER_ELIGIBILITY_LOGGING_INTERVAL;
 	double DD_ENABLED_CHECK_DELAY;
 	double DD_STALL_CHECK_DELAY;
 	double DD_LOW_BANDWIDTH_DELAY;
@@ -430,6 +434,8 @@ public:
 	bool DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM; // Set to disable audit storage replica check in the
 	                                                       // simulation.
 	int DD_BULKDUMP_PARALLELISM; // the max number of concurrent bulk dump tasks in DD
+	bool DD_BULKDUMP_USE_REMOTE_REGION; // dump from the remote region instead of the primary. The dumping server
+	                                    // uploads the files, so its region must reach the destination.
 	int SS_SERVE_BULKDUMP_PARALLELISM; // the number of bulk dump tasks that can concurrently happen at a SS
 	int64_t SS_BULKDUMP_BATCH_BYTES; // the max bytes when SS creates a batch to dump
 	int SS_BULKLOAD_GETRANGE_BATCH_SIZE; // the max number of keys to scan before do context switch
