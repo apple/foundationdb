@@ -220,6 +220,11 @@ struct RangePartitionedBackupData {
 		if (!logSystem.get()) {
 			return;
 		}
+		// The epoch was retired while this worker still ran, e.g. a replaced worker not yet fenced. An
+		// epoch retires only once its whole range is covered, so nothing is left to pop.
+		if (backupEpoch < oldestBackupEpoch) {
+			return;
+		}
 		// Defer the pop in two cases, both to avoid losing mutations a future worker might still need:
 		//   1. An older epoch still has work to finish (backupEpoch > oldestBackupEpoch). Wait for that
 		//      older epoch to catch up before popping from this epoch.
@@ -330,6 +335,9 @@ static Future<Void> onBackupChanges(RangePartitionedBackupData* self,
 Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                           LogEpoch recoveryCount,
                           RangePartitionedBackupData* self) {
+	// A draining worker is published only once recruitment installs it, so its absence means
+	// replaced or released only after it has been seen.
+	bool listed = false;
 	while (true) {
 		bool isDisplaced =
 		    db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED;
@@ -338,6 +346,21 @@ Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
 			    .detail("RecoveryCount", recoveryCount)
 			    .detail("RecoveryState", (int)db->get().recoveryState);
 			throw worker_removed();
+		}
+		// Fences a predecessor that was only suspected dead, so it stops popping past its replacement.
+		const LogSystemConfig& config = db->get().logSystemConfig;
+		if (self->backupEpoch != recoveryCount && config.epoch == recoveryCount &&
+		    config.getEpochEndVersion(self->backupEpoch) != invalidVersion) {
+			if (config.hasBackupWorker(self->myId)) {
+				listed = true;
+			} else if (listed && !self->allMessageSaved()) {
+				CODE_PROBE(true, "Old epoch range-partitioned backup worker fenced after losing its slot");
+				TraceEvent("RangePartitionedBWReplaced", self->myId)
+				    .detail("BackupEpoch", self->backupEpoch)
+				    .detail("Tag", self->tag.toString())
+				    .detail("SavedVersion", self->savedVersion);
+				throw worker_removed();
+			}
 		}
 		co_await db->onChange();
 	}
@@ -642,7 +665,13 @@ Future<Void> pullAsyncData(RangePartitionedBackupData* self) {
 		}
 
 		if (cursor->popped() > 0) {
-			TraceEvent(SevError, "RangePartitionedBWDataPopped", self->myId)
+			// For a draining old epoch this is a predecessor, declared dead but still running, popping past
+			// the version this replacement started from; exiting is the intended outcome. Nothing pops ahead
+			// of a current-epoch worker, so there it is a defect.
+			const bool draining = self->backupEpoch != self->recruitedEpoch;
+			TraceEvent(draining ? SevWarnAlways : SevError, "RangePartitionedBWDataPopped", self->myId)
+			    .detail("BackupEpoch", self->backupEpoch)
+			    .detail("RecruitedEpoch", self->recruitedEpoch)
 			    .detail("Popped", cursor->popped())
 			    .detail("Expected", tagAt);
 			throw worker_removed();
