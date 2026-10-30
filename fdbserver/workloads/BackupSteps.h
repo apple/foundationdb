@@ -52,6 +52,82 @@ inline Future<Void> discontinueBackup(Database cx, FileBackupAgent* agent, Key t
 	}
 }
 
+// Which backup system a step drives. Only the file backup agent (v1) is implemented; parseBackupVersion rejects any
+// other name with unsupported_operation.
+enum class BackupVersion { V1 };
+
+inline BackupVersion parseBackupVersion(StringRef name) {
+	if (name == "v1"_sr) {
+		return BackupVersion::V1;
+	}
+	TraceEvent(SevWarnAlways, "BackupVersionNotSupported").detail("Version", name);
+	throw unsupported_operation();
+}
+
+// What a restore needs, with named fields instead of the 17 positional arguments of FileBackupAgent::restore.
+struct RestoreSpec {
+	Key tag;
+	Reference<IBackupContainer> container;
+	Standalone<VectorRef<KeyRangeRef>> ranges;
+	Key addPrefix;
+	Key removePrefix;
+	// Restoring in place locks the database for the restore and unlocks it afterwards.
+	LockDB lockDB{ false };
+	Version targetVersion = ::invalidVersion;
+	Optional<std::string> encryptionKeyFileName;
+};
+
+// Restores `spec` and returns the version restored to.
+inline Future<Version> restoreBackup(Database cx, FileBackupAgent* agent, BackupVersion version, RestoreSpec spec) {
+	ASSERT(version == BackupVersion::V1);
+	co_return co_await agent->restore(cx,
+	                                  cx,
+	                                  spec.tag,
+	                                  Key(spec.container->getURL()),
+	                                  spec.container->getProxy(),
+	                                  spec.ranges,
+	                                  WaitForComplete::True,
+	                                  spec.targetVersion,
+	                                  Verbose::True,
+	                                  spec.addPrefix,
+	                                  spec.removePrefix,
+	                                  spec.lockDB,
+	                                  UnlockDB(spec.lockDB),
+	                                  OnlyApplyMutationLogs::False,
+	                                  InconsistentSnapshotOnly::False,
+	                                  ::invalidVersion,
+	                                  spec.encryptionKeyFileName);
+}
+
+// What starting a backup needs.
+struct SubmitSpec {
+	Key backupDir;
+	Key tag;
+	Standalone<VectorRef<KeyRangeRef>> ranges;
+	int initSnapshotInterval = 0;
+	int snapshotInterval = 1e8;
+	StopWhenDone stopWhenDone{ true };
+	IncrementalBackupOnly incremental{ false };
+	Optional<std::string> encryptionKeyFileName;
+};
+
+inline Future<Void> submitBackup(Database cx, FileBackupAgent* agent, BackupVersion version, SubmitSpec spec) {
+	ASSERT(version == BackupVersion::V1);
+	co_await agent->submitBackup(cx,
+	                             spec.backupDir,
+	                             {},
+	                             spec.initSnapshotInterval,
+	                             spec.snapshotInterval,
+	                             spec.tag.toString(),
+	                             spec.ranges,
+	                             spec.stopWhenDone,
+	                             MutationLogType::DEFAULT,
+	                             spec.incremental,
+	                             spec.encryptionKeyFileName,
+	                             spec.encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+	                             0);
+}
+
 // Discontinues the backup `tag` and waits until it is COMPLETED, so that no backup work is left on the cluster.
 inline Future<Void> stopBackup(Database cx, FileBackupAgent* agent, Key tag) {
 	co_await discontinueBackup(cx, agent, tag);
@@ -75,6 +151,8 @@ inline Future<Optional<Key>> firstKeyIn(Database cx, KeyRange range) {
 // (SevError) one that has no container or is not restorable; then it aborts the backup when `abortInstead`, otherwise
 // discontinues it. A backup that is already unneeded or a duplicate is not an error. `stopDifferentialDelay` is only
 // traced. Events are named <eventPrefix>DoBackup... so that each workload keeps its own names.
+// buggify() is decided per source line, so the workloads that call this share one activation of that branch: they all
+// wait for restorability, or none does.
 inline Future<Void> endBackupAfterRestorable(Database cx,
                                              FileBackupAgent* backupAgent,
                                              Key tag,
