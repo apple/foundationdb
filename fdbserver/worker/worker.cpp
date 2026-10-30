@@ -92,7 +92,7 @@
 #include "flow/ChaosMetrics.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "fdbctl/ControlService.h"
+#include "fdbgrpc/ControlService.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -2033,7 +2033,7 @@ Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionReco
 
 	auto db = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION);
 	Reference<IDatabase> idb = co_await safeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(db));
-	auto services = GrpcServer::ServiceList{ std::make_shared<fdbctl::ControlServiceImpl>(idb) };
+	auto services = GrpcServer::ServiceList{ std::make_shared<fdbgrpc::ControlServiceImpl>(idb) };
 	GrpcServer::instance()->registerRoleServices(UID(), services);
 	TraceEvent("WorkerGrpcServerStart").detail("Address", GrpcServer::instance()->getAddress());
 	co_await Future<Void>(Never());

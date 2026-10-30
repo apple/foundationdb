@@ -26,15 +26,15 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/FlowGrpc.h"
-#include "fdbctl/control_service/control_service.pb.h"
-#include "fdbctl/control_service/control_service.grpc.pb.h"
+#include "fdbgrpc/control_service/control_service.pb.h"
+#include "fdbgrpc/control_service/control_service.grpc.pb.h"
 
 #include <grpcpp/support/status.h>
 #include <map>
 #include <vector>
 #include <string>
 
-namespace fdbctl {
+namespace fdbgrpc {
 
 //-- Coordinators ----
 Future<grpc::Status> getCoordinators(Reference<IDatabase> db,
@@ -90,7 +90,7 @@ using management_api::failedServersSpecialKeyRange;
 
 const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 } // namespace special_keys
-} // namespace fdbctl
+} // namespace fdbgrpc
 
 #endif
 #endif // FLOW_GRPC_ENABLED

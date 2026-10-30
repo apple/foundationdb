@@ -20,7 +20,7 @@ add_fdbserver_link_test(fdbserver_workerlinktest
   fdbserver_tester
   fdbserver_tlog
   fdbserver_core
-  fdbctl)
+  fdbgrpc)
 add_fdbserver_unit_test(fdbserver_worker_test worker
   fdbserver_worker
   fdbserver_backupworker
@@ -39,7 +39,7 @@ add_fdbserver_unit_test(fdbserver_worker_test worker
   fdbserver_tester
   fdbserver_tlog
   fdbserver_core
-  fdbctl)
+  fdbgrpc)
 
 configure_fdbserver_common_includes(fdbserver_worker)
 target_include_directories(fdbserver_worker
@@ -47,11 +47,11 @@ target_include_directories(fdbserver_worker
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
     ${CMAKE_SOURCE_DIR}/fdbserver/include
-    ${CMAKE_SOURCE_DIR}/fdbctl/include
+    ${CMAKE_SOURCE_DIR}/fdbgrpc/include
     ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(fdbserver_worker
   PUBLIC
-    fdbctl
+    fdbgrpc
   PRIVATE
     fdbserver_backupworker
     fdbserver_cdcproxy

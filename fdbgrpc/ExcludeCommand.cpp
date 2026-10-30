@@ -19,7 +19,7 @@ I * Licensed under the Apache License, Version 2.0 (the "License");
  */
 #ifdef FLOW_GRPC_ENABLED
 
-#include "fdbctl/ControlCommands.h"
+#include "fdbgrpc/ControlCommands.h"
 
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.h"
@@ -32,7 +32,7 @@ I * Licensed under the Apache License, Version 2.0 (the "License");
 
 #include <map>
 
-namespace fdbctl {
+namespace fdbgrpc {
 namespace utils {
 
 Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
@@ -51,13 +51,13 @@ Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) 
 
 Future<std::set<NetworkAddress>> getInProgressExclusion(Reference<ITransaction> tr) {
 	ThreadFuture<RangeResult> resultFuture =
-	    tr->getRange(fdbctl::special_keys::exclusionInProgressSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+	    tr->getRange(fdbgrpc::special_keys::exclusionInProgressSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
 	RangeResult result = co_await safeThreadFutureToFuture(resultFuture);
 	ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
 	std::set<NetworkAddress> inProgressExclusion;
 	for (const auto& addr : result) {
 		inProgressExclusion.insert(NetworkAddress::parse(
-		    addr.key.removePrefix(fdbctl::special_keys::exclusionInProgressSpecialKeyRange.begin).toString()));
+		    addr.key.removePrefix(fdbgrpc::special_keys::exclusionInProgressSpecialKeyRange.begin).toString()));
 	}
 	co_return inProgressExclusion;
 }
@@ -286,10 +286,10 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 
 Future<grpc::Status> excludeStatus(Reference<IDatabase> db, const ExcludeStatusRequest* req, ExcludeStatusReply* rep) {
 	try {
-		std::vector<std::string> excludedAddresses = co_await fdbctl::utils::getExcludedServers(db);
-		std::vector<std::string> excludedLocalities = co_await fdbctl::utils::getExcludedLocalities(db);
-		std::vector<std::string> failedAddresses = co_await fdbctl::utils::getFailedServers(db);
-		std::vector<std::string> failedLocalities = co_await fdbctl::utils::getFailedLocalities(db);
+		std::vector<std::string> excludedAddresses = co_await fdbgrpc::utils::getExcludedServers(db);
+		std::vector<std::string> excludedLocalities = co_await fdbgrpc::utils::getExcludedLocalities(db);
+		std::vector<std::string> failedAddresses = co_await fdbgrpc::utils::getFailedServers(db);
+		std::vector<std::string> failedLocalities = co_await fdbgrpc::utils::getFailedLocalities(db);
 
 		for (const auto& e : excludedAddresses) {
 			rep->add_excluded_addresses(e);
@@ -320,6 +320,6 @@ Future<grpc::Status> excludeStatus(Reference<IDatabase> db, const ExcludeStatusR
 	}
 }
 
-} // namespace fdbctl
+} // namespace fdbgrpc
 
 #endif

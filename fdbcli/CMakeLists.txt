@@ -3,7 +3,7 @@ fdb_find_sources(FDBCLI_SRCS)
 
 add_flow_target(EXECUTABLE NAME fdbcli SRCS ${FDBCLI_SRCS})
 target_include_directories(fdbcli PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(fdbcli PRIVATE fdbctl fdbclient SimpleOpt)
+target_link_libraries(fdbcli PRIVATE fdbgrpc fdbclient SimpleOpt)
 
 if (USE_UBSAN)
   # The intent is to put typeinfo symbols in the dynamic symbol table so that

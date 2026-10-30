@@ -19,12 +19,12 @@
  */
 
 #ifdef FLOW_GRPC_ENABLED
-#ifndef FDBCTL_CLI_COMMAND_SERVER_H
-#define FDBCTL_CLI_COMMAND_SERVER_H
+#ifndef FDBGRPC_CLI_COMMAND_SERVER_H
+#define FDBGRPC_CLI_COMMAND_SERVER_H
 
 #include <grpcpp/support/status.h>
 
-#include "fdbctl/ControlCommands.h"
+#include "fdbgrpc/ControlCommands.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "flow/ThreadHelper.h"
@@ -35,7 +35,7 @@
 		return handleRequestOnMainThread(&handlerName, req, rep, context);                                             \
 	}
 
-namespace fdbctl {
+namespace fdbgrpc {
 
 template <class Handler, class Request, class Reply>
 Future<grpc::Status> grpcHandlerWrapper(Reference<IDatabase> db,
@@ -69,7 +69,7 @@ Future<grpc::Status> grpcHandlerWrapper(Reference<IDatabase> db,
 	}
 }
 
-class ControlServiceImpl final : public fdbctl::ControlService::Service {
+class ControlServiceImpl final : public fdbgrpc::ControlService::Service {
 public:
 	explicit ControlServiceImpl(Reference<IDatabase> db);
 
@@ -94,7 +94,7 @@ private:
 private:
 	Reference<IDatabase> db_;
 };
-} // namespace fdbctl
+} // namespace fdbgrpc
 
-#endif // FDBCTL_CLI_COMMAND_SERVER_H
+#endif // FDBGRPC_CLI_COMMAND_SERVER_H
 #endif // FLOW_GRPC_ENABLED
