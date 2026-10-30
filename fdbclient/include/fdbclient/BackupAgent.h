@@ -997,9 +997,9 @@ public:
 					           }
 					           return {}; // Not restorable until both complete
 				           }
-				           // Use the minimum of both as the effective first snapshot version
+				           // The log must cover either restore method before the backup can stop.
 				           Version effectiveFirstSnapshot =
-				               std::min(firstSnapshot.get().get(), bulkDumpSnapshot.get().get());
+				               std::max(firstSnapshot.get().get(), bulkDumpSnapshot.get().get());
 				           if (logVersion.present() && logVersion.get() > effectiveFirstSnapshot) {
 					           return std::max(logVersion.get() - 1, effectiveFirstSnapshot);
 				           }
