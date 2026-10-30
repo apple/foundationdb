@@ -6061,17 +6061,17 @@ Future<Void> testRestoreWriterRecovery(Database cx) {
 		RestoreLogDataPartitionedTaskFunc::Params.beginVersion().set(task, 1);
 		RestoreLogDataPartitionedTaskFunc::Params.endVersion().set(task, recordCount + 1);
 		RestoreLogDataPartitionedTaskFunc::Params.bytesWritten().set(task, 0);
+		KeyBackedTaskConfig::TaskParams.uid().set(task, restore.getUid());
 		Key taskPrefix = "writer-tasks/"_sr.withPrefix(restore.mutationLogPrefix());
 		auto taskBucket = makeReference<TaskBucket>(Subspace(taskPrefix), AccessSystemKeys::True);
-		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			restore.sourceContainer().set(tr, bc);
 			restore.restoreRange().set(tr, dataRange);
 			restore.bytesWritten().set(tr, 0);
-			co_await restore.toTask(tr, task, SetValidation::False);
-			TaskBucket::setValidationCondition(
-			    task, restore.sourceContainer().key, TupleCodec<Reference<IBackupContainer>>::pack(bc));
-			taskBucket->addTask(tr, task);
+			taskBucket->addTask(
+			    tr, task, restore.sourceContainer().key, TupleCodec<Reference<IBackupContainer>>::pack(bc));
+			return Future<Void>(Void());
 		});
 		// An unknown commit result can leave the task leased; retry until its lease expires and it is requeued.
 		while (true) {
@@ -6115,18 +6115,18 @@ Future<Void> testRestoreWriterRecovery(Database cx) {
 		ASSERT_EQ(test.committedRecords, recordCount);
 		KeyRange outputRange = writer == 0 ? dataRange : prefixRange(restore.mutationLogPrefix());
 		co_await taskBucket->clear(cx);
-		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		RangeResult rows = co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			RangeResult rows = co_await tr->getRange(outputRange, recordCount + 1);
-			ASSERT(!rows.more);
-			ASSERT_EQ(rows.size(), expected.size());
-			int i = 0;
-			for (const auto& [key, value] : expected) {
-				ASSERT_EQ(rows[i].key, key);
-				ASSERT_EQ(rows[i].value, value);
-				++i;
-			}
+			return tr->getRange(outputRange, recordCount + 1);
 		});
+		ASSERT(!rows.more);
+		ASSERT_EQ(rows.size(), expected.size());
+		int i = 0;
+		for (const auto& [key, value] : expected) {
+			ASSERT_EQ(rows[i].key, key);
+			ASSERT_EQ(rows[i].value, value);
+			++i;
+		}
 		// A successful cleanup with an unknown commit result must not retry verification against deleted data.
 		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -6549,7 +6549,7 @@ Future<Void> testRestoreDispatchRecovery(Database cx) {
 	auto taskBucket = makeReference<TaskBucket>(testSpace.get("tasks"_sr), AccessSystemKeys::True);
 	auto futureBucket = makeReference<FutureBucket>(testSpace.get("futures"_sr), AccessSystemKeys::True);
 	// Dispatch reads only this metadata; the range tasks are inspected without reading a backup file.
-	RestoreFile file{ 1, "range-file", true, 4096, 32 * 4096 };
+	RestoreFile file{ 1, "range-file", true, 4096, 32LL * 4096 };
 	auto task = makeReference<Task>(Dispatch::name, Dispatch::version);
 	KeyBackedTaskConfig::TaskParams.uid().set(task, restore.getUid());
 	TaskBucket::setValidationCondition(
