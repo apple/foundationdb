@@ -5591,8 +5591,7 @@ struct PartitionedLogFileScan {
 			}
 		}
 		if (page.more) {
-			ASSERT(!page.empty());
-			nextKey = keyAfter(page.back().key);
+			nextKey = page.getReadThrough();
 		}
 		return page.more;
 	}
@@ -5614,6 +5613,12 @@ TEST_CASE("/backup/restore/partitionedLogFilePagination") {
 	add(2010, 2015, "starts-at-end", 0);
 	for (Optional<Version> span : { Optional<Version>(), Optional<Version>(1020) }) {
 		PartitionedLogFileScan scan(files, 2000, 2010, span);
+		// An empty shard can advance the read boundary without returning a key.
+		RangeResult emptyPage;
+		emptyPage.more = true;
+		emptyPage.readThrough = keyAfter(scan.nextKey, emptyPage.arena());
+		ASSERT(scan.consume(emptyPage));
+		ASSERT_EQ(scan.nextKey, emptyPage.readThrough.get());
 		int pages = 0;
 		for (;;) {
 			RangeResult page;
@@ -6225,8 +6230,21 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef RestoreDispatchPartitionedTaskFunc::name = "restore_dispatch_partitioned"_sr;
+// Older agents must not dispatch a later window using the single-page log lookup.
+StringRef RestoreDispatchPartitionedTaskFunc::name = "restore_dispatch_partitioned_paged_logs"_sr;
 REGISTER_TASKFUNC(RestoreDispatchPartitionedTaskFunc);
+REGISTER_TASKFUNC_ALIAS(RestoreDispatchPartitionedTaskFunc, restore_dispatch_partitioned);
+
+TEST_CASE("/backup/restore/partitionedLogDispatchHandoff") {
+	// A persisted v1 task resolves to the dispatcher that queues work under the new name.
+	auto legacy = makeReference<Task>("restore_dispatch_partitioned"_sr, 1);
+	ASSERT(TaskFuncBase::isValidTask(legacy));
+	StringRef legacyName = legacy->params[Task::reservedTaskParamKeyType];
+	auto dispatcher = TaskFuncBase::create(legacyName);
+	ASSERT_NE(dispatcher->getName(), legacyName);
+	ASSERT(TaskFuncBase::isValidTaskType(dispatcher->getName()));
+	return Void();
+}
 
 struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 	static StringRef name;
@@ -6749,10 +6767,11 @@ Future<ERestoreState> abortRestore(Database cx, Key tagName) {
 
 struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 	static StringRef name;
-	static constexpr uint32_t version = 1;
+	static constexpr uint32_t version = 2;
 
 	static struct {
 		static TaskParam<Version> firstVersion() { return __FUNCTION__sr; }
+		static TaskParam<Version> maxLogFileSpan() { return __FUNCTION__sr; }
 	} Params;
 
 	// Find all files needed for the restore and save them in the RestoreConfig for the task.
@@ -6797,9 +6816,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				}
 				restore.stateEnum().set(tr, ERestoreState::STARTING);
 				restore.fileSet().clear(tr);
-				if (!useRangeFileRestore) {
-					restore.logFileSet().clear(tr);
-				}
+				restore.logFileSet().clear(tr);
 				restore.fileBlockCount().clear(tr);
 				restore.fileCount().clear(tr);
 				Reference<IBackupContainer> _bc = co_await restore.sourceContainer().getOrThrow(tr);
@@ -6931,6 +6948,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		}
 		// First version for which log data should be applied
 		Params.firstVersion().set(task, beginVersion);
+		Params.maxLogFileSpan().set(task, maxLogFileSpan);
 
 		tr->reset();
 		while (true) {
@@ -6939,7 +6957,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				restore.firstConsistentVersion().set(tr, firstConsistentVersion);
-				restore.maxLogFileSpan().set(tr, maxLogFileSpan);
 				if (!useRangeFileRestore) {
 					co_await taskBucket->keepRunning(tr, task);
 					restore.bulkDumpJobId().set(tr, restorable.get().bulkDumpJobId);
@@ -7155,6 +7172,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		// The log replay is independent of where the range data came from, so the dispatcher follows the
 		// container's log layout on both paths.
 		if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
+			// Publish the bound only when this manifest is complete and dispatch becomes runnable.
+			restore.maxLogFileSpan().set(tr, Params.maxLogFileSpan().get(task));
 			Version endVersion =
 			    std::min(firstVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE, restoreVersion);
 			co_await RestoreDispatchPartitionedTaskFunc::addTask(tr,
@@ -7201,13 +7220,16 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 	static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
 	                           Reference<TaskBucket> taskBucket,
 	                           UID uid,
+	                           MutationLogType mutationLogType,
 	                           TaskCompletionKey completionKey,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		auto task = makeReference<Task>(StartFullRestoreTaskFunc::name, StartFullRestoreTaskFunc::version, doneKey);
+		// A partitioned restore needs an agent that will enqueue the paginated dispatcher from its first window.
+		uint32_t taskVersion = mutationLogType == MutationLogType::PARTITIONED_LOG ? version : 1;
+		auto task = makeReference<Task>(name, taskVersion, doneKey);
 
 		RestoreConfig restore(uid);
 		// Bind the restore config to the new task
@@ -7645,7 +7667,7 @@ public:
 		// this also sets restore.add/removePrefix.
 		restore.initApplyMutations(tr, addPrefix, removePrefix, onlyApplyMutationLogs);
 		Key taskKey = co_await fileBackup::StartFullRestoreTaskFunc::addTask(
-		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal());
+		    tr, backupAgent->taskBucket, uid, mutationLogType, TaskCompletionKey::noSignal());
 
 		if (lockDB)
 			co_await lockDatabase(tr, uid);
