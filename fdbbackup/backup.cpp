@@ -2243,6 +2243,63 @@ Future<Void> changeBackupResumed(Database db, bool pause) {
 		FileBackupAgent backupAgent;
 		co_await backupAgent.changePause(db, pause);
 		printf("All backup agents have been %s.\n", pause ? "paused" : "resumed");
+
+		// Pausing the agents writes the task bucket pause key and backupPausedKey. A bulkdump snapshot is
+		// dispatched by data distribution, which reads neither, so the snapshot would keep running while
+		// the backup driving it reports paused. Carry the pause through to the job this backup owns, so
+		// that pausing a backup does not require a second command in another tool.
+		Optional<BulkDumpState> bulkDumpJob;
+		Transaction tr(db);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				bulkDumpJob = co_await getSubmittedBulkDumpJob(&tr);
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+
+		if (bulkDumpJob.present() && bulkDumpJob.get().isValid()) {
+			UID jobId = bulkDumpJob.get().getJobId();
+			Optional<BulkDumpOwnerInfo> owner = co_await getBulkDumpOwner(db, jobId);
+			// Ownership is recorded when the job is submitted, so it is available while the job runs.
+			if (owner.present() && owner.get().ownerType == "backup") {
+				co_await setBulkJobPaused(db, jobId, pause, /*isBulkDump=*/true);
+				if (pause) {
+					printf("Bulkdump job %s (backup \"%s\") has been paused. Tasks already dispatched run to "
+					       "completion, so the snapshot keeps making progress until that work drains.\n",
+					       jobId.toString().c_str(),
+					       owner.get().ownerName.c_str());
+				} else {
+					printf("Bulkdump job %s (backup \"%s\") has been resumed.\n",
+					       jobId.toString().c_str(),
+					       owner.get().ownerName.c_str());
+				}
+			} else if (pause) {
+				// Not this command's job to touch: it was submitted directly rather than by a backup.
+				fprintf(stderr,
+				        "WARNING: bulkdump job %s is running but was not submitted by a backup, so it has "
+				        "not been paused. Use `fdbcli bulkdump pause %s` if you intended to pause it.\n",
+				        jobId.toString().c_str(),
+				        jobId.toString().c_str());
+			}
+		}
+
+		// A bulkload job is a restore-side concern with no ownership link back to a backup, so pausing
+		// backup agents neither affects it nor implies anything about it.
+		if (pause) {
+			int bulkLoadMode = co_await getBulkLoadMode(db);
+			if (bulkLoadMode == 1) {
+				fprintf(stderr,
+				        "WARNING: bulkload mode is enabled. Pausing backup agents does not pause a bulkload "
+				        "job; data distribution continues to dispatch it. Use `fdbcli bulkload pause <JOBID>` "
+				        "to stop dispatching new tasks; a paused bulkload job keeps its range lock.\n");
+			}
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
