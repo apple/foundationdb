@@ -388,9 +388,9 @@ struct DDBulkLoadJobManager {
 struct DDBulkDumpJobManager {
 	BulkDumpState jobState;
 	std::map<Key, BulkLoadManifest> taskManifestMap;
-	// Limits the "no replica in the target DC" warning to once per job rather than once per
+	// Throttles the "no replica in the target DC" warning to one per interval per job rather than one per
 	// affected range per scheduling cycle. This manager is reconstructed for each job.
-	bool warnedNoServerInTargetDc = false;
+	Optional<double> lastNoServerInTargetDcWarn;
 
 	DDBulkDumpJobManager() = default;
 	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -2740,6 +2740,8 @@ Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 	self->bulkDumpParallelismLimitor.decrementTaskCounter();
 }
 
+constexpr double bulkDumpNoServerInTargetDcWarnIntervalSec = 60.0;
+
 Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	UID jobId = self->bulkDumpJobManager.jobState.getJobId();
 	KeyRange jobRange = self->bulkDumpJobManager.jobState.getJobRange();
@@ -2755,6 +2757,8 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	int rangeLocationIndex = 0;
 	std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations;
 	KeyRange taskRange;
+	int skippedNoServerInTargetDc = 0;
+	KeyRange firstSkippedRange;
 	std::vector<Future<Void>> actors;
 	Transaction tr(cx);
 	while (beginKey < endKey) {
@@ -2819,12 +2823,8 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 						const auto& servers = rangeLocations[rangeLocationIndex].servers;
 						auto targetDc = servers.find(targetDcId);
 						if (targetDc == servers.end() || targetDc->second.empty()) {
-							if (!self->bulkDumpJobManager.warnedNoServerInTargetDc) {
-								self->bulkDumpJobManager.warnedNoServerInTargetDc = true;
-								TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDc", self->ddId)
-								    .detail("JobID", jobId)
-								    .detail("TargetDcId", targetDcId)
-								    .detail("FirstSkippedRange", taskRange);
+							if (skippedNoServerInTargetDc++ == 0) {
+								firstSkippedRange = taskRange;
 							}
 							continue;
 						}
@@ -2859,6 +2859,18 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 			throw err;
 		}
 		co_await tr.onError(err);
+	}
+	// A skipped range is retried every pass, so the job cannot finish until the target DC gains a replica of it.
+	// Keep reporting that rather than stalling silently.
+	Optional<double>& lastWarn = self->bulkDumpJobManager.lastNoServerInTargetDcWarn;
+	if (skippedNoServerInTargetDc > 0 &&
+	    (!lastWarn.present() || now() - lastWarn.get() >= bulkDumpNoServerInTargetDcWarnIntervalSec)) {
+		lastWarn = now();
+		TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDc", self->ddId)
+		    .detail("JobID", jobId)
+		    .detail("TargetDcId", self->bulkDumpTargetDcId())
+		    .detail("SkippedRanges", skippedNoServerInTargetDc)
+		    .detail("FirstSkippedRange", firstSkippedRange);
 	}
 	co_await waitForAll(actors);
 	TraceEvent(SevInfo, "DDBulkDumpJobScheduleEnd", self->ddId).detail("JobId", jobId).detail("JobRange", jobRange);
