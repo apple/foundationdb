@@ -2981,9 +2981,26 @@ struct DDQueueImpl {
 
 						auto const highestPriorityRelocation = self->getHighestPriorityRelocation();
 
+						// InFlight and InQueue are counters and have been seen diverging from the work
+						// actually present by an order of magnitude, so also report the structures DD's
+						// memory consists of, which cannot drift. fetchKeysComplete is the known driver of
+						// that growth: relocations wait there to be retired, so it is unbounded whenever
+						// completion processing falls behind.
+						int serverQueueEntries = 0;
+						for (auto const& [serverId, serverQueue] : self->queue) {
+							serverQueueEntries += serverQueue.size();
+						}
+
 						TraceEvent("MovingData", self->distributorId)
 						    .detail("InFlight", self->activeRelocations)
 						    .detail("InQueue", self->queuedRelocations)
+						    .detail("FetchKeysComplete", self->fetchKeysComplete.size())
+						    .detail("FetchingSourcesQueue", self->fetchingSourcesQueue.size())
+						    .detail("ServerQueues", self->queue.size())
+						    .detail("ServerQueueEntries", serverQueueEntries)
+						    .detail("BusySourceServers", self->busymap.size())
+						    .detail("BusyDestServers", self->destBusymap.size())
+						    .detail("LastAsSourceEntries", self->lastAsSource.size())
 						    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
 						    .detail("UnhealthyRelocations", self->unhealthyRelocations)
 						    .detail("HighestPriority", highestPriorityRelocation)
