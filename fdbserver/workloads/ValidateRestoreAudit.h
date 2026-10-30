@@ -32,6 +32,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/tester/workloads.h"
 #include "BackupSteps.h"
 #include "flow/flow.h"
@@ -76,6 +77,144 @@ inline Future<Void> runValidateRestoreAudit(Database cx,
 		    .detail("Phase", static_cast<int>(state.getPhase()))
 		    .detail("Error", state.error);
 		throw audit_storage_failed();
+	}
+}
+
+// The content fingerprint of a key range, as computed by an audit_storage RangeDigest audit (design/range-digest.md).
+// Equal digests mean equal key-value sets, whatever the shard layout of either side.
+struct RangeDigestResult {
+	std::string digest;
+	int64_t kvCount = 0;
+	int64_t byteCount = 0;
+
+	bool operator==(RangeDigestResult const& other) const {
+		return digest == other.digest && kvCount == other.kvCount && byteCount == other.byteCount;
+	}
+};
+
+// Waits for data distribution to go idle (nothing in flight, nothing queued). A RangeDigest requires it: each storage
+// server folds at its own read version and the combine assumes every key-value is folded exactly once, so a shard in
+// flight can be counted by both the losing and the gaining server or by neither (design/range-digest.md,
+// "Precondition: quiescence"). A restore does not wait for it, and writing the restored data typically makes data
+// distribution split and move shards. Returns false when `timeoutSeconds` has passed, so the caller can decline to
+// digest a moving cluster. The deadline is checked between probes: a probe has no deadline of its own (finding the data
+// distributor's worker waits without one), so a probe that never completes is stopped only by the caller's own timeout.
+inline Future<bool> waitForQuiescentDataDistribution(Database cx,
+                                                     Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                                     double timeoutSeconds,
+                                                     const char* traceContext) {
+	double start = now();
+	while (now() - start < timeoutSeconds) {
+		Error err;
+		try {
+			int64_t inFlight = co_await getDataInFlight(cx, dbInfo);
+			int64_t queueSize = co_await getDataDistributionQueueSize(cx, dbInfo, /*reportInFlight=*/true);
+			if (inFlight == 0 && queueSize == 0) {
+				TraceEvent("DataDistributionQuiesced").detail("Context", traceContext).detail("Elapsed", now() - start);
+				co_return true;
+			}
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.code() == error_code_actor_cancelled) {
+			throw err;
+		}
+		if (err.code() != invalid_error_code) {
+			// These metrics come from per-worker event logs, so they throw (attribute_not_found when a server's worker
+			// cannot be found, timed_out when it does not answer) exactly while the cluster is churning. Not being able
+			// to observe quiescence is not evidence of it: keep polling and let the timeout be the only exit.
+			TraceEvent(SevInfo, "DataDistributionQuiescenceProbeFailed")
+			    .error(err)
+			    .detail("Context", traceContext)
+			    .detail("Elapsed", now() - start);
+		}
+		co_await delay(1.0);
+	}
+	TraceEvent(SevWarn, "DataDistributionQuiescenceTimeout")
+	    .detail("Context", traceContext)
+	    .detail("Timeout", timeoutSeconds);
+	co_return false;
+}
+
+// Computes the RangeDigest of `range` at a single version, so the range must be quiescent for the result to be
+// comparable with another. An audit that fails, or is cancelled or superseded while the data distributor or the
+// cluster recovers, is run again up to `maxAuditRetries` times; timed_out is not retried, since it means an audit
+// that was scheduled stopped making progress.
+inline Future<RangeDigestResult> runRangeDigestAudit(Database cx,
+                                                     KeyRange range,
+                                                     AuditWaitOptions options = AuditWaitOptions(),
+                                                     int maxAuditRetries = 10) {
+	if (options.traceContext.empty()) {
+		options.traceContext = "RangeDigestAudit";
+	}
+	for (int attempt = 1;; ++attempt) {
+		Error err;
+		try {
+			AuditStorageState state =
+			    co_await auditStorageAndWait(cx, range, AuditType::RangeDigest, KeyValueStoreType::END, options);
+			if (state.getPhase() == AuditPhase::Complete) {
+				RangeDigestResult result;
+				result.digest = state.digest;
+				result.kvCount = state.kvCount;
+				result.byteCount = state.byteCount;
+				co_return result;
+			}
+			TraceEvent(SevWarn, "RangeDigestAuditPhaseFailed")
+			    .detail("AuditID", state.id)
+			    .detail("Range", range)
+			    .detail("Phase", static_cast<int>(state.getPhase()))
+			    .detail("Error", state.error);
+			err = audit_storage_failed();
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.code() == error_code_actor_cancelled) {
+			throw err;
+		}
+		bool retryable = err.code() == error_code_audit_storage_failed ||
+		                 err.code() == error_code_persist_new_audit_metadata_error ||
+		                 err.code() == error_code_audit_storage_cancelled ||
+		                 err.code() == error_code_audit_storage_task_outdated;
+		if (!retryable || attempt > maxAuditRetries) {
+			throw err;
+		}
+		TraceEvent(SevWarn, "RangeDigestAuditRetry")
+		    .error(err)
+		    .detail("Range", range)
+		    .detail("Attempt", attempt)
+		    .detail("MaxRetries", maxAuditRetries);
+		co_await delay(std::min(10.0, 2.0 * attempt));
+	}
+}
+
+// Digests each of `ranges` in turn (see runRangeDigestAudit); the results are in the order of `ranges`.
+inline Future<std::vector<RangeDigestResult>> digestRanges(Database cx,
+                                                           Standalone<VectorRef<KeyRangeRef>> ranges,
+                                                           AuditWaitOptions options = AuditWaitOptions()) {
+	std::vector<RangeDigestResult> results;
+	for (auto const& r : ranges) {
+		results.push_back(co_await runRangeDigestAudit(cx, r, options));
+	}
+	co_return results;
+}
+
+// Throws restore_error if the digest of any range of `ranges` differs between `before` and `after`, which were taken
+// by digestRanges over the same ranges.
+inline void verifyDigestsEqual(Standalone<VectorRef<KeyRangeRef>> const& ranges,
+                               std::vector<RangeDigestResult> const& before,
+                               std::vector<RangeDigestResult> const& after) {
+	ASSERT(before.size() == ranges.size() && after.size() == ranges.size());
+	for (int i = 0; i < ranges.size(); ++i) {
+		if (!(before[i] == after[i])) {
+			TraceEvent(SevWarnAlways, "RangeDigestMismatch")
+			    .detail("Range", BackupSteps::describeRange(ranges[i]))
+			    .detail("BeforeKVCount", before[i].kvCount)
+			    .detail("AfterKVCount", after[i].kvCount)
+			    .detail("BeforeBytes", before[i].byteCount)
+			    .detail("AfterBytes", after[i].byteCount)
+			    .detail("DigestsEqual", before[i].digest == after[i].digest);
+			throw restore_error();
+		}
 	}
 }
 
