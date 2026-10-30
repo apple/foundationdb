@@ -2477,9 +2477,10 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 				// @todo probably there is no need to get the (entire) version vector from the sequencer
 				// in this case, and if so, consider adding a flag to the request to tell the sequencer
 				// to not send the version vector information.
+				// Receive master replies at socket priority so incoming commits cannot starve an already-arrived reply.
 				when(GetRawCommittedVersionReply v = wait(pProxyCommitData->master.getLiveCommittedVersion.getReply(
 				         GetRawCommittedVersionRequest(waitVersionSpan.context, debugID, invalidVersion),
-				         TaskPriority::GetLiveCommittedVersionReply))) {
+				         TaskPriority::ReadSocket))) {
 					if (v.version > pProxyCommitData->committedVersion.get()) {
 						pProxyCommitData->locked = v.locked;
 						pProxyCommitData->metadataVersion = v.metadataVersion;
