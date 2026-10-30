@@ -5,6 +5,11 @@
 # 'cy2/' and 'other/' must survive. Then restore B with no restore options: a default restore must clear and restore
 # only its backup's own ranges, so 'cy2/' and 'other/' must survive again. The restores run after the writers stop and
 # each ring is an independent cycle, so every ring is checked with the Cycle invariant.
+#
+# Before either restore, ValidateBackup checks backup B against the live data (a prefixed restore plus a ValidateRestore
+# audit, no in-place restore). The previous test's writers have stopped when it starts; it reads its quiescent version
+# validateAfter seconds into its test, well after the Cycle end time (Cycle can still land commits shortly after it).
+# The validation copy is cleared after the audit; the workload fails if any of it remains.
 
 testClass = "Backup"
 
@@ -52,6 +57,23 @@ runConsistencyCheck = false
     stopWhenDone = false
     encrypted = false
     backupRangePrefix = 'cy/'
+
+[[test]]
+testTitle = 'ValidateBackupB'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'ValidateBackup'
+    tag = 'prefixB'
+    delayFor = 0
+    # Backup B keeps running through the validation, so that RestoreBackupBDefault below still restores it after the
+    # restore of backup A has been captured by its log, as in the test without this step.
+    discontinue = false
+    validateAfter = 20.0
+    clearValidationData = true
+    settleSeconds = 30.0
 
 [[test]]
 testTitle = 'RestoreSubsetOfBackupA'
