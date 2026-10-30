@@ -236,45 +236,73 @@ public:
 	                              int rowLimit,
 	                              int byteLimit,
 	                              Optional<ReadOptions> options) override {
+		return readRangeImpl<RangeResult>(keys, rowLimit, byteLimit, byteLimit, options);
+	}
+
+	Future<StorageRangeKeysResult> readRangeKeys(KeyRangeRef keys,
+	                                             int rowLimit,
+	                                             int byteLimit,
+	                                             int scanByteLimit,
+	                                             Optional<ReadOptions> options) override {
+		return readRangeImpl<RangeKeysResult>(keys, rowLimit, byteLimit, scanByteLimit, options);
+	}
+
+	template <class Result>
+	Future<StorageRangeReadResult<Result>> readRangeImpl(KeyRangeRef keys,
+	                                                     int rowLimit,
+	                                                     int byteLimit,
+	                                                     int scanByteLimit,
+	                                                     Optional<ReadOptions> options) {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
-			return waitAndReadRange(keys, rowLimit, byteLimit, options);
+			return waitAndReadRange<Result>(keys, rowLimit, byteLimit, scanByteLimit, options);
 
-		RangeResult result;
+		Result result;
+		int64_t scannedBytes = 0;
 		if (rowLimit == 0) {
-			return result;
+			return makeStorageRangeReadResult(std::move(result), scannedBytes);
 		}
+
+		auto append = [&](const auto& it, KeyRef key) {
+			if constexpr (std::is_same_v<Result, RangeResult>) {
+				ValueRef value = it.getValue();
+				byteLimit -= sizeof(KeyValueRef) + key.size() + value.size();
+				result.emplace_back_deep(result.arena(), key, value);
+			} else {
+				scannedBytes += key.size();
+				byteLimit -= sizeof(uint32_t) + key.size();
+				result.push_back_deep(result.arena(), RangeKeyRef{ key });
+			}
+		};
 
 		if (rowLimit > 0) {
 			auto it = data.lower_bound(keys.begin);
-			while (it != data.end() && rowLimit && byteLimit > 0) {
-				StringRef tempKey = it.getKey(reserved_buffer);
-				if (tempKey >= keys.end)
+			while (it != data.end() && rowLimit && byteLimit > 0 && scannedBytes < scanByteLimit) {
+				KeyRef key = it.getKey(reserved_buffer);
+				if (key >= keys.end)
 					break;
 
-				byteLimit -= sizeof(KeyValueRef) + tempKey.size() + it.getValue().size();
-				result.push_back_deep(result.arena(), KeyValueRef(tempKey, it.getValue()));
+				append(it, key);
 				++it;
 				--rowLimit;
 			}
 		} else {
 			rowLimit = -rowLimit;
 			auto it = data.previous(data.lower_bound(keys.end));
-			while (it != data.end() && rowLimit && byteLimit > 0) {
-				StringRef tempKey = it.getKey(reserved_buffer);
-				if (tempKey < keys.begin)
+			while (it != data.end() && rowLimit && byteLimit > 0 && scannedBytes < scanByteLimit) {
+				KeyRef key = it.getKey(reserved_buffer);
+				if (key < keys.begin)
 					break;
 
-				byteLimit -= sizeof(KeyValueRef) + tempKey.size() + it.getValue().size();
-				result.push_back_deep(result.arena(), KeyValueRef(tempKey, it.getValue()));
+				append(it, key);
 				it = data.previous(it);
 				--rowLimit;
 			}
 		}
 
-		result.more = rowLimit == 0 || byteLimit <= 0;
-		return result;
+		result.more = rowLimit == 0 || byteLimit <= 0 || scannedBytes >= scanByteLimit;
+		return makeStorageRangeReadResult(std::move(result), scannedBytes);
 	}
 
 	void resyncLog() override {
@@ -870,10 +898,16 @@ private:
 		co_await this->recovering;
 		co_return static_cast<IKeyValueStore*>(this)->readValuePrefix(key, maxLength, options).get();
 	}
-	Future<RangeResult> waitAndReadRange(KeyRange keys, int rowLimit, int byteLimit, Optional<ReadOptions> options) {
+	template <class Result>
+	Future<StorageRangeReadResult<Result>> waitAndReadRange(KeyRange keys,
+	                                                        int rowLimit,
+	                                                        int byteLimit,
+	                                                        int scanByteLimit,
+	                                                        Optional<ReadOptions> options) {
 		co_await this->recovering;
-		co_return static_cast<IKeyValueStore*>(this)->readRange(keys, rowLimit, byteLimit, options).get();
+		co_return readRangeImpl<Result>(keys, rowLimit, byteLimit, scanByteLimit, options).get();
 	}
+
 	Future<Void> waitAndCommit(bool sequential) {
 		co_await this->recovering;
 		co_await this->commit(sequential);

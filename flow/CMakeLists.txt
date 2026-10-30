@@ -80,6 +80,8 @@ add_custom_command(
     ${FDB_PROTOCOL_VERSION_PYTHON_FILE}
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py
           ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/ProtocolVersion.h.template
+          ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/ProtocolVersion.java.template
+          ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py.template
           ${CMAKE_CURRENT_SOURCE_DIR}/ProtocolVersions.cmake)
 add_custom_target(ProtocolVersion DEPENDS ${FDB_PROTOCOL_VERSION_HEADER_FILE})
 

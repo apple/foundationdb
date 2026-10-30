@@ -456,6 +456,48 @@ inline std::vector<KeyRangeRef> operator-(const KeyRangeRef& lhs, const KeyRange
 	return result;
 }
 
+struct RangeKeyRef {
+	KeyRef key;
+
+	RangeKeyRef() = default;
+	explicit RangeKeyRef(KeyRef key) : key(key) {}
+	RangeKeyRef(Arena& arena, KeyRef key) : key(arena, key) {}
+	RangeKeyRef(Arena& arena, const RangeKeyRef& other) : key(arena, other.key) {}
+
+	bool operator==(const RangeKeyRef& other) const { return key == other.key; }
+	int expectedSize() const { return key.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, key);
+	}
+};
+
+template <>
+struct string_serialized_traits<RangeKeyRef> : std::true_type {
+	int32_t getSize(const RangeKeyRef& item) const { return sizeof(uint32_t) + item.key.size(); }
+
+	uint32_t save(uint8_t* out, const RangeKeyRef& item) const {
+		uint32_t size = item.key.size();
+		memcpy(out, &size, sizeof(size));
+		memcpy(out + sizeof(size), item.key.begin(), size);
+		return sizeof(size) + size;
+	}
+
+	template <class Context>
+	uint32_t load(const uint8_t* data, RangeKeyRef& item, Context& context) {
+		uint32_t size;
+		memcpy(&size, data, sizeof(size));
+		item.key = KeyRef(context.tryReadZeroCopy(data + sizeof(size), size), size);
+		return sizeof(size) + size;
+	}
+};
+
+template <>
+struct Traceable<RangeKeyRef> : std::true_type {
+	static std::string toString(const RangeKeyRef& value) { return value.key.printable(); }
+};
+
 struct KeyValueRef {
 	KeyRef key;
 	ValueRef value;
@@ -560,6 +602,7 @@ using KeyRange = Standalone<KeyRangeRef>;
 using KeyValue = Standalone<KeyValueRef>;
 using KeySelector = Standalone<struct KeySelectorRef>;
 using RangeResult = Standalone<struct RangeResultRef>;
+using RangeKeysResult = Standalone<struct RangeKeysResultRef>;
 using MappedRangeResult = Standalone<struct MappedRangeResultRef>;
 
 namespace std {
@@ -754,6 +797,8 @@ struct GetRangeLimits {
 	explicit GetRangeLimits(int rowLimit) : rows(rowLimit), minRows(1), bytes(BYTE_LIMIT_UNLIMITED) {}
 	GetRangeLimits(int rowLimit, int byteLimit) : rows(rowLimit), minRows(1), bytes(byteLimit) {}
 
+	void decrement(VectorRef<RangeKeyRef> const& data);
+	void decrement(RangeKeyRef const& data);
 	void decrement(VectorRef<KeyValueRef> const& data);
 	void decrement(KeyValueRef const& data);
 	void decrement(VectorRef<MappedKeyValueRef> const& data);
@@ -763,6 +808,7 @@ struct GetRangeLimits {
 	bool isReached() const;
 
 	// True if data would cause the row or byte limit to be reached
+	bool reachedBy(VectorRef<RangeKeyRef> const& data) const;
 	bool reachedBy(VectorRef<KeyValueRef> const& data) const;
 
 	bool hasByteLimit() const;
@@ -775,9 +821,8 @@ struct GetRangeLimits {
 	}
 };
 
-struct RangeResultRef : VectorRef<KeyValueRef> {
-	constexpr static FileIdentifier file_identifier = 3985192;
-
+template <class Row>
+struct RangeResultRefBase : VectorRef<Row> {
 	// True if the range may have more keys in it (possibly beyond the specified limits).
 	// 'more' can be true even if there are no keys left in the range, e.g. if a shard boundary is hit, it may or may
 	// not have more keys left, but 'more' will be set to true in that case.
@@ -802,8 +847,8 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		if (readThrough.present()) {
 			return readThrough.get();
 		}
-		ASSERT(!empty());
-		return reverse ? back().key : keyAfter(back().key);
+		ASSERT(!this->empty());
+		return reverse ? this->back().key : keyAfter(this->back().key);
 	}
 
 	// Helper function to get the next range scan's BeginKeySelector, use it when the range read is non-reverse,
@@ -813,8 +858,8 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		if (readThrough.present()) {
 			return firstGreaterOrEqual(readThrough.get());
 		}
-		ASSERT(!empty());
-		return firstGreaterThan(back().key);
+		ASSERT(!this->empty());
+		return firstGreaterThan(this->back().key);
 	}
 
 	// Helper function to get the next range scan's EndKeySelector, use it when the range read is reverse.
@@ -823,8 +868,8 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		if (readThrough.present()) {
 			return firstGreaterOrEqual(readThrough.get());
 		}
-		ASSERT(!empty());
-		return firstGreaterOrEqual(back().key);
+		ASSERT(!this->empty());
+		return firstGreaterOrEqual(this->back().key);
 	}
 
 	void setReadThrough(KeyRef key) {
@@ -836,25 +881,22 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	bool readToBegin;
 	bool readThroughEnd;
 
-	RangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
-	RangeResultRef(Arena& p, const RangeResultRef& toCopy)
-	  : VectorRef<KeyValueRef>(p, toCopy), more(toCopy.more),
+	RangeResultRefBase() : more(false), readToBegin(false), readThroughEnd(false) {}
+	RangeResultRefBase(Arena& p, const RangeResultRefBase& toCopy)
+	  : VectorRef<Row>(p, toCopy), more(toCopy.more),
 	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
 	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
-	RangeResultRef(const VectorRef<KeyValueRef>& value, bool more, Optional<KeyRef> readThrough = Optional<KeyRef>())
-	  : VectorRef<KeyValueRef>(value), more(more), readThrough(readThrough), readToBegin(false), readThroughEnd(false) {
-	}
-	RangeResultRef(bool readToBegin, bool readThroughEnd)
+	RangeResultRefBase(const VectorRef<Row>& value, bool more, Optional<KeyRef> readThrough = Optional<KeyRef>())
+	  : VectorRef<Row>(value), more(more), readThrough(readThrough), readToBegin(false), readThroughEnd(false) {}
+	RangeResultRefBase(bool readToBegin, bool readThroughEnd)
 	  : more(false), readToBegin(readToBegin), readThroughEnd(readThroughEnd) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
+		serializer(ar, ((VectorRef<Row>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 
-	int64_t logicalSize() const {
-		return VectorRef<KeyValueRef>::expectedSize() - VectorRef<KeyValueRef>::size() * sizeof(KeyValueRef);
-	}
+	int64_t logicalSize() const { return VectorRef<Row>::expectedSize() - VectorRef<Row>::size() * sizeof(Row); }
 
 	std::string toString() const {
 		return "more:" + std::to_string(more) +
@@ -863,12 +905,44 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	}
 };
 
+struct RangeResultRef : RangeResultRefBase<KeyValueRef> {
+	constexpr static FileIdentifier file_identifier = 3985192;
+	using RangeResultRefBase<KeyValueRef>::RangeResultRefBase;
+};
+
 template <>
 struct Traceable<RangeResultRef> : std::true_type {
 	static std::string toString(const RangeResultRef& value) {
 		return Traceable<VectorRef<KeyValueRef>>::toString(value);
 	}
 };
+
+struct RangeKeysResultRef : RangeResultRefBase<RangeKeyRef> {
+	constexpr static FileIdentifier file_identifier = 13985192;
+	using RangeResultRefBase<RangeKeyRef>::RangeResultRefBase;
+};
+
+template <>
+struct Traceable<RangeKeysResultRef> : std::true_type {
+	static std::string toString(const RangeKeysResultRef& value) {
+		return Traceable<VectorRef<RangeKeyRef>>::toString(value);
+	}
+};
+
+inline RangeKeysResult projectRangeKeys(const RangeResult& values) {
+	RangeKeysResult keys;
+	keys.reserve(keys.arena(), values.size());
+	for (const auto& row : values) {
+		keys.emplace_back(keys.arena(), keys.arena(), row.key);
+	}
+	keys.more = values.more;
+	keys.readToBegin = values.readToBegin;
+	keys.readThroughEnd = values.readThroughEnd;
+	if (values.readThrough.present()) {
+		keys.readThrough = KeyRef(keys.arena(), values.readThrough.get());
+	}
+	return keys;
+}
 
 // Similar to KeyValueRef, but result can be empty.
 struct GetValueReqAndResultRef {
