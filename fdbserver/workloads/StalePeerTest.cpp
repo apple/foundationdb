@@ -30,6 +30,7 @@
 #include "fdbrpc/FlowTransport.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.h"
+#include <algorithm>
 #include <set>
 #include "flow/CoroUtils.h"
 
@@ -171,18 +172,17 @@ struct StalePeerTestWorkload : TestWorkload {
 		return proc->global(INetwork::enFlowTransport) != nullptr;
 	}
 
-	// Count inspected source processes that currently hold a reference to `addr`:
-	// either a live tracked interface copy (per-role Delta > 0) or a live peer
-	// reference. Used pre-kill to establish non-vacuity (the target is actually
-	// referenced) and to pick the most-referenced storage server to kill.
-	int countSourcesReferencing(const NetworkAddress& addr, const std::string& trackerRole) const {
+	// Raw peer references also establish pre-kill coverage, but only tracked interface copies must drain.
+	int countSourcesReferencing(const NetworkAddress& addr,
+	                            const std::string& trackerRole,
+	                            bool includePeerRefs = true) const {
 		int n = 0;
 		for (auto* proc : g_simulator->getAllProcesses()) {
 			if (!isInspectedSource(proc))
 				continue;
 			auto* transport = static_cast<FlowTransport*>((void*)proc->global(INetwork::enFlowTransport));
 			bool hasRef = !trackerRole.empty() && transport->interfaceTracker.getDelta(addr, trackerRole) > 0;
-			if (!hasRef) {
+			if (!hasRef && includePeerRefs) {
 				const auto& allPeers = transport->getAllPeers();
 				auto it = allPeers.find(addr);
 				hasRef = (it != allPeers.end() && it->second->peerReferences > 0);
@@ -191,6 +191,38 @@ struct StalePeerTestWorkload : TestWorkload {
 				++n;
 		}
 		return n;
+	}
+
+	static Future<bool> storageServerRemoved(Database cx, NetworkAddress addr) {
+		const bool removed = std::ranges::none_of(
+		    co_await getStorageServers(cx), [addr](const StorageServerInterface& ss) { return ss.address() == addr; });
+		if (removed) {
+			TraceEvent("StalePeerTestStorageServerRemoved").detail("OldAddress", addr);
+		}
+		co_return removed;
+	}
+
+	Future<Void> waitForStorageServerRemovalOrDrain(Database cx, NetworkAddress addr, std::string trackerRole) const {
+		while (countSourcesReferencing(addr, trackerRole, false) > 0) {
+			if (co_await storageServerRemoved(cx, addr)) {
+				co_return;
+			}
+			co_await delay(1.0);
+		}
+		co_return;
+	}
+
+	bool skipIfClusterUnhealthy() {
+		const auto state = dbInfo->get().recoveryState;
+		if (state >= RecoveryState::FULLY_RECOVERED) {
+			return false;
+		}
+		TraceEvent("StalePeerTestClusterUnhealthy")
+		    .detail("RecoveryState", (int)state)
+		    .detail("KillRole", dstKillRole)
+		    .detail("Note", "Cluster is below FULLY_RECOVERED; skipping peer-ref check");
+		skippedClusterUnhealthy = true;
+		return true;
 	}
 
 	// Find a process address for the given role.
@@ -452,22 +484,39 @@ struct StalePeerTestWorkload : TestWorkload {
 		TraceEvent("StalePeerTestWaiting").detail("WaitSeconds", self->waitAfterKill);
 		co_await delay(self->waitAfterKill);
 
-		// Cluster-health guard: if the cluster never recovered to
-		// FULLY_RECOVERED within the wait window (e.g. perpetual_storage_wiggle
-		// + ssd-sharded-rocksdb configs that produce RkSSListFetchTimeout
-		// before the kill, or a degenerate recovery loop after the kill), the
-		// peer-ref check is meaningless -- the leak signal will be dominated
-		// by the cluster meltdown rather than the kill we're testing. Skip
-		// rather than fail: the contract this test verifies is "kill of role X
-		// drains its peer refs in a healthy cluster", not "every cluster
-		// configuration recovers within 240s".
-		if (self->dbInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
-			TraceEvent("StalePeerTestClusterUnhealthy")
-			    .detail("RecoveryState", (int)self->dbInfo->get().recoveryState)
-			    .detail("KillRole", self->dstKillRole)
-			    .detail("Note", "Cluster did not return to FULLY_RECOVERED; skipping peer-ref check");
-			self->skippedClusterUnhealthy = true;
+		// Peer references are only meaningful in a recovered cluster. Recovery can restart during the SS waits.
+		if (self->skipIfClusterUnhealthy()) {
 			co_return;
+		}
+
+		if (self->dstKillRole == "ss" && self->countSourcesReferencing(oldAddr, trackerRole, false) > 0) {
+			// Until DD finishes moving the killed server's shards, a client can evict its interface and
+			// immediately reacquire it from a proxy. Only require these remaining refs to drain after retirement.
+			auto result = co_await timeout(self->waitForStorageServerRemovalOrDrain(cx, oldAddr, trackerRole),
+			                               self->waitAfterKill);
+			if (!result.present() && self->countSourcesReferencing(oldAddr, trackerRole, false) > 0) {
+				// The server may have retired between the last poll and the deadline.
+				auto removed = co_await timeout(storageServerRemoved(cx, oldAddr), self->waitAfterKill);
+				if (!removed.orDefault(false) && self->countSourcesReferencing(oldAddr, trackerRole, false) > 0) {
+					if (self->skipIfClusterUnhealthy()) {
+						co_return;
+					}
+					if (removed.present()) {
+						TraceEvent(SevError, "StalePeerTestStorageServerRemovalTimeout").detail("OldAddress", oldAddr);
+					} else {
+						TraceEvent(SevError, "StalePeerTestServerListReadTimeout").detail("OldAddress", oldAddr);
+					}
+					self->testPassed = false;
+					co_return;
+				}
+			}
+			const double deadline = now() + self->waitAfterKill;
+			while (self->countSourcesReferencing(oldAddr, trackerRole, false) > 0 && now() < deadline) {
+				co_await delay(std::min(1.0, deadline - now()));
+			}
+			if (self->skipIfClusterUnhealthy()) {
+				co_return;
+			}
 		}
 
 		// Pass criterion: per-role InterfaceTracker Delta == 0 at the killed
