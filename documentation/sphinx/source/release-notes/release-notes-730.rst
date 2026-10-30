@@ -4,6 +4,21 @@
 Release Notes
 #############
 
+7.3.81
+======
+* Same as 7.3.80 release with AVX enabled.
+
+7.3.80
+======
+* Fixed a GRV proxy queue leak when tag throttling is enforced on GRV proxies, which is the default. `(PR #13996) <https://github.com/apple/foundationdb/pull/13996>`_
+* Disabled data distribution global admission control by default, which was added in 7.3.78. ``DD_MAX_PIPELINE_MOVES`` now defaults to unlimited; set it to a real cap (for example 1000) to turn admission control back on. `(PR #13987) <https://github.com/apple/foundationdb/pull/13987>`_
+* Fixed S3 multipart upload completion: a 200 response with an embedded error is now a failure, and an uncertain completion (NoSuchUpload or a failed request) is verified with a HEAD on the object before being reported as successful. `(PR #14172) <https://github.com/apple/foundationdb/pull/14172>`_
+* Fixed storage server ``finished_queries`` drifting below ``total_queries`` when a read was cancelled or failed, which made ``query_queue_max`` in status json grow permanently. `(PR #13786) <https://github.com/apple/foundationdb/pull/13786>`_
+* Fixed RPM build-id link conflicts that prevented installing versioned client packages alongside the main client package. `(PR #14163) <https://github.com/apple/foundationdb/pull/14163>`_
+* Changed debug level to "-g1" and enabled compression for "\*.debug" release artifacts, to make them much smaller. Also changed to include the main executable in the "\*.debug" release artifact so it can optionally be run directly, on its own. `(PR #14163) <https://github.com/apple/foundationdb/pull/14163>`_
+* Added opt-in audit logging to fdbcli. With ``--audit-log`` (or ``FDB_CLI_AUDIT_LOG_ENABLE``), every key returned by ``get``, ``getrange``, ``getrangekeys`` and ``getall`` is logged as an ``FdbCliAudit`` trace event. ``--audit-log-values`` (``none``, ``system`` or ``all``, default ``system``) picks which values are logged. Requires tracing to be enabled, and fdbcli aborts if audit logging is on without it. `(PR #14257) <https://github.com/apple/foundationdb/pull/14257>`_
+* Added opt-in JSON audit logging to ``transaction_profiling_analyzer.py``. With ``--audit-log`` (or ``FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE``), every key, range and mutation it prints is appended to ``transaction_profiling_analyzer_audit.json`` in the client trace directory. `(PR #14290) <https://github.com/apple/foundationdb/pull/14290>`_
+
 7.3.79
 ======
 * Same as 7.3.78 release with AVX enabled.
