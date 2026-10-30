@@ -1258,7 +1258,7 @@ struct EncodeFloatFunc : InstructionFunc {
 
 		int32_t intVal = *(int32_t*)fBytes.begin();
 		intVal = bigEndian32(intVal);
-		float fVal = *(float*)&intVal;
+		float fVal = std::bit_cast<float>(intVal);
 
 		Tuple t;
 		t.append(fVal);
@@ -1283,7 +1283,7 @@ struct EncodeDoubleFunc : InstructionFunc {
 
 		int64_t intVal = *(int64_t*)dBytes.begin();
 		intVal = bigEndian64(intVal);
-		double dVal = *(double*)&intVal;
+		double dVal = std::bit_cast<double>(intVal);
 
 		Tuple t;
 		t.append(dVal);
@@ -1304,7 +1304,7 @@ struct DecodeFloatFunc : InstructionFunc {
 
 		Standalone<StringRef> s1 = co_await items[0].value;
 		float fVal = Tuple::unpack(s1).getFloat(0);
-		int32_t intVal = *(int32_t*)&fVal;
+		int32_t intVal = std::bit_cast<int32_t>(fVal);
 		intVal = bigEndian32(intVal);
 
 		Tuple t;
@@ -1326,7 +1326,7 @@ struct DecodeDoubleFunc : InstructionFunc {
 
 		Standalone<StringRef> s1 = co_await items[0].value;
 		double dVal = Tuple::unpack(s1).getDouble(0);
-		int64_t intVal = *(int64_t*)&dVal;
+		int64_t intVal = std::bit_cast<int64_t>(dVal);
 		intVal = bigEndian64(intVal);
 
 		Tuple t;

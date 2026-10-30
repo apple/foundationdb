@@ -68,8 +68,9 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 		}
 	}
 
-	explicit RandomIntGenerator(unsigned int only = 0) : min(only), max(only) {}
-	RandomIntGenerator(unsigned int first, unsigned int last, bool skewTowardFirst = false) : min(first), max(last) {
+	explicit RandomIntGenerator(unsigned int only = 0) : min(only), max(only), val(only) {}
+	RandomIntGenerator(unsigned int first, unsigned int last, bool skewTowardFirst = false)
+	  : min(first), max(last), val(0) {
 		if (first != last && skewTowardFirst) {
 			skew = (first < last) ? SMALL : LARGE;
 		}
@@ -92,6 +93,7 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 			last = first;
 		}
 
+		val = 0;
 		min = parseInt(first);
 		max = parseInt(last);
 		if (skewTowardFirst && min != max) {
@@ -222,8 +224,8 @@ struct RandomStringSetGeneratorBase : IKeyGenerator {
 		std::set<Key> uniqueKeys;
 		int inserts = 0;
 		// for smaller indexGenerator.max, give it more insert try, as it may not find enough unique keys with 3 * max.
-		// It adds roughly log * 100. For example, even for max is 1, it will try at least 100 times.
-		const uint maxInsertTry = 3 * indexGenerator.max + (((sizeof(uint) * 8) - clz(indexGenerator.max)) * 100);
+		// It adds roughly log(max) * 100. (total_bits - count_leading_zero_bits = high_set_bit_pos)
+		const uint maxInsertTry = 3 * indexGenerator.max + (((uint)(sizeof(uint) * 8) - clz(indexGenerator.max)) * 100);
 		while (uniqueKeys.size() < indexGenerator.max) {
 			auto k = keyGen.next();
 			uniqueKeys.insert(k);
