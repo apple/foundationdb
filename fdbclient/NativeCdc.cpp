@@ -33,6 +33,7 @@
 #include "NativeCdcInternal.h"
 #include "NativeCdcOrderedMetadata.h"
 #include "NativeCdcOrderedMerge.h"
+#include "flow/BooleanParam.h"
 #include "flow/CodeProbe.h"
 #include "flow/Error.h"
 #include "flow/ScopeExit.h"
@@ -86,6 +87,8 @@ bool nativeCdcNameMatchesStream(Optional<Value> const& currentId, CDCStreamId st
 
 namespace {
 
+FDB_BOOLEAN_PARAM(GuardedRemoval);
+
 bool retryNativeCdcProxyRequest(Error const& error) {
 	return error.code() == error_code_wrong_shard_server || error.code() == error_code_broken_promise ||
 	       error.code() == error_code_connection_failed || error.code() == error_code_request_maybe_delivered;
@@ -108,7 +111,8 @@ bool rewindUnacknowledgedCursorAfterProxyReplacement(CDCCursor* currentPosition,
 // registration currently chooses any available proxy before the controller's opt-in balancing pass.
 Optional<CDCProxyInterface> selectAvailableNativeCdcProxy(ClientDBInfo const& clientInfo,
                                                           Optional<UID> previousProxy,
-                                                          bool requireOrdered = false) {
+                                                          bool requireOrdered = false,
+                                                          GuardedRemoval preferGuarded = GuardedRemoval::False) {
 	Optional<CDCProxyInterface> fallback;
 	for (const auto& proxy : clientInfo.cdcProxies) {
 		if (requireOrdered && !proxy.supportsOrderedStreams) {
@@ -117,7 +121,8 @@ Optional<CDCProxyInterface> selectAvailableNativeCdcProxy(ClientDBInfo const& cl
 		if (!fallback.present()) {
 			fallback = proxy;
 		}
-		if (!previousProxy.present() || proxy.id() != previousProxy.get()) {
+		if ((!previousProxy.present() || proxy.id() != previousProxy.get()) &&
+		    (!preferGuarded || proxy.supportsGuardedRemoval)) {
 			return proxy;
 		}
 	}
@@ -145,7 +150,9 @@ Future<bool> nativeCdcStreamStillExists(Database cx, CDCStreamId streamId) {
 	}
 }
 
-Future<Optional<CDCStreamId>> findNativeCdcStreamId(Database cx, Key name) {
+Future<Optional<CDCStreamId>> findNativeCdcStreamId(Database cx,
+                                                    Key name,
+                                                    GuardedRemoval guarded = GuardedRemoval::False) {
 	if (name.empty()) {
 		throw client_invalid_operation();
 	}
@@ -156,6 +163,9 @@ Future<Optional<CDCStreamId>> findNativeCdcStreamId(Database cx, Key name) {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			if (guarded) {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			}
 			Optional<Value> streamId = co_await tr.get(cdcStreamNameKeyFor(name));
 			if (!streamId.present()) {
 				co_return Optional<CDCStreamId>();
@@ -199,23 +209,10 @@ Future<CDCProxyInterface> getNativeCdcStreamProxy(Database cx, CDCStreamId strea
 	}
 }
 
-Future<bool> namedNativeCdcStreamStillExists(Database cx, Key name, CDCStreamId streamId) {
-	Transaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> currentId = co_await tr.get(cdcStreamNameKeyFor(name));
-			co_return nativeCdcNameMatchesStream(currentId, streamId);
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
-Future<Optional<CDCProxyInterface>> getNativeCdcStreamProxyForRemoval(Database cx, Key name, CDCStreamId streamId) {
+Future<Optional<CDCProxyInterface>> getNativeCdcStreamProxyForRemoval(Database cx,
+                                                                      Key name,
+                                                                      CDCStreamId streamId,
+                                                                      GuardedRemoval guarded) {
 	while (true) {
 		const ClientDBInfo& clientInfo = cx->clientInfo->get();
 		auto assigned = clientInfo.streamToCDCProxyId.find(streamId);
@@ -226,12 +223,13 @@ Future<Optional<CDCProxyInterface>> getNativeCdcStreamProxyForRemoval(Database c
 				}
 			}
 		}
-		if (!(co_await namedNativeCdcStreamStillExists(cx, name, streamId))) {
+		const Optional<CDCStreamId> current = co_await findNativeCdcStreamId(cx, name, guarded);
+		if (!current.present() || current.get() != streamId) {
 			co_return Optional<CDCProxyInterface>();
 		}
 		if ((co_await readNativeCdcOrderedSnapshot(cx, streamId)).present()) {
 			const ClientDBInfo& currentInfo = cx->clientInfo->get();
-			const auto proxy = selectAvailableNativeCdcProxy(currentInfo, {}, true);
+			const auto proxy = selectAvailableNativeCdcProxy(currentInfo, {}, true, guarded);
 			if (proxy.present()) {
 				co_return proxy;
 			}
@@ -243,17 +241,19 @@ Future<Optional<CDCProxyInterface>> getNativeCdcStreamProxyForRemoval(Database c
 	}
 }
 
-Future<Void> removeNativeCdcStreamById(Database cx, Key name, CDCStreamId streamId) {
+Future<Void> removeNativeCdcStreamById(Database cx, Key name, CDCStreamId streamId, GuardedRemoval guarded) {
 	while (true) {
-		Optional<CDCProxyInterface> proxy = co_await getNativeCdcStreamProxyForRemoval(cx, name, streamId);
+		Optional<CDCProxyInterface> proxy = co_await getNativeCdcStreamProxyForRemoval(cx, name, streamId, guarded);
 		if (!proxy.present()) {
 			co_return;
 		}
 		try {
 			Future<Void> proxyChanged = cx->clientInfo->onChange();
-			auto result = co_await race(
-			    throwErrorOr(proxy.get().removeStream.tryGetReply(CDCRemoveStreamRequest(name, streamId))),
-			    proxyChanged);
+			const bool useGuardedEndpoint = guarded && proxy.get().supportsGuardedRemoval;
+			auto reply = useGuardedEndpoint
+			                 ? proxy.get().removeStreamGuarded.tryGetReply(CDCRemoveStreamRequest(name, streamId))
+			                 : proxy.get().removeStream.tryGetReply(CDCRemoveStreamRequest(name, streamId));
+			auto result = co_await race(throwErrorOr(std::move(reply)), proxyChanged);
 			if (result.index() == 0) {
 				co_return;
 			}
@@ -529,6 +529,7 @@ Future<NativeCdcStatus> getNativeCdcStatus(Database cx) {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			result = NativeCdcStatus();
 			result.readVersion = co_await tr.getReadVersion();
 			std::vector<Future<Standalone<VectorRef<KeyValueRef>>>> metadata;
@@ -738,22 +739,22 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 		co_return;
 	}
 
-	co_await removeNativeCdcStreamById(cx, name, streamId.get());
+	co_await removeNativeCdcStreamById(cx, name, streamId.get(), GuardedRemoval::False);
 }
 
 Future<NativeCdcRemoveResult> removeNativeCdcStreamGuarded(Database cx, Key name, CDCStreamId expectedStreamId) {
 	if (name.empty() || expectedStreamId == 0) {
 		throw client_invalid_operation();
 	}
-	Optional<CDCStreamId> current = co_await findNativeCdcStreamId(cx, name);
+	Optional<CDCStreamId> current = co_await findNativeCdcStreamId(cx, name, GuardedRemoval::True);
 	if (!current.present()) {
 		co_return NativeCdcRemoveResult::AlreadyAbsent;
 	}
 	if (current.get() != expectedStreamId) {
 		co_return NativeCdcRemoveResult::StreamReplaced;
 	}
-	co_await removeNativeCdcStreamById(cx, name, expectedStreamId);
-	current = co_await findNativeCdcStreamId(cx, name);
+	co_await removeNativeCdcStreamById(cx, name, expectedStreamId, GuardedRemoval::True);
+	current = co_await findNativeCdcStreamId(cx, name, GuardedRemoval::True);
 	if (current.present()) {
 		if (current.get() != expectedStreamId) {
 			co_return NativeCdcRemoveResult::StreamReplaced;
@@ -1259,6 +1260,16 @@ TEST_CASE("/NativeCDC/OrderedProxySelectionRequiresCapability") {
 	ASSERT_EQ(selectAvailableNativeCdcProxy(clientInfo, {}).get().id(), legacy.id());
 	ASSERT_EQ(selectAvailableNativeCdcProxy(clientInfo, {}, true).get().id(), ordered.id());
 	ASSERT_EQ(selectAvailableNativeCdcProxy(clientInfo, ordered.id(), true).get().id(), ordered.id());
+	ASSERT_EQ(selectAvailableNativeCdcProxy(clientInfo, {}, true, GuardedRemoval::True).get().id(), ordered.id());
+
+	CDCProxyInterface guarded;
+	guarded.consume = PublicRequestStream<CDCConsumeRequest>(Endpoint({ address }, UID(5, 6)));
+	guarded.supportsOrderedStreams = true;
+	guarded.supportsGuardedRemoval = true;
+	clientInfo.cdcProxies.push_back(guarded);
+	ASSERT_EQ(selectAvailableNativeCdcProxy(clientInfo, {}, true).get().id(), ordered.id());
+	ASSERT_EQ(selectAvailableNativeCdcProxy(clientInfo, {}, true, GuardedRemoval::True).get().id(), guarded.id());
+
 	clientInfo.cdcProxies = { legacy };
 	ASSERT(!selectAvailableNativeCdcProxy(clientInfo, {}, true).present());
 	return Void();

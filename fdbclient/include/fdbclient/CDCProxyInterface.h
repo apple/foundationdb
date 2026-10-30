@@ -24,6 +24,7 @@
 
 #include "fdbclient/CommitTransaction.h"
 #include "flow/FileIdentifier.h"
+#include "flow/ObjectSerializerTraits.h"
 #include "fdbrpc/fdbrpc.h"
 
 // Native CDC wire messages; see design/cdc.md for protocol and lifecycle semantics.
@@ -344,7 +345,9 @@ struct CDCProxyInterface {
 	RequestStream<SetCDCProxyPopsPausedRequest> setPopsPausedForTesting;
 	RequestStream<GetCDCProxyStatusRequest> getStatus;
 	PublicRequestStream<CDCRegisterOrderedStreamRequest> registerOrderedStream;
+	RequestStream<CDCRemoveStreamRequest> removeStreamGuarded;
 	bool supportsOrderedStreams = false;
+	bool supportsGuardedRemoval = false;
 
 	UID id() const { return consume.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -355,7 +358,15 @@ struct CDCProxyInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, processId, consume, supportsOrderedStreams);
+		if constexpr (is_fb_function<Ar>) {
+			serializer(ar, processId, consume, supportsOrderedStreams, supportsGuardedRemoval);
+		} else {
+			// Positional archives cannot skip a new field between two interfaces in a vector.
+			serializer(ar, processId, consume, supportsOrderedStreams);
+			if constexpr (Ar::isDeserializing) {
+				supportsGuardedRemoval = false;
+			}
+		}
 		if (Ar::isDeserializing) {
 			registerStream =
 			    PublicRequestStream<CDCRegisterStreamRequest>(consume.getEndpoint().getAdjustedEndpoint(1));
@@ -370,11 +381,18 @@ struct CDCProxyInterface {
 			getStatus = RequestStream<GetCDCProxyStatusRequest>(consume.getEndpoint().getAdjustedEndpoint(8));
 			registerOrderedStream =
 			    PublicRequestStream<CDCRegisterOrderedStreamRequest>(consume.getEndpoint().getAdjustedEndpoint(9));
+			if (supportsGuardedRemoval) {
+				removeStreamGuarded =
+				    RequestStream<CDCRemoveStreamRequest>(consume.getEndpoint().getAdjustedEndpoint(10));
+			} else {
+				removeStreamGuarded = RequestStream<CDCRemoveStreamRequest>();
+			}
 		}
 	}
 
 	void initEndpoints() {
 		supportsOrderedStreams = true;
+		supportsGuardedRemoval = true;
 		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
 		streams.push_back(consume.getReceiver(TaskPriority::ReadSocket));
 		streams.push_back(registerStream.getReceiver(TaskPriority::ReadSocket));
@@ -386,6 +404,7 @@ struct CDCProxyInterface {
 		streams.push_back(setPopsPausedForTesting.getReceiver());
 		streams.push_back(getStatus.getReceiver());
 		streams.push_back(registerOrderedStream.getReceiver(TaskPriority::ReadSocket));
+		streams.push_back(removeStreamGuarded.getReceiver(TaskPriority::ReadSocket));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
