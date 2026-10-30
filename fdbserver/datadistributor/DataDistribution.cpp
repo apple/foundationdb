@@ -518,7 +518,7 @@ public:
 	}
 
 	// The DC whose storage servers perform bulkdump uploads, or empty when the cluster has no
-	// region configuration. Resolved per dispatch rather than cached so it follows a failover.
+	// region configuration. Resolved per scheduling pass rather than cached so it follows a failover.
 	std::string bulkDumpTargetDcId() const {
 		// With usable_regions == 1 the remote DC is configured but holds no storage servers.
 		const bool useRemote = SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION && configuration.usableRegions > 1;
@@ -2806,14 +2806,15 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 				    .detail("BulkDumpRange", bulkDumpRange)
 				    .detail("BeginKey", bulkDumpResult[bulkDumpResultIndex].key)
 				    .detail("EndKey", rangeLocations.back().range.end);
+				const std::string targetDcId = self->bulkDumpTargetDcId();
 				rangeLocationIndex = 0;
 				for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
 					// Spawn task per shard
 					taskRange = rangeLocations[rangeLocationIndex].range;
 					ASSERT(!taskRange.empty());
 					// Skip rather than fall back to another region: the dumping server uploads the
-					// files, so a DC that cannot reach the destination would fail every task.
-					const std::string targetDcId = self->bulkDumpTargetDcId();
+					// files, so a DC that cannot reach the destination would fail every task. The
+					// one exception is usable_regions == 1, handled in bulkDumpTargetDcId().
 					if (!targetDcId.empty()) {
 						const auto& servers = rangeLocations[rangeLocationIndex].servers;
 						auto targetDc = servers.find(targetDcId);
