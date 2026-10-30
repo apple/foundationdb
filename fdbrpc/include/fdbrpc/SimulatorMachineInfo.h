@@ -43,6 +43,9 @@ struct MachineInfo {
 
 	std::set<std::string> deletingOrClosingFiles;
 	std::set<std::string> closingFiles;
+	// Sim2 can acknowledge an unlink while keeping the host file to model loss on power failure.
+	// These names are absent on the running machine. A machine reboot discards this set.
+	std::set<std::string> nonDurablyUnlinkedFiles;
 	Optional<Standalone<StringRef>> machineId;
 
 	const uint16_t remotePortStart;

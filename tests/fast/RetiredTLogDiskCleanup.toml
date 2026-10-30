@@ -1,0 +1,24 @@
+[configuration]
+config = 'double log_version:=6'
+generateFearless = false
+datacenters = 1
+machineCount = 8
+processesPerMachine = 1
+buggify = false
+
+[[test]]
+testTitle = 'RetiredTLogDiskCleanup'
+runFailureWorkloads = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 250.0
+    testDuration = 20.0
+
+    # Changing the queue format forces recruitment of new shared stores even on the same worker.
+    [[test.workload]]
+    testName = 'ChangeConfig'
+    configMode = 'log_version:=7'
+    waitForTLogReplacement = true
+    minDelayBeforeChange = 10.0
+    maxDelayBeforeChange = 10.0

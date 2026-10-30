@@ -18,16 +18,20 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <cinttypes>
 #include <vector>
 #include <map>
+#include <set>
 
 #include <boost/lexical_cast.hpp>
 #include <fmt/ranges.h>
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
+#include "flow/Platform.h"
 #include "flow/flow.h"
 #include "flow/ProcessEvents.h"
 #include "flow/Trace.h"
@@ -823,13 +827,8 @@ struct QuietDatabaseChecker {
 				    .detail("Reasons", reasons)
 				    .detail("FailedAfter", now() - start)
 				    .detail("Timeout", maxDDRunTime);
-				if (timedOut) {
-					// this bool is just created to make the assertion more readable
-					bool ddGotStuck = true;
-					// This assertion is here to make the test fail more quickly. If quietDatabase takes this
-					// long without completing, we can assume that the test will eventually time out. However,
-					// time outs are more annoying to debug. This will hopefully be easier to track down.
-					ASSERT(!ddGotStuck || !g_network->isSimulated());
+				if (timedOut && g_network->isSimulated()) {
+					throw test_failed();
 				}
 				return false;
 			}
@@ -982,6 +981,309 @@ Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompletion) {
 	printf("Consistency scan complete.\n");
 }
 
+// Queue files, spill files, and spill directories all carry the shared TLog ID. A single
+// shared store can serve several generations, so a logical TLog ID cannot identify its files.
+static Optional<UID> sharedTLogIdFromFilename(StringRef name) {
+	StringRef prefix = name.eat("-"_sr);
+	if (prefix != "logqueue"_sr && prefix != "log2"_sr && prefix != "log"_sr) {
+		return {};
+	}
+	if (name.startsWith("V_"_sr)) {
+		name.eat("-"_sr);
+	}
+	if (name.size() <= 32 || (name[32] != '-' && name[32] != '.')) {
+		return {};
+	}
+	const auto id = name.substr(0, 32);
+	if (!std::all_of(
+	        id.begin(), id.end(), [](uint8_t c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); })) {
+		return {};
+	}
+	return UID::fromStringThrowsOnFailure(id.toString());
+}
+
+template <class Visitor>
+static int visitSimTLogDiskFiles(const ISimulator::ProcessInfo& process, const std::string& folder, Visitor&& visit) {
+	const auto absoluteFolder = abspath(folder);
+	auto names = platform::listFiles(folder);
+	auto dirs = platform::listDirectories(folder);
+	names.insert(names.end(), dirs.begin(), dirs.end());
+	int ignoredUnlinks = 0;
+	for (const auto& name : names) {
+		auto id = sharedTLogIdFromFilename(name);
+		if (!id.present()) {
+			continue;
+		}
+		if (process.machine->nonDurablyUnlinkedFiles.contains(joinPath(absoluteFolder, name))) {
+			++ignoredUnlinks;
+			continue;
+		}
+		visit(id.get(), name, joinPath(folder, name), std::binary_search(dirs.begin(), dirs.end(), name));
+	}
+	return ignoredUnlinks;
+}
+
+// Record the disk as well as the size so that a later empty scan checks the original disk.
+Optional<SimTLogDiskTarget> getSimTLogDiskTarget(NetworkAddress address, UID sharedId) {
+	const auto* process = g_simulator->findProcessByAddress(address);
+	if (!process || !process->machine || process->failed || process->rebooting) {
+		return {};
+	}
+	Optional<int64_t> bytes;
+	try {
+		visitSimTLogDiskFiles(
+		    *process, process->dataFolder, [&](UID id, const auto& name, const auto& path, bool directory) {
+			    if (id == sharedId && !directory && name.starts_with("logqueue-") && name.ends_with(".fdq")) {
+				    bytes = bytes.orDefault(0) + fileSize(path);
+			    }
+		    });
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		TraceEvent("GcGenerationsQueueTargetReadError", sharedId)
+		    .detail("Worker", address)
+		    .detail("ErrorCode", e.code());
+		return {};
+	}
+	return bytes.map([&](int64_t n) { return SimTLogDiskTarget{ sharedId, process->dataFolder, n }; });
+}
+
+static Future<bool> pollRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                         Optional<SimTLogDiskTarget> target) {
+	const Optional<UID> targetId = target.map(&SimTLogDiskTarget::sharedId);
+	Optional<LogEpoch> epoch;
+	double deadline = 0;
+	while (true) {
+		auto workers = co_await getWorkers(dbInfo);
+		const auto& info = dbInfo->get();
+		if (info.recoveryState != RecoveryState::FULLY_RECOVERED) {
+			epoch.reset();
+			co_await dbInfo->onChange();
+			continue;
+		}
+		if (!epoch.present() || epoch.get() != info.logSystemConfig.epoch) {
+			epoch = info.logSystemConfig.epoch;
+			deadline = now() + 120.0;
+		}
+
+		const auto owners = info.logSystemConfig.allSharedLogs();
+		const std::map<UID, NetworkAddress> advertised(owners.begin(), owners.end());
+		const bool targetAdvertised = targetId.present() && advertised.contains(targetId.get());
+		std::map<UID, std::vector<UID>> current;
+		for (const auto& log : info.logSystemConfig.allPresentLogs()) {
+			current[log.getSharedTLogID()].push_back(log.id());
+		}
+		std::set<NetworkAddress> workerAddresses;
+		for (const auto& worker : workers) {
+			workerAddresses.insert(worker.interf.address());
+		}
+		auto storeWorkers = advertised;
+		std::map<UID, Future<ErrorOr<SimTLogDiskCheckReply>>> audits;
+		const auto& endpoints = fdbSimulationPolicyState().tLogDiskCheckEndpoints;
+		for (const auto& [id, endpoint] : endpoints) {
+			Endpoint remote = endpoint;
+			remote.choosePrimaryAddress();
+			const auto& address = remote.getPrimaryAddress();
+			if (!workerAddresses.contains(address)) {
+				continue;
+			}
+			// Recovery can stop advertising a generation before its worker releases the shared store.
+			// Audit that store on its actual worker, even when there are no current log IDs to send.
+			if (storeWorkers.try_emplace(id, address).first->second != address) {
+				continue;
+			}
+			SimTLogDiskCheckRequest req;
+			auto logs = current.find(id);
+			if (logs != current.end()) {
+				req.currentLogs = logs->second;
+			}
+			RequestStream<SimTLogDiskCheckRequest> stream(remote);
+			audits.emplace(id, errorOr(timeoutError(stream.getReply(req), 5.0)));
+		}
+		for (const auto& [id, audit] : audits) {
+			co_await audit;
+		}
+		if (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED ||
+		    dbInfo->get().logSystemConfig.epoch != epoch.get() ||
+		    dbInfo->get().logSystemConfig.allSharedLogs() != owners) {
+			continue;
+		}
+		const Severity severity = now() >= deadline ? SevError : SevInfo;
+		std::set<UID> observed;
+		std::set<UID> queueStores;
+		std::map<UID, int64_t> queueBytes;
+		int filesChecked = 0;
+		int nonDurableUnlinks = 0;
+		int recoveringWorkers = 0;
+		int unreadableFolders = 0;
+		int staleFiles = 0;
+		bool targetDiskScanned = false;
+		int targetFiles = 0;
+		for (const auto& worker : workers) {
+			const auto* process = g_simulator->findProcessByAddress(worker.interf.address());
+			if (process && process->failed) {
+				continue;
+			}
+			if (!process || !process->machine || process->rebooting || !worker.recoveredDiskFiles) {
+				++recoveringWorkers;
+				continue;
+			}
+			const int priorReadErrors = unreadableFolders;
+			for (const auto& folder : { process->dataFolder, process->dataFolder + "-tlog-spill" }) {
+				try {
+					nonDurableUnlinks += visitSimTLogDiskFiles(
+					    *process, folder, [&](UID id, const auto& name, const auto& path, bool directory) {
+						    ++filesChecked;
+						    targetFiles += targetId == id;
+						    auto owner = storeWorkers.find(id);
+						    if (owner != storeWorkers.end() && owner->second == worker.interf.address()) {
+							    observed.insert(id);
+							    if (!directory && name.starts_with("logqueue-")) {
+								    if (name.ends_with(".fdq")) {
+									    queueStores.insert(id);
+								    }
+								    // Include temporary replacement files until their rename or unlink is visible.
+								    queueBytes[id] += fileSize(path);
+							    }
+						    } else {
+							    ++staleFiles;
+							    TraceEvent(severity, "RetiredTLogFilePresent", id)
+							        .detail("Epoch", epoch.get())
+							        .detail("Worker", worker.interf.address())
+							        .detail("SharedTLogID", id.toString())
+							        .detail("File", path)
+							        .detail("Bytes", directory ? -1 : fileSize(path))
+							        .detail("Deadline", deadline);
+						    }
+					    });
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw;
+					}
+					++unreadableFolders;
+					TraceEvent(severity, "TLogDiskInventoryReadError")
+					    .detail("Epoch", epoch.get())
+					    .detail("Worker", worker.interf.address())
+					    .detail("Folder", folder)
+					    .detail("ErrorCode", e.code());
+				}
+			}
+			if (target.present() && process->dataFolder == target->dataFolder && priorReadErrors == unreadableFolders &&
+			    directoryExists(target->dataFolder)) {
+				targetDiskScanned = true;
+			}
+		}
+		std::set<UID> answered;
+		bool staleData = false;
+		bool targetIdle = false;
+		for (const auto& [id, audit] : audits) {
+			const auto& result = audit.get();
+			if (result.isError()) {
+				continue;
+			}
+			answered.insert(id);
+			const auto& reply = result.get();
+			const bool idle = !current.contains(id);
+			const bool listed = advertised.contains(id);
+			const int64_t bytes = queueBytes[id];
+			targetIdle |= targetId == id && idle && reply.allLogsRetired && queueStores.contains(id);
+			if (reply.staleSpillId.present() || (idle && bytes > reply.emptyQueueLimit) ||
+			    (!listed && observed.contains(id) && (!reply.allLogsRetired || !queueStores.contains(id)))) {
+				staleData = true;
+				TraceEvent(severity, "RetiredTLogDataPresent", id)
+				    .detail("Epoch", epoch.get())
+				    .detail("SharedTLogID", id.toString())
+				    .detail("OldLog", reply.staleSpillId)
+				    .detail("Idle", idle)
+				    .detail("Advertised", listed)
+				    .detail("AllLogsRetired", reply.allLogsRetired)
+				    .detail("QueueFilePresent", queueStores.contains(id))
+				    .detail("QueueBytes", bytes)
+				    .detail("EmptyQueueLimit", reply.emptyQueueLimit);
+			} else if (idle && reply.allLogsRetired && queueStores.contains(id)) {
+				CODE_PROBE(!listed, "Checked idle TLog disk no longer advertised", probe::assert::simOnly);
+				TraceEvent("RetiredTLogIdleQueueChecked", id)
+				    .detail("Epoch", epoch.get())
+				    .detail("SharedTLogID", id.toString())
+				    .detail("Advertised", listed)
+				    .detail("QueueBytes", bytes)
+				    .detail("EmptyQueueLimit", reply.emptyQueueLimit);
+			}
+		}
+		// A historical store may already have been disposed. Every current store must exist,
+		// and every store that still owns files must answer for their contents.
+		const bool complete = !current.empty() && recoveringWorkers == 0 && unreadableFolders == 0 &&
+		                      std::all_of(current.begin(),
+		                                  current.end(),
+		                                  [&](const auto& entry) { return queueStores.contains(entry.first); }) &&
+		                      std::includes(answered.begin(), answered.end(), observed.begin(), observed.end());
+		// A new recovery can remove a retained role between worker restarts. A missing reply alone
+		// cannot prove disposal. Require a complete scan of the original disk and no remaining owner.
+		const bool targetDisposed = target.present() && targetDiskScanned && targetFiles == 0 && !targetAdvertised &&
+		                            !endpoints.contains(target->sharedId);
+		const bool targetChecked = !target.present() || (targetDiskScanned && targetIdle) || targetDisposed;
+		if (complete && targetChecked && !staleData && staleFiles == 0) {
+			if (target.present()) {
+				CODE_PROBE(targetIdle, "Checked retained idle TLog disk", probe::assert::simOnly);
+				CODE_PROBE(targetDisposed, "Checked disposed TLog disk", probe::assert::simOnly);
+				TraceEvent("RetiredTLogTargetChecked", target->sharedId)
+				    .detail("Epoch", epoch.get())
+				    .detail("SharedTLogID", target->sharedId.toString())
+				    .detail("DataFolder", target->dataFolder)
+				    .detail("InitialQueueBytes", target->queueBytes)
+				    .detail("QueueBytes", queueBytes[target->sharedId])
+				    .detail("TargetFiles", targetFiles)
+				    .detail("Disposed", targetDisposed);
+			}
+			TraceEvent("RetiredTLogDisksChecked")
+			    .detail("Epoch", epoch.get())
+			    .detail("CurrentSharedTLogs", current.size())
+			    .detail("NonDurableUnlinks", nonDurableUnlinks)
+			    .detail("TargetStore", targetId)
+			    .detail("TLogFiles", filesChecked);
+			co_return true;
+		}
+		if (now() >= deadline) {
+			if (!targetChecked) {
+				TraceEvent(SevError, "GcGenerationsQueueNotIdle", target->sharedId)
+				    .detail("Epoch", epoch.get())
+				    .detail("SharedTLogID", target->sharedId.toString())
+				    .detail("TargetDiskScanned", targetDiskScanned)
+				    .detail("TargetFiles", targetFiles)
+				    .detail("Advertised", targetAdvertised)
+				    .detail("Responded", answered.contains(target->sharedId))
+				    .detail("StillCurrent", current.contains(target->sharedId));
+			}
+			if (!complete) {
+				TraceEvent(SevError, "TLogDiskInventoryIncomplete")
+				    .detail("Epoch", epoch.get())
+				    .detail("CurrentSharedTLogs", current.size())
+				    .detail("ObservedSharedTLogs", observed.size())
+				    .detail("AnsweredAudits", answered.size())
+				    .detail("RecoveringWorkers", recoveringWorkers)
+				    .detail("UnreadableFolders", unreadableFolders);
+			}
+			co_return false;
+		}
+		co_await delay(5.0);
+	}
+}
+
+Future<bool> checkRetiredTLogDisks(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                   double maxWait,
+                                   Optional<SimTLogDiskTarget> target) {
+	auto result = co_await timeout(pollRetiredTLogDisks(dbInfo, target), maxWait);
+	if (!result.present()) {
+		TraceEvent(SevError, "TLogDiskCheckTimedOut")
+		    .detail("Epoch", dbInfo->get().logSystemConfig.epoch)
+		    .detail("RecoveryState", dbInfo->get().recoveryState)
+		    .detail("TargetStore", target.map(&SimTLogDiskTarget::sharedId));
+		co_return false;
+	}
+	co_return result.get();
+}
+
 // Waits until a database quiets down (no data in flight, small tlog queue, low SQ, no active data distribution). This
 // requires the database to be available and healthy in order to succeed.
 Future<Void> waitForQuietDatabase(Database cx,
@@ -1030,10 +1332,9 @@ Future<Void> waitForQuietDatabase(Database cx,
 			    .detail("RecoveryState", (int)dbInfo->get().recoveryState)
 			    .detail("WaitedFor", now() - checker.start)
 			    .detail("Timeout", checker.maxDDRunTime);
-			// Mirror the ddGotStuck assertion below: in simulation, a cluster that cannot fully
-			// recover within the budget is a failure we want surfaced quickly. On a real cluster,
-			// fall through and let the checks below keep retrying.
-			ASSERT(!g_network->isSimulated());
+			if (g_network->isSimulated()) {
+				throw test_failed();
+			}
 			break;
 		}
 		co_await (dbInfo->onChange() || delay(5.0));
@@ -1166,6 +1467,10 @@ Future<Void> waitForQuietDatabase(Database cx,
 		if (retryDelay.present()) {
 			co_await delay(retryDelay.get());
 		}
+	}
+	if (g_network->isSimulated() && phase != "Start" &&
+	    !(co_await checkRetiredTLogDisks(dbInfo, checker.maxDDRunTime))) {
+		throw test_failed();
 	}
 }
 

@@ -19,6 +19,8 @@
  */
 
 #include "flow/Hash3.h"
+#include "flow/IAsyncFile.h"
+#include "flow/Platform.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/Notified.h"
@@ -27,6 +29,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
+#include "fdbserver/kvstore/IDiskQueue.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/IDiskQueue.h"
 #include "fdbserver/core/Knobs.h"
@@ -47,6 +50,7 @@
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/Histogram.h"
+#include "flow/ScopeExit.h"
 #include "flow/DebugTrace.h"
 #include "flow/genericactors.h"
 #include "flow/network.h"
@@ -235,6 +239,7 @@ private:
 // persistFormat has been mostly invalidated by TLogVersion, and can probably be removed when
 // 4.6's TLog code is removed.
 static const KeyValueRef persistFormat("Format"_sr, "FoundationDB/LogServer/3/0"_sr);
+static const KeyValueRef persistDisposing("Disposing"_sr, "1"_sr);
 static const KeyRangeRef persistFormatReadableRange("FoundationDB/LogServer/3/0"_sr, "FoundationDB/LogServer/4/0"_sr);
 static const KeyRangeRef persistProtocolVersionKeys("ProtocolVersion/"_sr, "ProtocolVersion0"_sr);
 static const KeyRangeRef persistTLogSpillTypeKeys("TLogSpillType/"_sr, "TLogSpillType0"_sr);
@@ -805,24 +810,6 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			    .detail("LocalBytesDurable", bytesDurable.getValue());
 
 			ASSERT_ABORT(tLogData->bytesDurable <= tLogData->bytesInput);
-
-			Key logIdKey = BinaryWriter::toValue(logId, Unversioned());
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)));
-			tLogData->persistentData->clear(
-			    singleKeyRange(logIdKey.withPrefix(persistKnownCommittedVersionKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLocalityKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLogRouterTagsKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTxsTagsKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistProtocolVersionKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTLogSpillTypeKeys.begin)));
-			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryLocationKey)));
-			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
-			tLogData->persistentData->clear(KeyRangeRef(msgKey, strinc(msgKey)));
-			Key msgRefKey = logIdKey.withPrefix(persistTagMessageRefsKeys.begin);
-			tLogData->persistentData->clear(KeyRangeRef(msgRefKey, strinc(msgRefKey)));
-			Key poppedKey = logIdKey.withPrefix(persistTagPoppedKeys.begin);
-			tLogData->persistentData->clear(KeyRangeRef(poppedKey, strinc(poppedKey)));
 		}
 
 		for (auto it = peekTracker.begin(); it != peekTracker.end(); ++it) {
@@ -831,6 +818,23 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 					seq.second.sendError(timed_out());
 				}
 			}
+		}
+	}
+
+	void clearPersistentState() {
+		Key logIdKey = BinaryWriter::toValue(logId, Unversioned());
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistKnownCommittedVersionKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLocalityKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLogRouterTagsKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTxsTagsKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistProtocolVersionKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTLogSpillTypeKeys.begin)));
+		tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryLocationKey)));
+		for (const auto& range : { persistTagMessagesKeys, persistTagMessageRefsKeys, persistTagPoppedKeys }) {
+			Key prefix = logIdKey.withPrefix(range.begin);
+			tLogData->persistentData->clear(KeyRangeRef(prefix, strinc(prefix)));
 		}
 	}
 
@@ -1105,6 +1109,10 @@ Future<Void> popDiskQueue(TLogData* self, Reference<LogData> logData) {
 }
 
 Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logData, Version newPersistentDataVersion) {
+	// The generation can be removed while this update waits for the shared store's commit lock.
+	if (!self->id_data.contains(logData->logId)) {
+		co_return;
+	}
 	BinaryWriter wr(Unversioned());
 	// PERSIST: Changes self->persistentDataVersion and writes and commits the relevant changes
 	ASSERT(newPersistentDataVersion <= logData->version.get());
@@ -1337,6 +1345,10 @@ void advanceRetiredLogQueues(TLogData* self) {
 		log->second->queuePoppedVersion = std::max(log->second->queuePoppedVersion, log->second->version.get());
 		self->popOrder.pop_front();
 	}
+	if (self->popOrder.empty()) {
+		// Include commit padding and recovery repair bytes only when no generation can still reference the queue.
+		self->persistentQueue->pop(self->rawPersistentQueue->getNextPushLocation());
+	}
 }
 
 Future<bool> waitForRetirementStep(Future<Void> step, Future<Void> removed) {
@@ -1410,6 +1422,8 @@ Future<Void> retireRecoveredLog(TLogData* self, Reference<LogData> logData) {
 
 	logData->retired = true;
 	advanceRetiredLogQueues(self);
+	co_await ioTimeoutError(
+	    self->persistentQueue->commit(), SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "TLogRetireQueueCommit");
 }
 
 Reference<LogData> getNextRecoveredLogToRetire(TLogData* self) {
@@ -1680,7 +1694,7 @@ Future<Void> updateStorage(TLogData* self) {
 					co_await delay(getTLogStorageUpdateDelayDuration(), TaskPriority::UpdateStorage);
 				}
 
-				if (logData->removed.isReady()) {
+				if (logData->removed.isReady() || !self->id_data.contains(logData->logId)) {
 					break;
 				}
 			}
@@ -3476,7 +3490,7 @@ Future<Void> serveTLogInterface(TLogData* self,
 	co_await server.run();
 }
 
-void removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerIfEmpty = true) {
+Future<Void> removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerIfEmpty = true) {
 	TraceEvent("TLogRemoved", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Input", logData->bytesInput.getValue())
@@ -3502,6 +3516,14 @@ void removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerI
 	if (self->id_data.empty() && terminateWorkerIfEmpty) {
 		throw worker_removed();
 	}
+	// Queue commits and peeks can still hold LogData after removal. A shared store may never write again.
+	// Serialize with any in-flight spill and durably remove this generation while the store is still open.
+	Reference<FlowLock> lock = self->persistentDataCommitLock;
+	co_await lock->take();
+	FlowLock::Releaser release(*lock);
+	logData->clearPersistentState();
+	co_await ioTimeoutError(self->persistentData->commit(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogRemoveCommit");
+	TraceEvent("TLogRemovedPersistentState", self->dbgid).detail("LogId", logData->logId);
 }
 
 double effectiveTLogMinAvailableSpaceRatio() {
@@ -3750,7 +3772,7 @@ Future<Void> tLogCore(TLogData* self, Reference<LogData> logData, TLogInterface 
 			throw logData->removed.getError();
 		}
 
-		removeLog(self, logData);
+		co_await removeLog(self, logData);
 		co_return;
 	}
 
@@ -3776,6 +3798,17 @@ Future<Void> tLogCore(TLogData* self, Reference<LogData> logData, TLogInterface 
 
 		                                                 StorageBytes sbQueue =
 		                                                     self->rawPersistentQueue->getStorageBytes();
+		                                                 int activeLogs = 0, retiredLogs = 0;
+		                                                 for (const auto& [id, log] : self->id_data) {
+			                                                 activeLogs += !log->stopped();
+			                                                 retiredLogs += log->retired;
+		                                                 }
+		                                                 te.detail("SharedTLogID", self->dbgid.toString());
+		                                                 te.detail("SharedLogCount", self->id_data.size());
+		                                                 te.detail("ActiveLogCount", activeLogs);
+		                                                 te.detail("RetiredLogCount", retiredLogs);
+		                                                 te.detail("QueueDiskEmptyLimit",
+		                                                           self->rawPersistentQueue->getMaxEmptyQueueBytes());
 		                                                 te.detail("QueueDiskBytesUsed", sbQueue.used);
 		                                                 te.detail("QueueDiskBytesFree", sbQueue.free);
 		                                                 te.detail("QueueDiskBytesAvailable", sbQueue.available);
@@ -3799,16 +3832,16 @@ Future<Void> tLogCore(TLogData* self, Reference<LogData> logData, TLogInterface 
 		                  true));
 	}
 
+	bool terminateWorkerIfEmpty;
 	try {
 		co_await error;
 		throw internal_error();
 	} catch (Error& e) {
 		if (e.code() != error_code_worker_removed && e.code() != error_code_recruitment_failed)
 			throw;
-
-		removeLog(self, logData, e.code() != error_code_recruitment_failed);
-		co_return;
+		terminateWorkerIfEmpty = e.code() != error_code_recruitment_failed;
 	}
+	co_await removeLog(self, logData, terminateWorkerIfEmpty);
 }
 
 Future<Void> checkEmptyQueue(TLogData* self) {
@@ -3844,11 +3877,7 @@ Future<Void> initPersistentStorage(TLogData* self) {
 }
 
 // Recovery persistent state of tLog from disk
-Future<Void> restorePersistentState(TLogData* self,
-                                    LocalityData locality,
-                                    Promise<Void> oldLog,
-                                    Promise<Void> recovered,
-                                    PromiseStream<InitializeTLogRequest> tlogRequests) {
+Future<Void> restorePersistentState(TLogData* self, LocalityData locality) {
 	double startt = now();
 	Reference<LogData> logData;
 	// PERSIST: Read basic state from persistentData; replay persistentQueue but don't erase it
@@ -3857,6 +3886,7 @@ Future<Void> restorePersistentState(TLogData* self,
 
 	IKeyValueStore* storage = self->persistentData;
 	Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
+	Future<Optional<Value>> fDisposing = storage->readValue(persistDisposing.key);
 	Future<Optional<Value>> fRecoveryLocation = storage->readValue(persistRecoveryLocationKey);
 	Future<RangeResult> fVers = storage->readRange(persistCurrentVersionKeys);
 	Future<RangeResult> fKnownCommitted = storage->readRange(persistKnownCommittedVersionKeys);
@@ -3869,8 +3899,14 @@ Future<Void> restorePersistentState(TLogData* self,
 
 	// FIXME: metadata in queue?
 
-	std::vector<Future<Optional<Value>>> pointFutures = { fFormat, fRecoveryLocation };
+	std::vector<Future<Optional<Value>>> pointFutures = { fFormat, fRecoveryLocation, fDisposing };
 	co_await waitForAll(pointFutures);
+	if (fDisposing.get().present()) {
+		// A crash may have interrupted deletion between the two queue files. Never open that queue for recovery.
+		TraceEvent("TLogResumeStoreDisposal", self->dbgid);
+		CODE_PROBE(true, "Resume interrupted TLog store disposal");
+		throw worker_removed();
+	}
 	std::vector<Future<RangeResult>> rangeFutures = { fVers,    fKnownCommitted, fLocality,         fLogRouterTags,
 		                                              fTxsTags, fRecoverCounts,  fProtocolVersions, fTLogSpillTypes };
 	co_await waitForAll(rangeFutures);
@@ -4132,12 +4168,32 @@ Future<Void> restorePersistentState(TLogData* self,
 		registerWithCC.send(Void());
 }
 
-bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* persistentQueue, Error const& e) {
+Future<Void> markTLogStoreForDisposal(IKeyValueStore* store) {
+	store->set(persistDisposing);
+	return store->commit();
+}
+
+Future<Void> finishTLogStore(UID id, IKeyValueStore* persistentData, TLogQueue* persistentQueue, Error e) {
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just
 	// close it.
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
+		try {
+			// The worker discovers the store from its spill database. Keep that database until every queue file
+			// is gone, so a restart can distinguish an interrupted disposal from a damaged live queue.
+			co_await markTLogStoreForDisposal(persistentData);
+			TraceEvent("TLogStoreDisposalRecorded", id);
+			auto queueClosed = persistentQueue->onClosed();
+			persistentQueue->dispose();
+			persistentQueue = nullptr;
+			co_await queueClosed;
+		} catch (Error&) {
+			if (persistentQueue) {
+				persistentQueue->close();
+			}
+			persistentData->close();
+			throw;
+		}
 		persistentData->dispose();
-		persistentQueue->dispose();
 	} else {
 		persistentData->close();
 		persistentQueue->close();
@@ -4145,11 +4201,10 @@ bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* p
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
 	    e.code() == error_code_file_not_found) {
-		TraceEvent("TLogTerminated", self->dbgid).errorUnsuppressed(e);
-		return true;
-	} else {
-		return false;
+		TraceEvent("TLogTerminated", id).errorUnsuppressed(e);
+		co_return;
 	}
+	throw e;
 }
 
 Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, LogSystemConfig recoverFrom) {
@@ -4394,7 +4449,7 @@ Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, LocalityData l
 		// before any are removed.
 		co_await delay(0.0);
 
-		removeLog(self, logData, removePersistentState);
+		co_await removeLog(self, logData, removePersistentState);
 		co_return;
 	}
 
@@ -4419,6 +4474,57 @@ Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Reference<Asy
 		self->targetVolatileBytes = SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT * 2;
 	} else {
 		TraceEvent("SharedTLogSkipSpilling", self->dbgid).detail("NowActive", activeSharedTLog->get());
+	}
+}
+
+static Future<Optional<UID>> findRetiredSpillData(IKeyValueStore* store, std::vector<UID> currentLogs) {
+	for (const auto& range : { persistTagMessagesKeys, persistTagMessageRefsKeys }) {
+		Key begin = range.begin;
+		while (begin < range.end) {
+			auto rows = co_await store->readRange(KeyRangeRef(begin, range.end), 1);
+			if (rows.empty()) {
+				break;
+			}
+			KeyRef idPrefix = rows[0].key.substr(0, range.begin.size() + sizeof(UID));
+			UID id = BinaryReader::fromStringRef<UID>(idPrefix.removePrefix(range.begin), Unversioned());
+			if (std::find(currentLogs.begin(), currentLogs.end(), id) == currentLogs.end()) {
+				co_return id;
+			}
+			// Skip all tags and versions for this generation in one seek.
+			begin = strinc(idPrefix);
+		}
+	}
+	co_return Optional<UID>();
+}
+
+static Future<Void> serveSimTLogDiskChecks(TLogData* self) {
+	RequestStream<SimTLogDiskCheckRequest> requests;
+	auto& endpoints = fdbSimulationPolicyState().tLogDiskCheckEndpoints;
+	const auto endpoint = requests.getEndpoint();
+	endpoints[self->dbgid] = endpoint;
+	ScopeExit unregister([&] {
+		auto it = endpoints.find(self->dbgid);
+		if (it != endpoints.end() && it->second == endpoint) {
+			endpoints.erase(it);
+		}
+	});
+	while (true) {
+		auto req = co_await requests.getFuture();
+		SimTLogDiskCheckReply reply;
+		try {
+			reply.staleSpillId = co_await findRetiredSpillData(self->persistentData, std::move(req.currentLogs));
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			req.reply.sendError(e);
+			continue;
+		}
+		reply.allLogsRetired = std::all_of(self->id_data.begin(), self->id_data.end(), [](const auto& entry) {
+			return entry.second->stopped() && entry.second->retired;
+		});
+		reply.emptyQueueLimit = self->rawPersistentQueue->getMaxEmptyQueueBytes();
+		req.reply.send(reply);
 	}
 }
 
@@ -4450,11 +4556,17 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 	Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
 	TraceEvent("SharedTLog", tlogId);
+	Error termination;
 	try {
 		co_await ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit");
 
 		if (restoreFromDisk) {
-			co_await restorePersistentState(&self, locality, oldLog, recovered, tlogRequests);
+			co_await restorePersistentState(&self, locality);
+			// Complete recovery repair writes and establish the committed boundary even if no new log is recruited.
+			co_await ioTimeoutError(
+			    self.persistentQueue->commit(), SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "TLogRestoreQueueCommit");
+			self.queueCommitBegin = 1;
+			self.queueCommitEnd.set(1);
 		} else {
 			co_await ioTimeoutError(checkEmptyQueue(&self) && initPersistentStorage(&self),
 			                        SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
@@ -4471,6 +4583,9 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 		self.sharedActors.send(commitQueue(&self));
 		self.sharedActors.send(updateStorageLoop(&self));
 		self.sharedActors.send(monitorRetainedOldLogs(&self));
+		if (g_network->isSimulated()) {
+			self.sharedActors.send(serveSimTLogDiskChecks(&self));
+		}
 		self.sharedActors.send(traceRole(Role::SHARED_TRANSACTION_LOG, tlogId));
 		Future<Void> activeSharedChange = Void();
 
@@ -4503,6 +4618,7 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 			}
 		}
 	} catch (Error& e) {
+		termination = e;
 		self.terminated.send(Void());
 		TraceEvent("TLogError", tlogId).errorUnsuppressed(e);
 		if (recovered.canBeSet())
@@ -4517,14 +4633,149 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 				it.second->recoveryComplete.sendError(end_of_stream());
 			}
 		}
+	}
+	// Recruitment must move to a new shared store while this one's files are being deleted.
+	if (oldLog.canBeSet()) {
+		oldLog.send(Void());
+	}
+	error.cancel();
+	co_await finishTLogStore(tlogId, persistentData, self.persistentQueue, termination);
+}
 
-		if (!tlogTerminated(&self, persistentData, self.persistentQueue, e)) {
-			throw;
+// UNIT TESTS
+TEST_CASE("/fdbserver/TLog/ResumeInterruptedStoreDisposal") {
+	for (bool marked : { false, true }) {
+		const UID id = deterministicRandom()->randomUniqueID();
+		const std::string base = joinPath(params.getDataDir(), id.toString() + "-");
+		const std::string spill = base + "spill.sqlite";
+		auto openSpill = [&] { return keyValueStoreSQLite(spill, id, KeyValueStoreType::SSD_BTREE_V2); };
+		auto openQueue = [&] { return openDiskQueue(base, "fdq", id, DiskQueueVersion::V2); };
+		auto* store = openSpill();
+		auto* queue = openQueue();
+		auto closed = store->onClosed() && queue->onClosed();
+		co_await store->init();
+		store->set(persistFormat);
+		store->set(KeyValueRef("keep"_sr, "payload"_sr));
+		co_await store->commit();
+		co_await queue->initializeRecovery(0);
+		queue->push("payload"_sr);
+		co_await queue->commit();
+		if (marked) {
+			co_await markTLogStoreForDisposal(store);
+		}
+		store->close();
+		queue->close();
+		co_await closed;
+		// Model a restart with only the second canonical file left.
+		co_await IAsyncFileSystem::filesystem()->deleteFile(base + "0.fdq", true);
+
+		store = openSpill();
+		queue = openQueue();
+		closed = store->onClosed() && queue->onClosed();
+		co_await tLog(store,
+		              queue,
+		              makeReference<AsyncVar<ServerDBInfo>>(ServerDBInfo()),
+		              LocalityData(),
+		              PromiseStream<InitializeTLogRequest>(),
+		              id,
+		              deterministicRandom()->randomUniqueID(),
+		              true,
+		              Promise<Void>(),
+		              Promise<Void>(),
+		              params.getDataDir(),
+		              makeReference<AsyncVar<bool>>(false),
+		              makeReference<AsyncVar<bool>>(false),
+		              makeReference<AsyncVar<UID>>(UID()),
+		              makeReference<AsyncVar<bool>>(false));
+		co_await closed;
+		const bool queuePresent = fileExists(base + "1.fdq");
+		const bool spillPresent = fileExists(spill);
+		if (queuePresent == marked || spillPresent == marked || fileExists(base + "0.fdq")) {
+			TraceEvent(SevError, "IncompleteTLogDisposalCheckFailed", id)
+			    .detail("Marked", marked)
+			    .detail("QueuePresent", queuePresent)
+			    .detail("SpillPresent", spillPresent);
+			throw test_failed();
+		}
+		if (!marked) {
+			store = openSpill();
+			queue = openQueue();
+			closed = store->onClosed() && queue->onClosed();
+			co_await store->init();
+			auto payload = co_await store->readValue("keep"_sr);
+			store->dispose();
+			queue->dispose();
+			co_await closed;
+			if (!payload.present() || payload.get() != "payload"_sr) {
+				TraceEvent(SevError, "IncompleteTLogDisposalCheckFailed", id).detail("Marked", marked);
+				throw test_failed();
+			}
 		}
 	}
 }
 
-// UNIT TESTS
+TEST_CASE("/fdbserver/TLog/RemoveSpillWithOutstandingReference") {
+	const UID sharedId = deterministicRandom()->randomUniqueID();
+	const std::string file = joinPath(params.getDataDir(), sharedId.toString() + ".sqlite");
+	auto* store = keyValueStoreSQLite(file, sharedId, KeyValueStoreType::SSD_BTREE_V2);
+	auto closed = store->onClosed();
+	bool passed;
+	{
+		ScopeExit dispose([&] { store->dispose(); });
+		co_await store->init();
+		TLogData shared(sharedId,
+		                deterministicRandom()->randomUniqueID(),
+		                store,
+		                nullptr,
+		                makeReference<AsyncVar<ServerDBInfo>>(ServerDBInfo()),
+		                makeReference<AsyncVar<bool>>(false),
+		                makeReference<AsyncVar<bool>>(false),
+		                "",
+		                makeReference<AsyncVar<bool>>(false));
+		std::unique_ptr<TLogQueue> queue(shared.persistentQueue);
+		ScopeExit terminate([&] { shared.terminated.send(Void()); });
+		auto addLog = [&] {
+			auto log = makeReference<LogData>(&shared,
+			                                  TLogInterface(LocalityData()),
+			                                  invalidTag,
+			                                  true,
+			                                  0,
+			                                  0,
+			                                  UID(),
+			                                  g_network->protocolVersion(),
+			                                  TLogSpillType::REFERENCE,
+			                                  std::vector<Tag>(),
+			                                  "RemoveSpillTest");
+			shared.id_data.emplace(log->logId, log);
+			return log;
+		};
+		auto removed = addLog();
+		UID current = addLog()->logId;
+		for (const auto id : { removed->logId, current }) {
+			store->set(KeyValueRef(persistTagMessagesKey(id, txsTag, 1), "value"_sr));
+			store->set(KeyValueRef(persistTagMessageRefsKey(id, Tag(0, 0), 1), "reference"_sr));
+		}
+		co_await store->commit();
+		co_await removeLog(&shared, removed);
+		std::vector<UID> currentLogs{ current };
+		auto stale = co_await findRetiredSpillData(store, std::move(currentLogs));
+		auto value = co_await store->readValue(persistTagMessagesKey(current, txsTag, 1));
+		auto reference = co_await store->readValue(persistTagMessageRefsKey(current, Tag(0, 0), 1));
+		passed = !stale.present() && value.present() && reference.present();
+		if (!passed) {
+			TraceEvent(SevError, "RemovedTLogSpillCheckFailed", sharedId)
+			    .detail("RemovedLog", removed->logId)
+			    .detail("StaleLog", stale)
+			    .detail("CurrentValuePresent", value.present())
+			    .detail("CurrentReferencePresent", reference.present());
+		}
+	}
+	co_await closed;
+	if (!passed) {
+		throw test_failed();
+	}
+}
+
 namespace {
 
 class CommittedPeekTestKnobs : NonCopyable {
@@ -4595,8 +4846,7 @@ public:
 	}
 
 	~CommittedPeekTestFixture() {
-		// This fixture only exercises in-memory peeks and duplicate commits. Termination prevents
-		// LogData's normal persistent-state removal from dereferencing the absent disk stores.
+		// The fixture only exercises in-memory peeks and duplicate commits.
 		shared.terminated.send(Void());
 	}
 

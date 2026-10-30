@@ -193,8 +193,11 @@ public:
 		stallCount.init("RawDiskQueue.StallCount"_sr);
 	}
 
-	Future<Void> pushAndCommit(Standalone<StringRef> pageData, StringBuffer* pageMem, uint64_t poppedPages) {
-		return pushAndCommit(Uncancellable(), this, pageData, pageMem, poppedPages);
+	Future<Void> pushAndCommit(Standalone<StringRef> pageData,
+	                           StringBuffer* pageMem,
+	                           uint64_t poppedPages,
+	                           bool reclaimEmptyQueue) {
+		return pushAndCommit(Uncancellable(), this, pageData, pageMem, poppedPages, reclaimEmptyQueue);
 	}
 
 	void stall() {
@@ -331,6 +334,41 @@ public:
 	}
 #endif
 
+	// Requires a durable empty page whose popped position is its own start.
+	Future<Void> reclaimEmpty(Standalone<StringRef> pageData) {
+		ASSERT(pageData.size() == sizeof(Page));
+		ASSERT(files[0].popped == files[0].size);
+		ASSERT(files[1].popped == writingPos - sizeof(Page));
+		const int64_t beginSeq = dbg_file0BeginSeq + files[0].size + files[1].popped;
+		const int64_t oldBytes = files[0].size + files[1].size;
+		TraceEvent("DiskQueueEmptyCompactionBegin", dbgid).detail("OldBytes", oldBytes).detail("Basename", basename);
+
+		// The empty marker is already durable in files[1]. Keep that copy until the replacement marker is durable.
+		Reference<IAsyncFile> replacement = co_await replaceFile(files[0].f);
+		files[0].setFile(replacement);
+		co_await replacement->write(pageData.begin(), pageData.size(), 0);
+		co_await replacement->sync();
+
+		Reference<IAsyncFile> empty = co_await replaceFile(files[1].f);
+		files[1].setFile(empty);
+		// Keep a fully popped blank page: uncached handles cannot truncate to zero.
+		co_await empty->zeroRange(0, sizeof(Page));
+		co_await empty->sync();
+		std::swap(files[0], files[1]);
+		memset(firstPages[0], 0xFF, sizeof(Page));
+		memcpy(firstPages[1], pageData.begin(), sizeof(Page));
+		files[0].size = files[0].popped = sizeof(Page);
+		files[1].size = writingPos = sizeof(Page);
+		files[1].popped = 0;
+		dbg_file0BeginSeq = beginSeq - sizeof(Page);
+		CODE_PROBE(true, "Reclaimed an empty disk queue without new payload writes");
+		TraceEvent("DiskQueueEmptyCompacted", dbgid)
+		    .detail("OldBytes", oldBytes)
+		    .detail("NewBytes", 2 * sizeof(Page))
+		    .detail("Basename", basename)
+		    .detail("BeginSeq", beginSeq);
+	}
+
 	Future<Future<Void>> push(Standalone<StringRef> pageData, std::vector<Reference<SyncQueue>>* toSync) {
 		return push(Uncancellable(), this, pageData, toSync);
 	}
@@ -440,7 +478,8 @@ public:
 	                                  RawDiskQueue_TwoFiles* self,
 	                                  Standalone<StringRef> pageData,
 	                                  StringBuffer* pageMem,
-	                                  uint64_t poppedPages) {
+	                                  uint64_t poppedPages,
+	                                  bool reclaimEmptyQueue) {
 		Promise<Void> pushing;
 		Promise<Void> committed;
 		Promise<Void> errorPromise = self->error;
@@ -455,9 +494,8 @@ public:
 			self->readyToPush = pushing.getFuture();
 			self->lastCommit = committed.getFuture();
 
-			// the first commit must complete before we can pipeline other commits so that we will always have a valid
-			// page to binary search to
-			if (self->isFirstCommit) {
+			// Preserve a valid recovery page, and serialize later pushes with empty-queue file replacement.
+			if (self->isFirstCommit || reclaimEmptyQueue) {
 				self->isFirstCommit = false;
 				self->readyToPush = self->lastCommit;
 			}
@@ -487,6 +525,9 @@ public:
 			}
 
 			self->updatePopped(poppedPages * sizeof(Page));
+			if (reclaimEmptyQueue) {
+				co_await self->reclaimEmpty(pageData);
+			}
 
 			/*TraceEvent("RDQCommitEnd", self->dbgid).detail("DeltaPopped", poppedPages*sizeof(Page)).detail("PoppedCommitted", self->dbg_file0BeginSeq + self->files[0].popped + self->files[1].popped)
 			    .detail("File0Size", self->files[0].size).detail("File1Size", self->files[1].size)
@@ -608,6 +649,15 @@ public:
 				TraceEvent("DiskQueueShutdownDeleting", self->dbgid)
 				    .detail("File0", self->filename(0))
 				    .detail("File1", self->filename(1));
+				// A crash before the atomic rename leaves a staging file beside the canonical queue.
+				// Remove it durably while the queue is still identifiable by its canonical files.
+				for (int i = 0; i < 2; ++i) {
+					const std::string part = self->filename(i) + ".part";
+					if (fileExists(part)) {
+						co_await IAsyncFileSystem::filesystem()->deleteFile(part, true);
+						CODE_PROBE(true, "Disposed abandoned disk queue replacement");
+					}
+				}
 				co_await IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename(0), false);
 				co_await IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename(1), true);
 			}
@@ -941,7 +991,7 @@ public:
 	// Always commit an entire page. Commit overhead is the unused space in a to-be-committed page
 	int getCommitOverhead() const override {
 		if (!pushedPageCount()) {
-			if (!anyPopped)
+			if (!anyPopped && !shouldReclaimEmptyQueue())
 				return 0;
 
 			// To mark pages are poped, we push an empty page to specify that following pages were poped.
@@ -954,8 +1004,9 @@ public:
 
 	Future<Void> commit() override {
 		ASSERT(recovered);
+		const bool reclaimEmptyQueue = shouldReclaimEmptyQueue();
 		if (!pushedPageCount()) {
-			if (!anyPopped)
+			if (!anyPopped && !reclaimEmptyQueue)
 				return Void();
 			addEmptyPage(); // To remove poped pages, we push an empty page to specify that pages behind it were poped.
 		}
@@ -984,8 +1035,10 @@ public:
 		// Since we only commit entire pages, round the last
 		// committed location up to the next page.
 		lastCommittedSeq = pageCeiling(backPage().endSeq());
-		auto f = rawQueue->pushAndCommit(
-		    pushed_page_buffer->get(), pushed_page_buffer, poppedSeq / sizeof(Page) - lastPoppedSeq / sizeof(Page));
+		auto f = rawQueue->pushAndCommit(pushed_page_buffer->get(),
+		                                 pushed_page_buffer,
+		                                 poppedSeq / sizeof(Page) - lastPoppedSeq / sizeof(Page),
+		                                 reclaimEmptyQueue);
 		lastPoppedSeq = poppedSeq;
 		pushed_page_buffer = 0;
 		return f;
@@ -1028,8 +1081,21 @@ public:
 	}
 
 	StorageBytes getStorageBytes() const override { return rawQueue->getStorageBytes(); }
+	int64_t getMaxEmptyQueueBytes() const override {
+		// Persisting a pop can extend the files once after the reclamation decision.
+		return std::max(SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES * 2,
+		                rawQueue->fileExtensionBytes + rawQueue->fileShrinkBytes) +
+		       rawQueue->fileExtensionBytes + 2 * sizeof(Page);
+	}
 
 private:
+	bool shouldReclaimEmptyQueue() const {
+		return !pushedPageCount() && poppedSeq == nextPageSeq &&
+		       rawQueue->files[0].size + rawQueue->files[1].size >
+		           std::max(SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES * 2,
+		                    rawQueue->fileExtensionBytes + rawQueue->fileShrinkBytes);
+	}
+
 	static Future<Void> dispose(Uncancellable, DiskQueue* self) {
 		co_await self->onSafeToDestruct();
 		TraceEvent("DQDestroyDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
@@ -1556,8 +1622,8 @@ public:
 	                         UID dbgid,
 	                         DiskQueueVersion diskQueueVersion,
 	                         int64_t fileSizeWarningLimit)
-	  : queue(new DiskQueue(basename, fileExtension, dbgid, diskQueueVersion, fileSizeWarningLimit)), pushed(0),
-	    popped(0), committed(0) {};
+	  : queue(new DiskQueue(basename, fileExtension, dbgid, diskQueueVersion, fileSizeWarningLimit)), popped(0),
+	    committed(0) {};
 
 	// IClosable
 	Future<Void> getError() const override { return queue->getError(); }
@@ -1573,7 +1639,7 @@ public:
 
 	// IDiskQueue
 	Future<bool> initializeRecovery(location recoverAt) override { return queue->initializeRecovery(recoverAt); }
-	Future<Standalone<StringRef>> readNext(int bytes) override { return readNext(this, bytes); }
+	Future<Standalone<StringRef>> readNext(int bytes) override { return queue->readNext(bytes); }
 
 	location getNextReadLocation() const override { return queue->getNextReadLocation(); }
 
@@ -1582,10 +1648,7 @@ public:
 	}
 	location getNextPushLocation() const override { return queue->getNextPushLocation(); }
 
-	location push(StringRef contents) override {
-		pushed = queue->push(contents);
-		return pushed;
-	}
+	location push(StringRef contents) override { return queue->push(contents); }
 
 	void pop(location upTo) override {
 		popped = std::max(popped, upTo);
@@ -1598,15 +1661,14 @@ public:
 	}
 
 	Future<Void> commit() override {
-		location pushLocation = pushed;
 		location popLocation = popped;
 
 		Future<Void> commitFuture = queue->commit();
+		location pushLocation = queue->getNextPushLocation();
 
 		bool updatePop = popLocation > committed;
 
-		// Since we only commit entire pages, round the last
-		// committed location up to the next page.
+		// Include empty pop-marker pages, so later pops can advance past their padding.
 		committed = location(pushLocation.hi, pageCeiling(pushLocation.lo));
 
 		if (updatePop) {
@@ -1625,20 +1687,12 @@ public:
 	}
 
 	StorageBytes getStorageBytes() const override { return queue->getStorageBytes(); }
+	int64_t getMaxEmptyQueueBytes() const override { return queue->getMaxEmptyQueueBytes(); }
 
 private:
 	DiskQueue* queue;
-	location pushed;
 	location popped;
 	location committed;
-
-	static Future<Standalone<StringRef>> readNext(DiskQueue_PopUncommitted* self, int bytes) {
-		Standalone<StringRef> str = co_await self->queue->readNext(bytes);
-		if (str.size() < bytes)
-			self->pushed = self->getNextReadLocation();
-
-		co_return str;
-	}
 };
 
 IDiskQueue* openDiskQueue(std::string basename,
@@ -1647,6 +1701,34 @@ IDiskQueue* openDiskQueue(std::string basename,
                           DiskQueueVersion dqv,
                           int64_t fileSizeWarningLimit) {
 	return new DiskQueue_PopUncommitted(basename, ext, dbgid, dqv, fileSizeWarningLimit);
+}
+
+TEST_CASE("/fdbserver/DiskQueue/DisposeInterruptedReplacement") {
+	const UID id = deterministicRandom()->randomUniqueID();
+	const std::string base = joinPath(params.getDataDir(), id.toString() + "-");
+	IDiskQueue* queue = openDiskQueue(base, "fdq", id, DiskQueueVersion::V2);
+	co_await queue->initializeRecovery(0);
+	const std::vector<std::string> parts = { base + "0.fdq.part", base + "1.fdq.part" };
+	for (int i = 0; i < parts.size(); ++i) {
+		auto staging = co_await IAsyncFileSystem::filesystem()->open(
+		    parts[i],
+		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE |
+		        IAsyncFile::OPEN_UNCACHED,
+		    0600);
+		if (i != 0) {
+			co_await staging->zeroRange(0, _PAGE_SIZE);
+		}
+		co_await staging->sync();
+	}
+	auto closed = queue->onClosed();
+	queue->dispose();
+	co_await closed;
+	for (const auto& part : parts) {
+		if (fileExists(part)) {
+			TraceEvent(SevError, "DisposedDiskQueueStagingFilePresent", id).detail("File", part);
+			throw test_failed();
+		}
+	}
 }
 
 TEST_CASE("performance/fdbserver/DiskQueue") {

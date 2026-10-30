@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/StatusSchema.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 
@@ -31,6 +32,7 @@ struct ChangeConfigWorkload : TestWorkload {
 	std::string configMode;
 	std::string networkAddresses;
 	int coordinatorChanges;
+	bool waitForTLogReplacement;
 
 	explicit ChangeConfigWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		minDelayBeforeChange = getOption(options, "minDelayBeforeChange"_sr, 0.0);
@@ -38,6 +40,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		ASSERT(maxDelayBeforeChange >= minDelayBeforeChange);
 
 		configMode = getOption(options, "configMode"_sr, StringRef()).toString();
+		waitForTLogReplacement = getOption(options, "waitForTLogReplacement"_sr, false);
 		networkAddresses = getOption(options, "coordinators"_sr, StringRef()).toString();
 		coordinatorChanges = getOption(options, "coordinatorChanges"_sr, 1);
 		if (networkAddresses != "auto") {
@@ -116,6 +119,20 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if (!configMode.empty()) {
+			std::set<UID> originalStores;
+			if (waitForTLogReplacement) {
+				while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
+					co_await dbInfo->onChange();
+				}
+				for (const auto& log : dbInfo->get().logSystemConfig.allPresentLogs()) {
+					originalStores.insert(log.getSharedTLogID());
+				}
+				if (originalStores.empty()) {
+					TraceEvent(SevError, "TLogReplacementMissingOriginalStores")
+					    .detail("Epoch", dbInfo->get().logSystemConfig.epoch);
+					throw test_failed();
+				}
+			}
 			bool existingDB = false;
 			if (g_network->isSimulated() && !fdbSimulationPolicyState().startingDisabledConfiguration.empty()) {
 				co_await ManagementAPI::changeConfig(
@@ -127,6 +144,22 @@ struct ChangeConfigWorkload : TestWorkload {
 			}
 			std::string mode = getConfigMode(configMode, existingDB);
 			co_await ManagementAPI::changeConfig(cx.getReference(), mode, true);
+			if (waitForTLogReplacement) {
+				while (true) {
+					auto logs = dbInfo->get().logSystemConfig.allPresentLogs();
+					if (dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED && !logs.empty() &&
+					    std::none_of(logs.begin(), logs.end(), [&](const TLogInterface& log) {
+						    return originalStores.contains(log.getSharedTLogID());
+					    })) {
+						TraceEvent("ChangedTLogStores")
+						    .detail("Epoch", dbInfo->get().logSystemConfig.epoch)
+						    .detail("OriginalStores", originalStores.size())
+						    .detail("CurrentLogs", logs.size());
+						break;
+					}
+					co_await dbInfo->onChange();
+				}
+			}
 		}
 
 		if (!networkAddresses.empty()) {
