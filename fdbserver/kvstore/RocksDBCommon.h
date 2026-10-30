@@ -26,6 +26,7 @@
 
 #include "fdbclient/FDBTypes.h"
 
+#include <rocksdb/env.h>
 #include <rocksdb/listener.h>
 #include <rocksdb/options.h>
 #include <rocksdb/slice.h>
@@ -67,6 +68,9 @@ rocksdb::CompactionPri getCompactionPriorityFromKnob(int knobValue);
 
 // Get index type from a knob value
 rocksdb::BlockBasedTableOptions::IndexType getIndexTypeFromKnob(int knobValue);
+
+// Returns the process-wide RocksDB Env that FDB's RocksDB engines use. Extends EnvWrapper.
+rocksdb::Env* getFdbRocksDBEnv();
 
 } // namespace RocksDBCommon
 
