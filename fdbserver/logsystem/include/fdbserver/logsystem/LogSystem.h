@@ -568,7 +568,8 @@ private:
 Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
     const std::vector<Reference<LogSet>>& logServers,
     const std::tuple<int, std::vector<TLogLockResult>, bool>& logGroupResults,
-    Version minDV);
+    Version minDV,
+    int writeAntiQuorum);
 
 template <class T>
 std::vector<T> LogSystem::getReadyNonError(std::vector<Future<T>> const& futures) {

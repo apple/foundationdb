@@ -51,6 +51,7 @@ public:
 	int fastReplies;
 	int unknownReplies;
 	bool returnEmptyIfStopped;
+	bool verifyEndOnBlocked = false;
 	int replyByteLimit;
 
 	ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf,
@@ -59,7 +60,8 @@ public:
 	                 Version end,
 	                 bool returnIfBlocked,
 	                 bool parallelGetMore,
-	                 bool returnEmtpyIfStopped = false);
+	                 bool returnEmptyIfStopped = false,
+	                 bool useWriteAntiQuorum = false);
 	ServerPeekCursor(TLogPeekReply const& results,
 	                 LogMessageVersion const& messageVersion,
 	                 LogMessageVersion const& end,
@@ -109,19 +111,16 @@ public:
 	bool hasNextMessage;
 	UID randomID;
 	int tLogReplicationFactor;
+	Optional<Version> antiQuorumPeekEnd;
 	Future<Void> more;
 
 	MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> const& serverCursors, Version begin);
-	MergedPeekCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
+	MergedPeekCursor(Reference<LogSet> const& logSet,
 	                 int bestServer,
-	                 int readQuorum,
 	                 Tag tag,
 	                 Version begin,
 	                 Version end,
 	                 bool parallelGetMore,
-	                 std::vector<LocalityData> const& tLogLocalities,
-	                 Reference<IReplicationPolicy> const tLogPolicy,
-	                 int tLogReplicationFactor,
 	                 const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
 	MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> const& serverCursors,
 	                 LogMessageVersion const& messageVersion,
@@ -129,7 +128,8 @@ public:
 	                 int readQuorum,
 	                 Optional<LogMessageVersion> nextVersion,
 	                 Reference<LogSet> logSet,
-	                 int tLogReplicationFactor);
+	                 int tLogReplicationFactor,
+	                 Optional<Version> antiQuorumPeekEnd = {});
 
 	Reference<IReplayPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
@@ -181,14 +181,15 @@ public:
 	              Version begin,
 	              Version end,
 	              bool parallelGetMore,
-	              const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
+	              const Optional<std::vector<std::vector<uint16_t>>>& knownLockedTLogIds = {});
 	SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 	              std::vector<std::vector<Reference<ServerPeekCursor>>> const& serverCursors,
 	              LogMessageVersion const& messageVersion,
 	              int bestSet,
 	              int bestServer,
 	              Optional<LogMessageVersion> nextVersion,
-	              bool useBestSet);
+	              bool useBestSet,
+	              Optional<Version> end = {});
 
 	Reference<IReplayPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
