@@ -195,6 +195,12 @@ TraceEventFields makeProcessErrorMetrics(std::string const& type, std::string co
 	return traceEventFields;
 }
 
+TraceEventFields makeProcessErrorMetrics(double eventTime) {
+	auto traceEventFields = makeProcessErrorMetrics("OpenClusterIdError", "io_error");
+	traceEventFields.addField("Time", format("%.17g", eventTime));
+	return traceEventFields;
+}
+
 TraceEventFields makeRkUpdateMetrics(double releasedTps, double tpsLimit) {
 	TraceEventFields traceEventFields;
 	traceEventFields.addField("ReleasedTPS", std::to_string(releasedTps));
@@ -403,7 +409,7 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/CoordinatorReachabi
 }
 
 TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/ProcessErrorsFactor") {
-	ProcessErrorsFactor factor;
+	ProcessErrorsFactor factor(/*maxErrorAge=*/3600.0);
 	auto provider = makeReference<FakeWorkerEventProvider>();
 	Level level;
 
@@ -431,6 +437,58 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/ProcessErrorsFactor
 	provider->setLatestEvents("", LatestWorkerEvents());
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/ProcessErrorsFactor/Staleness") {
+	ProcessErrorsFactor factor(/*maxErrorAge=*/3600.0);
+	auto provider = makeReference<FakeWorkerEventProvider>();
+	double const currentTime = TraceEvent::getCurrentTime();
+	Level level;
+
+	provider->setLatestEvents("", makeLatestWorkerEvents(makeProcessErrorMetrics(currentTime - 3599.0)));
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
+
+	provider->setLatestEvents("", makeLatestWorkerEvents(makeProcessErrorMetrics(currentTime - 3601.0)));
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::HEALTHY);
+
+	ProcessErrorsFactor noExpiration(/*maxErrorAge=*/-1.0);
+	level = co_await noExpiration.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
+
+	provider->setLatestEvents("", makeLatestWorkerEvents(makeProcessErrorMetrics(currentTime + 10.0)));
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
+
+	WorkerEvents mixedErrors;
+	mixedErrors.emplace(NetworkAddress(IPAddress(0x01010101), 1), makeProcessErrorMetrics(currentTime - 7200.0));
+	mixedErrors.emplace(NetworkAddress(IPAddress(0x02020202), 2), makeProcessErrorMetrics(currentTime - 1.0));
+	provider->setLatestEvents("", makeLatestWorkerEvents(mixedErrors));
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
+
+	mixedErrors[NetworkAddress(IPAddress(0x02020202), 2)] = makeProcessErrorMetrics(currentTime - 3601.0);
+	provider->setLatestEvents("", makeLatestWorkerEvents(mixedErrors));
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::HEALTHY);
+
+	mixedErrors[NetworkAddress(IPAddress(0x02020202), 2)] = TraceEventFields();
+	provider->setLatestEvents("", makeLatestWorkerEvents(std::move(mixedErrors), { "2.2.2.2:2" }));
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::HEALTHY);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/ProcessErrorsFactor/InvalidTimestamp") {
+	ProcessErrorsFactor factor(/*maxErrorAge=*/3600.0);
+	auto provider = makeReference<FakeWorkerEventProvider>();
+	for (char const* timestamp : { "", "invalid", "1.0suffix", "nan", "inf", "-inf" }) {
+		auto traceEventFields = makeProcessErrorMetrics("OpenClusterIdError", "io_error");
+		traceEventFields.addField("Time", timestamp);
+		provider->setLatestEvents("", makeLatestWorkerEvents(std::move(traceEventFields)));
+		Level level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+		ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
+	}
 }
 
 TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/RkThrottlingFactor") {
