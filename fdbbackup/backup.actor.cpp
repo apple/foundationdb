@@ -1611,6 +1611,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state std::vector<Future<Reference<IBackupContainer>>> tagContainers;
 		state std::vector<Future<int64_t>> tagRangeBytes;
 		state std::vector<Future<int64_t>> tagLogBytes;
+		state std::vector<Future<MutationLogType>> tagMutationLogTypes;
 		state Future<Optional<Value>> fBackupPaused = tr->get(fba.taskBucket->getPauseKey(), snapshot);
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1625,12 +1626,14 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagStates.push_back(config.stateEnum().getOrThrow(tr, snapshot));
 			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, snapshot, 0));
 			tagLogBytes.push_back(config.logBytesWritten().getD(tr, snapshot, 0));
+			tagMutationLogTypes.push_back(config.mutationLogType().getD(tr, snapshot, MutationLogType::DEFAULT));
 			tagContainers.push_back(config.backupContainer().getOrThrow(tr, snapshot));
 			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName), snapshot));
 		}
 
 		wait(waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) &&
-		     waitForAll(tagRangeBytes) && waitForAll(tagLogBytes) && success(fBackupPaused));
+		     waitForAll(tagRangeBytes) && waitForAll(tagLogBytes) && waitForAll(tagMutationLogTypes) &&
+		     success(fBackupPaused));
 
 		state std::vector<Future<Void>> encryptionSetupResults;
 		state std::vector<int> encryptionContainerIndices;
@@ -1685,6 +1688,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagRoot.create("running_backup_is_restorable") = (status == EBackupState::STATE_RUNNING_DIFFERENTIAL);
 			tagRoot.create("range_bytes_written") = tagRangeBytes[j].get();
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytes[j].get();
+			tagRoot.create("mutation_log_type") = mutationLogTypeToString(tagMutationLogTypes[j].get());
 			tagRoot.create("mutation_stream_id") = backupTagUids[j].toString();
 			tagRoot.create("file_level_encryption") =
 			    tagContainers[j].get()->getEncryptionKeyFileName().present() ? true : false;
