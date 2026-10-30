@@ -34,6 +34,7 @@
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "BackupRangeSpec.h"
 #include "BackupSteps.h"
+#include "ValidateRestoreAudit.h"
 
 // TODO: explain the purpose of this workload and how it different from the
 // 20+ (literally) other backup/restore workloads.
@@ -59,6 +60,13 @@ struct RestoreBackupWorkload : TestWorkload {
 	BackupSteps::BackupVersion version;
 	// Fail unless the backup is completed and has nothing registered with the cluster before the restore starts.
 	bool requireBackupStopped;
+	// Compare the RangeDigest of the restored ranges with that of the live data before it was cleared. Needs an
+	// in-place restore, and ranges that nothing writes to between the two digests.
+	bool verifyDigest;
+	// Deadline of the wait for data distribution to go idle (checked between probes) and bound on one attempt of a
+	// digest audit, from it being scheduled to it finishing. An audit that fails is run again, and the ranges are
+	// digested one after the other, so the whole digest can take longer.
+	double digestTimeoutSeconds;
 	Optional<double> restoreDuration;
 	Optional<double> snapshotMB;
 
@@ -73,6 +81,8 @@ struct RestoreBackupWorkload : TestWorkload {
 		addPrefix = BackupRangeSpec::readKeyOption(options, "addPrefix"_sr);
 		removePrefix = BackupRangeSpec::readKeyOption(options, "removePrefix"_sr);
 		reportBackupMetrics = getOption(options, "reportBackupMetrics"_sr, !g_network->isSimulated());
+		verifyDigest = getOption(options, "verifyDigest"_sr, false);
+		digestTimeoutSeconds = getOption(options, "digestTimeoutSeconds"_sr, 1800.0);
 
 		std::string keyFileName = "simfdb/" + getTestEncryptionFileName();
 		// Only set encryptionKeyFileName if the encryption key file exists during backup.
@@ -206,6 +216,41 @@ struct RestoreBackupWorkload : TestWorkload {
 		}
 	}
 
+	// Digests `ranges` and records how long it took.
+	Future<std::vector<RangeDigestResult>> digestAndRecord(Database cx,
+	                                                       Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                                       std::string label,
+	                                                       bool isBaseline = false) {
+		// The digest is only exact over settled data distribution; the restore leaves shards moving.
+		if (!co_await waitForQuiescentDataDistribution(cx, dbInfo, digestTimeoutSeconds, "RestoreBackupDigest")) {
+			throw timed_out();
+		}
+		AuditWaitOptions waitOptions;
+		waitOptions.traceContext = "RestoreBackupDigest";
+		waitOptions.maxWaitSeconds = digestTimeoutSeconds;
+		double digestStart = now();
+		std::vector<RangeDigestResult> results = co_await digestRanges(cx, ranges, waitOptions);
+		double elapsed = now() - digestStart;
+		int64_t kvCount = 0;
+		int64_t byteCount = 0;
+		for (auto const& d : results) {
+			kvCount += d.kvCount;
+			byteCount += d.byteCount;
+		}
+		TraceEvent("RestoreBackupDigest")
+		    .detail("Label", label.c_str())
+		    .detail("RangeCount", ranges.size())
+		    .detail("KVCount", kvCount)
+		    .detail("Bytes", byteCount)
+		    .detail("DurationSeconds", elapsed);
+		backupMetrics.emplace_back("Digest " + label + " (s)", elapsed, Averaged::False);
+		if (isBaseline) {
+			backupMetrics.emplace_back("Digest key-value count", double(kvCount), Averaged::False);
+			backupMetrics.emplace_back("Digest data (MB)", byteCount / 1e6, Averaged::False);
+		}
+		co_return results;
+	}
+
 	// Returns the ranges to restore: restoreRanges if set, else the ranges the backup covers. Every restoreRanges
 	// entry must lie within one backup range: submitBackup coalesces them, so a range spanning two is not covered.
 	Future<Standalone<VectorRef<KeyRangeRef>>> getRangesToRestore(Database cx) {
@@ -243,6 +288,26 @@ struct RestoreBackupWorkload : TestWorkload {
 		// lock. With a prefix change the destination must already be empty, so nothing is cleared and the restore
 		// must not block other clients or restores.
 		bool inPlace = addPrefix.empty() && removePrefix.empty();
+		std::vector<RangeDigestResult> digestsBefore;
+		if (verifyDigest) {
+			if (!inPlace) {
+				// The keys of a restore with a prefix change differ from the live ones.
+				TraceEvent(SevWarnAlways, "RestoreBackupDigestNeedsInPlace")
+				    .detail("AddPrefix", addPrefix)
+				    .detail("RemovePrefix", removePrefix);
+				throw restore_error();
+			}
+			digestsBefore = co_await digestAndRecord(cx, ranges, "before", /*isBaseline=*/true);
+			int64_t digestedKeys = 0;
+			for (auto const& d : digestsBefore) {
+				digestedKeys += d.kvCount;
+			}
+			if (digestedKeys == 0) {
+				// Equal digests of empty ranges prove nothing.
+				TraceEvent(SevWarnAlways, "RestoreBackupDigestNothingToVerify").detail("RangeCount", ranges.size());
+				throw restore_error();
+			}
+		}
 		if (inPlace) {
 			co_await clearRanges(cx, ranges);
 			co_await checkRangesEmpty(cx, ranges);
@@ -268,6 +333,11 @@ struct RestoreBackupWorkload : TestWorkload {
 		co_await BackupSteps::restoreBackup(cx, &backupAgent, version, spec);
 		restoreDuration = now() - restoreStart;
 		TraceEvent("RestoreBackupDone").detail("Tag", tag).detail("DurationSeconds", restoreDuration.get());
+		if (verifyDigest) {
+			std::vector<RangeDigestResult> digestsAfter = co_await digestAndRecord(cx, ranges, "after");
+			// The digests are taken over settled data distribution, so a difference is a failure.
+			verifyDigestsEqual(ranges, digestsBefore, digestsAfter);
+		}
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
