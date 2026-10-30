@@ -4546,7 +4546,10 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 					    .detail("BackupUrl", backupUrl)
 					    .detail("Action", "Aborting restore - bulkdump dataset is incomplete");
 					co_await restore.logError(
-					    cx, restore_missing_data(), "BulkLoad restore failed: bulkdump dataset incomplete", nullptr);
+					    cx,
+					    restore_missing_data(),
+					    "BulkLoad restore failed: bulkdump dataset incomplete; retry with --mode rangefile",
+					    nullptr);
 					// Abort the restore by setting state to ABORTED
 					auto abortTr = makeReference<ReadYourWritesTransaction>(cx);
 					abortTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
