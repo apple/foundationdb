@@ -3697,8 +3697,9 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 
 		state Reference<TaskFuture> logDispatchBatchFuture = futureBucket->future(tr);
 
-		// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag
-		state int priority = latestSnapshotEndVersion.present() ? 1 : 0;
+		// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag.
+		// Priority 2 also puts them ahead of other backups' initial snapshot range tasks (priority 1).
+		state int priority = latestSnapshotEndVersion.present() ? 2 : 0;
 
 		if (!mutationLogType.present() || mutationLogType.get() == MutationLogType::DEFAULT) {
 			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will
