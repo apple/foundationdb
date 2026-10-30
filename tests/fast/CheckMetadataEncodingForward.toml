@@ -1,0 +1,17 @@
+[[knobs]]
+shard_encode_location_metadata = true
+
+[[test]]
+testTitle = 'CheckMetadataEncodingForward'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'CheckMetadataEncoding'

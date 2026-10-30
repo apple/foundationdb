@@ -1,0 +1,21 @@
+# Sharded RocksDB requires SHARD_ENCODE=true, exclude it.
+[configuration]
+storageEngineExcludeTypes=[3,4,5]
+
+[[knobs]]
+shard_encode_location_metadata = false
+
+[[test]]
+testTitle = 'CheckMetadataEncodingOldPath'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'CheckMetadataEncoding'
