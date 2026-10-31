@@ -231,6 +231,10 @@ public:
 	int TLS_MALLOC_ARENA_MAX;
 	int TLS_HANDSHAKE_LIMIT;
 	bool DISABLE_MAINTHREAD_TLS_HANDSHAKE;
+	// If true, each TLS handshake thread drives many handshakes concurrently on non-blocking sockets, with a
+	// per-handshake deadline, and handshakes never run on the network thread while handshake threads exist;
+	// DISABLE_MAINTHREAD_TLS_HANDSHAKE then has no effect.
+	bool TLS_HANDSHAKE_NONBLOCKING_WORKERS;
 	int TLS_HANDSHAKE_FLOWLOCK_PRIORITY;
 
 	int NETWORK_TEST_CLIENT_COUNT;
