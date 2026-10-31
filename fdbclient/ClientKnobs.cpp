@@ -303,6 +303,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
 	init( BACKUP_DISPATCH_ADDTASK_SIZE,             50 );
 	init( RESTORE_DISPATCH_ADDTASK_SIZE,           150 );
+	init( RESTORE_DISPATCH_TX_SIZE,      4 * 1024 * 1024 ); if( randomize && buggify() ) RESTORE_DISPATCH_TX_SIZE = 1 * 1024;
 	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && buggify() ) RESTORE_DISPATCH_BATCH_SIZE = 20;
 	init (RESTORE_PARTITIONED_BATCH_VERSION_SIZE, 10000000); // each step restores 10s worth of data
 	init( RESTORE_WRITE_TX_SIZE,            256 * 1024 );

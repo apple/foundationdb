@@ -1,0 +1,16 @@
+testClass = "Backup"
+
+[[knobs]]
+# The test caps writer transactions at 4 KiB, below their initial 16 KiB budget.
+restore_write_tx_size = 16384
+backup_logfile_block_size = 65536
+mutation_block_size = 10000
+
+[configuration]
+tenantModes = ['disabled']
+
+[[test]]
+testTitle = 'RestoreWriterRecovery'
+
+    [[test.workload]]
+    testName = 'RestoreWriterRecovery'
