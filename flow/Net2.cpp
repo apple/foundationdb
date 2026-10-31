@@ -153,7 +153,8 @@ public:
 	Future<Reference<IConnection>> connect(NetworkAddress toAddr, tcp::socket* existingSocket = nullptr) override;
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override;
 	Future<Reference<IConnection>> connectExternalWithHostname(NetworkAddress toAddr,
-	                                                           const std::string& hostname) override;
+	                                                           const std::string& hostname,
+	                                                           tcp::socket* existingSocket = nullptr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
 	// The mock DNS methods should only be used in simulation.
@@ -932,6 +933,7 @@ public:
 		if (existingSocket != nullptr) {
 			Reference<SSLConnection> self(new SSLConnection(context, existingSocket));
 			self->peer_address = addr;
+			self->sni_hostname = std::move(hostname);
 			self->init();
 			co_return self;
 		}
@@ -1068,10 +1070,28 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(N2::g_net2->activeTlsPolicy,
-			                   self->ssl_sock,
-			                   self->peer_address,
-			                   [conn = self.getPtr()](bool verifyOk) { conn->has_trusted_peer = verifyOk; });
+			if (self->sni_hostname.empty()) {
+				ConfigureSSLStream(N2::g_net2->activeTlsPolicy,
+				                   self->ssl_sock,
+				                   self->peer_address,
+				                   [conn = self.getPtr()](bool verifyOk) { conn->has_trusted_peer = verifyOk; });
+			} else {
+				// An external server (S3, a KMS) is authenticated by CA chain plus the SSL_set1_host() check below.
+				// The cluster's --tls-verify-peers rules describe FDB peers and would reject any such server.
+				self->ssl_sock.set_verify_callback(
+				    [conn = self.getPtr()](bool preverified, boost::asio::ssl::verify_context& ctx) {
+					    if (!preverified) {
+						    TraceEvent(SevWarn, "TLSExternalServerVerifyFailed")
+						        .suppressFor(1.0)
+						        .detail("PeerAddress", conn->peer_address)
+						        .detail("Hostname", conn->sni_hostname)
+						        .detail("VerifyError",
+						                X509_verify_cert_error_string(X509_STORE_CTX_get_error(ctx.native_handle())));
+					    }
+					    conn->has_trusted_peer = preverified;
+					    return preverified;
+				    });
+			}
 
 			// Set SNI hostname if we have one (for connections made with hostname) and SSL flags to check
 			// certificate against.
@@ -1962,12 +1982,14 @@ Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr) {
 	return connect(toAddr);
 }
 
-Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr, const std::string& hostname) {
+Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr,
+                                                                const std::string& hostname,
+                                                                tcp::socket* existingSocket) {
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
-		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, nullptr, hostname);
+		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, existingSocket, hostname);
 	}
-	return connect(toAddr);
+	return connect(toAddr, existingSocket);
 }
 
 Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {
