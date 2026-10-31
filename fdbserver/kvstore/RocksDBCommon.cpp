@@ -23,6 +23,7 @@
 #ifdef WITH_ROCKSDB
 
 #include "fdbserver/core/Knobs.h"
+#include "flow/Platform.h"
 #include "flow/Trace.h"
 
 namespace RocksDBCommon {
@@ -121,6 +122,87 @@ rocksdb::BlockBasedTableOptions::IndexType getIndexTypeFromKnob(int knobValue) {
 		TraceEvent(SevWarn, "InvalidIndexType").detail("KnobValue", knobValue);
 		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearch;
 	}
+}
+
+namespace {
+
+// Forwards everything to its target Env, except that compaction pool threads set their nice value before running jobs.
+class FdbRocksDBEnv : public rocksdb::EnvWrapper {
+public:
+	FdbRocksDBEnv(rocksdb::Env* target, int compactionThreadPriority)
+	  : rocksdb::EnvWrapper(target), compactionThreadPriority(compactionThreadPriority) {
+		// Use the target's FileSystem and SystemClock directly. By default, EnvWrapper routes them through RocksDB's
+		// legacy Env API.
+		file_system_ = target->GetFileSystem();
+		system_clock_ = target->GetSystemClock();
+	}
+
+	const char* Name() const override { return "FdbRocksDBEnv"; }
+
+	void Schedule(void (*function)(void*),
+	              void* arg,
+	              Priority pri,
+	              void* tag = nullptr,
+	              void (*unschedFunction)(void*) = nullptr) override {
+		// RocksDB runs compactions on LOW and BOTTOM. It only puts flushes on LOW when HIGH has no threads, and
+		// opening a DB always gives HIGH at least one.
+		if (!compactionThreadPriority || (pri != Priority::LOW && pri != Priority::BOTTOM)) {
+			target()->Schedule(function, arg, pri, tag, unschedFunction);
+			return;
+		}
+		auto* const job = new Job{ function, arg, unschedFunction, compactionThreadPriority };
+		target()->Schedule(&runJob, job, pri, tag, &unscheduleJob);
+	}
+
+private:
+	struct Job {
+		void (*function)(void*);
+		void* arg;
+		void (*unschedFunction)(void*);
+		int threadPriority;
+	};
+
+	// Runs on a RocksDB pool thread: sets the thread's nice value once, then runs RocksDB's job.
+	static void runJob(void* p) {
+		Job* const owned = static_cast<Job*>(p);
+		const Job job = *owned;
+		delete owned;
+		thread_local bool prioritySet = false;
+		if (!prioritySet) {
+			setThreadPriority(job.threadPriority);
+			prioritySet = true;
+		}
+		job.function(job.arg);
+	}
+
+	// Runs instead of runJob if RocksDB cancels the job (e.g. on close). RocksDB's own callback must still run, or
+	// DB::Close() waits forever for the job to finish.
+	static void unscheduleJob(void* p) {
+		Job* const owned = static_cast<Job*>(p);
+		const Job job = *owned;
+		delete owned;
+		if (job.unschedFunction) {
+			job.unschedFunction(job.arg);
+		}
+	}
+
+	const int compactionThreadPriority;
+};
+
+} // namespace
+
+rocksdb::Env* getFdbRocksDBEnv() {
+	// Never destroyed: RocksDB's threads and DBs keep this pointer for the life of the process, like Env::Default().
+	static FdbRocksDBEnv* const env = [] {
+		const int priority = SERVER_KNOBS->ROCKSDB_COMPACTION_THREAD_PRIORITY;
+		if (priority < 0) {
+			TraceEvent(SevWarnAlways, "RocksDBCompactionThreadPriorityNegative")
+			    .detail("Priority", priority)
+			    .detail("Note", "Negative nice values need CAP_SYS_NICE; otherwise they are ignored");
+		}
+		return new FdbRocksDBEnv(rocksdb::Env::Default(), priority);
+	}();
+	return env;
 }
 
 } // namespace RocksDBCommon

@@ -286,6 +286,7 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	options.avoid_unnecessary_blocking_io = true;
 	options.max_open_files = SERVER_KNOBS->ROCKSDB_MAX_OPEN_FILES;
 	options.create_if_missing = true;
+	options.env = RocksDBCommon::getFdbRocksDBEnv();
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}
