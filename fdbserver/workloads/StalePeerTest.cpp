@@ -497,6 +497,11 @@ struct StalePeerTestWorkload : TestWorkload {
 			if (!result.present() && self->countSourcesReferencing(oldAddr, trackerRole, false) > 0) {
 				// The server may have retired between the last poll and the deadline.
 				auto removed = co_await timeout(storageServerRemoved(cx, oldAddr), self->waitAfterKill);
+				if (removed.present() && !removed.get()) {
+					// The server-list read resumes us inline while its result still owns the target's interface.
+					// Let that callback unwind before sampling the tester's tracked references.
+					co_await delay(0);
+				}
 				if (!removed.orDefault(false) && self->countSourcesReferencing(oldAddr, trackerRole, false) > 0) {
 					if (self->skipIfClusterUnhealthy()) {
 						co_return;
