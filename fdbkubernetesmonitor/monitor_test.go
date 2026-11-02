@@ -228,6 +228,18 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 					})
 				})
 
+				When("the watched node and the launch binary are unavailable", func() {
+					BeforeEach(func() {
+						mon.podClient.nodeName = "missing-node"
+						Expect(os.Remove(fdbserverPath)).To(Succeed())
+					})
+
+					It("still accepts isolation", func() {
+						Expect(configuration).NotTo(BeNil())
+						Expect(configuration.ShouldRunServers()).To(BeFalse())
+					})
+				})
+
 				It("should return the configuration with runServers set to false", func() {
 					Expect(configuration).NotTo(BeNil())
 					Expect(configuration.Version).To(Equal(&defaultVersion))

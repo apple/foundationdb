@@ -136,8 +136,6 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 		currentContainerVersion: currentContainerVersion,
 	}
 
-	go func() { mon.watchPodTimestamps(ctx) }()
-
 	mux := http.NewServeMux()
 	// Enable pprof endpoints for debugging purposes.
 	if enableDebug {
@@ -159,6 +157,7 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 	reg.MustRegister(collectors.NewGoCollector())
 	monitorMetrics := registerMetrics(reg)
 	mon.metrics = monitorMetrics
+	go mon.watchReloadRequests(ctx)
 	promHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
 
 	// Add Prometheus support
@@ -247,21 +246,24 @@ func (monitor *monitor) readConfiguration(ctx context.Context) (*api.ProcessConf
 		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version.String(), "fdbserver")
 	}
 
-	err = checkOwnerExecutable(configuration.BinaryPath)
-	if err != nil {
-		monitor.logger.Error(err, "Error with binary path for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
-		return nil, nil, nil
+	if configuration.ShouldRunServers() && monitor.processIsIsolated(ctx) {
+		configuration.RunServers = pointer.Bool(false)
 	}
-
 	environment, err := monitor.environmentFromNodeMetadata(ctx)
 	if err != nil {
 		monitor.logger.Error(err, "Error updating custom environment from node metadata", "configuration", configuration, "binaryPath", configuration.BinaryPath)
-		return nil, nil, nil
+		if configuration.ShouldRunServers() {
+			return nil, nil, nil
+		}
+		// A stop request must still reach the running processes when the node is unavailable.
+		environment = monitor.baseEnvironment
 	}
 	if configuration.ShouldRunServers() {
-		if monitor.processIsIsolated(ctx) {
-			configuration.RunServers = pointer.Bool(false)
-		} else if _, err := configuration.GenerateArguments(1, environment); err != nil {
+		if err := checkOwnerExecutable(configuration.BinaryPath); err != nil {
+			monitor.logger.Error(err, "Error with binary path for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
+			return nil, nil, nil
+		}
+		if _, err := configuration.GenerateArguments(1, environment); err != nil {
 			monitor.logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
 			return nil, nil, nil
 		}
@@ -696,18 +698,18 @@ func (monitor *monitor) run(ctx context.Context) {
 	<-done
 }
 
-// watchPodTimestamps watches the timestamp feed to reload the configuration.
-func (monitor *monitor) watchPodTimestamps(ctx context.Context) {
+// watchReloadRequests applies node and pod changes and skips stale ConfigMap reminders.
+func (monitor *monitor) watchReloadRequests(ctx context.Context) {
 	for {
 		select {
-		case timestamp, ok := <-monitor.podClient.TimestampFeed:
+		case request, ok := <-monitor.podClient.reloadRequests:
 			if !ok {
 				return
 			}
 			monitor.mutex.Lock()
 			lastConfigurationTime := monitor.lastConfigurationTime
 			monitor.mutex.Unlock()
-			if timestamp > lastConfigurationTime.Unix() {
+			if request.force || request.timestamp > lastConfigurationTime.Unix() {
 				monitor.loadConfiguration(ctx)
 			}
 		case <-ctx.Done():

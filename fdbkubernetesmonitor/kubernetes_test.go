@@ -21,6 +21,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -36,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 )
 
@@ -76,6 +78,41 @@ var _ = Describe("Testing FDB Pod client", func() {
 		})).To(Succeed())
 	})
 
+	It("preserves a concurrent isolation change when retrying an environment annotation patch", func() {
+		ctx := context.Background()
+		pod := &corev1.Pod{}
+		key := client.ObjectKey{Namespace: namespace, Name: podName}
+		Expect(fakeClient.Get(ctx, key, pod)).To(Succeed())
+		pod.Annotations = map[string]string{api.IsolateProcessGroupAnnotation: "true"}
+		Expect(fakeClient.Update(ctx, pod)).To(Succeed())
+
+		attempts := 0
+		podClient = &kubernetesClient{namespace: namespace, podName: podName, Logger: GinkgoLogr,
+			Client: interceptor.NewClient(fakeClient, interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if err := c.Get(ctx, key, obj, opts...); err != nil {
+						return err
+					}
+					obj.GetAnnotations()[api.IsolateProcessGroupAnnotation] = "false"
+					return nil
+				},
+				Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					attempts++
+					if attempts == 1 {
+						return errors.New("transient failure")
+					}
+					return c.Patch(ctx, obj, patch, opts...)
+				},
+			}),
+		}
+
+		Expect(podClient.updateAnnotationsOnPod(ctx, map[string]string{api.EnvironmentAnnotation: "{}"})).To(Succeed())
+		Expect(attempts).To(Equal(2))
+		Expect(fakeClient.Get(ctx, key, pod)).To(Succeed())
+		Expect(pod.Annotations).To(HaveKeyWithValue(api.IsolateProcessGroupAnnotation, "true"))
+		Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{}"))
+	})
+
 	When("the kubernetesClient was started", func() {
 		JustBeforeEach(func() {
 			var err error
@@ -109,6 +146,28 @@ var _ = Describe("Testing FDB Pod client", func() {
 		When("the node watch feature is enabled", func() {
 			BeforeEach(func() {
 				enableNodeWatcher = true
+			})
+
+			It("reloads when a missing node appears after startup", func() {
+				node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+				podClient.OnAdd(node, true)
+				Expect(podClient.reloadRequests).NotTo(Receive())
+
+				podClient.OnAdd(node, false)
+				Expect(podClient.reloadRequests).To(Receive(Equal(reloadRequest{force: true})))
+			})
+
+			It("reloads after label removal and ignores unrelated node updates", func() {
+				node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Labels: map[string]string{"zone": "a"}}}
+				informer, err := internalCache.FakeInformerFor(context.Background(), node)
+				Expect(err).NotTo(HaveOccurred())
+				updated := node.DeepCopy()
+				updated.Labels = nil
+				informer.Update(node, updated)
+				Expect(podClient.reloadRequests).To(Receive(Equal(reloadRequest{force: true})))
+
+				informer.Update(updated, updated.DeepCopy())
+				Expect(podClient.reloadRequests).NotTo(Receive())
 			})
 
 			It("should have the metadata for the pod and node", func() {
@@ -168,7 +227,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 				})
 
 				It("should update the pod information and receive an event", func() {
-					Expect(podClient.TimestampFeed).To(Receive(&timestamp))
+					Expect(podClient.reloadRequests).To(Receive(Equal(reloadRequest{timestamp: timestamp})))
 				})
 			})
 
@@ -181,7 +240,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 				})
 
 				It("should update the Pod information", func() {
-					Expect(podClient.TimestampFeed).NotTo(Receive())
+					Expect(podClient.reloadRequests).NotTo(Receive())
 				})
 			})
 
@@ -196,7 +255,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 				})
 
 				It("should update the Pod information", func() {
-					Expect(podClient.TimestampFeed).To(Receive())
+					Expect(podClient.reloadRequests).To(Receive(Equal(reloadRequest{force: true})))
 				})
 			})
 
@@ -210,7 +269,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 				})
 
 				It("should update the Pod information", func() {
-					Expect(podClient.TimestampFeed).NotTo(Receive())
+					Expect(podClient.reloadRequests).NotTo(Receive())
 				})
 			})
 		})
