@@ -133,6 +133,7 @@ var truncatedFields = [][]byte{
 	{intZeroCode + 1}, {negIntStart + 1}, {negIntStart + 1, 0x80},
 	{posIntEnd}, {posIntEnd, 2, 1}, {negIntStart}, {negIntStart, 0xfd, 1},
 	{nestedCode}, {nestedCode, nilCode, 0xff},
+	{floatCode}, {doubleCode}, {uuidCode}, {versionstampCode},
 }
 
 func TestUnpackTruncatedFields(t *testing.T) {
@@ -140,6 +141,43 @@ func TestUnpackTruncatedFields(t *testing.T) {
 		if _, err := Unpack(input); err == nil {
 			t.Errorf("Unpack(%x) accepted a truncated tuple", input)
 		}
+	}
+}
+
+func TestUnpackNestedSiblings(t *testing.T) {
+	// An escaped nil inside a nested tuple, followed by a zero encoded in one byte.
+	// Preserve the original unsigned result for that noncanonical integer encoding.
+	packed := []byte{nestedCode, nestedCode, nilCode, 0xff, nilCode, intZeroCode + 1, 0, nilCode, nilCode}
+	want := Tuple{Tuple{Tuple{nil}, uint64(0)}, nil}
+	got, err := Unpack(packed)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("Unpack(%x) = %#v, %v; want %#v", packed, got, err, want)
+	}
+}
+
+func TestUnpackDeepNesting(t *testing.T) {
+	const depth = 1 << 16
+	tags := bytes.Repeat([]byte{nestedCode}, depth)
+	if _, err := Unpack(tags); err == nil {
+		t.Fatal("accepted unterminated nested tuples")
+	}
+	packed := append(tags, make([]byte, depth)...)
+	tuple, err := Unpack(packed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < depth; i++ {
+		if len(tuple) != 1 {
+			t.Fatalf("tuple at depth %d has %d elements", i, len(tuple))
+		}
+		var ok bool
+		tuple, ok = tuple[0].(Tuple)
+		if !ok {
+			t.Fatalf("expected a nested tuple at depth %d", i)
+		}
+	}
+	if len(tuple) != 0 {
+		t.Fatal("expected an empty innermost tuple")
 	}
 }
 
