@@ -25,6 +25,7 @@ package fdb_test
 import (
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
@@ -361,9 +362,52 @@ func TestDatabaseCloseRemovesResources(t *testing.T) {
 		t.Fatalf("Unable to set API version: %v\n", err)
 	}
 
+	defer newDB.Close()
 	if db == newDB {
 		t.Fatalf("Expected a different database object, got: %v and %v\n", db, newDB)
 	}
+}
+
+func TestIndependentDatabaseOpens(t *testing.T) {
+	fdb.MustAPIVersion(API_VERSION)
+	first := fdb.MustOpenDefault()
+	second := fdb.MustOpenDefault()
+	defer second.Close()
+	firstCopy := first
+	first.Close()
+	firstCopy.Close()
+
+	if _, err := second.CreateTransaction(); err != nil {
+		t.Fatalf("create transaction after closing the other handle: %v", err)
+	}
+}
+
+func TestConcurrentDatabaseOpenClose(t *testing.T) {
+	fdb.MustAPIVersion(API_VERSION)
+	var workers sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			for j := 0; j < 10; j++ {
+				db, err := fdb.OpenDefault()
+				if err != nil {
+					t.Errorf("open database: %v", err)
+					return
+				}
+				_, err = db.CreateTransaction()
+				db.Close()
+				if err != nil {
+					t.Errorf("create transaction: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	close(start)
+	workers.Wait()
 }
 
 func ExampleOpenWithConnectionString() {

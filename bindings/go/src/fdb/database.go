@@ -29,6 +29,7 @@ import "C"
 import (
 	"errors"
 	"runtime"
+	"sync"
 )
 
 // ErrMultiVersionClientUnavailable is returned when the multi-version client API is unavailable.
@@ -44,17 +45,15 @@ var ErrMultiVersionClientUnavailable = errors.New("multi-version client API is u
 // usually created and committed automatically by the (Database).Transact
 // method.
 type Database struct {
-	// String reference to the cluster file.
-	clusterFile string
-	// This variable is to track if we have to remove the database from the cached
-	// database structs. We can't use clusterFile alone, since the default clusterFile
-	// would be an empty string.
-	isCached bool
 	*database
+	closeOnce *sync.Once // Copies of a handle share one release.
 }
 
 type database struct {
-	ptr *C.FDBDatabase
+	ptr         *C.FDBDatabase
+	clusterFile string
+	isCached    bool
+	openHandles int // Guarded by databaseCacheMutex.
 }
 
 // DatabaseOptions is a handle with which to set options that affect a Database
@@ -64,22 +63,24 @@ type DatabaseOptions struct {
 	d *database
 }
 
-// Close will close the Database and clean up all resources.
-// It must be called exactly once for each created database.
-// You have to ensure that you're not reusing this database
-// after it has been closed.
+// Close releases this handle. After closing it, neither this handle nor copies
+// of it may be used. Other handles opened for the same cluster remain usable.
 func (d Database) Close() {
-	// Remove database object from the cached databases
-	if d.isCached {
-		openDatabases.Delete(d.clusterFile)
-	}
-
-	if d.ptr == nil {
-		return
-	}
-
-	// Destroy the database
-	C.fdb_database_destroy(d.ptr)
+	d.closeOnce.Do(func() {
+		if d.isCached {
+			databaseCacheMutex.Lock()
+			d.openHandles--
+			last := d.openHandles == 0
+			if last {
+				delete(openDatabases, d.clusterFile)
+			}
+			databaseCacheMutex.Unlock()
+			if !last {
+				return
+			}
+		}
+		C.fdb_database_destroy(d.ptr)
+	})
 }
 
 func (opt DatabaseOptions) setOpt(code int, param []byte) error {

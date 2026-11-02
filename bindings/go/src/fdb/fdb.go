@@ -208,7 +208,8 @@ var networkStarted, networkStopped bool
 var networkMutex sync.RWMutex
 var networkRunning sync.WaitGroup
 
-var openDatabases sync.Map
+var databaseCacheMutex sync.Mutex
+var openDatabases = make(map[string]*database)
 
 // executeWithRunningNetworkThread starts the internal network event loop, if not already done,
 // then runs the provided function while network thread is running.
@@ -321,7 +322,7 @@ func MustOpenDefault() Database {
 	return db
 }
 
-// Open returns a database handle to the FoundationDB cluster identified
+// OpenDatabase returns a database handle to the FoundationDB cluster identified
 // by the provided cluster file and database name.
 //
 // A single client can use this function multiple times to connect to different
@@ -330,19 +331,20 @@ func MustOpenDefault() Database {
 // the multi-version client API must be used.
 // Caller must call Close() to release resources.
 func OpenDatabase(clusterFile string) (Database, error) {
-	var db Database
-	var okDb bool
-	anyy, exist := openDatabases.Load(clusterFile)
-	if db, okDb = anyy.(Database); !exist || !okDb {
+	databaseCacheMutex.Lock()
+	defer databaseCacheMutex.Unlock()
+
+	db := openDatabases[clusterFile]
+	if db == nil {
 		var err error
 		db, err = createDatabase(clusterFile)
 		if err != nil {
 			return Database{}, err
 		}
-		openDatabases.Store(clusterFile, db)
+		openDatabases[clusterFile] = db
 	}
-
-	return db, nil
+	db.openHandles++
+	return Database{database: db, closeOnce: new(sync.Once)}, nil
 }
 
 // MustOpenDatabase is like OpenDatabase but panics if the default database cannot
@@ -375,10 +377,9 @@ func MustOpen(clusterFile string, dbName []byte) Database {
 }
 
 // createDatabase is the internal function used to create a database.
-// Caller must call Close() to release resources.
-func createDatabase(clusterFile string) (Database, error) {
+func createDatabase(clusterFile string) (*database, error) {
 	if apiVersion == 0 {
-		return Database{}, ErrAPIVersionUnset
+		return nil, ErrAPIVersionUnset
 	}
 
 	var cf *C.char
@@ -395,15 +396,13 @@ func createDatabase(clusterFile string) (Database, error) {
 			createErr = Error{int(err)}
 		}
 	}); err != nil {
-		return Database{}, err
+		return nil, err
 	}
 	if createErr != nil {
-		return Database{}, createErr
+		return nil, createErr
 	}
 
-	db := &database{outdb}
-
-	return Database{clusterFile: clusterFile, isCached: true, database: db}, nil
+	return &database{ptr: outdb, clusterFile: clusterFile, isCached: true}, nil
 }
 
 // OpenWithConnectionString returns a database handle to the FoundationDB cluster identified
@@ -437,9 +436,7 @@ func OpenWithConnectionString(connectionString string) (Database, error) {
 		return Database{}, createErr
 	}
 
-	db := &database{outdb}
-
-	return Database{"", false, db}, nil
+	return Database{database: &database{ptr: outdb}, closeOnce: new(sync.Once)}, nil
 }
 
 // Deprecated: Use OpenDatabase instead.
