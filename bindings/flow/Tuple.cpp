@@ -449,7 +449,8 @@ Versionstamp Tuple::getVersionstamp(size_t index) const {
 	if (code != VERSIONSTAMP_96_CODE) {
 		throw invalid_tuple_data_type();
 	}
-	if (data.size() - offsets[index] - 1 < VERSIONSTAMP_TUPLE_SIZE) {
+	const size_t end = index + 1 < offsets.size() ? offsets[index + 1] : data.size();
+	if (end - offsets[index] < 1 + VERSIONSTAMP_TUPLE_SIZE) {
 		throw invalid_versionstamp_size();
 	}
 	return Versionstamp(StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE));

@@ -464,7 +464,8 @@ TupleVersionstamp Tuple::getVersionstamp(size_t index) const {
 	if (code != VERSIONSTAMP_96_CODE) {
 		throw invalid_tuple_data_type();
 	}
-	if (data.size() - offsets[index] - 1 < VERSIONSTAMP_TUPLE_SIZE) {
+	const size_t end = index + 1 < offsets.size() ? offsets[index + 1] : data.size();
+	if (end - offsets[index] < 1 + VERSIONSTAMP_TUPLE_SIZE) {
 		throw invalid_versionstamp_size();
 	}
 	return TupleVersionstamp(StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE));
@@ -607,14 +608,19 @@ TEST_CASE("/fdbclient/Tuple/unpack") {
 
 TEST_CASE("/fdbclient/Tuple/truncatedVersionstamp") {
 	const StringRef packed = "\x14\x33twelve bytes"_sr;
-	for (int end = 2; end < packed.size(); ++end) {
-		auto tuple = Tuple::unpack(packed.substr(0, end));
+	auto expectTruncated = [](const Tuple& tuple) {
 		try {
 			tuple.getVersionstamp(1);
 			ASSERT(false);
 		} catch (Error& e) {
 			ASSERT_EQ(e.code(), error_code_invalid_versionstamp_size);
 		}
+	};
+	for (int end = 2; end < packed.size(); ++end) {
+		auto tuple = Tuple::unpack(packed.substr(0, end));
+		expectTruncated(tuple);
+		tuple.append("another field"_sr);
+		expectTruncated(tuple);
 	}
 	ASSERT(Tuple::unpack(packed).getVersionstamp(1) == TupleVersionstamp(packed.substr(2)));
 	return Void();
