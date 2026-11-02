@@ -1,113 +1,161 @@
 project(awssdk-download NONE)
 
-# Compile the sdk with clang and libc++, since otherwise we get libc++ vs libstdc++ link errors when compiling fdb with clang
-set(AWSSDK_COMPILER_FLAGS "")
+### This whole aws-sdk-cpp is only used for Aws::Auth::AWSCredentials
+# to discover AWS credentials from environment variables, config files,
+# EC2 instance metadata (which requires an http client) etc.
+# The s3 client and even AWS request signing is re-implemented by FDB.
+
+set(AWSSDK_COMPILER_FLAGS "-fPIC")
 if(APPLE OR USE_LIBCXX)
-  set(AWSSDK_COMPILER_FLAGS "-stdlib=libc++ -nostdlib++")
+  string(APPEND AWSSDK_COMPILER_FLAGS " -stdlib=libc++ -nostdlib++")
+endif()
+
+if(APPLE)
+  set(AWSSDK_LIBDIR "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib")
+else()
+  set(AWSSDK_LIBDIR "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64")
 endif()
 
 include(ExternalProject)
 ExternalProject_Add(awssdk_project
   GIT_REPOSITORY https://github.com/aws/aws-sdk-cpp.git
   GIT_TAG c4b8cb01b0215f00740d9d72f7185ee056ced1f6 # v1.11.473
+  GIT_SHALLOW ON
   SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/awssdk-src"
   BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build"
-  GIT_CONFIG advice.detachedHead=false
   # it seems advice.detachedHead breaks something which causes aws sdk to always be rebuilt.
   # This option forces to cmake to build the aws sdk only once and never attempt to update it
   UPDATE_DISCONNECTED ON
-  CMAKE_ARGS -DBUILD_SHARED_LIBS=OFF        # SDK builds shared libs by default, we want static libs
+  PATCH_COMMAND # enable s2n for macOS too
+    sed -i.bak -e "s/UNIX AND NOT APPLE AND NOT BYO_CRYPTO/UNIX AND NOT BYO_CRYPTO/"
+    crt/aws-crt-cpp/CMakeLists.txt
+  COMMAND # patch cmake_minimum_required in s2n sub-sub-module
+    sed -i.bak -E -e "s/\\(VERSION 3.0\\)/\\(VERSION 3.10\\)/"
+    crt/aws-crt-cpp/crt/s2n/CMakeLists.txt
+  CMAKE_ARGS
+  -DBUILD_SHARED_LIBS=OFF        # SDK builds shared libs by default, we want static libs
   -DENABLE_TESTING=OFF
   -DBUILD_ONLY=core              # git repo contains SDK for every AWS product, we only want the core auth libraries
   -DSIMPLE_INSTALL=ON
-  -DCMAKE_INSTALL_PREFIX=install # need to specify an install prefix so it doesn't install in /usr/lib - FIXME: use absolute path
-  -DBYO_CRYPTO=ON                # we have our own crypto libraries that conflict if we let aws sdk build and link its own
-  -DBUILD_CURL=ON
-  -DBUILD_ZLIB=ON
-
+  -DCMAKE_INSTALL_PREFIX=install # need to specify an install prefix so it doesn't install in /usr/lib
   -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-  -DCMAKE_CXX_FLAGS=${AWSSDK_COMPILER_FLAGS}
+  "-DCMAKE_CXX_FLAGS=${AWSSDK_COMPILER_FLAGS}"
+  -DAWS_SDK_WARNINGS_ARE_ERRORS=OFF # newer compilers warn about code in this (older) sdk version
+  -DUSE_CRT_HTTP_CLIENT=ON
+  -DUSE_OPENSSL=ON
   TEST_COMMAND ""
   # the sdk build produces a ton of artifacts, with their own dependency tree, so there is a very specific dependency order they must be linked in
-  BUILD_BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-cpp-sdk-core.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-crt-cpp.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-s3.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-auth.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-event-stream.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-http.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-mqtt.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-sdkutils.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-io.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-checksums.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-compression.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-cal.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-common.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/external-install/curl/lib/libcurl.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/external-install/zlib/lib/libz.a"
+  BUILD_BYPRODUCTS
+    "${AWSSDK_LIBDIR}/libaws-cpp-sdk-core.a"
+    "${AWSSDK_LIBDIR}/libaws-crt-cpp.a"
+    "${AWSSDK_LIBDIR}/libaws-c-s3.a"
+    "${AWSSDK_LIBDIR}/libaws-c-auth.a"
+    "${AWSSDK_LIBDIR}/libaws-c-event-stream.a"
+    "${AWSSDK_LIBDIR}/libaws-c-http.a"
+    "${AWSSDK_LIBDIR}/libaws-c-mqtt.a"
+    "${AWSSDK_LIBDIR}/libaws-c-sdkutils.a"
+    "${AWSSDK_LIBDIR}/libaws-c-io.a"
+    "${AWSSDK_LIBDIR}/libaws-checksums.a"
+    "${AWSSDK_LIBDIR}/libaws-c-compression.a"
+    "${AWSSDK_LIBDIR}/libaws-c-cal.a"
+    "${AWSSDK_LIBDIR}/libaws-c-common.a"
+    "${AWSSDK_LIBDIR}/libs2n.a"
   )
 
 add_library(awssdk_core STATIC IMPORTED)
 add_dependencies(awssdk_core awssdk_project)
-set_target_properties(awssdk_core PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-cpp-sdk-core.a")
+set_target_properties(awssdk_core PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-cpp-sdk-core.a")
 
 add_library(awssdk_crt STATIC IMPORTED)
 add_dependencies(awssdk_crt awssdk_project)
-set_target_properties(awssdk_crt PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-crt-cpp.a")
+set_target_properties(awssdk_crt PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-crt-cpp.a")
 
 # TODO: can we remove c_s3? It seems to be a dependency of libaws-crt
 add_library(awssdk_c_s3 STATIC IMPORTED)
 add_dependencies(awssdk_c_s3 awssdk_project)
-set_target_properties(awssdk_c_s3 PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-s3.a")
+set_target_properties(awssdk_c_s3 PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-c-s3.a")
 
 add_library(awssdk_c_auth STATIC IMPORTED)
 add_dependencies(awssdk_c_auth awssdk_project)
-set_target_properties(awssdk_c_auth PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-auth.a")
+set_target_properties(awssdk_c_auth PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-c-auth.a")
 
 add_library(awssdk_c_eventstream STATIC IMPORTED)
 add_dependencies(awssdk_c_eventstream awssdk_project)
-set_target_properties(awssdk_c_eventstream PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-event-stream.a")
+set_target_properties(awssdk_c_eventstream PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-c-event-stream.a")
 
 add_library(awssdk_c_http STATIC IMPORTED)
 add_dependencies(awssdk_c_http awssdk_project)
-set_target_properties(awssdk_c_http PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-http.a")
+set_target_properties(awssdk_c_http PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-c-http.a")
 
 add_library(awssdk_c_mqtt STATIC IMPORTED)
 add_dependencies(awssdk_c_mqtt awssdk_project)
-set_target_properties(awssdk_c_mqtt PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-mqtt.a")
+set_target_properties(awssdk_c_mqtt PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-c-mqtt.a")
 
 add_library(awssdk_c_io STATIC IMPORTED)
 add_dependencies(awssdk_c_io awssdk_project)
-set_target_properties(awssdk_c_io PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-io.a")
+set_target_properties(awssdk_c_io PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-c-io.a")
 
 add_library(awssdk_c_sdkutils STATIC IMPORTED)
 add_dependencies(awssdk_c_sdkutils awssdk_project)
-set_target_properties(awssdk_c_sdkutils PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-sdkutils.a")
+set_target_properties(awssdk_c_sdkutils PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-c-sdkutils.a")
 
 add_library(awssdk_checksums STATIC IMPORTED)
 add_dependencies(awssdk_checksums awssdk_project)
-set_target_properties(awssdk_checksums PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-checksums.a")
+set_target_properties(awssdk_checksums PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-checksums.a")
 
 add_library(awssdk_c_compression STATIC IMPORTED)
 add_dependencies(awssdk_c_compression awssdk_project)
-set_target_properties(awssdk_c_compression PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-compression.a")
+set_target_properties(awssdk_c_compression PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-c-compression.a")
 
 add_library(awssdk_c_cal STATIC IMPORTED)
 add_dependencies(awssdk_c_cal awssdk_project)
-set_target_properties(awssdk_c_cal PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-cal.a")
+set_target_properties(awssdk_c_cal PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-c-cal.a")
 
 add_library(awssdk_c_common STATIC IMPORTED)
 add_dependencies(awssdk_c_common awssdk_project)
-set_target_properties(awssdk_c_common PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-common.a")
+set_target_properties(awssdk_c_common PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libaws-c-common.a")
 
-add_library(curl STATIC IMPORTED)
-add_dependencies(curl awssdk_project)
-set_property(TARGET curl PROPERTY IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/external-install/curl/lib/libcurl.a")
-
-add_library(zlib STATIC IMPORTED)
-add_dependencies(zlib awssdk_project)
-set_property(TARGET zlib PROPERTY IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/external-install/zlib/lib/libz.a")
+add_library(s2n STATIC IMPORTED)
+add_dependencies(s2n awssdk_project)
+set_target_properties(s2n PROPERTIES
+                      IMPORTED_LOCATION "${AWSSDK_LIBDIR}/libs2n.a")
 
 # link them all together in one interface target
 add_library(awssdk_target INTERFACE)
 target_include_directories(awssdk_target SYSTEM INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/include)
-target_link_libraries(awssdk_target INTERFACE awssdk_core awssdk_crt awssdk_c_s3 awssdk_c_auth awssdk_c_eventstream awssdk_c_http awssdk_c_mqtt awssdk_c_sdkutils awssdk_c_io awssdk_checksums awssdk_c_compression awssdk_c_cal awssdk_c_common curl zlib)
+target_link_libraries(awssdk_target
+  INTERFACE awssdk_core
+            awssdk_crt
+            awssdk_c_s3
+            awssdk_c_auth
+            awssdk_c_eventstream
+            awssdk_c_http
+            awssdk_c_mqtt
+            awssdk_c_sdkutils
+            awssdk_c_io
+            awssdk_checksums
+            awssdk_c_compression
+            awssdk_c_cal
+            awssdk_c_common
+            s2n
+            # OpenSSL::SSL
+            OpenSSL::Crypto
+            # ZLIB::ZLIB
+  )
+
+if(APPLE)
+  target_link_libraries(awssdk_target INTERFACE "-framework Security")
+endif()

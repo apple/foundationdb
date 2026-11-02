@@ -3317,6 +3317,14 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> serverEligibilityLogger(DDTeamCollection* self) {
+		loop {
+			// Body before the delay, so a new collection -- every distributor restart -- reports at once.
+			self->traceServerEligibility();
+			wait(delay(SERVER_KNOBS->DD_SERVER_ELIGIBILITY_LOGGING_INTERVAL, TaskPriority::FlushTrace));
+		}
+	}
+
 	ACTOR static Future<Void> monitorHealthyTeams(DDTeamCollection* self) {
 		TraceEvent("DDMonitorHealthyTeamsStart").detail("ZeroHealthyTeams", self->zeroHealthyTeams->get());
 		loop choose {
@@ -3592,6 +3600,7 @@ public:
 
 			// The following actors (e.g. storageRecruiter) do not need to be assigned to a variable because
 			// they are always running.
+			self->addActor.send(self->serverEligibilityLogger());
 			self->addActor.send(self->monitorHealthyTeams());
 
 			if (!self->db->isMocked()) {
@@ -4016,7 +4025,9 @@ void DDTeamCollection::updateTeamEligibility() {
 			team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
 		}
 	}
+
 	TraceEvent("TeamEligibilityCount", distributorId)
+	    .detail("Primary", primary)
 	    .detail("TotalTeam", teams.size())
 	    .detail("HealthyTeam", healthyCount)
 	    .detail("AllMetricsLowTeam", allMetricsLow)
@@ -4024,6 +4035,74 @@ void DDTeamCollection::updateTeamEligibility() {
 	    .detail("LowCPUTeam", lowCpuTotal)
 	    .detail("PivotAvailableSpaceRatio", teamPivots.pivotAvailableSpaceRatio)
 	    .detail("PivotCpuRatio", teamPivots.pivotCPU);
+
+	lastEligibilitySurvey = now();
+}
+
+Future<Void> DDTeamCollection::serverEligibilityLogger() {
+	return DDTeamCollectionImpl::serverEligibilityLogger(this);
+}
+
+// Per-server counterpart to TeamEligibilityCount. Reuses the counters the last survey left behind, so
+// the figures can be up to DD_TEAM_PIVOT_UPDATE_DELAY stale; SurveyAgeSeconds reports that, and -1 says
+// no survey has run and the eligibility figures are unknown rather than zero.
+void DDTeamCollection::traceServerEligibility() const {
+	const bool surveyed = lastEligibilitySurvey.present();
+
+	const int targetTeamsPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+	int healthyServers = 0, serversWithoutEligibleTeam = 0, serversWithMetrics = 0;
+	int serversBelowTeamTarget = 0, minTeamsPerServer = std::numeric_limits<int>::max();
+	double minFreeRatio = 1.0, maxFreeRatio = 0.0;
+
+	for (auto const& [serverId, server] : server_info) {
+		if (server_status.get(serverId).isUnhealthy()) {
+			continue;
+		}
+		++healthyServers;
+
+		if (surveyed) {
+			bool anyEligible = false;
+			for (auto const& team : server->getTeams()) {
+				if (team->getEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL) > 0) {
+					anyEligible = true;
+					break;
+				}
+			}
+			if (!anyEligible) {
+				++serversWithoutEligibleTeam;
+			}
+		}
+
+		const int serverTeams = server->getTeams().size();
+		if (serverTeams < targetTeamsPerServer) {
+			++serversBelowTeamTarget;
+		}
+		minTeamsPerServer = std::min(minTeamsPerServer, serverTeams);
+
+		if (server->metricsPresent()) {
+			auto [available, capacity] = server->spaceBytes();
+			if (capacity > 0) {
+				double freeRatio = std::max(0.0, (double)available / capacity);
+				minFreeRatio = std::min(minFreeRatio, freeRatio);
+				maxFreeRatio = std::max(maxFreeRatio, freeRatio);
+				++serversWithMetrics;
+			}
+		}
+	}
+
+	TraceEvent("DDServerEligibility", distributorId)
+	    .detail("Primary", primary)
+	    .detail("HealthyServers", healthyServers)
+	    .detail("ServersWithoutEligibleTeam", surveyed ? serversWithoutEligibleTeam : -1)
+	    .detail("SurveyAgeSeconds", surveyed ? now() - lastEligibilitySurvey.get() : -1.0)
+	    .detail("ServersBelowTeamTarget", serversBelowTeamTarget)
+	    .detail("TargetTeamsPerServer", targetTeamsPerServer)
+	    .detail("MinTeamsPerServer", healthyServers ? minTeamsPerServer : -1)
+	    .detail("LastBuildTeamsFailed", lastBuildTeamsFailed)
+	    .detail("TotalTeams", teams.size())
+	    .detail("MachineTeams", machineTeams.size())
+	    .detail("MinServerFreeRatio", serversWithMetrics ? minFreeRatio : -1.0)
+	    .detail("MaxServerFreeRatio", serversWithMetrics ? maxFreeRatio : -1.0);
 }
 
 void DDTeamCollection::updateTeamPivotValues() {
@@ -6808,6 +6887,10 @@ public:
 		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
+		// Force the eligibility survey: updateTeamPivotValues() only refreshes once
+		// DD_TEAM_PIVOT_UPDATE_DELAY has elapsed, so without this the case depends on how much time
+		// earlier tests consumed and fails when run alone.
+		collection->teamPivots.lastPivotValuesUpdate = -100;
 
 		collection->server_info[UID(1, 0)]->setMetrics(high_avail);
 		collection->server_info[UID(2, 0)]->setMetrics(low_avail);
@@ -6866,6 +6949,8 @@ public:
 		collection->addTeam(std::set<UID>({ UID(3, 0), UID(4, 0), UID(5, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
+		// Force the eligibility survey; see GetTeam_ServerUtilizationBelowCutoff.
+		collection->teamPivots.lastPivotValuesUpdate = -100;
 
 		collection->server_info[UID(1, 0)]->setMetrics(high_avail);
 		collection->server_info[UID(2, 0)]->setMetrics(low_avail);
@@ -6893,6 +6978,155 @@ public:
 		const auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
 
 		ASSERT(!resTeam.present());
+
+		return Void();
+	}
+
+	// Above AVAILABLE_SPACE_RATIO_CUTOFF the free-space multiplier is identically 1.0, so destination
+	// ranking degenerates to absolute bytes: a team at 10% free is preferred over one at 90% free if it
+	// holds slightly fewer bytes. Free space is an eligibility floor, not a gradient, so nothing pushes
+	// DD to level utilization between two teams that both have room.
+	//
+	// If free space is ever given influence above the cutoff this test should fail: invert the
+	// expectation to the roomier team rather than deleting the case, so the policy change stays visible.
+	ACTOR static Future<Void> GetTeam_FreeSpaceIgnoredAboveCutoff() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+		state int processSize = 6;
+		state int teamSize = 3;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		const int64_t MB = 1024LL * 1024;
+		const int64_t capacity = 10000 * MB;
+
+		// 90% free, holding 100 MB.
+		GetStorageMetricsReply roomy;
+		roomy.capacity.bytes = capacity;
+		roomy.available.bytes = 9000 * MB;
+		roomy.load.bytes = 100 * MB;
+
+		// 10% free, holding 90 MB. Stays above MIN_AVAILABLE_SPACE_RATIO +
+		// MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER (0.06), so it remains an eligible destination.
+		GetStorageMetricsReply nearlyFull;
+		nearlyFull.capacity.bytes = capacity;
+		nearlyFull.available.bytes = 1000 * MB;
+		nearlyFull.load.bytes = 90 * MB;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(4, 0), UID(5, 0), UID(6, 0) }), IsInitialTeam::True);
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		for (int id = 1; id <= 3; ++id) {
+			collection->server_info[UID(id, 0)]->setMetrics(roomy);
+		}
+		for (int id = 4; id <= 6; ++id) {
+			collection->server_info[UID(id, 0)]->setMetrics(nearlyFull);
+		}
+
+		// Force the first refresh, or destination eligibility is never computed and this asserts
+		// nothing: DD_TEAM_PIVOT_UPDATE_DELAY never elapses while now() is still near zero.
+		collection->teamPivots.lastPivotValuesUpdate = -100;
+
+		// Both teams are healthy, so the pivot is the median of {0.90, 0.10} = 0.10, which the
+		// nearly-full team meets exactly: both are eligible and the choice is made purely on bytes.
+		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         PreferLowerReadUtil::False,
+		                         PreferWithinShardLimit::False);
+
+		wait(collection->getTeam(req));
+
+		const auto& [resTeam, srcFound] = req.reply.getFuture().get();
+
+		ASSERT(resTeam.present());
+		auto ids = resTeam.get()->getServerIDs();
+		const std::set<UID> selected(ids.begin(), ids.end());
+
+		// Asking for the least-utilized team yields the one with 10% free, not the one with 90%.
+		const std::set<UID> nearlyFullTeam{ UID(4, 0), UID(5, 0), UID(6, 0) };
+		ASSERT(selected == nearlyFullTeam);
+		ASSERT_LT(resTeam.get()->getMinAvailableSpaceRatio(), 0.5);
+
+		return Void();
+	}
+
+	// A destination team must be *fully* healthy, so during a migration a brand-new empty server whose
+	// teams all still contain an excluded member has no eligible destination team and receives nothing,
+	// however much free space it has: DD prefers a half-full healthy team to an empty unhealthy one.
+	// Health filtering is right in itself; what this pins down is that per-team eligibility turns "not
+	// the best destination" into "not a destination at all" until those teams are rebuilt.
+	//
+	// trackTeamHealth does not run in these fixtures, so the team is marked unhealthy directly and
+	// server_status is set only to document intent.
+	//
+	// A change that lets such a server receive data should fail this case: update the expectation
+	// rather than deleting it.
+	ACTOR static Future<Void> GetTeam_UnhealthyTeamStrandsEmptyServer() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+		state int processSize = 6;
+		state int teamSize = 3;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		const int64_t MB = 1024LL * 1024;
+		const int64_t capacity = 10000 * MB;
+
+		// Surviving old hosts: half full, and holding real data.
+		GetStorageMetricsReply loaded;
+		loaded.capacity.bytes = capacity;
+		loaded.available.bytes = 5000 * MB;
+		loaded.load.bytes = 500 * MB;
+
+		// Freshly added hosts: empty.
+		GetStorageMetricsReply empty;
+		empty.capacity.bytes = capacity;
+		empty.available.bytes = 9900 * MB;
+		empty.load.bytes = 0;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(4, 0), UID(5, 0), UID(6, 0) }), IsInitialTeam::True);
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		for (int id = 1; id <= 3; ++id) {
+			collection->server_info[UID(id, 0)]->setMetrics(loaded);
+		}
+		for (int id = 4; id <= 6; ++id) {
+			collection->server_info[UID(id, 0)]->setMetrics(empty);
+		}
+
+		// Server 4 stands in for a still-excluded old host teamed with new servers 5 and 6; server 6 is
+		// the new host expected to be stranded.
+		const UID excludedServer(4, 0);
+		ServerStatus undesired(collection->server_info[excludedServer]->getLastKnownInterface().locality);
+		undesired.isUndesired = true;
+		collection->server_status.set(excludedServer, undesired);
+		collection->server_info[excludedServer]->markTeamUnhealthy(0);
+
+		// Force the pivot refresh, so the empty team is proven rejected on health rather than merely
+		// left uncomputed.
+		collection->teamPivots.lastPivotValuesUpdate = -100;
+
+		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         PreferLowerReadUtil::False,
+		                         PreferWithinShardLimit::False);
+
+		wait(collection->getTeam(req));
+
+		const auto& [resTeam, srcFound] = req.reply.getFuture().get();
+
+		ASSERT(resTeam.present());
+		auto ids = resTeam.get()->getServerIDs();
+		const std::set<UID> selected(ids.begin(), ids.end());
+
+		// The half-full team is chosen and the empty one is never offered, so the empty servers cannot
+		// converge toward the rest of the cluster.
+		const std::set<UID> loadedTeam{ UID(1, 0), UID(2, 0), UID(3, 0) };
+		ASSERT(selected == loadedTeam);
+		ASSERT(!selected.contains(UID(6, 0)));
+		ASSERT_GT(resTeam.get()->getLoadBytes(false), 0);
 
 		return Void();
 	}
@@ -7219,6 +7453,16 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
 
 TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	wait(DDTeamCollectionUnitTest::GetTeam_ServerUtilizationNearCutoff());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/FreeSpaceIgnoredAboveCutoff") {
+	wait(DDTeamCollectionUnitTest::GetTeam_FreeSpaceIgnoredAboveCutoff());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/UnhealthyTeamStrandsEmptyServer") {
+	wait(DDTeamCollectionUnitTest::GetTeam_UnhealthyTeamStrandsEmptyServer());
 	return Void();
 }
 

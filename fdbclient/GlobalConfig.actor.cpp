@@ -23,7 +23,9 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tuple.h"
+#include "fdbrpc/FailureMonitor.h"
 #include "flow/Error.h"
+#include "flow/UnitTest.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
@@ -161,20 +163,27 @@ ACTOR Future<Version> GlobalConfig::refresh(GlobalConfig* self, Version lastKnow
 	state Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
 	loop {
 		try {
-			GlobalConfigRefreshReply reply =
+			state GlobalConfigRefreshReply reply =
 			    wait(timeoutError(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
 			                                       &GrvProxyInterface::refreshGlobalConfig,
 			                                       GlobalConfigRefreshRequest{ lastKnown }),
 			                      CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT));
+			// TODO: Remove this max-version exception and the corresponding check in updater()
+			// once compatibility with older cluster controllers that emit the sentinel is no longer required.
+			if (reply.version < largestSeen && largestSeen != std::numeric_limits<Version>::max()) {
+				TraceEvent("GlobalConfigRefreshStaleSnapshot")
+				    .suppressFor(1.0)
+				    .detail("LastKnownVersion", lastKnown)
+				    .detail("LargestSeenVersion", largestSeen)
+				    .detail("ReplyVersion", reply.version);
+				wait(delay(0.25));
+				continue;
+			}
 			for (const auto& kv : reply.result) {
 				KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
 				self->insert(systemKey, kv.value);
 			}
-			if (reply.version >= largestSeen || largestSeen == std::numeric_limits<Version>::max()) {
-				return reply.version;
-			} else {
-				wait(delay(0.25));
-			}
+			return reply.version;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
@@ -263,4 +272,68 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 			wait(delay(1.0));
 		}
 	}
+}
+
+namespace {
+
+ACTOR Future<Void> serveGlobalConfigRefreshSnapshots(GrvProxyInterface grvProxy) {
+	state GlobalConfigRefreshRequest initialRequest = waitNext(grvProxy.refreshGlobalConfig.getFuture());
+	ASSERT_EQ(initialRequest.lastKnown, -1);
+	RangeResult initialData;
+	initialRequest.reply.send(GlobalConfigRefreshReply{ initialData.arena(), 1, initialData });
+
+	state GlobalConfigRefreshRequest staleRequest = waitNext(grvProxy.refreshGlobalConfig.getFuture());
+	ASSERT_EQ(staleRequest.lastKnown, 1);
+	RangeResult staleData;
+	staleData.push_back_deep(
+	    staleData.arena(),
+	    KeyValueRef(fdbClientInfoTxnSampleRate.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(0.5).pack()));
+	staleRequest.reply.send(GlobalConfigRefreshReply{ staleData.arena(), 2, staleData });
+
+	state GlobalConfigRefreshRequest currentRequest = waitNext(grvProxy.refreshGlobalConfig.getFuture());
+	ASSERT_EQ(currentRequest.lastKnown, 1);
+	RangeResult currentData;
+	currentRequest.reply.send(GlobalConfigRefreshReply{ currentData.arena(), 3, currentData });
+	return Void();
+}
+
+} // namespace
+
+TEST_CASE("/fdbclient/GlobalConfig/RejectsStaleRefreshSnapshot") {
+	state GrvProxyInterface grvProxy;
+	grvProxy.provisional = false;
+	grvProxy.initEndpoints();
+	IFailureMonitor::failureMonitor().setStatus(grvProxy.address(), FailureStatus(false));
+	ASSERT(IFailureMonitor::failureMonitor().getState(grvProxy.address()).isAvailable());
+
+	CommitProxyInterface commitProxy;
+	commitProxy.provisional = false;
+	commitProxy.initEndpoints();
+
+	ClientDBInfo initialInfo;
+	initialInfo.id = UID(1, 1);
+	initialInfo.grvProxies.push_back(grvProxy);
+	initialInfo.commitProxies.push_back(commitProxy);
+
+	state Reference<AsyncVar<ClientDBInfo>> clientInfo = makeReference<AsyncVar<ClientDBInfo>>(initialInfo);
+	state std::shared_ptr<int> callbackCount = std::make_shared<int>(0);
+	state Database db =
+	    DatabaseContext::create(clientInfo, Future<Void>(Never()), LocalityData(), EnableLocalityLoadBalance::False);
+	state Future<Void> refreshes = serveGlobalConfigRefreshSnapshots(grvProxy);
+	db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
+	wait(timeoutError(db->globalConfig->onInitialized(), 5.0));
+
+	std::shared_ptr<int> count = callbackCount; // state variables cannot be captured by a lambda
+	db->globalConfig->trigger(fdbClientInfoTxnSampleRate, [count](std::optional<std::any>) { ++*count; });
+	state Future<Void> configChanged = db->globalConfig->onChange();
+	ClientDBInfo currentInfo = clientInfo->get();
+	currentInfo.id = UID(1, 2);
+	currentInfo.history.emplace_back(3);
+	clientInfo->set(currentInfo);
+
+	wait(timeoutError(refreshes, 5.0));
+	wait(timeoutError(configChanged, 5.0));
+	ASSERT_EQ(*callbackCount, 0);
+	ASSERT(!db->globalConfig->get(fdbClientInfoTxnSampleRate).isValid());
+	return Void();
 }
