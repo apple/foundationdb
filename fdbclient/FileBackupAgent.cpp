@@ -6774,9 +6774,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		}
 
 		Version firstConsistentVersion = invalidVersion;
-		if (beginVersion == invalidVersion) {
-			beginVersion = 0;
-		}
 		Standalone<VectorRef<KeyRangeRef>> keyRangesFilter;
 		for (auto const& r : ranges) {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
@@ -6817,7 +6814,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				}
 			}
 		} else {
-			// In logs-only (incremental) mode, the firstConsistentVersion should just be restore.beginVersion().
+			if (beginVersion == invalidVersion) {
+				beginVersion = 0;
+			}
 			firstConsistentVersion = beginVersion;
 		}
 		if (!inconsistentSnapshotOnly) {
