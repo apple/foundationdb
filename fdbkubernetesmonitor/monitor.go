@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/rand/v2"
 	"net/http"
 	"net/http/pprof"
@@ -69,8 +70,9 @@ type monitor struct {
 	// currentContainerVersion defines the version of the container. This will be the same as the fdbserver version.
 	currentContainerVersion api.Version
 
-	// customEnvironment defines the custom environment variables to use when
-	// interpreting the monitor configuration.
+	// baseEnvironment holds startup settings. Each accepted configuration gets an immutable
+	// customEnvironment derived from those settings and the current node labels.
+	baseEnvironment   map[string]string
 	customEnvironment map[string]string
 
 	// activeConfiguration defines the active process configuration.
@@ -97,6 +99,9 @@ type monitor struct {
 	// This is used to synchronize access to local state like the active
 	// configuration and the process IDs from multiple goroutines.
 	mutex sync.Mutex
+
+	// reloadMutex orders configuration publication and its corresponding pod annotation update.
+	reloadMutex sync.Mutex
 
 	// podClient is a client for posting updates about this pod to
 	// Kubernetes.
@@ -125,7 +130,7 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 		configFile:              configFile,
 		podClient:               client,
 		logger:                  logger,
-		customEnvironment:       customEnvironment,
+		baseEnvironment:         customEnvironment,
 		processCount:            processCount,
 		processIDs:              make([]int, processCount+1),
 		currentContainerVersion: currentContainerVersion,
@@ -186,50 +191,31 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 	mon.run(ctx)
 }
 
-// updateCustomEnvironment will add the node labels and their values to the custom environment map. All the generated
-// environment variables will start with NODE_LABEL and "/" and "." will be replaced in the key as "_", e.g. from the
-// label "foundationdb.org/testing = awesome" the env variables NODE_LABEL_FOUNDATIONDB_ORG_TESTING = awesome" will be
-// generated.
-func (monitor *monitor) updateCustomEnvironmentFromNodeMetadata(ctx context.Context) error {
+// environmentFromNodeMetadata overlays the current node labels on the startup environment.
+func (monitor *monitor) environmentFromNodeMetadata(ctx context.Context) (map[string]string, error) {
 	nodeMeta, err := monitor.podClient.getNodeMetadata(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
 	if nodeMeta == nil {
-		return nil
+		return monitor.baseEnvironment, nil
 	}
-
-	nodeLabels := nodeMeta.Labels
-	for key, value := range nodeLabels {
+	environment := make(map[string]string, len(monitor.baseEnvironment)+len(nodeMeta.Labels))
+	maps.Copy(environment, monitor.baseEnvironment)
+	for key, value := range nodeMeta.Labels {
 		sanitizedKey := strings.ReplaceAll(key, "/", "_")
 		sanitizedKey = strings.ReplaceAll(sanitizedKey, ".", "_")
-		envKey := "NODE_LABEL_" + strings.ToUpper(sanitizedKey)
-		currentValue, ok := monitor.customEnvironment[envKey]
-		if !ok {
-			monitor.logger.Info("adding new custom environment variable from node labels", "key", envKey, "value", value)
-			monitor.customEnvironment[envKey] = value
-			continue
-		}
-
-		if currentValue == value {
-			continue
-		}
-
-		monitor.logger.Info("update custom environment variable from node labels", "key", envKey, "newValue", value, "currentValue", currentValue)
-		monitor.customEnvironment[envKey] = value
-		continue
+		environment["NODE_LABEL_"+strings.ToUpper(sanitizedKey)] = value
 	}
-
-	return nil
+	return environment, nil
 }
 
 // readConfiguration reads the latest configuration from the monitor file.
-func (monitor *monitor) readConfiguration(ctx context.Context) (*api.ProcessConfiguration, []byte) {
+func (monitor *monitor) readConfiguration(ctx context.Context) (*api.ProcessConfiguration, []byte, map[string]string) {
 	file, err := os.Open(monitor.configFile)
 	if err != nil {
 		monitor.logger.Error(err, "Error reading monitor config file", "monitorConfigPath", monitor.configFile)
-		return nil, nil
+		return nil, nil, nil
 	}
 	defer func() {
 		err := file.Close()
@@ -245,12 +231,12 @@ func (monitor *monitor) readConfiguration(ctx context.Context) (*api.ProcessConf
 	err = json.Unmarshal(configurationBytes, configuration)
 	if err != nil {
 		monitor.logger.Error(err, "Error parsing monitor configuration", "rawConfiguration", string(configurationBytes))
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	if configuration.Version == nil {
 		monitor.logger.Error(err, "Error could not parse configured version", "rawConfiguration", string(configurationBytes))
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// If the versions are protocol compatible don't try to point to another binary path. Otherwise, the processes will
@@ -264,18 +250,18 @@ func (monitor *monitor) readConfiguration(ctx context.Context) (*api.ProcessConf
 	err = checkOwnerExecutable(configuration.BinaryPath)
 	if err != nil {
 		monitor.logger.Error(err, "Error with binary path for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	err = monitor.updateCustomEnvironmentFromNodeMetadata(ctx)
+	environment, err := monitor.environmentFromNodeMetadata(ctx)
 	if err != nil {
 		monitor.logger.Error(err, "Error updating custom environment from node metadata", "configuration", configuration, "binaryPath", configuration.BinaryPath)
-		return nil, nil
+		return nil, nil, nil
 	}
-	_, err = configuration.GenerateArguments(1, monitor.customEnvironment)
+	_, err = configuration.GenerateArguments(1, environment)
 	if err != nil {
 		monitor.logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	if configuration.ShouldRunServers() {
@@ -286,17 +272,20 @@ func (monitor *monitor) readConfiguration(ctx context.Context) (*api.ProcessConf
 		}
 	}
 
-	return configuration, configurationBytes
+	return configuration, configurationBytes, environment
 }
 
 // loadConfiguration loads the latest configuration from the config file.
 func (monitor *monitor) loadConfiguration(ctx context.Context) {
-	configuration, configurationBytes := monitor.readConfiguration(ctx)
+	monitor.reloadMutex.Lock()
+	defer monitor.reloadMutex.Unlock()
+
+	configuration, configurationBytes, environment := monitor.readConfiguration(ctx)
 	if configuration == nil || len(configurationBytes) == 0 {
 		return
 	}
 
-	monitor.acceptConfiguration(configuration, configurationBytes)
+	monitor.acceptConfiguration(configuration, configurationBytes, environment)
 	// Always update the annotations if needed to handle cases where the fdb-kubernetes-monitor
 	// has loaded the new configuration but was not able to update the annotations.
 	err := monitor.podClient.updateAnnotations(ctx, monitor)
@@ -320,10 +309,11 @@ func checkOwnerExecutable(path string) error {
 
 // acceptConfiguration is called when the monitor process parses and accepts
 // a configuration from the local config file.
-func (monitor *monitor) acceptConfiguration(configuration *api.ProcessConfiguration, configurationBytes []byte) {
+func (monitor *monitor) acceptConfiguration(configuration *api.ProcessConfiguration, configurationBytes []byte, environment map[string]string) {
 	monitor.mutex.Lock()
 	defer monitor.mutex.Unlock()
 
+	monitor.customEnvironment = environment
 	// If the configuration hasn't changed ignore those events to prevent noisy logging.
 	if equality.Semantic.DeepEqual(monitor.activeConfiguration, configuration) {
 		return
@@ -387,10 +377,7 @@ func (monitor *monitor) runProcess(processNumber int) {
 
 		monitor.mutex.Lock()
 		config := monitor.activeConfiguration
-		customEnv := make(map[string]string, len(monitor.customEnvironment))
-		for k, v := range monitor.customEnvironment {
-			customEnv[k] = v
-		}
+		customEnv := monitor.customEnvironment
 		monitor.mutex.Unlock()
 
 		arguments, err := config.GenerateArguments(processNumber, customEnv)
@@ -722,7 +709,10 @@ func (monitor *monitor) watchPodTimestamps(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if timestamp > monitor.lastConfigurationTime.Unix() {
+			monitor.mutex.Lock()
+			lastConfigurationTime := monitor.lastConfigurationTime
+			monitor.mutex.Unlock()
+			if timestamp > lastConfigurationTime.Unix() {
 				monitor.loadConfiguration(ctx)
 			}
 		case <-ctx.Done():
