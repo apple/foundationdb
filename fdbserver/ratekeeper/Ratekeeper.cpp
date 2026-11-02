@@ -354,9 +354,7 @@ Future<Void> Ratekeeper::handleGetSSVersionLagReqs(RatekeeperInterface rkInterf)
 	}
 }
 
-Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
-                                               Version* recoveryVersion,
-                                               bool* lastLimited) {
+Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf, bool* lastLimited) {
 	while (true) {
 		GetRateInfoRequest req = co_await rkInterf.getRateInfo.getFuture();
 		GetRateInfoReply reply;
@@ -376,14 +374,6 @@ Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
 
 		p.totalTransactions = req.totalReleasedTransactions;
 		p.batchTransactions = req.batchReleasedTransactions;
-		p.version = req.version;
-		maxVersion = std::max(maxVersion, req.version);
-
-		if (*recoveryVersion == std::numeric_limits<Version>::max() && version_recovery.contains(*recoveryVersion)) {
-			*recoveryVersion = maxVersion;
-			version_recovery[*recoveryVersion] = version_recovery[std::numeric_limits<Version>::max()];
-			version_recovery.erase(std::numeric_limits<Version>::max());
-		}
 
 		p.lastUpdateTime = now();
 
@@ -411,33 +401,11 @@ Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
 }
 
 Future<Void> Ratekeeper::handleDBInfoChanges(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                             bool* recovering,
-                                             Version* recoveryVersion,
                                              std::vector<TLogInterface>* tlogInterfs,
                                              std::vector<Future<Void>>* tlogTrackers,
                                              Promise<Void>* err) {
 	while (true) {
 		co_await dbInfo->onChange();
-
-		if (!*recovering && dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-			*recovering = true;
-			*recoveryVersion = maxVersion;
-			if (*recoveryVersion == 0) {
-				*recoveryVersion = std::numeric_limits<Version>::max();
-			}
-			if (version_recovery.contains(*recoveryVersion)) {
-				auto& it = version_recovery[*recoveryVersion];
-				double existingEnd = it.second.present() ? it.second.get() : now();
-				double existingDuration = existingEnd - it.first;
-				version_recovery[*recoveryVersion] = std::make_pair(now() - existingDuration, Optional<double>());
-			} else {
-				version_recovery[*recoveryVersion] = std::make_pair(now(), Optional<double>());
-			}
-		}
-		if (*recovering && dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-			*recovering = false;
-			version_recovery[*recoveryVersion].second = now();
-		}
 
 		if (*tlogInterfs != dbInfo->get().logSystemConfig.allLocalLogs()) {
 			*tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
@@ -460,10 +428,6 @@ Future<Void> Ratekeeper::rateUpdater(bool* lastLimited) {
 			actualTpsHistory.pop_front();
 		}
 		actualTpsHistory.push_back(actualTps);
-
-		while (version_recovery.size() > CLIENT_KNOBS->MAX_GENERATIONS) {
-			version_recovery.erase(version_recovery.begin());
-		}
 
 		updateRate(&normalLimits);
 		updateRate(&batchLimits);
@@ -535,16 +499,9 @@ Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<Se
 
 	self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
 
-	bool recovering = dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS;
-	Version recoveryVersion = std::numeric_limits<Version>::max();
-	if (recovering) {
-		self.version_recovery[recoveryVersion] = std::make_pair(now(), Optional<double>());
-	}
-
 	bool lastLimited = false;
-	self.addActor.send(self.handleGetRateInfoReqs(rkInterf, &recoveryVersion, &lastLimited));
-	self.addActor.send(
-	    self.handleDBInfoChanges(dbInfo, &recovering, &recoveryVersion, &tlogInterfs, &tlogTrackers, &err));
+	self.addActor.send(self.handleGetRateInfoReqs(rkInterf, &lastLimited));
+	self.addActor.send(self.handleDBInfoChanges(dbInfo, &tlogInterfs, &tlogTrackers, &err));
 	self.addActor.send(self.rateUpdater(&lastLimited));
 
 	try {
@@ -604,8 +561,7 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,
                 SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH,
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
-                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
-    maxVersion(0), unblockedAssignmentTime(now()) {
+                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH) {
 	tagThrottler = std::make_unique<TagThrottler>(db, id);
 }
 

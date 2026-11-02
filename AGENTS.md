@@ -57,6 +57,7 @@ Enable simulation tests in cmake: `-DENABLE_SIMULATION_TESTS=ON`
 
 - A `SevError` (Severity 40) `TraceEvent` **fails** a simulation/Joshua run. Use `SevWarnAlways` for "shouldn't happen but non-fatal." Errors carrying an injected fault are auto-downgraded; genuine `SevError`s are not. Expected errors must be suppressed/allowlisted, never emitted at `SevError`.
 - Keep a `TraceEvent` small: any single `detail()` value over 495 bytes is truncated (`...`), and an event whose fields total over 4000 bytes is **dropped entirely** and re-logged as `TraceEventOverflow` — at `SevError` in simulation, so an oversized event *fails the test*. Chunk long payloads (joined lists, command lines, serialized blobs) across multiple events.
+- The `Time` field is `now()`, which does not advance between `co_await`s, so spans within one run-loop slice read as zero. `g_traceBatch` events also carry `MonotonicTime` for this.
 
 ## Architecture
 
@@ -75,6 +76,8 @@ Key types: `Future<T>`, `Promise<T>`, `PromiseStream<T>`, `Reference<T>` (ref-co
 - C++ coroutines: `co_await` is not allowed inside a `catch` handler. Capture the error, exit the catch, then `co_await` outside.
 - Errors are integer codes (`flow/include/flow/error_definitions.h`), not exceptions with messages. When you `catch (Error& e)`, re-throw `actor_cancelled` (and never silently swallow `broken_promise`) — eating cancellation causes hangs and leaks. Transaction retry goes through `tr.onError(e)`, not a bare loop.
 - `StringRef`/`KeyRef`/`ValueRef` are non-owning views into an `Arena`. Returning or storing one past its arena's lifetime is a dangling-reference bug; use `Standalone<>` (or `Key`/`Value`) when you need to own the bytes.
+- `a && b` on `Future<Void>` is `quorum(x, 2, 2)`, not a join: the first error completes it and drops the other input, cancelling it if nothing else holds it, and an already-failed `lhs` discards `rhs` unreferenced. Never accumulate with `f = f && g`; use `waitForAllReady()` to wait for everything regardless of errors.
+- `Subspace::range()` spans `prefix + '\x00'` to `prefix + '\xff'`, so it excludes the subspace's own key: a value written at `s.pack(x)` is not returned by scanning `s.get(x).range()`.
 
 ### Core Subsystems
 
@@ -92,25 +95,12 @@ Key types: `Future<T>`, `Promise<T>`, `PromiseStream<T>`, `Reference<T>` (ref-co
   - `ratekeeper/` — Back-pressure and throttling
   - `workloads/` — Simulation test workloads
 
-### Write Path
-
-Client commit → GRV Proxy (assigns read version) → Commit Proxy (batches, sends to Resolver for conflict check, writes to TLogs) → TLogs (durable WAL) → Storage Servers (pull from TLogs, apply)
-
-### Read Path
-
-Client read → Storage Server (serves from MVCC versioned data or underlying storage engine)
-
-### Recovery
-
-When the transaction system fails, the Cluster Controller drives nine recovery phases (`READING_CSTATE` through `FULLY_RECOVERED`; `UNINITIALIZED` is state 0) defined in `fdbserver/core/include/fdbserver/core/RecoveryState.h`. Recovery reads coordinated state from coordinators, locks old TLogs, recruits the next transaction system, and recovers durable mutations from old log generations.
-
-### Coordinator Consensus
-
-Coordinators implement generation registers in `fdbserver/coordinator/Coordination.cpp`. `CoordinatedState` in `fdbserver/core/CoordinatedState.cpp` performs quorum reads and writes over them for recovery metadata. Coordinators separately participate in leader election, but transaction commits use the resolver/TLog pipeline instead.
-
 ### Simulation Testing
 
 `fdbserver -r simulation` runs the entire cluster in a single process using Sim2, a deterministic simulated network. `buggify()` calls (`flow/include/flow/Buggify.h`) inject faults (delays, failures, corruption). Tests are TOML files that compose workloads. This is FDB's primary testing strategy.
+
+- Determinism is per seed *and* binary. Any code change shifts the `deterministicRandom()` sequence, so the same seed on a patched binary is a different execution, not an A/B comparison. Reproduce a failure on the unpatched binary, and judge a fix by failure rates over many seeds.
+- A continuation can resume with a different simulated process current than the one that started waiting, e.g. when a future is shared between processes on one simulated machine. Code that binds to `g_simulator->getCurrentProcess()` should capture it on entry and `co_await g_simulator->onProcess(...)` back before binding.
 
 ### Knobs
 
@@ -155,14 +145,7 @@ After writing or changing a bunch of code, make a pass over it one last time to 
 
 ## Code Review
 
-Unless you have specific instructions to the contrary, when asked to review code (named files or a diff), address all of these explicitly:
-
-- What is it trying to accomplish?
-- Is it correct?
-- Are there bugs?
-- Are there omissions?
-- Are there things that could be done better?
-- Should it be LGTM'd? (clear yes / no / not-yet)
+When reviewing, state explicitly: what the change is for, whether it is correct, bugs, omissions, better approaches, and a clear LGTM / no / not-yet. Read a construct's history (`git log -L`, `git blame`) before proposing to change something that looks odd.
 
 ## Branching
 
@@ -170,4 +153,4 @@ PRs target `main`. Release branches receive cherry-picks rather than direct PRs 
 
 ## Design Docs
 
-When collaborating on a design doc, at some point reconcile the user's draft against `design/design-doc-template.md` — the template defines the section structure (motivation, design, alternatives, etc.) expected for FDB design docs. Suggest this reconciliation step before the doc is considered finished, not at the very start, so the draft has time to take shape first.
+Before a design doc is considered finished (not at the start), reconcile it against `design/design-doc-template.md`.
