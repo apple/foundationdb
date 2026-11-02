@@ -184,12 +184,11 @@ Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> d
 
 Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req, ExcludeReply* rep) {
 	try {
-		std::vector<ProcessData> workers;
 		std::map<std::string, StorageServerInterface> server_interfaces;
-		Future<bool> future_workers = utils::getWorkersProcessData(db, &workers);
+		auto future_workers = utils::getWorkersProcessData(db);
 		Future<Void> future_server_interfaces = utils::getStorageServerInterfaces(db, &server_interfaces);
 
-		co_await future_workers;
+		auto workers = co_await future_workers;
 		co_await future_server_interfaces;
 
 		bool force = req->force();

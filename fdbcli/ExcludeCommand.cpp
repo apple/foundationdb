@@ -271,6 +271,9 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 		Future<bool> future_workers = fdb_cli::getWorkers(db, &workers);
 		Future<Void> future_server_interfaces = fdb_cli::getStorageServerInterfaces(db, &server_interfaces);
 		co_await (success(future_workers) && success(future_server_interfaces));
+		if (!future_workers.get()) {
+			co_return false;
+		}
 
 		for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
 			if (*t == "FORCE"_sr) {

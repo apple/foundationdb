@@ -854,6 +854,22 @@ std::vector<ProcessData> ManagementAPI::decodeWorkers(const RangeResult& process
 	return results;
 }
 
+TEST_CASE("/ManagementAPI/DecodeWorkers/InvalidProcessClassVersion") {
+	RangeResult classes;
+	RangeResult workers;
+	ASSERT(ManagementAPI::decodeWorkers(classes, workers).empty());
+
+	classes.push_back_deep(classes.arena(),
+	                       KeyValueRef(processClassKeyFor("worker"_sr), "\x00\x00\x00\x00\x00\x00\x00\x00"_sr));
+	try {
+		ManagementAPI::decodeWorkers(classes, workers);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_incompatible_protocol_version);
+		co_return;
+	}
+	ASSERT(false);
+}
+
 Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
 	Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
 	Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);

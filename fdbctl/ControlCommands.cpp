@@ -252,35 +252,21 @@ Future<grpc::Status> getWorkers(Reference<IDatabase> db, const GetWorkersRequest
 				continue;
 			}
 
-			std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
-			for (int i = 0; i < processClasses.get().size(); i++) {
-				try {
-					id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
-					    decodeProcessClassValue(processClasses.get()[i].value);
-				} catch (Error& e) {
-					co_return grpc::Status(grpc::StatusCode::ABORTED,
-					                       fmt::format("error decoding process class: {}", e.name()));
-				}
+			std::vector<ProcessData> workers;
+			try {
+				workers = ManagementAPI::decodeWorkers(processClasses.get(), processData.get());
+			} catch (Error& e) {
+				co_return grpc::Status(grpc::StatusCode::ABORTED,
+				                       fmt::format("error decoding worker metadata: {}", e.name()));
 			}
+			for (const auto& data : workers) {
+				Worker* w = rep->add_workers();
+				w->set_address(data.address.toString());
+				w->set_process_class(data.processClass.toString());
+				if (data.grpcAddress.present())
+					w->set_grpc_address(data.grpcAddress->toString());
 
-			for (int i = 0; i < processData.get().size(); i++) {
-				ProcessData data = decodeWorkerListValue(processData.get()[i].value);
-				ProcessClass processClass = id_class[data.locality.processId()];
-
-				if (processClass.classSource() == ProcessClass::DBSource ||
-				    data.processClass.classType() == ProcessClass::UnsetClass)
-					data.processClass = processClass;
-
-				if (data.processClass.classType() != ProcessClass::TesterClass) {
-					Worker* w = rep->add_workers();
-					w->set_address(data.address.toString());
-					w->set_process_class(data.processClass.toString());
-					if (data.grpcAddress.present())
-						w->set_grpc_address(data.grpcAddress->toString());
-
-					auto* lc = w->mutable_locality();
-					localityDataToProto(data.locality, lc);
-				}
+				localityDataToProto(data.locality, w->mutable_locality());
 			}
 
 			co_return grpc::Status::OK;
@@ -492,7 +478,7 @@ Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 	}
 }
 
-Future<bool> getWorkersProcessData(Reference<IDatabase> db, std::vector<ProcessData>* workers) {
+Future<std::vector<ProcessData>> getWorkersProcessData(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
 		Error err;
@@ -500,38 +486,7 @@ Future<bool> getWorkersProcessData(Reference<IDatabase> db, std::vector<ProcessD
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			ThreadFuture<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-			ThreadFuture<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
-
-			co_await safeThreadFutureToFuture(processClasses);
-			co_await safeThreadFutureToFuture(processData);
-
-			ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
-			ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
-
-			std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
-			for (int i = 0; i < processClasses.get().size(); i++) {
-				try {
-					id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
-					    decodeProcessClassValue(processClasses.get()[i].value);
-				} catch (Error& e) {
-					co_return false;
-				}
-			}
-
-			for (int i = 0; i < processData.get().size(); i++) {
-				ProcessData data = decodeWorkerListValue(processData.get()[i].value);
-				ProcessClass processClass = id_class[data.locality.processId()];
-
-				if (processClass.classSource() == ProcessClass::DBSource ||
-				    data.processClass.classType() == ProcessClass::UnsetClass)
-					data.processClass = processClass;
-
-				if (data.processClass.classType() != ProcessClass::TesterClass)
-					workers->push_back(data);
-			}
-
-			co_return true;
+			co_return co_await ManagementAPI::getWorkers(tr, ThreadFuture<RangeResult>(), ThreadFuture<RangeResult>());
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
