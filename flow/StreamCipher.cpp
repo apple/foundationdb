@@ -30,52 +30,6 @@
 std::unordered_map<UID, EVP_CIPHER_CTX*> StreamCipher::ctxs;
 std::unordered_map<UID, StreamCipherKey*> StreamCipherKey::cipherKeys;
 
-namespace {
-
-// Owns the global keys, one per network, and nothing else: the network global below stores a bare
-// pointer and frees nothing, so the objects have to live somewhere. Keys are never looked up here,
-// only appended, and they stay until the process exits.
-std::vector<std::unique_ptr<StreamCipherKey>> globalCipherKeys;
-
-// The current network's global key, or null if it has none yet.
-//
-// Keying on the network is the point. The simulator scopes network globals per process, so each
-// simulated process gets a key of its own instead of all of them sharing one buffer. They need
-// their own because a process reads a backup's encryption key into this key, and concurrent backups
-// can be using different keys.
-StreamCipherKey* currentGlobalCipherKey() {
-	return static_cast<StreamCipherKey*>(g_network->global(INetwork::enGlobalCipherKey));
-}
-
-} // namespace
-
-bool StreamCipherKey::isGlobalKeyPresent() {
-	return currentGlobalCipherKey() != nullptr;
-}
-
-void StreamCipherKey::allocGlobalCipherKey() {
-	if (StreamCipherKey::isGlobalKeyPresent()) {
-		return;
-	}
-	auto& key = globalCipherKeys.emplace_back(std::make_unique<StreamCipherKey>(AES_256_KEY_LENGTH));
-	g_network->setGlobal(INetwork::enGlobalCipherKey, static_cast<flowGlobalType>(key.get()));
-}
-
-void StreamCipherKey::initializeGlobalRandomTestKey() {
-	if (!StreamCipherKey::isGlobalKeyPresent()) {
-		StreamCipherKey::allocGlobalCipherKey();
-	}
-	currentGlobalCipherKey()->initializeRandomTestKey();
-}
-
-StreamCipherKey const* StreamCipherKey::getGlobalCipherKey() {
-	if (!StreamCipherKey::isGlobalKeyPresent()) {
-		StreamCipherKey::allocGlobalCipherKey();
-	}
-	ASSERT(StreamCipherKey::isGlobalKeyPresent());
-	return currentGlobalCipherKey();
-}
-
 void StreamCipherKey::cleanup() noexcept {
 	for (const auto& [_cipherId, cipherKey] : cipherKeys) {
 		cipherKey->reset();
@@ -207,8 +161,8 @@ void forceLinkStreamCipherTests() {}
 // Tests both encryption and decryption of random data
 // using the StreamCipher class
 TEST_CASE("flow/StreamCipher") {
-	StreamCipherKey::initializeGlobalRandomTestKey();
-	StreamCipherKey const* key = StreamCipherKey::getGlobalCipherKey();
+	StreamCipherKey key(AES_256_KEY_LENGTH);
+	key.initializeRandomTestKey();
 
 	StreamCipher::IV iv;
 	deterministicRandom()->randomBytes(iv.data(), iv.size());
@@ -223,7 +177,7 @@ TEST_CASE("flow/StreamCipher") {
 	    .detail("PlaintextSize", plaintext.size())
 	    .detail("AESBlockSize", AES_BLOCK_SIZE);
 	{
-		EncryptionStreamCipher encryptor(key, iv);
+		EncryptionStreamCipher encryptor(&key, iv);
 		int index = 0;
 		int encryptedOffset = 0;
 		while (index < plaintext.size()) {
@@ -243,7 +197,7 @@ TEST_CASE("flow/StreamCipher") {
 	}
 
 	{
-		DecryptionStreamCipher decryptor(key, iv);
+		DecryptionStreamCipher decryptor(&key, iv);
 		int index = 0;
 		int decryptedOffset = 0;
 		const int payloadSize = ciphertext.size() - GCM_TAG_LEN;

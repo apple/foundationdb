@@ -1836,8 +1836,8 @@ public:
 
 	static constexpr int ENCRYPTION_KEY_MAX_RETRIES = 5;
 
-	static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
-		StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
+	static Future<std::shared_ptr<const StreamCipherKey>> readEncryptionKey(std::string encryptionKeyFileName) {
+		auto cipherKey = std::make_shared<StreamCipherKey>(AES_256_KEY_LENGTH);
 		for (int retries = 0;; ++retries) {
 			const char* errorEvent = "FailedToOpenEncryptionKeyFile";
 			try {
@@ -1846,7 +1846,8 @@ public:
 				    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
 				    0400);
 				errorEvent = "FailedToReadEncryptionKeyFile";
-				int bytesRead = co_await uncancellable(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
+				int bytesRead = co_await uncancellable(
+				    holdWhile(cipherKey, keyFile->read(cipherKey->data(), cipherKey->size(), 0)));
 				if (bytesRead != cipherKey->size()) {
 					TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
 					    .detail("ExpectedSize", cipherKey->size())
@@ -1854,7 +1855,7 @@ public:
 					    .detail("FileName", encryptionKeyFileName);
 					throw invalid_encryption_key_file();
 				}
-				co_return;
+				co_return cipherKey;
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) {
 					throw;
@@ -2323,10 +2324,18 @@ std::string BackupContainerFileSystem::encryptionMetadataFileName() {
 }
 
 bool BackupContainerFileSystem::usesEncryption() const {
-	return encryptionSetupFuture.isValid();
+	return encryptionKey.isValid();
 }
 Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
-	return encryptionSetupFuture;
+	return usesEncryption() ? success(encryptionKey) : Future<Void>();
+}
+
+Future<Reference<IAsyncFile>> BackupContainerFileSystem::encryptedFile(Future<Reference<IAsyncFile>> file,
+                                                                       AsyncFileEncrypted::Mode mode) const {
+	return map(success(file) && encryptionSetupComplete(),
+	           [file, key = encryptionKey, mode, blockSize = encryptionBlockSize](Void) -> Reference<IAsyncFile> {
+		           return makeReference<AsyncFileEncrypted>(file.get(), mode, blockSize, key.get());
+	           });
 }
 
 Future<Void> BackupContainerFileSystem::writeEntireFileFallback(const std::string& fileName,
@@ -2337,7 +2346,7 @@ Future<Void> BackupContainerFileSystem::writeEntireFileFallback(const std::strin
 
 void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
 	if (encryptionKeyFileName.present()) {
-		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
+		encryptionKey = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
 	}
 }
 
@@ -2354,6 +2363,37 @@ int chooseFileSize(std::vector<int>& sizes) {
 		return size;
 	}
 	return deterministicRandom()->randomInt(0, 2e6);
+}
+
+TEST_CASE("/backup/containers/localdir/independentEncryptionKeys") {
+	const std::string base = joinPath(params.getDataDir(), deterministicRandom()->randomUniqueID().toString());
+	auto open = [&](const std::string& name) {
+		return makeReference<BackupContainerLocalDirectory>("file://" + base + name, base + name + ".key", 4096);
+	};
+	co_await BackupContainerFileSystem::createTestEncryptionKeyFile(base + "A.key");
+	co_await BackupContainerFileSystem::createTestEncryptionKeyFile(base + "B.key");
+
+	auto a = open("A");
+	auto fileA = co_await a->writeFile("payload");
+	auto b = open("B");
+	auto fileB = co_await b->writeFile("payload");
+	co_await fileA->append("first", 5);
+	co_await fileB->append("other", 5);
+	co_await fileB->finish();
+	co_await fileA->finish();
+
+	a = open("A");
+	auto readerA = co_await a->readFile("payload");
+	uint8_t bytes[5];
+	ASSERT_EQ(co_await readerA->read(bytes, sizeof(bytes), 0), 5);
+	ASSERT(StringRef(bytes, sizeof(bytes)) == "first"_sr);
+
+	b = open("B");
+	auto readerB = co_await b->readFile("payload");
+	ASSERT_EQ(co_await readerB->read(bytes, sizeof(bytes), 0), 5);
+	ASSERT(StringRef(bytes, sizeof(bytes)) == "other"_sr);
+	ASSERT_EQ(co_await readerA->read(bytes, sizeof(bytes), 0), 5);
+	ASSERT(StringRef(bytes, sizeof(bytes)) == "first"_sr);
 }
 
 Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size, FlowLock* lock) {
