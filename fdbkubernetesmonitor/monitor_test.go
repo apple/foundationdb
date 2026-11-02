@@ -211,6 +211,23 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 					})).To(Succeed())
 				})
 
+				When("a label required for launching has disappeared", func() {
+					BeforeEach(func() {
+						config := &api.ProcessConfiguration{
+							Version:   &defaultVersion,
+							Arguments: []api.Argument{{ArgumentType: api.EnvironmentArgumentType, Source: "NODE_LABEL_REMOVED"}},
+						}
+						data, err := json.Marshal(config)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(os.WriteFile(configurationFilePath, data, 0600)).To(Succeed())
+					})
+
+					It("still accepts isolation", func() {
+						Expect(configuration).NotTo(BeNil())
+						Expect(configuration.ShouldRunServers()).To(BeFalse())
+					})
+				})
+
 				It("should return the configuration with runServers set to false", func() {
 					Expect(configuration).NotTo(BeNil())
 					Expect(configuration.Version).To(Equal(&defaultVersion))

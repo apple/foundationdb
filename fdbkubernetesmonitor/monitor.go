@@ -258,17 +258,12 @@ func (monitor *monitor) readConfiguration(ctx context.Context) (*api.ProcessConf
 		monitor.logger.Error(err, "Error updating custom environment from node metadata", "configuration", configuration, "binaryPath", configuration.BinaryPath)
 		return nil, nil, nil
 	}
-	_, err = configuration.GenerateArguments(1, environment)
-	if err != nil {
-		monitor.logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
-		return nil, nil, nil
-	}
-
 	if configuration.ShouldRunServers() {
-		// In case that the process is isolated we don't want to start the servers and we should terminate the running fdbserver
-		// instances.
 		if monitor.processIsIsolated(ctx) {
 			configuration.RunServers = pointer.Bool(false)
+		} else if _, err := configuration.GenerateArguments(1, environment); err != nil {
+			monitor.logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
+			return nil, nil, nil
 		}
 	}
 
