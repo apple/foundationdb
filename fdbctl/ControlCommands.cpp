@@ -339,6 +339,11 @@ Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req,
 
 				// Include specific localities
 				for (const auto& l : req->localities()) {
+					if (!StringRef(l).startsWith(LocalityData::ExcludeLocalityPrefix) ||
+					    l.find(':') == std::string::npos) {
+						co_return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
+						                       fmt::format("'{}' is not a valid locality", l));
+					}
 					Key locality = req->failed() ? special_keys::failedLocalitySpecialKeyRange.begin.withSuffix(l)
 					                             : special_keys::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
 					tr->clear(locality);
