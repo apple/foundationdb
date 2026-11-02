@@ -299,7 +299,6 @@ Future<grpc::Status> getWorkers(Reference<IDatabase> db, const GetWorkersRequest
 
 Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req, IncludeReply* rep) {
 	std::vector<AddressExclusion> addresses;
-	std::vector<std::string> localities;
 
 	for (const auto& addr_str : req->addresses()) {
 		auto a = AddressExclusion::parse(StringRef(addr_str));
@@ -339,7 +338,7 @@ Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req,
 				}
 
 				// Include specific localities
-				for (const auto& l : localities) {
+				for (const auto& l : req->localities()) {
 					Key locality = req->failed() ? special_keys::failedLocalitySpecialKeyRange.begin.withSuffix(l)
 					                             : special_keys::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
 					tr->clear(locality);
