@@ -28,6 +28,7 @@
 #include <exception>
 #include <unordered_set>
 
+#include "fdbclient/TupleVersionstamp.h"
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -1635,6 +1636,11 @@ Future<RangeResult> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw,
 				result.push_back_deep(
 				    result.arena(),
 				    KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(config->getValue()))));
+			} else if (config->getValue().type() == typeid(TupleVersionstamp)) {
+				const auto& stamp = std::any_cast<const TupleVersionstamp&>(config->getValue());
+				result.push_back_deep(
+				    result.arena(),
+				    KeyValueRef(prefixedKey, StringRef(stamp.begin(), stamp.size()).toFullHexStringPlain()));
 			} else {
 				ASSERT(false);
 			}

@@ -764,7 +764,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		const Key key = GlobalConfig::prefixedKey(name);
 		co_await runRYWTransaction(cx, [key](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tr->set(key, Tuple::makeTuple(int64_t{ 42 }).pack());
+			tr->set(key, Tuple::makeTuple(TupleVersionstamp(0x0102030405060708LL, 0x090a, 0xabcd)).pack());
 			return Void();
 		});
 		while (!cx->globalConfig->get(name)) {
@@ -773,8 +773,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 		ReadYourWritesTransaction tr(cx);
 		const RangeResult rows = co_await tr.getRange(module, GetRangeLimits::ROW_LIMIT_UNLIMITED);
-		ASSERT(std::any_of(
-		    rows.begin(), rows.end(), [&](const KeyValueRef& kv) { return kv.key == key && kv.value == "42"_sr; }));
+		ASSERT(std::any_of(rows.begin(), rows.end(), [&](const KeyValueRef& kv) {
+			return kv.key == key && kv.value == "01 02 03 04 05 06 07 08 09 0a ab cd"_sr;
+		}));
 
 		co_await runRYWTransaction(cx, [key, module](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
