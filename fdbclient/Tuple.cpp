@@ -376,7 +376,7 @@ int64_t Tuple::getInt(size_t index, bool allow_incomplete) const {
 
 	memset(&swap, neg ? '\xff' : 0, 8 - len);
 	// presentLen is how many of len bytes are actually present, it will be < len if the encoded tuple was truncated
-	int presentLen = std::min<int8_t>(len, data.size() - offsets[index] - 1);
+	int presentLen = std::min<size_t>(len, data.size() - offsets[index] - 1);
 	ASSERT(len == presentLen || allow_incomplete);
 	memcpy(((uint8_t*)&swap) + 8 - len, data.begin() + offsets[index] + 1, presentLen);
 	if (presentLen < len) {
@@ -562,6 +562,16 @@ TEST_CASE("/fdbclient/Tuple/makeTuple") {
 	ASSERT(t1.getType(8) == Tuple::USER_TYPE);
 	ASSERT(t1.size() == 9);
 
+	return Void();
+}
+
+TEST_CASE("/fdbclient/Tuple/intWithLongSuffix") {
+	for (int remaining : { 127, 128, 255, 256 }) {
+		auto packed = Tuple::makeTuple(1, std::string(remaining - 3, 'x')).pack();
+		ASSERT_EQ(packed.size() - 1, remaining);
+		ASSERT_EQ(Tuple::unpack(packed).getInt(0), 1);
+	}
+	ASSERT_EQ(Tuple::unpack("\x16\x12"_sr).getInt(0, true), 0x1200);
 	return Void();
 }
 
