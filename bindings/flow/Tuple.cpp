@@ -449,8 +449,10 @@ Versionstamp Tuple::getVersionstamp(size_t index) const {
 	if (code != VERSIONSTAMP_96_CODE) {
 		throw invalid_tuple_data_type();
 	}
-	size_t versionstampLength = VERSIONSTAMP_TUPLE_SIZE;
-	return Versionstamp(StringRef(data.begin() + offsets[index] + 1, versionstampLength));
+	if (data.size() - offsets[index] - 1 < VERSIONSTAMP_TUPLE_SIZE) {
+		throw invalid_versionstamp_size();
+	}
+	return Versionstamp(StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE));
 }
 
 Uuid Tuple::getUuid(size_t index) const {
