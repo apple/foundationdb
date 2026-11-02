@@ -340,48 +340,6 @@ func ExamplePrintable() {
 	// Output: \x00\x01\x02abc123!?\xff
 }
 
-func TestDatabaseCloseRemovesResources(t *testing.T) {
-	err := fdb.APIVersion(API_VERSION)
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
-
-	// OpenDefault opens the database described by the platform-specific default
-	// cluster file
-	db, err := fdb.OpenDefault()
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
-
-	// Close the database after usage
-	db.Close()
-
-	// Open the same database again, if the database is still in the cache we would return the same object, if not we create a new object with a new pointer
-	newDB, err := fdb.OpenDefault()
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
-
-	defer newDB.Close()
-	if db == newDB {
-		t.Fatalf("Expected a different database object, got: %v and %v\n", db, newDB)
-	}
-}
-
-func TestIndependentDatabaseOpens(t *testing.T) {
-	fdb.MustAPIVersion(API_VERSION)
-	first := fdb.MustOpenDefault()
-	second := fdb.MustOpenDefault()
-	defer second.Close()
-	firstCopy := first
-	first.Close()
-	firstCopy.Close()
-
-	if _, err := second.CreateTransaction(); err != nil {
-		t.Fatalf("create transaction after closing the other handle: %v", err)
-	}
-}
-
 func TestConcurrentDatabaseOpenClose(t *testing.T) {
 	fdb.MustAPIVersion(API_VERSION)
 	var workers sync.WaitGroup

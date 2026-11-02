@@ -66,6 +66,9 @@ type DatabaseOptions struct {
 // Close releases this handle. After closing it, neither this handle nor copies
 // of it may be used. Other handles opened for the same cluster remain usable.
 func (d Database) Close() {
+	if d.closeOnce == nil {
+		return
+	}
 	d.closeOnce.Do(func() {
 		if d.isCached {
 			databaseCacheMutex.Lock()
