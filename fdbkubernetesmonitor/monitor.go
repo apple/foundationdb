@@ -366,7 +366,6 @@ func getBackoffDuration(errorCounter int) time.Duration {
 
 // runProcess runs a loop to continually start and watch a process.
 func (monitor *monitor) runProcess(processNumber int) {
-	pid := 0
 	logger := monitor.logger.WithValues("processNumber", processNumber, "area", "runProcess")
 	logger.Info("Starting run loop")
 	startTime := time.Now()
@@ -430,16 +429,10 @@ func (monitor *monitor) runProcess(processNumber int) {
 		// Update the prometheus metrics for the process.
 		monitor.metrics.registerProcessStartup(processNumber, config.Version.String())
 
-		if cmd.Process != nil {
-			pid = cmd.Process.Pid
-		} else {
-			logger.Error(nil, "No Process information available for subprocess")
-		}
-
+		pid := cmd.Process.Pid
 		startTime = time.Now()
 		logger.Info("Subprocess started", "PID", pid)
-
-		monitor.updateProcessID(processNumber, pid)
+		monitor.updateProcess(processNumber, cmd.Process)
 
 		if stdout != nil {
 			stdoutScanner := bufio.NewScanner(stdout)
@@ -470,7 +463,7 @@ func (monitor *monitor) runProcess(processNumber int) {
 
 		processDuration := time.Since(startTime)
 		logger.Info("Subprocess terminated", "exitCode", exitCode, "PID", pid, "lastExecutionDurationSeconds", processDuration.String())
-		monitor.updateProcessID(processNumber, -1)
+		monitor.updateProcess(processNumber, nil)
 
 		// Only backoff if the exit code is non-zero.
 		if exitCode != 0 {
@@ -532,11 +525,22 @@ func (monitor *monitor) processIsIsolated(ctx context.Context) bool {
 	return isolated
 }
 
-// updateProcessID records a new Process ID from a newly launched process.
-func (monitor *monitor) updateProcessID(processNumber int, pid int) {
+// updateProcess publishes a child (or its exit) under the same lock as configuration changes.
+func (monitor *monitor) updateProcess(processNumber int, process *os.Process) {
 	monitor.mutex.Lock()
 	defer monitor.mutex.Unlock()
-	monitor.processIDs[processNumber] = pid
+	if process == nil {
+		monitor.processIDs[processNumber] = -1
+		return
+	}
+
+	monitor.processIDs[processNumber] = process.Pid
+	// Isolation or shutdown may have skipped this slot between the launch decision and cmd.Start.
+	if processNumber > monitor.processCount || !monitor.activeConfiguration.ShouldRunServers() {
+		if err := process.Signal(syscall.SIGTERM); err != nil {
+			monitor.logger.Error(err, "Error signaling subprocess", "PID", process.Pid)
+		}
+	}
 }
 
 // addWatcher adds a watch for the provided file. If an error is returned it will be retried for a maximum of 10 retries.

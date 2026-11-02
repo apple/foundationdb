@@ -22,7 +22,9 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path"
+	"syscall"
 	"time"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
@@ -83,6 +85,27 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 			})
 		})
 	})
+
+	DescribeTable("publishing a child after it is no longer wanted", func(processCount int, runServers bool) {
+		cmd := exec.Command("sleep", "60")
+		Expect(cmd.Start()).To(Succeed())
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		DeferCleanup(func() { _ = cmd.Process.Kill() })
+
+		mon := &monitor{
+			logger:              GinkgoLogr,
+			processCount:        processCount,
+			processIDs:          []int{0, -1},
+			activeConfiguration: &api.ProcessConfiguration{RunServers: &runServers},
+		}
+		mon.updateProcess(1, cmd.Process)
+		var err error
+		Eventually(done).Should(Receive(&err))
+		var exitError *exec.ExitError
+		Expect(err).To(BeAssignableToTypeOf(exitError))
+		Expect(err.(*exec.ExitError).Sys().(syscall.WaitStatus).Signal()).To(Equal(syscall.SIGTERM))
+	}, Entry("isolation", 1, false), Entry("shutdown", 0, true))
 
 	DescribeTable("when getting the backoff time", func(errorCount int, expected time.Duration) {
 		Expect(getBackoffDuration(errorCount)).To(Equal(expected))
