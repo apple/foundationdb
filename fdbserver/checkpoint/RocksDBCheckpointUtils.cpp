@@ -883,7 +883,9 @@ void RocksDBSstFileReader::open(const std::string localFile) {
 }
 
 bool RocksDBSstFileReader::hasNext() const {
-	ASSERT(iter != nullptr);
+	if (!iter) {
+		return false;
+	}
 	if (!iter->Valid()) {
 		const auto status = iter->status();
 		if (!status.ok()) {
@@ -942,6 +944,7 @@ TEST_CASE("/fdbserver/checkpoint/BulkLoadSstReadError") {
 	writeFile(path, bytes);
 	{
 		RocksDBSstFileReader reader;
+		ASSERT(!reader.hasNext());
 		reader.open(path);
 		try {
 			reader.getRange(singleKeyRange("a"_sr));
