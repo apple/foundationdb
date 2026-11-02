@@ -6870,6 +6870,16 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				if (logsOnly && !restorable.get().logs.empty()) {
+					// A container-wide description can reflect a different log layout from this interval.
+					const bool partitioned = restorable.get().logs.front().isPartitionedLog();
+					const auto layout =
+					    co_await restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
+					if (partitioned != (layout == MutationLogType::PARTITIONED_LOG)) {
+						restore.mutationLogType().set(
+						    tr, partitioned ? MutationLogType::PARTITIONED_LOG : MutationLogType::DEFAULT);
+					}
+				}
 				restore.firstConsistentVersion().set(tr, firstConsistentVersion);
 				if (!useRangeFileRestore) {
 					co_await taskBucket->keepRunning(tr, task);

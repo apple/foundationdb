@@ -1496,22 +1496,19 @@ public:
 			}
 			RestorableFileSet restorableSet;
 			restorableSet.targetVersion = targetVersion;
-			std::vector<LogFile> logFiles;
 			Version begin = beginVersion == invalidVersion ? 0 : beginVersion;
-			logFiles = co_await bc->listLogFiles(begin, targetVersion, MutationLogType::DEFAULT);
-			// List logs in version order so log continuity can be analyzed
+			auto logFiles = co_await bc->listLogFiles(begin, targetVersion, MutationLogType::DEFAULT);
 			std::sort(logFiles.begin(), logFiles.end());
-			if (!logFiles.empty()) {
-				if (beginVersion != invalidVersion && logFiles.front().beginVersion > beginVersion) {
-					co_return Optional<RestorableFileSet>();
+			if (!logFiles.empty() &&
+			    (beginVersion == invalidVersion || logFiles.front().beginVersion <= beginVersion)) {
+				auto result = getRestoreSetFromLogs(logFiles, targetVersion, restorableSet);
+				if (result.present() || beginVersion == invalidVersion) {
+					co_return result;
 				}
-				co_return getRestoreSetFromLogs(logFiles, targetVersion, restorableSet);
 			}
 			if (beginVersion != invalidVersion) {
-				auto partitioned =
-				    co_await bc->listLogFiles(beginVersion, targetVersion, MutationLogType::PARTITIONED_LOG);
-				co_return getRestoreSetFromPartitionedLogs(
-				    std::move(partitioned), beginVersion, std::move(restorableSet));
+				auto partitioned = co_await bc->listLogFiles(begin, targetVersion, MutationLogType::PARTITIONED_LOG);
+				co_return getRestoreSetFromPartitionedLogs(std::move(partitioned), begin, std::move(restorableSet));
 			}
 		}
 
@@ -3133,11 +3130,6 @@ TEST_CASE("/backup/containers/localdir/incrementalBeginVersion") {
 	co_await container->create();
 	auto getLogs = [&](Version begin) { return container->getRestoreSet(190, {}, true, begin); };
 
-	auto tagged = co_await container->writeTaggedLogFile(150, 200, 1024, 0, 1);
-	co_await tagged->finish();
-	ASSERT(!(co_await getLogs(100)).present());
-	ASSERT((co_await getLogs(150)).present());
-
 	auto log = co_await container->writeLogFile(150, 200, 1024);
 	co_await log->finish();
 	ASSERT(!(co_await getLogs(100)).present());
@@ -3145,6 +3137,18 @@ TEST_CASE("/backup/containers/localdir/incrementalBeginVersion") {
 	ASSERT((co_await getLogs(175)).present());
 	ASSERT(!(co_await getLogs(191)).present());
 	ASSERT((co_await getLogs(invalidVersion)).present());
+
+	auto tagged = co_await container->writeTaggedLogFile(120, 200, 1024, 0, 1);
+	co_await tagged->finish();
+	ASSERT(!(co_await getLogs(100)).present());
+	auto taggedSet = co_await getLogs(120);
+	ASSERT(taggedSet.present());
+	ASSERT_EQ(taggedSet.get().logs.size(), 1);
+	ASSERT_EQ(taggedSet.get().logs.front().fileName, tagged->getFileName());
+	auto ordinarySet = co_await getLogs(150);
+	ASSERT(ordinarySet.present());
+	ASSERT_EQ(ordinarySet.get().logs.size(), 1);
+	ASSERT_EQ(ordinarySet.get().logs.front().fileName, log->getFileName());
 	co_await container->deleteContainer();
 }
 
