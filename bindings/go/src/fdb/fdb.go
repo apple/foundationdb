@@ -302,12 +302,8 @@ func StopNetwork() error {
 const DefaultClusterFile string = ""
 
 // OpenDefault returns a database handle to the FoundationDB cluster identified
-// by the DefaultClusterFile on the current machine.
-//
-// A single client can use this function multiple times to connect to different
-// clusters simultaneously, with each invocation requiring its own cluster file.
-// To connect to multiple clusters running at different, incompatible versions,
-// the multi-version client API must be used.
+// by the DefaultClusterFile on the current machine. As with OpenDatabase,
+// the caller must close each successfully opened handle.
 func OpenDefault() (Database, error) {
 	return OpenDatabase(DefaultClusterFile)
 }
@@ -323,13 +319,13 @@ func MustOpenDefault() Database {
 }
 
 // OpenDatabase returns a database handle to the FoundationDB cluster identified
-// by the provided cluster file and database name.
+// by the provided cluster file. Each successful call returns a handle that
+// the caller must close, even when the same cluster file is opened twice.
 //
 // A single client can use this function multiple times to connect to different
 // clusters simultaneously, with each invocation requiring its own cluster file.
 // To connect to multiple clusters running at different, incompatible versions,
 // the multi-version client API must be used.
-// Caller must call Close() to release resources.
 func OpenDatabase(clusterFile string) (Database, error) {
 	databaseCacheMutex.Lock()
 	defer databaseCacheMutex.Unlock()
