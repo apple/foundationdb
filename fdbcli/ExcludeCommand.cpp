@@ -266,14 +266,11 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 		bool force = false;
 		bool waitForAllExcluded = true;
 		bool markFailed = false;
-		std::vector<ProcessData> workers;
 		std::map<std::string, StorageServerInterface> server_interfaces;
-		Future<bool> future_workers = fdb_cli::getWorkers(db, &workers);
+		auto future_workers = ::getWorkers(db);
 		Future<Void> future_server_interfaces = fdb_cli::getStorageServerInterfaces(db, &server_interfaces);
-		co_await (success(future_workers) && success(future_server_interfaces));
-		if (!future_workers.get()) {
-			co_return false;
-		}
+		co_await (success(future_workers) && future_server_interfaces);
+		const auto& workers = future_workers.get();
 
 		for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
 			if (*t == "FORCE"_sr) {

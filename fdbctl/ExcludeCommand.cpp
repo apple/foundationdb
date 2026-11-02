@@ -185,7 +185,7 @@ Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> d
 Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req, ExcludeReply* rep) {
 	try {
 		std::map<std::string, StorageServerInterface> server_interfaces;
-		auto future_workers = utils::getWorkersProcessData(db);
+		auto future_workers = ::getWorkers(db);
 		Future<Void> future_server_interfaces = utils::getStorageServerInterfaces(db, &server_interfaces);
 
 		auto workers = co_await future_workers;
@@ -237,7 +237,10 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 		try {
 			co_await excludeServersAndLocalities(db, exclusionAddresses, exclusionLocalities, markFailed, force);
 		} catch (Error& e) {
-			co_return grpc::Status(grpc::StatusCode::INTERNAL, fmt::format("error: ", e.name()));
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			co_return grpc::Status(grpc::StatusCode::INTERNAL, fmt::format("Error excluding processes: {}", e.name()));
 		}
 
 		std::set<NetworkAddress> notExcludedServers =
@@ -278,6 +281,9 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 
 		co_return grpc::Status::OK;
 	} catch (const Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		co_return grpc::Status(grpc::StatusCode::INTERNAL,
 		                       fmt::format("Error getting worker information: {}", e.what()));
 	}

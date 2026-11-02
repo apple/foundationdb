@@ -478,27 +478,6 @@ Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 	}
 }
 
-Future<std::vector<ProcessData>> getWorkersProcessData(Reference<IDatabase> db) {
-	Reference<ITransaction> tr = db->createTransaction();
-	while (true) {
-		Error err;
-		try {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			co_return co_await ManagementAPI::getWorkers(tr, ThreadFuture<RangeResult>(), ThreadFuture<RangeResult>());
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
-			}
-
-			err = e;
-		}
-
-		co_await safeThreadFutureToFuture(tr->onError(err));
-	}
-}
-
 } // namespace utils
 } // namespace fdbctl
 #endif // FLOW_GRPC_ENABLED

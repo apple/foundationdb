@@ -117,35 +117,6 @@ Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 	addInterfacesFromKVs(kvs, address_interface);
 }
 
-Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers) {
-	Reference<ITransaction> tr = db->createTransaction();
-	while (true) {
-		Error err;
-		try {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			ThreadFuture<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-			ThreadFuture<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
-
-			co_await (success(safeThreadFutureToFuture(processClasses)) &&
-			          success(safeThreadFutureToFuture(processData)));
-			try {
-				*workers = ManagementAPI::decodeWorkers(processClasses.get(), processData.get());
-			} catch (Error& e) {
-				fprintf(stderr, "Error decoding worker metadata: %s\n", e.what());
-				co_return false;
-			}
-
-			co_return true;
-		} catch (Error& e) {
-			err = e;
-		}
-		TraceEvent(SevWarn, "GetWorkersError").error(err);
-		co_await safeThreadFutureToFuture(tr->onError(err));
-	}
-}
-
 Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                         std::map<std::string, StorageServerInterface>* interfaces) {
 	Reference<ITransaction> tr = db->createTransaction();

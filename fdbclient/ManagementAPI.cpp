@@ -878,6 +878,28 @@ Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
 	co_return ManagementAPI::decodeWorkers(processClasses.get(), processData.get());
 }
 
+Future<std::vector<ProcessData>> getWorkers(Reference<IDatabase> db) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			co_return co_await ManagementAPI::getWorkers(tr, ThreadFuture<RangeResult>(), ThreadFuture<RangeResult>());
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+
+			err = e;
+		}
+
+		TraceEvent(SevWarn, "GetWorkersError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
+	}
+}
+
 Future<std::vector<ProcessData>> getWorkers(Database cx) {
 	Transaction tr(cx);
 	while (true) {

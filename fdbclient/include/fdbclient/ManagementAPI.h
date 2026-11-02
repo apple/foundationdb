@@ -145,6 +145,7 @@ Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
                                              std::set<NetworkAddress>* inProgressExclusion);
 
 // Gets a list of all workers in the cluster (excluding testers)
+Future<std::vector<ProcessData>> getWorkers(Reference<IDatabase> db);
 Future<std::vector<ProcessData>> getWorkers(Database cx);
 Future<std::vector<ProcessData>> getWorkers(Transaction* tr);
 
