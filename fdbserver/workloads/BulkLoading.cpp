@@ -361,7 +361,7 @@ struct BulkLoading : TestWorkload {
 		if (range.singleKeyRange()) {
 			ASSERT(count == 1);
 			// Large values make these user keys enter the byte sample with their exact size at the default rate.
-			const std::string value(32 * 1024, 'x');
+			const std::string value(32'768, 'x');
 			KeyValue kv = KeyValueRef(range.begin, StringRef(value));
 			ASSERT(isKeyValueInSample(kv).probability == 1.0);
 			return { kv };
