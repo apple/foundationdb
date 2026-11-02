@@ -361,8 +361,9 @@ int64_t Tuple::getInt(size_t index, bool allow_incomplete) const {
 	int64_t swap;
 	bool neg = false;
 
-	ASSERT(offsets[index] < data.size());
-	uint8_t code = data[offsets[index]];
+	const StringRef field = subTupleRawString(index);
+	ASSERT(!field.empty());
+	uint8_t code = field[0];
 	if (code < '\x0c' || code > '\x1c') {
 		throw invalid_tuple_data_type();
 	}
@@ -376,9 +377,9 @@ int64_t Tuple::getInt(size_t index, bool allow_incomplete) const {
 
 	memset(&swap, neg ? '\xff' : 0, 8 - len);
 	// presentLen is how many of len bytes are actually present, it will be < len if the encoded tuple was truncated
-	int presentLen = std::min<size_t>(len, data.size() - offsets[index] - 1);
+	int presentLen = std::min<int>(len, field.size() - 1);
 	ASSERT(len == presentLen || allow_incomplete);
-	memcpy(((uint8_t*)&swap) + 8 - len, data.begin() + offsets[index] + 1, presentLen);
+	memcpy(((uint8_t*)&swap) + 8 - len, field.begin() + 1, presentLen);
 	if (presentLen < len) {
 		int suffix = len - presentLen;
 		if (presentLen == 0) {
@@ -571,7 +572,11 @@ TEST_CASE("/fdbclient/Tuple/intWithLongSuffix") {
 		ASSERT_EQ(packed.size() - 1, remaining);
 		ASSERT_EQ(Tuple::unpack(packed).getInt(0), 1);
 	}
-	ASSERT_EQ(Tuple::unpack("\x16\x12"_sr).getInt(0, true), 0x1200);
+	auto partial = Tuple::unpack("\x16\x12"_sr);
+	ASSERT_EQ(partial.getInt(0, true), 0x1200);
+	partial.append(1);
+	ASSERT_EQ(partial.getInt(0, true), 0x1200);
+	ASSERT_EQ(partial.getInt(1), 1);
 	return Void();
 }
 
