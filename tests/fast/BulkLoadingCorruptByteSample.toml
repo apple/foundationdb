@@ -1,5 +1,5 @@
 [configuration]
-storageEngineType = 'ssd-rocksdb-v1'
+storageEngineType = 4 # RocksDB
 disableTss = true
 config = 'triple'
 machineCount = 10
