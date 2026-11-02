@@ -178,14 +178,21 @@ void logRocksDBError(const rocksdb::Status& status, const std::string& method, c
 	}
 }
 
-Error statusToError(const rocksdb::Status& s) {
+Error statusToError(const rocksdb::Status& s, int fallbackCode = error_code_unknown_error) {
 	if (s.IsIOError()) {
 		return io_error();
 	} else if (s.IsTimedOut()) {
 		return transaction_too_old();
 	} else {
-		return unknown_error();
+		return Error(fallbackCode);
 	}
+}
+
+Error sstReadError(const rocksdb::Status& status) {
+	if (status.IsCorruption()) {
+		return file_corrupt();
+	}
+	return statusToError(status, error_code_operation_failed);
 }
 
 // Fetch a single sst file from storage server. The progress is checkpointed via cFun.
@@ -875,10 +882,10 @@ void RocksDBSstFileReader::open(const std::string localFile) {
 			iter->SeekToFirst();
 		}
 	} else {
-		TraceEvent(SevError, "RocksDBSstFileReaderWrapperOpenFileError")
+		TraceEvent(SevWarnAlways, "RocksDBSstFileReaderWrapperOpenFileError")
 		    .detail("LocalFile", this->localFile)
 		    .detail("Status", status.ToString());
-		throw statusToError(status);
+		throw sstReadError(status);
 	}
 }
 
@@ -889,7 +896,10 @@ bool RocksDBSstFileReader::hasNext() const {
 	if (!iter->Valid()) {
 		const auto status = iter->status();
 		if (!status.ok()) {
-			throw statusToError(status);
+			TraceEvent(SevWarnAlways, "RocksDBSstFileReaderIterationError")
+			    .detail("LocalFile", localFile)
+			    .detail("Status", status.ToString());
+			throw sstReadError(status);
 		}
 		return false;
 	}
@@ -950,7 +960,17 @@ TEST_CASE("/fdbserver/checkpoint/BulkLoadSstReadError") {
 			reader.getRange(singleKeyRange("a"_sr));
 			ASSERT(false);
 		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_unknown_error);
+			ASSERT_EQ(e.code(), error_code_file_corrupt);
+		}
+	}
+	writeFile(path, ""); // An SST without a footer must fail during open.
+	{
+		RocksDBSstFileReader reader;
+		try {
+			reader.open(path);
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_file_corrupt);
 		}
 	}
 	deleteFile(path);

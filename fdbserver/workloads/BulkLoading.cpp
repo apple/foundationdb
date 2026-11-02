@@ -57,9 +57,10 @@ struct BulkLoadTaskTestUnit {
 struct BulkLoading : TestWorkload {
 	static constexpr auto NAME = "BulkLoadingWorkload";
 	const bool enabled = true;
+	const bool corruptByteSample;
 	bool pass = true;
 	bool debugging = false;
-	bool backgroundTrafficEnabled = deterministicRandom()->coinflip();
+	bool backgroundTrafficEnabled = !corruptByteSample && deterministicRandom()->coinflip();
 	UID jobId = deterministicRandom()->randomUniqueID();
 	bool initializeBulkLoadMetadata = deterministicRandom()->coinflip();
 
@@ -77,7 +78,9 @@ struct BulkLoading : TestWorkload {
 		             "BulkDumping" });
 	}
 
-	explicit BulkLoading(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
+	explicit BulkLoading(WorkloadContext const& wcx)
+	  : TestWorkload(wcx), enabled(true), corruptByteSample(getOption(options, "corruptByteSample"_sr, false)),
+	    pass(true) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -355,6 +358,14 @@ struct BulkLoading : TestWorkload {
 	}
 
 	std::vector<KeyValue> generateOrderedKVS(BulkLoading* self, KeyRange range, size_t count) {
+		if (range.singleKeyRange()) {
+			ASSERT(count == 1);
+			// Large values make these user keys enter the byte sample with their exact size at the default rate.
+			const std::string value(32 * 1024, 'x');
+			KeyValue kv = KeyValueRef(range.begin, StringRef(value));
+			ASSERT(isKeyValueInSample(kv).probability == 1.0);
+			return { kv };
+		}
 		std::set<Key> keys; // ordered
 		while (keys.size() < count) {
 			Standalone<StringRef> str = self->getRandomStringRef();
@@ -547,11 +558,21 @@ struct BulkLoading : TestWorkload {
 			std::string indexStr = std::to_string(i);
 			std::string indexStrNext = std::to_string(i + 1);
 			Key beginKey = StringRef(indexStr);
-			Key endKey = StringRef(indexStrNext);
+			// A single-key manifest fits inside any destination shard, so it stays eligible for whole-file ingestion.
+			Key endKey = corruptByteSample ? keyAfter(beginKey) : Key(StringRef(indexStrNext));
 			std::string folderPath = joinPath(simulationBulkLoadFolder, indexStr);
-			int dataSize = std::pow(10, deterministicRandom()->randomInt(0, 4));
+			int dataSize = corruptByteSample ? 1 : std::pow(10, deterministicRandom()->randomInt(0, 4));
 			BulkLoadTaskTestUnit taskUnit =
 			    self->generateBulkLoadTaskUnit(self, folderPath, dataSize, KeyRangeRef(beginKey, endKey));
+			if (corruptByteSample) {
+				const auto& manifest = taskUnit.bulkLoadTask.getManifests().front();
+				ASSERT(manifest.hasByteSampleFile());
+				const std::string path = manifest.getBytesSampleFileFullPath();
+				std::string bytes = readFileBytes(path, 1 << 20);
+				ASSERT(!bytes.empty());
+				bytes[0] ^= 1; // Keep the index and footer readable; the data block checksum will fail.
+				writeFile(path, bytes);
+			}
 			bulkLoadTaskStates.push_back(taskUnit.bulkLoadTask);
 			taskRanges.push_back(taskUnit.bulkLoadTask.getRange());
 			taskUnits.push_back(taskUnit);
@@ -563,6 +584,13 @@ struct BulkLoading : TestWorkload {
 		oldBulkLoadMode = co_await setBulkLoadMode(cx, 1);
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		std::vector<BulkLoadTaskState> errorTasks = co_await self->waitUntilAllTaskCompleteOrError(self, cx);
+		if (corruptByteSample) {
+			ASSERT(errorTasks.empty());
+			for (const auto& task : taskUnits) {
+				StorageMetrics metrics = co_await cx->getStorageMetrics(task.getRange(), CLIENT_KNOBS->TOO_MANY);
+				ASSERT_EQ(metrics.bytes, static_cast<int64_t>(task.getTotalBytes()));
+			}
+		}
 		errorRanges.reserve(errorTasks.size());
 		for (const auto& errorTask : errorTasks) {
 			errorRanges.push_back(errorTask.getRange());
@@ -780,7 +808,7 @@ struct BulkLoading : TestWorkload {
 		ASSERT(lockOwners.size() == 1 && lockOwners[0].getOwnerUniqueId() == rangeLockNameForBulkLoad);
 
 		// Run test
-		if (deterministicRandom()->coinflip()) {
+		if (corruptByteSample || deterministicRandom()->coinflip()) {
 			// Inject data to three non-overlapping ranges
 			co_await simpleTest(this, cx);
 		} else {

@@ -1,0 +1,30 @@
+[configuration]
+storageEngineType = 'ssd-rocksdb-v1'
+disableTss = true
+config = 'triple'
+machineCount = 10
+extraStorageMachineCountPerDC = 5
+datacenters = 1
+generateFearless = false
+
+[[knobs]]
+shard_encode_location_metadata = true
+enable_read_lock_on_range = true
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
+cc_enforce_use_unfit_dd_in_sim = true
+disable_audit_storage_final_replica_check_in_sim = true
+max_trace_lines = 5000000
+
+bulk_load_use_sst_ingest = true
+bulkload_sim_failure_injection = false
+
+[[test]]
+testTitle = 'BulkLoadingCorruptByteSample'
+useDB = true
+waitForQuiescence = false
+
+    [[test.workload]]
+    testName = 'BulkLoadingWorkload'
+    corruptByteSample = true
