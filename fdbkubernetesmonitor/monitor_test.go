@@ -86,26 +86,40 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 		})
 	})
 
-	DescribeTable("publishing a child after it is no longer wanted", func(processCount int, runServers bool) {
+	DescribeTable("launching a child after it is no longer wanted", func(processCount int, runServers bool) {
 		cmd := exec.Command("sleep", "60")
-		Expect(cmd.Start()).To(Succeed())
-		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
-		DeferCleanup(func() { _ = cmd.Process.Kill() })
-
 		mon := &monitor{
-			logger:              GinkgoLogr,
 			processCount:        processCount,
 			processIDs:          []int{0, -1},
 			activeConfiguration: &api.ProcessConfiguration{RunServers: &runServers},
 		}
-		mon.updateProcess(1, cmd.Process)
-		var err error
-		Eventually(done).Should(Receive(&err))
-		var exitError *exec.ExitError
-		Expect(err).To(BeAssignableToTypeOf(exitError))
-		Expect(err.(*exec.ExitError).Sys().(syscall.WaitStatus).Signal()).To(Equal(syscall.SIGTERM))
+		_, _, err := mon.startProcess(1, cmd, GinkgoLogr)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cmd.Process).To(BeNil())
+		Expect(mon.processIDs[1]).To(BeZero())
 	}, Entry("isolation", 1, false), Entry("shutdown", 0, true))
+
+	It("registers the child for the next signal before returning from launch", func() {
+		version := api.Version{Major: 7, Minor: 1, Patch: 51}
+		mon := &monitor{
+			logger:              GinkgoLogr,
+			processCount:        1,
+			processIDs:          []int{0, -1},
+			activeConfiguration: &api.ProcessConfiguration{Version: &version},
+		}
+		cmd := exec.Command("sleep", "60")
+		_, _, err := mon.startProcess(1, cmd, GinkgoLogr)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = cmd.Process.Kill() })
+		Expect(mon.processIDs[1]).To(Equal(cmd.Process.Pid))
+
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		mon.signalProcesses(syscall.SIGTERM, mon.processIDs)
+		Eventually(done).Should(Receive(&err))
+		Expect(err).To(BeAssignableToTypeOf((*exec.ExitError)(nil)))
+		Expect(err.(*exec.ExitError).Sys().(syscall.WaitStatus).Signal()).To(Equal(syscall.SIGTERM))
+	})
 
 	DescribeTable("when getting the backoff time", func(errorCount int, expected time.Duration) {
 		Expect(getBackoffDuration(errorCount)).To(Equal(expected))
