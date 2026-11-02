@@ -329,3 +329,19 @@ TEST_CASE("/bulkload/jobManifestEntry/documentedExample") {
 	ASSERT_EQ(entry.toString(), rawString);
 	return Void();
 }
+
+TEST_CASE("/bulkload/manifest/checksumRoundTrip") {
+	const BulkLoadFileSet files("root", "part", "manifest.txt", "data.sst", "", BulkLoadChecksum("crc32c", "e3069283"));
+	const BulkLoadManifest manifest(files,
+	                                "a"_sr,
+	                                "z"_sr,
+	                                100,
+	                                10,
+	                                1,
+	                                BulkLoadByteSampleSetting(0, "hashlittle2", 250, 100, 0.5),
+	                                BulkLoadType::SST,
+	                                BulkLoadTransportMethod::CP);
+	const std::string encoded = manifest.toString();
+	ASSERT_EQ(BulkLoadManifest(encoded).toString(), encoded);
+	return Void();
+}
