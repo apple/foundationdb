@@ -5,8 +5,10 @@ import (
 	"encoding/gob"
 	"flag"
 	"fmt"
+	"math/big"
 	"math/rand"
 	"os"
+	"reflect"
 	"testing"
 )
 
@@ -123,6 +125,40 @@ func TestTuplePacking(t *testing.T) {
 
 	if *update {
 		writeGolden(t, golden)
+	}
+}
+
+var truncatedFields = [][]byte{
+	{bytesCode}, {bytesCode, 0, 0xff}, {stringCode, 'x'},
+	{intZeroCode + 1}, {negIntStart + 1}, {negIntStart + 1, 0x80},
+	{posIntEnd}, {posIntEnd, 2, 1}, {negIntStart}, {negIntStart, 0xfd, 1},
+	{nestedCode}, {nestedCode, nilCode, 0xff},
+}
+
+func TestUnpackTruncatedFields(t *testing.T) {
+	for _, input := range truncatedFields {
+		if _, err := Unpack(input); err == nil {
+			t.Errorf("Unpack(%x) accepted a truncated tuple", input)
+		}
+	}
+}
+
+func FuzzUnpack(f *testing.F) {
+	for _, input := range truncatedFields {
+		f.Add(input)
+	}
+	f.Fuzz(func(t *testing.T, input []byte) {
+		_, _ = Unpack(input)
+	})
+}
+
+func TestUnpackIntegerAndStringBoundaries(t *testing.T) {
+	input := Tuple{int64(0), int64(-1 << 63), uint64(1 << 63), new(big.Int).Lsh(big.NewInt(1), 70),
+		new(big.Int).Neg(new(big.Int).Lsh(big.NewInt(1), 70)), []byte{0}, "a\x00", Tuple{nil}}
+	packed := input.Pack()
+	decoded, err := Unpack(packed)
+	if err != nil || !reflect.DeepEqual(decoded, input) {
+		t.Fatalf("Unpack(%x) = %#v, %v; want %#v", packed, decoded, err, input)
 	}
 }
 
