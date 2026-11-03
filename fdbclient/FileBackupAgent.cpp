@@ -4546,7 +4546,10 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 					    .detail("BackupUrl", backupUrl)
 					    .detail("Action", "Aborting restore - bulkdump dataset is incomplete");
 					co_await restore.logError(
-					    cx, restore_missing_data(), "BulkLoad restore failed: bulkdump dataset incomplete", nullptr);
+					    cx,
+					    restore_missing_data(),
+					    "BulkLoad restore failed: bulkdump dataset incomplete; retry with --mode rangefile",
+					    nullptr);
 					// Abort the restore by setting state to ABORTED
 					auto abortTr = makeReference<ReadYourWritesTransaction>(cx);
 					abortTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -7302,8 +7305,16 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		}
 		Optional<RestorableFileSet> restorable =
 		    co_await bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion, !useRangeFileRestore);
-		if (!restorable.present())
+		if (!restorable.present()) {
+			if (!useRangeFileRestore) {
+				co_await restore.logError(cx,
+				                          restore_missing_data(),
+				                          "BulkLoad restore failed: backup has no restorable bulkdump data; "
+				                          "retry with --mode rangefile",
+				                          nullptr);
+			}
 			throw restore_missing_data();
+		}
 
 		// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
 		// Order does not matter, they will be put in order when written to the restoreFileMap below.
