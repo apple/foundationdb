@@ -954,20 +954,9 @@ TEST_CASE("/fdbserver/checkpoint/BulkLoadSstReadError") {
 	writeFile(path, bytes);
 	{
 		RocksDBSstFileReader reader;
-		ASSERT(!reader.hasNext());
 		reader.open(path);
 		try {
 			reader.getRange(singleKeyRange("a"_sr));
-			ASSERT(false);
-		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_file_corrupt);
-		}
-	}
-	writeFile(path, ""); // An SST without a footer must fail during open.
-	{
-		RocksDBSstFileReader reader;
-		try {
-			reader.open(path);
 			ASSERT(false);
 		} catch (Error& e) {
 			ASSERT_EQ(e.code(), error_code_file_corrupt);

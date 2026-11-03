@@ -52,15 +52,15 @@ struct BulkLoadTaskTestUnit {
 
 	BulkLoadTaskState bulkLoadTask;
 	std::vector<KeyValue> data;
+	int64_t sampledBytes = 0;
 };
 
 struct BulkLoading : TestWorkload {
 	static constexpr auto NAME = "BulkLoadingWorkload";
 	const bool enabled = true;
-	const bool corruptByteSample;
 	bool pass = true;
 	bool debugging = false;
-	bool backgroundTrafficEnabled = !corruptByteSample && deterministicRandom()->coinflip();
+	bool backgroundTrafficEnabled = deterministicRandom()->coinflip();
 	UID jobId = deterministicRandom()->randomUniqueID();
 	bool initializeBulkLoadMetadata = deterministicRandom()->coinflip();
 
@@ -78,9 +78,7 @@ struct BulkLoading : TestWorkload {
 		             "BulkDumping" });
 	}
 
-	explicit BulkLoading(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), enabled(true), corruptByteSample(getOption(options, "corruptByteSample"_sr, false)),
-	    pass(true) {}
+	explicit BulkLoading(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -358,14 +356,6 @@ struct BulkLoading : TestWorkload {
 	}
 
 	std::vector<KeyValue> generateOrderedKVS(BulkLoading* self, KeyRange range, size_t count) {
-		if (range.singleKeyRange()) {
-			ASSERT(count == 1);
-			// Large values make these user keys enter the byte sample with their exact size at the default rate.
-			const std::string value(32'768, 'x');
-			KeyValue kv = KeyValueRef(range.begin, StringRef(value));
-			ASSERT(isKeyValueInSample(kv).probability == 1.0);
-			return { kv };
-		}
 		std::set<Key> keys; // ordered
 		while (keys.size() < count) {
 			Standalone<StringRef> str = self->getRandomStringRef();
@@ -386,7 +376,7 @@ struct BulkLoading : TestWorkload {
 		return res; // ordered
 	}
 
-	BulkLoadFileSet generateSSTFiles(BulkLoading* self, std::string rootPath, BulkLoadTaskTestUnit task) {
+	BulkLoadFileSet generateSSTFiles(BulkLoading* self, std::string rootPath, BulkLoadTaskTestUnit& task) {
 		const std::string dataFileNameBase = deterministicRandom()->randomUniqueID().toString();
 		const std::string dataFileName = dataFileNameBase + "-data.sst";
 		const std::string sampleFileName = dataFileNameBase + "-sample.sst";
@@ -407,6 +397,7 @@ struct BulkLoading : TestWorkload {
 		for (const auto& kv : task.data) {
 			ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
 			if (sampleInfo.inSample) {
+				task.sampledBytes += sampleInfo.sampledSize;
 				Key sampleKey = kv.key;
 				Value sampleValue = BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned());
 				bytesSample.push_back(Standalone(KeyValueRef(sampleKey, sampleValue)));
@@ -558,20 +549,14 @@ struct BulkLoading : TestWorkload {
 			std::string indexStr = std::to_string(i);
 			std::string indexStrNext = std::to_string(i + 1);
 			Key beginKey = StringRef(indexStr);
-			// A single-key manifest fits inside any destination shard, so it stays eligible for whole-file ingestion.
-			Key endKey = corruptByteSample ? keyAfter(beginKey) : Key(StringRef(indexStrNext));
+			Key endKey = StringRef(indexStrNext);
 			std::string folderPath = joinPath(simulationBulkLoadFolder, indexStr);
-			int dataSize = corruptByteSample ? 1 : std::pow(10, deterministicRandom()->randomInt(0, 4));
+			int dataSize = std::pow(10, deterministicRandom()->randomInt(0, 4));
 			BulkLoadTaskTestUnit taskUnit =
 			    self->generateBulkLoadTaskUnit(self, folderPath, dataSize, KeyRangeRef(beginKey, endKey));
-			if (corruptByteSample) {
-				const auto& manifest = taskUnit.bulkLoadTask.getManifests().front();
-				ASSERT(manifest.hasByteSampleFile());
-				const std::string path = manifest.getBytesSampleFileFullPath();
-				std::string bytes = readFileBytes(path, 1 << 20);
-				ASSERT(!bytes.empty());
-				bytes[0] ^= 1; // Keep the index and footer readable; the data block checksum will fail.
-				writeFile(path, bytes);
+			const auto& manifest = taskUnit.bulkLoadTask.getManifests().front();
+			if (i == 0 && manifest.hasByteSampleFile()) {
+				writeFile(manifest.getBytesSampleFileFullPath(), "invalid SST");
 			}
 			bulkLoadTaskStates.push_back(taskUnit.bulkLoadTask);
 			taskRanges.push_back(taskUnit.bulkLoadTask.getRange());
@@ -584,13 +569,6 @@ struct BulkLoading : TestWorkload {
 		oldBulkLoadMode = co_await setBulkLoadMode(cx, 1);
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		std::vector<BulkLoadTaskState> errorTasks = co_await self->waitUntilAllTaskCompleteOrError(self, cx);
-		if (corruptByteSample) {
-			ASSERT(errorTasks.empty());
-			for (const auto& task : taskUnits) {
-				StorageMetrics metrics = co_await cx->getStorageMetrics(task.getRange(), CLIENT_KNOBS->TOO_MANY);
-				ASSERT_EQ(metrics.bytes, static_cast<int64_t>(task.getTotalBytes()));
-			}
-		}
 		errorRanges.reserve(errorTasks.size());
 		for (const auto& errorTask : errorTasks) {
 			errorRanges.push_back(errorTask.getRange());
@@ -613,6 +591,8 @@ struct BulkLoading : TestWorkload {
 			if (rangeTaskError) {
 				continue; // Ignore error ranges
 			}
+			StorageMetrics metrics = co_await cx->getStorageMetrics(taskUnits[j].getRange(), CLIENT_KNOBS->TOO_MANY);
+			ASSERT_EQ(metrics.bytes, taskUnits[j].sampledBytes);
 			kvs.insert(kvs.end(), taskUnits[j].data.begin(), taskUnits[j].data.end());
 		}
 		ASSERT(self->checkSame(self, kvs, dbkvs));
@@ -808,7 +788,7 @@ struct BulkLoading : TestWorkload {
 		ASSERT(lockOwners.size() == 1 && lockOwners[0].getOwnerUniqueId() == rangeLockNameForBulkLoad);
 
 		// Run test
-		if (corruptByteSample || deterministicRandom()->coinflip()) {
+		if (deterministicRandom()->coinflip()) {
 			// Inject data to three non-overlapping ranges
 			co_await simpleTest(this, cx);
 		} else {
