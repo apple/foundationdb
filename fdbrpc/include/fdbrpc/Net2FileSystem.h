@@ -40,6 +40,10 @@ public:
 
 	Future<Void> renameFile(std::string const& from, std::string const& to) override;
 
+	// Resolve and create the parent on EIO on Unix, retaining the job through cancellation.
+	// Simulation and Windows retain synchronous behavior.
+	static Future<Void> createParentDirectory(std::string filename);
+
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet& getActorLineageSet() override;
 #endif
