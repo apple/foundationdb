@@ -24,10 +24,14 @@ if(POLICY CMP0135)
 endif()
 
 project(foundationdb
-  VERSION 7.4.8
+  VERSION 7.4.9
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
-  LANGUAGES C CXX ASM Swift)
+  LANGUAGES C CXX ASM)
+
+if(WITH_SWIFT)
+  enable_language(Swift)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
@@ -35,6 +39,9 @@ message (STATUS "${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR}")
 if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
   message(FATAL_ERROR "In-source builds are forbidden")
 endif()
+
+set(FDB_RELEASE           OFF CACHE BOOL "This is a building of a final release")
+set(FDB_RELEASE_CANDIDATE OFF CACHE BOOL "This is a building of a release candidate")
 
 set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
 set(AUTO_DISCOVER_UNIT_TESTS OFF CACHE BOOL "Automatically discover unit-tests")
@@ -44,11 +51,11 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "Defaulting build type to 'Debug' for OPEN_FOR_IDE")
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build" FORCE)
   else()
-    message(STATUS "Setting build type to 'Release' as none was specified")
+    message(STATUS "Setting build type to 'Release'")
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build" FORCE)
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
-      "MinSizeRel" "RelWithDebInfo")
   endif()
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
+                                               "MinSizeRel" "RelWithDebInfo")
 endif()
 
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
@@ -122,7 +129,7 @@ file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
 
 set(FDB_CURRENT_VERSION ${PROJECT_VERSION})
 set(FDB_FUTURE_VERSION "8.0.0")
-set(FDB_PREV_RELEASE_VERSION "7.3.59")
+set(FDB_PREV_RELEASE_VERSION "7.3.79")
 set(FDB_PREV2_RELEASE_VERSION "7.1.61")
 
 set(MULTIREGION_TEST TRUE)
@@ -237,6 +244,21 @@ if(WITH_DOCUMENTATION)
   if(BUILD_JAVA_BINDING)
     add_dependencies(html CopyJavadoc)
   endif()
+endif()
+
+# Make sure binaries built on newer RHEL 9 minor releases still run on older ones, see ConfigureCompiler.cmake
+if(RHEL9_BASED)
+  set(glibc_check_binaries)
+  foreach(target fdbserver fdbcli fdbbackup fdbmonitor fdb_c fdb_c_shim fdb_java)
+    if(TARGET ${target})
+      get_target_property(target_type ${target} TYPE)
+      if(target_type MATCHES "^(EXECUTABLE|SHARED_LIBRARY|MODULE_LIBRARY)$")
+        list(APPEND glibc_check_binaries $<TARGET_FILE:${target}>)
+      endif()
+    endif()
+  endforeach()
+  add_test(NAME glibc_symbol_versions
+           COMMAND ${CMAKE_SOURCE_DIR}/contrib/check_glibc_symbol_versions.sh ${CMAKE_NM} ${glibc_check_binaries})
 endif()
 
 if(WIN32)

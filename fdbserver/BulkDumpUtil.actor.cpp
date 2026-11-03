@@ -28,26 +28,26 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
-                                 const BulkDumpState& bulkDumpState) {
-	StorageServerInterface targetServer;
+                                 const BulkDumpState& bulkDumpState,
+                                 const std::string& targetDcId) {
+	// The target server uploads the dumped files, so its DC must reach the destination.
+	// An empty targetDcId means the cluster has no region configuration.
+	auto targetDc = targetDcId.empty() ? locations.begin() : locations.find(targetDcId);
+	ASSERT(targetDc != locations.end() && !targetDc->second.empty());
+	StorageServerInterface targetServer =
+	    targetDc->second[deterministicRandom()->randomInt(0, targetDc->second.size())];
+
 	std::vector<UID> checksumServers;
-	int dcid = 0;
 	for (const auto& [_, dcServers] : locations) {
-		if (dcid == 0) {
-			const int idx = deterministicRandom()->randomInt(0, dcServers.size());
-			targetServer = dcServers[idx];
-		}
-		for (int i = 0; i < dcServers.size(); i++) {
-			if (dcServers[i].id() == targetServer.id()) {
-				ASSERT_WE_THINK(dcid == 0);
-			} else {
-				checksumServers.push_back(dcServers[i].id());
+		for (const auto& ssi : dcServers) {
+			if (ssi.id() != targetServer.id()) {
+				checksumServers.push_back(ssi.id());
 			}
 		}
-		dcid++;
 	}
 	return SSBulkDumpTask(targetServer, checksumServers, bulkDumpState);
 }
@@ -329,5 +329,54 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 			wait(tr.onError(e));
 		}
 	}
+	return Void();
+}
+
+TEST_CASE("/BulkDumpUtil/getSSBulkDumpTask/TargetDc") {
+	auto makeServer = []() {
+		StorageServerInterface ssi;
+		ssi.uniqueID = deterministicRandom()->randomUniqueID();
+		return ssi;
+	};
+	auto inDc = [](const std::vector<StorageServerInterface>& dcServers, const UID& id) {
+		for (const auto& ssi : dcServers) {
+			if (ssi.id() == id) {
+				return true;
+			}
+		}
+		return false;
+	};
+	auto isChecksumServer = [](const std::vector<UID>& checksumServers, const UID& id) {
+		for (const auto& checksumServer : checksumServers) {
+			if (checksumServer == id) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	// "mr" sorts before "pv", so map order alone would always pick the remote region.
+	std::map<std::string, std::vector<StorageServerInterface>> locations;
+	locations["mr"] = { makeServer(), makeServer() };
+	locations["pv"] = { makeServer(), makeServer(), makeServer() };
+	const size_t totalServers = locations["mr"].size() + locations["pv"].size();
+
+	BulkDumpState jobState;
+
+	// The target is drawn from the requested DC, not from map order.
+	SSBulkDumpTask primaryTask = getSSBulkDumpTask(locations, jobState, "pv");
+	ASSERT(inDc(locations["pv"], primaryTask.targetServer.id()));
+	// Every other replica, in both DCs, becomes a checksum server, and the target never does.
+	ASSERT(primaryTask.checksumServers.size() == totalServers - 1);
+	ASSERT(!isChecksumServer(primaryTask.checksumServers, primaryTask.targetServer.id()));
+
+	SSBulkDumpTask remoteTask = getSSBulkDumpTask(locations, jobState, "mr");
+	ASSERT(inDc(locations["mr"], remoteTask.targetServer.id()));
+	ASSERT(remoteTask.checksumServers.size() == totalServers - 1);
+
+	// An empty targetDcId means no region configuration; any DC is acceptable.
+	SSBulkDumpTask anyTask = getSSBulkDumpTask(locations, jobState, "");
+	ASSERT(inDc(locations["mr"], anyTask.targetServer.id()) || inDc(locations["pv"], anyTask.targetServer.id()));
+
 	return Void();
 }

@@ -10,28 +10,32 @@ env_set(USE_GCOV OFF BOOL "Compile with gcov instrumentation")
 env_set(USE_MSAN OFF BOOL "Compile with memory sanitizer. To avoid false positives you need to dynamically link to a msan-instrumented libc++ and libc++abi, which you must compile separately. See https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo#instrumented-libc.")
 env_set(USE_TSAN OFF BOOL "Compile with thread sanitizer. It is recommended to dynamically link to a tsan-instrumented libc++ and libc++abi, which you can compile separately.")
 env_set(USE_UBSAN OFF BOOL "Compile with undefined behavior sanitizer")
-env_set(FDB_RELEASE_CANDIDATE OFF BOOL "This is a building of a release candidate")
-env_set(FDB_RELEASE OFF BOOL "This is a building of a final release")
-env_set(USE_CCACHE OFF BOOL "Use ccache for compilation if available")
-env_set(RELATIVE_DEBUG_PATHS OFF BOOL "Use relative file paths in debug info")
+env_set(USE_CCACHE OFF BOOL "Use ccache for compilation")
 env_set(USE_WERROR OFF BOOL "Compile with -Werror. Recommended for local development and CI.")
+
 default_linker(_use_ld)
-env_set(USE_LD "${_use_ld}" STRING
-  "The linker to use for building: can be LD (system default and same as DEFAULT), BFD, GOLD, or LLD - will be LLD for Clang if available, DEFAULT otherwise")
+env_set(USE_LD "${_use_ld}" STRING "The linker to use for building: can be LD (system default and same as DEFAULT), BFD, GOLD, or LLD - will be LLD for Clang if available, DEFAULT otherwise")
 use_libcxx(_use_libcxx)
 env_set(USE_LIBCXX "${_use_libcxx}" BOOL "Use libc++")
 static_link_libcxx(_static_link_libcxx)
 env_set(STATIC_LINK_LIBCXX "${_static_link_libcxx}" BOOL "Statically link libstdcpp/libc++")
+env_set(MAX_LINK_JOBS "4" STRING "Maximum number of link jobs to run in parallel (to avoid OOM)")
+
 env_set(TRACE_PC_GUARD_INSTRUMENTATION_LIB "" STRING "Path to a library containing an implementation for __sanitizer_cov_trace_pc_guard. See https://clang.llvm.org/docs/SanitizerCoverage.html for more info.")
 env_set(PROFILE_INSTR_GENERATE OFF BOOL "If set, build FDB as an instrumentation build to generate profiles")
 env_set(PROFILE_INSTR_USE "" STRING "If set, build FDB with profile")
+
+env_set(RELATIVE_DEBUG_PATHS OFF BOOL "Use relative file paths in debug info")
 env_set(FULL_DEBUG_SYMBOLS OFF BOOL "Generate full debug symbols")
-env_set(ENABLE_LONG_RUNNING_TESTS OFF BOOL "Add a long running tests package")
+env_set(COMPRESS_DEBUG_SYMBOLS ON BOOL "Compress debug symbols")
 
 set(is_swift_compile "$<COMPILE_LANGUAGE:Swift>")
 set(is_cxx_compile "$<OR:$<COMPILE_LANGUAGE:CXX>,$<COMPILE_LANGUAGE:C>>")
 set(is_swift_link "$<LINK_LANGUAGE:Swift>")
 set(is_cxx_link "$<OR:$<LINK_LANGUAGE:CXX>,$<LINK_LANGUAGE:C>>")
+
+set_property(GLOBAL PROPERTY JOB_POOLS link_job_pool=${MAX_LINK_JOBS})
+set(CMAKE_JOB_POOL_LINK link_job_pool)
 
 set(USE_SANITIZER OFF)
 if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)
@@ -91,9 +95,12 @@ if (USE_CCACHE)
   set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
 endif()
 
+
 include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
-set(CMAKE_REQUIRED_LIBRARIES c)
+if(NOT WIN32)
+  set(CMAKE_REQUIRED_LIBRARIES c)
+endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -138,6 +145,35 @@ else()
     set(GCC YES)
   endif()
 
+  set(RHEL9_BASED NO)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING)
+    cmake_host_system_information(RESULT _distrib_id QUERY DISTRIB_ID)
+    cmake_host_system_information(RESULT _distrib_id_like QUERY DISTRIB_ID_LIKE)
+    cmake_host_system_information(RESULT _distrib_version_id QUERY DISTRIB_VERSION_ID)
+    if((_distrib_id STREQUAL "rhel" OR _distrib_id_like MATCHES "(^| )rhel( |$)") AND _distrib_version_id MATCHES "^9(\\.|$)")
+      set(RHEL9_BASED YES)
+    endif()
+  endif()
+
+  # Since RHEL 9.7, the system GCC 11 (gcc >= 11.5.0-10) libgcc_eh.a unwinder calls _dl_find_object@GLIBC_2.35
+  # (backported to the RHEL 9.7 glibc 2.34). Clang selects the system GCC installation by default, so with
+  # -static-libgcc our binaries would fail to start on RHEL 9.6 and older. The gcc-toolset-13 libgcc_eh.a
+  # does not have this dependency (but newer gcc-toolsets do). The glibc_symbol_versions test checks this.
+  set(_clang_gcc_install_dir "")
+  if(CLANG AND RHEL9_BASED)
+    set(_clang_gcc_install_dir "/opt/rh/gcc-toolset-13/root/usr/lib/gcc/${CMAKE_SYSTEM_PROCESSOR}-redhat-linux/13")
+  endif()
+  env_set(CLANG_GCC_INSTALL_DIR "${_clang_gcc_install_dir}" PATH "GCC installation for clang to use (passed as --gcc-install-dir), empty for the clang default")
+  if(CLANG_GCC_INSTALL_DIR)
+    if(NOT IS_DIRECTORY "${CLANG_GCC_INSTALL_DIR}")
+      message(FATAL_ERROR "CLANG_GCC_INSTALL_DIR=${CLANG_GCC_INSTALL_DIR} does not exist. On RHEL 9 based distros, "
+                          "install gcc-toolset-13-gcc-c++, or set CLANG_GCC_INSTALL_DIR to empty to use clang's default.")
+    endif()
+    message(STATUS "Using GCC installation for clang: ${CLANG_GCC_INSTALL_DIR}")
+    add_compile_options("$<${is_cxx_compile}:--gcc-install-dir=${CLANG_GCC_INSTALL_DIR}>")
+    add_link_options("$<${is_cxx_link}:--gcc-install-dir=${CLANG_GCC_INSTALL_DIR}>")
+  endif()
+
   # check linker flags.
   if (USE_LD STREQUAL "DEFAULT")
     set(USE_LD "LD")
@@ -179,36 +215,37 @@ else()
 
   add_compile_options("$<${is_cxx_compile}:-fno-omit-frame-pointer>")
 
+  # The default DWARF 5 format does not play nicely with GNU Binutils 2.39 and earlier, resulting
+  # in tools like addr2line omitting line numbers.
+  #  - Our rockylinux9 gcc   compile uses rh/gcc--toolset-13 -> binutils 2.40
+  #  - Our rockylinux9 clang compile uses rhel9 default      -> binutils 2.35.2
+  #  - MacOS/Darwin ld and lldb do not fully support dwarf-5 either (and also use clang)
   if(CLANG)
-    # The default DWARF 5 format does not play nicely with GNU Binutils 2.39 and earlier, resulting
-    # in tools like addr2line omitting line numbers. We can consider removing this once we are able 
-    # to use a version that has a fix.
     add_compile_options("$<${is_cxx_compile}:-gdwarf-4>")
-  endif()
-
-  if(FDB_RELEASE OR FULL_DEBUG_SYMBOLS OR CMAKE_BUILD_TYPE STREQUAL "Debug")
-    # Configure with FULL_DEBUG_SYMBOLS=ON to generate all symbols for debugging with gdb
-    # Also generating full debug symbols in release builds. CPack will strip them out
-    # and create a debuginfo rpm
-    add_compile_options("$<${is_cxx_compile}:-ggdb>")
   else()
-    # Generating minimal debug symbols by default. They are sufficient for testing purposes
-    add_compile_options("$<${is_cxx_compile}:-ggdb1>")
+    add_compile_options("$<${is_cxx_compile}:-gdwarf-5>")
   endif()
 
-  if(CLANG)
-    # The default DWARF 5 format does not play nicely with GNU Binutils 2.39 and earlier, resulting
-    # in tools like addr2line omitting line numbers. We can consider removing this once we are able 
-    # to use a version that has a fix.
-    add_compile_options("$<${is_cxx_compile}:-gdwarf-4>")
+  # Also generate debug symbols in release builds,
+  # CPack will strip them out and create a debuginfo rpm.
+  # Just -g1 by default because g2+ is huge, and cpack rpm debugedit is very slow.
+  if(FULL_DEBUG_SYMBOLS)
+    # As much as possible, including macros etc.
+    add_compile_options("$<${is_cxx_compile}:-g3>")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    # Reasonable for debugging, including function locals and c++ namespaces.
+    add_compile_options("$<${is_cxx_compile}:-g2>")
+  else()
+    # Minimal debug symbols: enough for backtraces with line numbers, but no locals.
+    add_compile_options("$<${is_cxx_compile}:-g1>")
   endif()
 
-  if(NOT FDB_RELEASE)
-    # Enable compression of the debug sections. This reduces the size of the binaries several times. 
-    # We do not enable it release builds, because CPack fails to generate debuginfo packages when
-    # compression is enabled
+  # Enable compression of the debuginfo sections, reducing size to ~ 1/3 or less.
+  # CPack RPM gen used to have problems with compressed debuginfo due to "debugedit"
+  # but recent versions including the one in rhel9 support it.
+  if(COMPRESS_DEBUG_SYMBOLS)
     add_compile_options("$<${is_cxx_compile}:-gz>")
-    add_link_options("$<${is_cxx_compile}:-gz>")
+    add_link_options("$<${is_cxx_link}:-gz>")
   endif()
 
   if(TRACE_PC_GUARD_INSTRUMENTATION_LIB)
