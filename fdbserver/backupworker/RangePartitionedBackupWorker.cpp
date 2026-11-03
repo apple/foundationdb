@@ -94,8 +94,6 @@ struct RangePartitionedBackupData {
 	KeyRangeMap<int> keyRangeToPartitionId;
 	// Partition ID to key range map for easy lookup of partition's key range.
 	std::unordered_map<int, KeyRange> partitionToKeyRange;
-	// KeyRange to backup UID and partition id map needed to create log files for the right backup and partition.
-	KeyRangeMap<std::vector<std::pair<UID, int32_t>>> keyRangeToBackupAssignment;
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
@@ -349,13 +347,12 @@ struct RangePartitionedBackupData {
 	}
 };
 
-static Future<Void> computeKeyRangeToBackupAssignment(RangePartitionedBackupData* self) {
-	self->keyRangeToBackupAssignment = KeyRangeMap<std::vector<std::pair<UID, int32_t>>>();
-
-	while (!self->isAllBackupsReady()) {
-		co_await self->waitAllBackupsReady();
-	}
-
+// Builds the KeyRange to backup UID and partition id map needed to create log files for the right backup and
+// partition. Requires all backups to be ready.
+static void computeKeyRangeToBackupAssignment(
+    RangePartitionedBackupData* self,
+    KeyRangeMap<std::vector<std::pair<UID, int32_t>>>* keyRangeToBackupAssignment) {
+	ASSERT(self->isAllBackupsReady());
 	for (auto& [uid, info] : self->backups) {
 		const auto& backupRanges = info.ranges.get().get();
 
@@ -368,16 +365,15 @@ static Future<Void> computeKeyRangeToBackupAssignment(RangePartitionedBackupData
 				continue;
 
 			std::pair<UID, int32_t> bk{ uid, partitionId };
-			for (auto& range : self->keyRangeToBackupAssignment.modify(intersection.get())) {
+			for (auto& range : keyRangeToBackupAssignment->modify(intersection.get())) {
 				range->value().push_back(bk);
 			}
 		}
 	}
-	self->keyRangeToBackupAssignment.coalesce(allKeys);
+	keyRangeToBackupAssignment->coalesce(allKeys);
 }
 
-static Future<Void> onBackupChanges(RangePartitionedBackupData* self,
-                                    std::vector<std::pair<UID, Version>> uidVersions) {
+static void onBackupChanges(RangePartitionedBackupData* self, const std::vector<std::pair<UID, Version>>& uidVersions) {
 	std::unordered_set<UID> activeUids;
 	for (const auto& [uid, version] : uidVersions) {
 		activeUids.insert(uid);
@@ -416,7 +412,6 @@ static Future<Void> onBackupChanges(RangePartitionedBackupData* self,
 	}
 	if (modified) {
 		self->changedTrigger.trigger();
-		co_await computeKeyRangeToBackupAssignment(self);
 	}
 }
 
@@ -627,9 +622,7 @@ Future<Void> persistAndUploadPartitionMap(RangePartitionedBackupData* self,
 }
 
 // Updates local routing state to use the new partition map.
-Future<Void> setActivePartitionMap(RangePartitionedBackupData* self,
-                                   Version pmVersion,
-                                   PartitionMap const& partitionMap) {
+void setActivePartitionMap(RangePartitionedBackupData* self, Version pmVersion, PartitionMap const& partitionMap) {
 	self->logFolderBaseVersion = pmVersion;
 	ASSERT(partitionMap.contains(self->tag));
 	const auto& tagPartitions = partitionMap.at(self->tag);
@@ -638,7 +631,6 @@ Future<Void> setActivePartitionMap(RangePartitionedBackupData* self,
 	for (const auto& partition : tagPartitions) {
 		self->keyRangeToPartitionId.insert(partition.ranges, partition.partitionId);
 	}
-	co_await computeKeyRangeToBackupAssignment(self);
 }
 
 Future<Void> processPartitionMap(RangePartitionedBackupData* self) {
@@ -697,7 +689,7 @@ Future<Void> processPartitionMap(RangePartitionedBackupData* self) {
 		self->pop();
 	}
 
-	co_await setActivePartitionMap(self, partitionMapVersion, partitionMap);
+	setActivePartitionMap(self, partitionMapVersion, partitionMap);
 }
 
 // Pulls mutations from TLog servers.
@@ -883,20 +875,40 @@ static Future<Void> updateLogBytesWritten(RangePartitionedBackupData* self, std:
 	}
 }
 
-Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastVersionInFile, int numMsg) {
-	// Make sure all backups are ready, otherwise mutations will be lost.
-	while (!self->isAllBackupsReady()) {
-		co_await self->waitAllBackupsReady();
-	}
+struct MutationLogFiles {
+	std::vector<UID> backupUids;
+	std::vector<Reference<IBackupFile>> files;
+};
 
+static bool retryableBackupFileError(Error error) {
+	switch (error.code()) {
+	case error_code_io_error:
+	case error_code_io_timeout:
+	case error_code_platform_error:
+	case error_code_timed_out:
+	case error_code_connection_failed:
+	case error_code_lookup_failed:
+	case error_code_http_request_failed:
+	case error_code_http_bad_response:
+		return true;
+	default:
+		return false;
+	}
+}
+
+// One complete-file attempt for messages in [0, numMsg), without advancing progress or accounting.
+static Future<MutationLogFiles> writeMutationsToFile(
+    RangePartitionedBackupData* self,
+    const KeyRangeMap<std::vector<std::pair<UID, int32_t>>>& keyRangeToBackupAssignment,
+    Version lastVersionInFile,
+    int numMsg,
+    int blockSize) {
 	std::vector<RangePartitionedLogFileInfo> activeFiles;
 	// Map of (backupUid, partitionId) -> index into activeFiles.
 	std::map<std::pair<UID, int32_t>, int> fileIndexByBackupPartition;
-	int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
 	std::vector<Future<Reference<IBackupFile>>> fileFutures;
 
-	for (auto entry = self->keyRangeToBackupAssignment.ranges().begin();
-	     entry != self->keyRangeToBackupAssignment.ranges().end();
+	for (auto entry = keyRangeToBackupAssignment.ranges().begin(); entry != keyRangeToBackupAssignment.ranges().end();
 	     ++entry) {
 		for (const auto& [backupUid, partitionId] : entry->value()) {
 
@@ -920,7 +932,8 @@ Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastV
 			RangePartitionedLogFileInfo lf;
 			lf.backupUid = it->first;
 			lf.partitionId = partitionId;
-			lf.fileKeyRange = entry->range();
+			// The partition's full range.
+			lf.fileKeyRange = self->keyRangeToPartitionId.rangeContaining(entry->range().begin).range();
 			lf.beginVersion = beginVersion;
 			lf.blockEnd = 0;
 
@@ -932,7 +945,7 @@ Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastV
 	}
 
 	if (fileFutures.empty()) {
-		co_return;
+		co_return MutationLogFiles{};
 	}
 	co_await waitForAll(fileFutures);
 
@@ -946,7 +959,7 @@ Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastV
 	co_await waitForAll(headerWrites);
 
 	if (activeFiles.empty()) {
-		co_return;
+		co_return MutationLogFiles{};
 	}
 
 	// Process mutations
@@ -964,7 +977,7 @@ Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastV
 
 		std::vector<Future<Void>> adds;
 		if (m.type != MutationRef::Type::ClearRange) {
-			for (const auto& entry : self->keyRangeToBackupAssignment[m.param1]) {
+			for (const auto& entry : keyRangeToBackupAssignment[m.param1]) {
 				auto it = fileIndexByBackupPartition.find(entry);
 				ASSERT(it != fileIndexByBackupPartition.end());
 
@@ -978,7 +991,7 @@ Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastV
 		} else {
 			KeyRangeRef mutationRange(m.param1, m.param2);
 			std::unordered_set<int> writtenFiles;
-			for (auto range : self->keyRangeToBackupAssignment.intersectingRanges(mutationRange)) {
+			for (auto range : keyRangeToBackupAssignment.intersectingRanges(mutationRange)) {
 				for (const auto& entry : range.value()) {
 					auto it = fileIndexByBackupPartition.find(entry);
 					ASSERT(it != fileIndexByBackupPartition.end());
@@ -1010,13 +1023,78 @@ Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastV
 	}
 	co_await waitForAll(finished);
 
+	MutationLogFiles completed;
+	for (const auto& lf : activeFiles) {
+		completed.backupUids.push_back(lf.backupUid);
+		completed.files.push_back(lf.file);
+	}
+	co_return completed;
+}
+
+Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastVersionInFile, int numMsg) {
+	// Make sure all backups are ready, otherwise mutations will be lost.
+	while (!self->isAllBackupsReady()) {
+		co_await self->waitAllBackupsReady();
+	}
+	// Built once: every retry must route mutations to the same files.
+	KeyRangeMap<std::vector<std::pair<UID, int32_t>>> keyRangeToBackupAssignment;
+	computeKeyRangeToBackupAssignment(self, &keyRangeToBackupAssignment);
+
+	const int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
+	const int retryLimit = SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_LIMIT;
+	const double maxDelay = std::max(0.0, SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY);
+	double retryDelay = std::max(0.0, std::min(SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_DELAY, maxDelay));
+	Future<Void> configChanged = self->changedTrigger.onTrigger();
+	MutationLogFiles completed;
+	Optional<Error> lastError;
+	int retries = 0;
+	while (true) {
+		try {
+			completed =
+			    co_await writeMutationsToFile(self, keyRangeToBackupAssignment, lastVersionInFile, numMsg, blockSize);
+			// keyRangeToBackupAssignment is stale if backups changed during a retry. Recovery must replay the
+			// retained prefix, even when this attempt's files finished successfully.
+			if (lastError.present() && configChanged.isReady()) {
+				throw lastError.get();
+			}
+			break;
+		} catch (Error& e) {
+			if (!retryableBackupFileError(e) || retries >= retryLimit || self->stopped || configChanged.isReady()) {
+				throw;
+			}
+			lastError = e;
+		}
+		const double waitSeconds = retryDelay * (0.5 + 0.5 * deterministicRandom()->random01());
+		retryDelay = std::min(maxDelay, retryDelay * 2);
+		++retries;
+		TraceEvent(SevWarn, "RangePartitionedBWFileRetry", self->myId)
+		    .errorUnsuppressed(lastError.get())
+		    .detail("Retry", retries)
+		    .detail("RetryLimit", retryLimit)
+		    .detail("Delay", waitSeconds);
+		Future<Void> backoff = delay(waitSeconds);
+		while (!backoff.isReady()) {
+			co_await (backoff || self->doneTrigger.onTrigger() || configChanged);
+			if (self->stopped || configChanged.isReady()) {
+				throw lastError.get();
+			}
+		}
+		co_await backoff;
+		if (self->stopped || configChanged.isReady()) {
+			throw lastError.get();
+		}
+	}
+
+	if (completed.backupUids.empty()) {
+		co_return;
+	}
 	std::map<UID, int64_t> bytesPerBackup;
-	for (auto& lf : activeFiles) {
-		auto it = self->backups.find(lf.backupUid);
+	for (int i = 0; i < completed.backupUids.size(); i++) {
+		auto it = self->backups.find(completed.backupUids[i]);
 		if (it != self->backups.end()) {
 			it->second.nextFileBeginVersion = lastVersionInFile + 1;
 		}
-		bytesPerBackup[lf.backupUid] += lf.file->size();
+		bytesPerBackup[completed.backupUids[i]] += completed.files[i]->size();
 	}
 
 	co_await updateLogBytesWritten(self, std::move(bytesPerBackup));
@@ -1047,7 +1125,7 @@ static Future<bool> shouldBackupWorkerExitEarly(RangePartitionedBackupData* self
 							shouldExit = false;
 						}
 					}
-					co_await onBackupChanges(self, uidVersions);
+					onBackupChanges(self, uidVersions);
 					co_return shouldExit;
 				}
 
@@ -1084,7 +1162,7 @@ static Future<Void> monitorBackupStartedKeyChanges(RangePartitionedBackupData* s
 					}
 				}
 
-				co_await onBackupChanges(self, uidVersions);
+				onBackupChanges(self, uidVersions);
 				Future<Void> watchFuture = tr.watch(backupStartedKey);
 				co_await tr.commit();
 				co_await watchFuture;
@@ -1299,7 +1377,7 @@ Future<Void> uploadData(RangePartitionedBackupData* self) {
 				    self->messages[0].arena, self->messages[0].message, AssumeVersion(g_network->protocolVersion()));
 				PartitionMapMessage pmMsg;
 				pmReader >> pmMsg;
-				co_await setActivePartitionMap(self, pmV, pmMsg.partitionMap);
+				setActivePartitionMap(self, pmV, pmMsg.partitionMap);
 				self->eraseMessages(1);
 				numMsg -= 1;
 
