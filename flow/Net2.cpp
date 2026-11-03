@@ -380,6 +380,7 @@ class BindPromise {
 	std::variant<const char*, AuditedEvent> errContext;
 	UID errID;
 	NetworkAddress peerAddr;
+	boost::system::error_code* errorOut = nullptr;
 
 public:
 	BindPromise(const char* errContext, UID errID, NetworkAddress peerAddr)
@@ -388,15 +389,21 @@ public:
 	  : errContext(auditedEvent), errID(errID), peerAddr(peerAddr) {}
 	BindPromise(BindPromise const& r) = default;
 	BindPromise(BindPromise&& r) noexcept
-	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
+	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr), errorOut(r.errorOut) {}
 
 	Future<Void> getFuture() const { return p.getFuture(); }
 
 	NetworkAddress getPeerAddr() const { return peerAddr; }
 
+	// `*out` receives the error, if any, before the future is set. `out` must outlive the operation.
+	void setErrorOut(boost::system::error_code* out) { errorOut = out; }
+
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
 		try {
 			if (error) {
+				if (errorOut) {
+					*errorOut = error;
+				}
 				// Log the error...
 				{
 					std::optional<TraceEvent> traceEvent;
@@ -860,6 +867,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		ssl_socket::handshake_type type;
 		boost::system::error_code err;
 		NetworkAddress peerAddr;
+		// If set, receives `err` before `done` is set. Owned by the connection, which outlives the handshake.
+		boost::system::error_code* errorOut = nullptr;
 	};
 
 	void action(Handshake& h) {
@@ -867,6 +876,9 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			if (h.socket.next_layer().non_blocking(false, h.err).failed() ||
 			    h.socket.handshake(h.type, h.err).failed() ||
 			    h.socket.next_layer().non_blocking(true, h.err).failed()) {
+				if (h.errorOut) {
+					*h.errorOut = h.err;
+				}
 				TraceEvent(SevWarn,
 				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
 				                                                        : "N2_AcceptHandshakeError"_audit)
@@ -892,6 +904,16 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		}
 	}
 };
+
+// Whether `error` is how a TLS handshake ends when overload on either end makes it time out or the peer give up: a
+// handshake worker's deadline (timed_out), a worker job cancelled by closeSocket() (operation_aborted), or the
+// connection closing.
+static bool isTimeoutOrDisconnect(const boost::system::error_code& error) {
+	return error == boost::asio::error::timed_out || error == boost::asio::error::operation_aborted ||
+	       error == boost::asio::error::eof || error == boost::asio::ssl::error::stream_truncated ||
+	       error == boost::asio::error::connection_reset || error == boost::asio::error::connection_aborted ||
+	       error == boost::asio::error::broken_pipe;
+}
 
 class SSLConnection final : public IConnection, ReferenceCounted<SSLConnection> {
 public:
@@ -993,6 +1015,7 @@ public:
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
 				handshake->setPeerAddr(self->getPeerAddress());
+				handshake->errorOut = &self->handshakeError;
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -1001,6 +1024,7 @@ public:
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnMainThread");
 				countServerTLSHandshakesOnMainThread->increment(1);
 				BindPromise p("N2_AcceptHandshakeError"_audit, self->id, self->getPeerAddress());
+				p.setErrorOut(&self->handshakeError);
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
@@ -1046,6 +1070,7 @@ public:
 
 		Promise<Void> connected;
 		doAcceptHandshake(Uncancellable(), self, connected);
+		bool timedOut = false;
 		try {
 			auto res = co_await timeout(connected.getFuture(), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 			if (res.present()) {
@@ -1056,17 +1081,12 @@ public:
 				static SimpleCounter<int64_t>* countServerTLSHandshakesTimedout =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesTimedout");
 				countServerTLSHandshakesTimedout->increment(1);
+				timedOut = true;
 				throw connection_failed();
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
-				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-				if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-					iter->second.first++;
-				} else {
-					g_network->networkInfo.serverTLSConnectionThrottler[peerIP] =
-					    std::make_pair(0, now() + FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT);
-				}
+				self->recordHandshakeFailure(peerIP, FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT, timedOut);
 			}
 			// Either the connection failed, or was cancelled by the caller
 			self->closeSocket();
@@ -1111,6 +1131,7 @@ public:
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
 				handshake->setPeerAddr(self->getPeerAddress());
+				handshake->errorOut = &self->handshakeError;
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -1119,6 +1140,7 @@ public:
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesOnMainThread");
 				countClientTLSHandshakesOnMainThread->increment(1);
 				BindPromise p("N2_ConnectHandshakeError"_audit, self->id, self->getPeerAddress());
+				p.setErrorOut(&self->handshakeError);
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
@@ -1143,6 +1165,7 @@ public:
 
 		Promise<Void> connected;
 		doConnectHandshake(Uncancellable(), self, connected);
+		bool timedOut = false;
 		try {
 			auto res = co_await timeout(connected.getFuture(), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 			if (res.present()) {
@@ -1153,19 +1176,15 @@ public:
 				static SimpleCounter<int64_t>* countClientTLSHandshakesTimedout =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesTimedout");
 				countClientTLSHandshakesTimedout->increment(1);
+				timedOut = true;
 				throw connection_failed();
 			}
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
 			if (e.code() != error_code_actor_cancelled) {
-				std::pair<IPAddress, uint16_t> peerIP = std::make_pair(self->peer_address.ip, self->peer_address.port);
-				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-				if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-					iter->second.first++;
-				} else {
-					g_network->networkInfo.serverTLSConnectionThrottler[peerIP] =
-					    std::make_pair(0, now() + FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT);
-				}
+				self->recordHandshakeFailure(std::make_pair(self->peer_address.ip, self->peer_address.port),
+				                             FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,
+				                             timedOut);
 			}
 			self->closeSocket();
 			throw;
@@ -1272,6 +1291,27 @@ private:
 	Reference<ReferencedObject<boost::asio::ssl::context>> sslContext;
 	bool has_trusted_peer;
 	std::string sni_hostname; // For Server Name Indication
+	// The error the TLS handshake failed with, if any.
+	boost::system::error_code handshakeError;
+
+	// Records a failed handshake toward TLS connection throttling of `peer`, which is throttled for `throttleTimeout`
+	// once its failures reach the limit. With TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS, timeouts and disconnects
+	// are not recorded. Must not be called if the handshake was cancelled, since it may still be running then.
+	void recordHandshakeFailure(std::pair<IPAddress, uint16_t> peer, double throttleTimeout, bool timedOut) {
+		// After a timeout the handshake may still be running on another thread, writing handshakeError, so it is only
+		// read if the handshake finished.
+		const bool timeoutOrDisconnect = timedOut || isTimeoutOrDisconnect(handshakeError);
+		if (FLOW_KNOBS->TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS && timeoutOrDisconnect) {
+			return;
+		}
+		auto& throttler = g_network->networkInfo.serverTLSConnectionThrottler;
+		auto iter = throttler.find(peer);
+		if (iter != throttler.end()) {
+			iter->second.first++;
+		} else {
+			throttler[peer] = std::make_pair(0, now() + throttleTimeout);
+		}
+	}
 	// Set when closeSocket() is called while a handshake worker owns the socket. The handshake coroutine then closes
 	// the socket itself once the worker hands it back, and fails the connection even if the handshake succeeded.
 	bool closeRequested = false;
@@ -1299,8 +1339,14 @@ private:
 		return done;
 	}
 
-	// Takes the socket back from the worker after it finished (or when no worker was used).
-	void abandonWorkerHandshake() { handshakeJob.reset(); }
+	// Takes the socket back from the worker after it finished (or when no worker was used), keeping its error for
+	// handshakeError.
+	void abandonWorkerHandshake() {
+		if (handshakeJob) {
+			handshakeError = handshakeJob->error;
+		}
+		handshakeJob.reset();
+	}
 
 	// Closing a socket while a worker thread is still using it is unsafe: the descriptor number could be reused by a
 	// new connection under the worker. So if a worker owns the socket, ask it to stop and return true; the socket is
