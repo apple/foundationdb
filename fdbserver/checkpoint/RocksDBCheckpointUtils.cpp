@@ -29,6 +29,7 @@
 #include <rocksdb/sst_file_reader.h>
 #include <rocksdb/types.h>
 #include <rocksdb/version.h>
+#include "fdbserver/core/FDBRocksDBVersion.h"
 #endif // WITH_ROCKSDB
 
 #include "fdbclient/FDBTypes.h"
@@ -36,7 +37,6 @@
 #include "fdbserver/core/MutationTracking.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.h"

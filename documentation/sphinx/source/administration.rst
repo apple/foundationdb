@@ -618,6 +618,41 @@ By default, trace files are output to:
 
 Trace files are rolled every 10MB. These files are valuable to the FoundationDB development team for diagnostic purposes, and should be retained in case you need support from FoundationDB. Old trace files are automatically deleted so that there are no more than 100 MB worth of trace files per process. Both the log size and the maximum total size of the log files are configurable on a per process basis in the :ref:`configuration file <foundationdb-conf>`.
 
+.. _administration-trace-severities:
+
+Trace event severities
+----------------------
+
+Every trace event has a ``Severity`` field holding one of the numeric levels below. A process writes only the events at or above its minimum trace severity, which is 10 by default, so events below that level do not appear in trace files.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 12 22 66
+
+   * - ``Severity``
+     - Name
+     - Meaning
+   * - 40
+     - ``SevError``
+     - A serious problem that is not expected to happen, often one that ends the process or the role running in it. A failed ``ASSERT`` is logged at this severity. Each event includes a backtrace, and the most recent one for a process is reported in that process's ``messages`` in :doc:`machine-readable status <mr-status>`. In simulation tests, any event at this severity fails the test.
+   * - 30
+     - ``SevWarnAlways``
+     - A condition that is not fatal but is worth knowing about, which makes it a candidate for monitoring. Simulation tests report these events as warnings without failing.
+   * - 20
+     - ``SevWarn``
+     - A condition that may be worth looking at when diagnosing a problem. Events at this severity are not expected to be monitored individually.
+   * - 10
+     - ``SevInfo``
+     - Ordinary events that are useful in production. This is the default severity of a trace event and the lowest severity written by default.
+   * - 5
+     - ``SevDebug``
+     - Detail for testing and debugging that is not needed in production. Not written by default.
+   * - 1, 0
+     - ``SevSample``, ``SevVerbose``
+     - Very frequent or very detailed events. Not written by default.
+
+See :doc:`monitored-metrics` for how the two highest levels are used in monitoring.
+
 .. _administration-disaster-recovery:
 
 Disaster Recovery
