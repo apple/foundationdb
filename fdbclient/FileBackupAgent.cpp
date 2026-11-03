@@ -7299,9 +7299,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		}
 
 		Version firstConsistentVersion = invalidVersion;
-		if (beginVersion == invalidVersion) {
-			beginVersion = 0;
-		}
 		Standalone<VectorRef<KeyRangeRef>> keyRangesFilter;
 		for (auto const& r : ranges) {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
@@ -7350,7 +7347,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				}
 			}
 		} else {
-			// In logs-only (incremental) mode, the firstConsistentVersion should just be restore.beginVersion().
+			if (beginVersion == invalidVersion) {
+				beginVersion = 0;
+			}
 			firstConsistentVersion = beginVersion;
 		}
 		if (!inconsistentSnapshotOnly) {
@@ -7404,6 +7403,16 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				if (logsOnly && !restorable.get().logs.empty()) {
+					// A container-wide description can reflect a different log layout from this interval.
+					const bool partitioned = restorable.get().logs.front().isPartitionedLog();
+					const auto layout =
+					    co_await restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
+					if (partitioned != (layout == MutationLogType::PARTITIONED_LOG)) {
+						restore.mutationLogType().set(
+						    tr, partitioned ? MutationLogType::PARTITIONED_LOG : MutationLogType::DEFAULT);
+					}
+				}
 				restore.firstConsistentVersion().set(tr, firstConsistentVersion);
 				if (!useRangeFileRestore) {
 					co_await taskBucket->keepRunning(tr, task);
