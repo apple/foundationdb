@@ -3422,12 +3422,12 @@ Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId) {
 	co_return result;
 }
 
-Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {
+Future<BulkDumpTaskCounts> getBulkDumpTaskCounts(Database cx, KeyRange rangeToRead) {
 	Transaction tr(cx);
 	Key readBegin = rangeToRead.begin;
 	Key readEnd = rangeToRead.end;
 	RangeResult rangeResult;
-	size_t completeTaskCount = 0;
+	BulkDumpTaskCounts counts;
 	while (readBegin < readEnd) {
 		int retryCount = 0;
 		while (true) {
@@ -3461,12 +3461,14 @@ Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {
 			}
 			BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
 			if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
-				completeTaskCount++;
+				counts.complete++;
+			} else if (bulkDumpState.getPhase() == BulkDumpPhase::Error) {
+				counts.error++;
 			}
 		}
 		readBegin = rangeResult.back().key;
 	}
-	co_return completeTaskCount;
+	co_return counts;
 }
 
 Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
@@ -3547,6 +3549,8 @@ Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
 				progress.completedBytes += taskState.getManifest().getTotalBytes();
 			} else if (taskState.getPhase() == BulkDumpPhase::Submitted) {
 				progress.runningTasks++;
+			} else if (taskState.getPhase() == BulkDumpPhase::Error) {
+				progress.errorTasks++;
 			}
 
 			progress.totalBytes += taskState.getManifest().getTotalBytes();

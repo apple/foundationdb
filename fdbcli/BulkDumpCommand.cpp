@@ -174,7 +174,9 @@ Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 
 		if (progress.errorTasks > 0) {
 			fmt::println("");
-			fmt::println("WARNING: {} tasks in error state", progress.errorTasks);
+			fmt::println(
+			    "WARNING: {} tasks in error state. The job cannot complete; run 'bulkdump cancel' to clear it.",
+			    progress.errorTasks);
 		}
 
 		co_return UID();

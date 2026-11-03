@@ -30,6 +30,7 @@ enum class BulkDumpPhase : uint8_t {
 	Invalid = 0,
 	Submitted = 1,
 	Complete = 2,
+	Error = 3, // Set by DD on ranges it has given up dumping. The job cannot complete; `bulkdump cancel` clears it.
 };
 
 // Definition of bulkdump metadata
@@ -138,6 +139,12 @@ public:
 		res.phase = BulkDumpPhase::Complete;
 		res.manifest = manifest;
 		ASSERT(res.isMetadataValid());
+		return res;
+	}
+
+	BulkDumpState generateErrorMetadata() const {
+		BulkDumpState res = *this;
+		res.phase = BulkDumpPhase::Error;
 		return res;
 	}
 
