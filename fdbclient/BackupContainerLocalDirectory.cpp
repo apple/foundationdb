@@ -21,6 +21,7 @@
 #include "BackupContainerLocalDirectory.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileReadAhead.h"
+#include "fdbrpc/Net2FileSystem.h"
 #include "flow/IAsyncFile.h"
 #include "flow/FaultInjection.h"
 #include "flow/Platform.h"
@@ -307,15 +308,31 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 	return f;
 }
 
+static Future<Reference<IAsyncFile>> openLocalBackupFileWithAsyncMetadata(std::string fullPath, int flags) {
+	co_await Net2FileSystem::createParentDirectory(fullPath);
+	// A cancelled rename can finish later, so only unique intermediate names are safe.
+	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
+	co_return co_await IAsyncFileSystem::filesystem()->open(temp, flags | IAsyncFile::OPEN_ASYNC_ATOMIC_RENAME, 0644);
+}
+
 Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const std::string& path) {
 	validatePathInContainer(path, m_path, /*allowContainerRoot=*/false);
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::writeFile");
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
 	            IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
 	std::string fullPath = joinPath(m_path, path);
-	platform::createDirectory(parentDirectory(fullPath));
-	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
-	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
+	bool asyncMetadata = false;
+#ifdef __unixish__
+	asyncMetadata = CLIENT_KNOBS->BACKUP_LOCAL_FILE_ASYNC_METADATA && !g_network->isSimulated();
+#endif
+	Future<Reference<IAsyncFile>> f;
+	if (asyncMetadata) {
+		f = openLocalBackupFileWithAsyncMetadata(fullPath, flags);
+	} else {
+		platform::createDirectory(parentDirectory(fullPath));
+		std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
+		f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
+	}
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
 		int encBlockSize = encryptionBlockSize;
