@@ -453,17 +453,11 @@ if(WITH_PYTHON)
       TEST_FILES restarting/from_7.3.0/StorefrontTestRestart-1.toml
       restarting/from_7.3.0/StorefrontTestRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_7.4.5/ConfigureStorageMigrationTestRestart-1.toml
-      restarting/to_7.4.5/ConfigureStorageMigrationTestRestart-2.toml)
+      TEST_FILES restarting/to_8.0.1/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/to_8.0.1/ConfigureStorageMigrationTestRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_7.4.5/CycleTestRestart-1.toml
-      restarting/to_7.4.5/CycleTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/to_8.0.0/ConfigureStorageMigrationTestRestart-1.toml
-      restarting/to_8.0.0/ConfigureStorageMigrationTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/to_8.0.0/CycleTestRestart-1.toml
-      restarting/to_8.0.0/CycleTestRestart-2.toml)
+      TEST_FILES restarting/to_8.0.1/CycleTestRestart-1.toml
+      restarting/to_8.0.1/CycleTestRestart-2.toml)
   endif()
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
