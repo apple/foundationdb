@@ -33,12 +33,14 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	double testDuration;
 	Key keyPrefix;
 	bool checkOnly;
+	int subrangeCount;
 
 	explicit GetEstimatedRangeSizeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		nodeCount = getOption(options, "nodeCount"_sr, 10000);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		checkOnly = getOption(options, "checkOnly"_sr, false);
+		subrangeCount = getOption(options, "subrangeCount"_sr, 0);
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -80,6 +82,58 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	Future<Void> checkSize(Database cx) {
 		int64_t size = co_await getSize(cx);
 		ASSERT(sizeIsAsExpected(size));
+		if (subrangeCount > 0) {
+			co_await checkSubrangesAddUp(cx);
+		}
+	}
+
+	KeyRef subrangeBoundary(int i, Arena& arena) {
+		if (i == 0) {
+			return normalKeys.begin;
+		}
+		if (i == subrangeCount) {
+			return normalKeys.end;
+		}
+		return KeyRef(arena, key(static_cast<int64_t>(i) * nodeCount / subrangeCount));
+	}
+
+	// Byte samples are chosen by key hash, so once data distribution is quiet the estimate for the whole range must
+	// equal the sum of the estimates for disjoint subranges. A batch dropped or double-counted while paging through
+	// shard locations breaks the equality, which the wide bounds in sizeIsAsExpected() would not catch.
+	Future<Void> checkSubrangesAddUp(Database cx) {
+		ReadYourWritesTransaction tr(cx);
+		int attempts = 0;
+
+		while (true) {
+			Error err;
+			try {
+				int64_t total = co_await tr.getEstimatedRangeSizeBytes(normalKeys);
+				int64_t subrangeSum = 0;
+				Arena arena;
+				for (int i = 0; i < subrangeCount; i++) {
+					KeyRangeRef subrange(subrangeBoundary(i, arena), subrangeBoundary(i + 1, arena));
+					subrangeSum += co_await tr.getEstimatedRangeSizeBytes(KeyRange(subrange));
+				}
+				++attempts;
+				TraceEvent(total == subrangeSum ? SevInfo : SevWarn, "GetEstimatedRangeSizeSubranges")
+				    .detail("Total", total)
+				    .detail("SubrangeSum", subrangeSum)
+				    .detail("SubrangeCount", subrangeCount)
+				    .detail("Attempts", attempts);
+				if (total == subrangeSum) {
+					co_return;
+				}
+				// Shards may still be moving; give data distribution time to settle before failing.
+				ASSERT(attempts < 60);
+				co_await delay(5.0);
+				tr.reset();
+				continue;
+			} catch (Error& e) {
+				err = e;
+			}
+			TraceEvent(SevDebug, "GetSubrangeSizeError").errorUnsuppressed(err);
+			co_await tr.onError(err);
+		}
 	}
 
 	bool sizeIsAsExpected(int64_t size) {
