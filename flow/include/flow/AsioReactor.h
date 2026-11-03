@@ -22,6 +22,10 @@
 #define FLOW_ASIOREACTOR_H
 #pragma once
 
+#ifdef __linux__
+#include <sys/eventfd.h>
+#endif
+
 #include <boost/asio.hpp>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/bind/bind.hpp>

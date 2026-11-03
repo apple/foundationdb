@@ -23,6 +23,7 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
+#include "BackupRangeSpec.h"
 
 struct SubmitBackupWorkload : TestWorkload {
 	static constexpr auto NAME = "SubmitBackup";
@@ -37,6 +38,8 @@ struct SubmitBackupWorkload : TestWorkload {
 	StopWhenDone stopWhenDone{ false };
 	IncrementalBackupOnly incremental{ false };
 	Optional<std::string> encryptionKeyFileName;
+	// Whole keyspace (addDefaultBackupRanges) when unset.
+	Optional<Standalone<VectorRef<KeyRangeRef>>> explicitBackupRanges;
 
 	explicit SubmitBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
@@ -46,6 +49,7 @@ struct SubmitBackupWorkload : TestWorkload {
 		snapshotInterval = getOption(options, "snapshotInterval"_sr, 1e8);
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, true));
 		incremental.set(getOption(options, "incremental"_sr, false));
+		explicitBackupRanges = BackupRangeSpec::readOptionalRanges(options, "backupRanges"_sr, "backupRangePrefix"_sr);
 
 		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
 			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
@@ -55,7 +59,11 @@ struct SubmitBackupWorkload : TestWorkload {
 	Future<Void> _start(Database cx) {
 		co_await delay(delayFor);
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		addDefaultBackupRanges(backupRanges);
+		if (explicitBackupRanges.present()) {
+			backupRanges = explicitBackupRanges.get();
+		} else {
+			addDefaultBackupRanges(backupRanges);
+		}
 
 		if (encryptionKeyFileName.present()) {
 			co_await BackupContainerFileSystem::createTestEncryptionKeyFile(encryptionKeyFileName.get());
@@ -90,3 +98,56 @@ struct SubmitBackupWorkload : TestWorkload {
 };
 
 WorkloadFactory<SubmitBackupWorkload> SubmitBackupWorkloadFactory;
+
+TEST_CASE("/fdbserver/workloads/BackupRangeSpec/parse") {
+	auto ranges = BackupRangeSpec::parseRanges("test"_sr, "\\x02perf\\x00:\\x02perf\\x01;d/:e;:\\x01a\\x3bb");
+	ASSERT_EQ(ranges.size(), 3);
+	ASSERT(ranges[0] == KeyRangeRef("\x02perf\x00"_sr, "\x02perf\x01"_sr));
+	ASSERT(ranges[1] == KeyRangeRef("d/"_sr, "e"_sr));
+	ASSERT(ranges[2] == KeyRangeRef(""_sr,
+	                                "\x01"
+	                                "a;b"_sr));
+
+	ASSERT(BackupRangeSpec::parsePrefixRange("test"_sr, "d\\\\") == prefixRange("d\\"_sr));
+
+	for (const char* bad : { "a",
+	                         "a:b:c",
+	                         "b:a",
+	                         "a:a",
+	                         "a:b;",
+	                         "a:b;a1:c",
+	                         "a:\\xff\\xff\\x00",
+	                         "a\\x:b",
+	                         "a\\q:b",
+	                         "a:\\xff\\x00",
+	                         "\\xff:\\xff\\x00",
+	                         "a:b;\\xff\\x02/x:\\xff\\x02/y" }) {
+		bool threw = false;
+		try {
+			BackupRangeSpec::parseRanges("test"_sr, bad);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_test_specification_invalid);
+			threw = true;
+		}
+		ASSERT(threw);
+	}
+
+	for (const char* badPrefix : { "\\xff", "\\xff\\x02/x" }) {
+		bool threw = false;
+		try {
+			BackupRangeSpec::parsePrefixRange("test"_sr, badPrefix);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_test_specification_invalid);
+			threw = true;
+		}
+		ASSERT(threw);
+	}
+
+	Standalone<VectorRef<KeyValueRef>> options;
+	options.push_back_deep(options.arena(), KeyValueRef("p"_sr, "d/"_sr));
+	auto fromPrefix = BackupRangeSpec::readOptionalRanges(options, "r"_sr, "p"_sr);
+	ASSERT(fromPrefix.present() && fromPrefix.get().size() == 1 && fromPrefix.get()[0] == prefixRange("d/"_sr));
+	ASSERT(!BackupRangeSpec::readOptionalRanges(options, "r"_sr, "p"_sr).present());
+
+	return Void();
+}

@@ -29,6 +29,7 @@
 #include <rocksdb/sst_file_reader.h>
 #include <rocksdb/types.h>
 #include <rocksdb/version.h>
+#include "fdbserver/core/FDBRocksDBVersion.h"
 #endif // WITH_ROCKSDB
 
 #include "fdbclient/FDBTypes.h"
@@ -36,11 +37,12 @@
 #include "fdbserver/core/MutationTracking.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/IThreadPool.h"
+#include "flow/Platform.h"
 #include "flow/ThreadHelper.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/flow.h"
 
 #ifdef WITH_ROCKSDB
@@ -49,6 +51,64 @@
 static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSDB_MINOR &&
                ROCKSDB_PATCH == FDB_ROCKSDB_PATCH),
               "Unsupported rocksdb version.");
+
+rocksdb::LiveFileMetaData toRocksDBLiveFileMetaData(const LiveFileMetaData& fileMetaData) {
+	rocksdb::LiveFileMetaData liveFileMetaData;
+	liveFileMetaData.relative_filename = fileMetaData.relative_filename;
+	liveFileMetaData.directory = fileMetaData.directory;
+	liveFileMetaData.file_number = fileMetaData.file_number;
+	liveFileMetaData.file_type = static_cast<rocksdb::FileType>(fileMetaData.file_type);
+	liveFileMetaData.size = fileMetaData.size;
+	liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
+	liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+	liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+	liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+	liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+	liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+	liveFileMetaData.largestkey = fileMetaData.largestkey;
+	liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+	liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+	liveFileMetaData.num_entries = fileMetaData.num_entries;
+	liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+	liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+	liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+	liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+	liveFileMetaData.epoch_number = fileMetaData.epoch_number;
+	liveFileMetaData.name = fileMetaData.name;
+	liveFileMetaData.db_path = fileMetaData.db_path;
+	liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+	liveFileMetaData.level = fileMetaData.level;
+	return liveFileMetaData;
+}
+
+LiveFileMetaData fromRocksDBLiveFileMetaData(const rocksdb::LiveFileMetaData& fileMetaData) {
+	LiveFileMetaData liveFileMetaData;
+	liveFileMetaData.relative_filename = fileMetaData.relative_filename;
+	liveFileMetaData.directory = fileMetaData.directory;
+	liveFileMetaData.file_number = fileMetaData.file_number;
+	liveFileMetaData.file_type = static_cast<int>(fileMetaData.file_type);
+	liveFileMetaData.size = fileMetaData.size;
+	liveFileMetaData.temperature = static_cast<uint8_t>(fileMetaData.temperature);
+	liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+	liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+	liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+	liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+	liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+	liveFileMetaData.largestkey = fileMetaData.largestkey;
+	liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+	liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+	liveFileMetaData.num_entries = fileMetaData.num_entries;
+	liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+	liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+	liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+	liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+	liveFileMetaData.epoch_number = fileMetaData.epoch_number;
+	liveFileMetaData.name = fileMetaData.name;
+	liveFileMetaData.db_path = fileMetaData.db_path;
+	liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+	liveFileMetaData.level = fileMetaData.level;
+	return liveFileMetaData;
+}
 
 namespace {
 
@@ -71,31 +131,7 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 	metaData.db_comparator_name = rocksCF.dbComparatorName;
 
 	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
-		rocksdb::LiveFileMetaData liveFileMetaData;
-		liveFileMetaData.relative_filename = fileMetaData.relative_filename;
-		liveFileMetaData.directory = fileMetaData.directory;
-		liveFileMetaData.file_number = fileMetaData.file_number;
-		liveFileMetaData.file_type = static_cast<rocksdb::FileType>(fileMetaData.file_type);
-		liveFileMetaData.size = fileMetaData.size;
-		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
-		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
-		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
-		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
-		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
-		liveFileMetaData.largestkey = fileMetaData.largestkey;
-		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
-		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
-		liveFileMetaData.num_entries = fileMetaData.num_entries;
-		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
-		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
-		liveFileMetaData.name = fileMetaData.name;
-		liveFileMetaData.db_path = fileMetaData.db_path;
-		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
-		liveFileMetaData.level = fileMetaData.level;
+		rocksdb::LiveFileMetaData liveFileMetaData = toRocksDBLiveFileMetaData(fileMetaData);
 		liveFileMetaData.smallest = fileMetaData.smallest;
 		liveFileMetaData.largest = fileMetaData.largest;
 		liveFileMetaData.file_type = rocksdb::kTableFile;
@@ -1026,6 +1062,25 @@ Future<Void> RocksDBCFCheckpointReader::close() {
 	return doClose(this);
 }
 
+// RocksDB file names start with '/'; joinPath() drops it, so check the rest. The name must be a file inside the
+// checkpoint directory, not the directory itself.
+static bool checkpointFileNameIsContained(const std::string& name) {
+	const std::string relativeName = name.starts_with('/') ? name.substr(1) : name;
+	return relativePathIsContained(relativeName) && cleanPath(relativeName) != ".";
+}
+
+// Names as RocksDB reports them pass; names that could resolve outside the checkpoint directory, or to the directory
+// itself, don't.
+TEST_CASE("/fdbserver/checkpoint/checkpointFileNameIsContained") {
+	for (const char* name : { "/000012.sst", "000012.sst", "/a..b.sst" }) {
+		ASSERT(checkpointFileNameIsContained(name));
+	}
+	for (const char* name : { "/../000012.sst", "../000012.sst", "/a/../000012.sst", "/..", "", "/", "/." }) {
+		ASSERT(!checkpointFileNameIsContained(name));
+	}
+	return Void();
+}
+
 // Fetch a single sst file from storage server. The progress is checkpointed via cFun.
 Future<Void> fetchCheckpointFile(Database cx,
                                  std::shared_ptr<CheckpointMetaData> metaData,
@@ -1035,13 +1090,18 @@ Future<Void> fetchCheckpointFile(Database cx,
                                  int maxRetries = 3) {
 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(*metaData);
 
+	const std::string remoteFile = rocksCF.sstFiles[idx].name;
+	if (!checkpointFileNameIsContained(remoteFile)) {
+		TraceEvent(SevWarnAlways, "FetchCheckpointFileInvalidName").detail("Name", remoteFile).detail("Dir", dir);
+		throw checkpoint_not_found();
+	}
+
 	// Skip fetched file.
 	if (rocksCF.sstFiles[idx].fetched && rocksCF.sstFiles[idx].db_path == dir) {
 		co_return;
 	}
 
-	const std::string remoteFile = rocksCF.sstFiles[idx].name;
-	const std::string localFile = joinPath(dir, rocksCF.sstFiles[idx].name);
+	const std::string localFile = joinPath(dir, remoteFile);
 	ASSERT_EQ(metaData->src.size(), 1);
 	const UID ssId = metaData->src.front();
 

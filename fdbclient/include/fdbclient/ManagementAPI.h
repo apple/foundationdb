@@ -173,6 +173,30 @@ Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
                          AuditType type,
                          KeyValueStoreType engineType,
                          double timeoutSeconds);
+struct AuditWaitOptions {
+	double pollIntervalSeconds = 2.0;
+	// Bound on the time from the audit being scheduled to it finishing. Triggering the audit is bounded separately
+	// by maxScheduleAttempts and roundTripTimeoutSeconds.
+	double maxWaitSeconds = 300.0;
+	// Triggering the audit is retried this many times when the cluster controller is changing or the data
+	// distributor cannot start it.
+	int maxScheduleAttempts = 5;
+	// Bound on one round trip (triggering the audit, reading audit state) so a recovering cluster is noticed.
+	double roundTripTimeoutSeconds = 60.0;
+	// Names the caller in the traces auditStorageAndWait emits, so concurrent waits can be told apart.
+	std::string traceContext;
+};
+
+// Start an audit on range of the specific type and wait for it to finish. Returns the final state, whose phase is
+// Complete, Error (the audit reported a problem) or Failed (the data distributor gave up without a verdict); the
+// caller decides what to do with the latter two. Throws timed_out if the audit cannot be triggered within
+// options.maxScheduleAttempts attempts, or does not finish within options.maxWaitSeconds of being scheduled.
+Future<AuditStorageState> auditStorageAndWait(Database cx,
+                                              KeyRange range,
+                                              AuditType type,
+                                              KeyValueStoreType engineType = KeyValueStoreType::END,
+                                              AuditWaitOptions options = AuditWaitOptions());
+
 // Cancel an audit given type and id
 Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                AuditType type,

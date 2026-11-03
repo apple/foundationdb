@@ -43,7 +43,7 @@
 // TLogInterface, etc.) per process. Used for debugging stale peer references.
 //
 // All bookkeeping methods are no-ops when FLOW_KNOBS->STALE_PEER_OBSERVABILITY
-// is false. Method bodies live in fdbrpc/FlowTransport.actor.cpp to keep this
+// is false. Method bodies live in fdbrpc/FlowTransport.cpp to keep this
 // header light.
 struct InterfaceTracker {
 	struct Key {

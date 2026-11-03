@@ -268,7 +268,7 @@ public:
 
 Version nativeCdcDurationVersions(double seconds) {
 	const long double versions = static_cast<long double>(seconds) * SERVER_KNOBS->VERSIONS_PER_SECOND;
-	if (versions >= std::numeric_limits<Version>::max()) {
+	if (versions >= (long double)std::numeric_limits<Version>::max()) {
 		return std::numeric_limits<Version>::max();
 	}
 	return static_cast<Version>(versions);

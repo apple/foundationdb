@@ -21,7 +21,9 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BulkLoading.h"
 #include "flow/BooleanParam.h"
+#include "flow/Platform.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "BackupContainerLocalDirectory.h"
 #include "BackupContainerBlobStore.h"
@@ -31,7 +33,9 @@
 #include "flow/UnitTest.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cinttypes>
+#include <memory>
 
 class BackupContainerFileSystemImpl {
 public:
@@ -47,6 +51,101 @@ public:
 			    .detail("FileName", fileName)
 			    .detail("Bytes", bytes);
 		}
+	}
+
+	// A bad snapshot need not prevent restoring through another snapshot. Transport errors
+	// and cancellation still belong to the operation, not to an individual dump.
+	static bool unusableSnapshot(Error e) {
+		return e.code() == error_code_file_not_found || e.code() == error_code_file_corrupt ||
+		       e.code() == error_code_restore_bad_read || e.code() == error_code_restore_corrupted_data ||
+		       e.code() == error_code_bulkload_manifest_decode_error;
+	}
+
+	// Returns the bulkdump job id recorded in a keyspace snapshot, or empty if the snapshot has none or
+	// cannot be read. The job id is only in the snapshot's JSON body -- the filename carries the snapshot
+	// type but not the id -- and it is what locates the SST tree under bulkdump_data/<jobId>/.
+	//
+	// Expiration is deliberately tolerant: it must not be blocked by one unreadable or unexpectedly shaped
+	// snapshot. Returning empty leaves that snapshot's SSTs in place, which only costs space, whereas
+	// throwing would strand every later expire on the container. A restore propagates read and decode errors.
+	static Future<std::string> readBulkDumpJobId(Reference<BackupContainerFileSystem> bc,
+	                                             KeyspaceSnapshotFile snapshot,
+	                                             bool restoring = false) {
+		try {
+			Reference<IAsyncFile> f = co_await bc->readFile(snapshot.fileName);
+			int64_t size = co_await f->size();
+			if (restoring && size > (1 << 20)) {
+				// A bulkdump descriptor contains only the job ID and a single key range.
+				throw restore_corrupted_data();
+			}
+			// A bulkdump manifest has an empty "files" array and so is a few hundred bytes, while a
+			// rangefile manifest lists every range file and can reach hundreds of megabytes. Size is the
+			// only cheap discriminator available: the snapshot filename carries the type suffix solely in
+			// 'both' mode, so a plain bulkdump snapshot is indistinguishable from a rangefile one by name.
+			// Refusing to read anything over a chunk keeps expire from pulling in a huge manifest just to
+			// discover it has no job id.
+			if (!restoring && size > CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE) {
+				TraceEvent("BackupContainerExpireSkipLargeSnapshotManifest")
+				    .detail("Snapshot", snapshot.fileName)
+				    .detail("Size", size)
+				    .detail("Limit", CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE);
+				co_return std::string();
+			}
+			auto buf = std::make_shared<std::string>(size, '\0');
+			for (int64_t offset = 0; offset < size;) {
+				int toRead =
+				    static_cast<int>(std::min<int64_t>(CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE, size - offset));
+				int r = co_await uncancellable(holdWhile(buf, f->read(buf->data() + offset, toRead, offset)));
+				if (r != toRead) {
+					throw restore_bad_read();
+				}
+				offset += r;
+			}
+			json_spirit::mValue json;
+			if (!json_spirit::read_string(*buf, json)) {
+				throw restore_corrupted_data();
+			}
+			JSONDoc doc(json);
+			std::string jobId;
+			if (doc.tryGet("bulkDumpJobId", jobId) && !jobId.empty()) {
+				co_return jobId;
+			}
+			if (restoring) {
+				// Without a dump job, only a traditional snapshot with actual range files is usable.
+				std::string type;
+				const auto& files = doc.create("files");
+				if (snapshot.snapshotType == "bulk" || (doc.tryGet("snapshotType", type) && type == "bulkdump") ||
+				    files.type() != json_spirit::array_type || files.get_array().empty()) {
+					throw restore_corrupted_data();
+				}
+			}
+			co_return std::string();
+		} catch (Error& e) {
+			if (restoring || e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "BackupContainerExpireReadBulkDumpJobIdFailed")
+			    .error(e)
+			    .detail("Snapshot", snapshot.fileName);
+			co_return std::string();
+		}
+	}
+
+	// Storage servers name every file of a dumped batch <dumpVersion>-..., e.g. 123-data.sst. Returns
+	// that version, or empty for files not named by version such as the job's job-manifest.txt.
+	static Optional<Version> bulkDumpFileVersion(const std::string& path) {
+		size_t leaf = path.find_last_of('/');
+		leaf = leaf == std::string::npos ? 0 : leaf + 1;
+		size_t dash = path.find('-', leaf);
+		if (dash == std::string::npos) {
+			return {};
+		}
+		Version v = 0;
+		auto [end, ec] = std::from_chars(path.data() + leaf, path.data() + dash, v);
+		if (ec != std::errc() || end != path.data() + dash) {
+			return {};
+		}
+		return v;
 	}
 
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of
@@ -168,7 +267,20 @@ public:
 		return path.substr(pos + 1);
 	}
 
+	// Listed paths are used as file names under the container (and fdbdecode --save writes them locally), so skip any
+	// that could escape it.
+	static bool listedPathIsContained(const std::string& path) {
+		if (relativePathIsContained(path)) {
+			return true;
+		}
+		TraceEvent(SevWarnAlways, "BackupContainerInvalidListedPath").suppressFor(60).detail("Path", path);
+		return false;
+	}
+
 	static bool pathToRangeFile(RangeFile& out, const std::string& path, int64_t size) {
+		if (!listedPathIsContained(path))
+			return false;
+
 		std::string name = fileNameOnly(path);
 		RangeFile f;
 		f.fileName = path;
@@ -196,9 +308,9 @@ public:
 
 		if (isBulkDump) {
 			// For BulkDump snapshots, version comes from metadata
-			ASSERT(metadata.get().snapshotVersion != invalidVersion);
-			minVer = metadata.get().snapshotVersion;
-			maxVer = metadata.get().snapshotVersion;
+			minVer = metadata.get().beginVersion;
+			maxVer = metadata.get().endVersion;
+			ASSERT(minVer != invalidVersion && minVer <= maxVer);
 			// fileNames is empty for BulkDump (files are referenced by job ID)
 		} else {
 			ASSERT(!fileNames.empty() && fileNames.size() == beginEndKeys.size());
@@ -854,7 +966,37 @@ public:
 			}
 		}
 
+		// Verify the job and use its actual bounds before computing restorability. Older
+		// descriptors recorded the job start as a point snapshot. Even a correctly bounded
+		// descriptor cannot protect an earlier snapshot from expiration if its job is missing.
 		for (auto& s : desc.snapshots) {
+			if (s.totalSize != 0 || s.endVersion < desc.unreliableEndVersion.orDefault(0)) {
+				continue;
+			}
+			try {
+				auto job = co_await readBulkDumpJobId(bc, s, true);
+				if (job.empty()) {
+					continue;
+				}
+				auto batches = co_await BackupContainerFileSystem::readBulkDumpRanges(bc, job);
+				auto bounds = std::minmax_element(
+				    batches.begin(), batches.end(), [](const auto& a, const auto& b) { return a.version < b.version; });
+				s.beginVersion = bounds.first->version;
+				s.endVersion = bounds.second->version;
+			} catch (Error& e) {
+				if (!unusableSnapshot(e)) {
+					throw;
+				}
+				TraceEvent(SevWarn, "BackupDescribeUnreadableBulkDump").error(e).detail("Snapshot", s.fileName);
+				s.restorable = false;
+			}
+		}
+		std::sort(desc.snapshots.begin(), desc.snapshots.end());
+
+		for (auto& s : desc.snapshots) {
+			if (!s.restorable.orDefault(true)) {
+				continue;
+			}
 			// Calculate restorability of each snapshot.  Assume true, then try to prove false
 			s.restorable = true;
 			// If this is not a single-version snapshot then see if the available contiguous logs cover its range
@@ -872,6 +1014,11 @@ public:
 						s.restorable = hasContinuousLogsForSnapshot(logs, s.beginVersion, s.endVersion);
 				}
 			}
+			// Expire deletes a snapshot's data before its descriptor, and keeps a bulkdump descriptor until its
+			// SST tree is empty, so a descriptor ending below unreliableEndVersion may be missing data.
+			if (s.endVersion < desc.unreliableEndVersion.orDefault(0)) {
+				s.restorable = false;
+			}
 
 			desc.snapshotBytes += s.totalSize;
 
@@ -879,7 +1026,7 @@ public:
 			// Update only if minRestorableVersion and maxRestorableVersion are not set. If they are set, we should
 			// check for log continuity between current minRestorableVersion to s.endVersion which happens in the
 			// next if block.
-			if (s.beginVersion == s.endVersion && !desc.minRestorableVersion.present() &&
+			if (s.beginVersion == s.endVersion && s.restorable.get() && !desc.minRestorableVersion.present() &&
 			    !desc.maxRestorableVersion.present()) {
 				desc.minRestorableVersion = s.endVersion;
 				desc.maxRestorableVersion = s.endVersion;
@@ -1086,9 +1233,94 @@ public:
 		}
 		ranges.clear();
 
+		// A bulkdump snapshot's data is an SST tree under bulkdump_data/<jobId>/, which none of the
+		// listings above cover: they enumerate log, partitioned-log and range files only. Expiring such a
+		// snapshot therefore deleted its descriptor and orphaned the data, so repeated backup-and-expire
+		// cycles grew the container without bound and nothing ever reclaimed the bytes.
+		//
+		// A job id can be shared by more than one snapshot: BulkDumpTaskFunc joins an already-submitted
+		// job instead of starting its own, so a snapshot that survives this expire may point at the same
+		// tree as one being removed. Collect the ids on both sides and delete a tree only when no
+		// surviving snapshot still references it.
+		//
+		// Must run before the loop below, which moves fileName out of the snapshot entries.
+		//
+		// Identification is by job id read from the manifest, not by KeyspaceSnapshotFile::isBulkDump():
+		// the snapshot filename only carries a type suffix in 'both' mode, so a plain bulkdump snapshot
+		// reports an empty snapshotType and isBulkDump() is false for it. Any snapshot naming a job id is
+		// a bulkdump one; the rest read back empty and are skipped.
+		//
+		// As with range files, SSTs are expired by version: only files dumped before expireEndVersion go,
+		// so stepping the expire version forward splits reclaiming a large tree across runs. A dump
+		// finishes after its snapshot version, so an expiring snapshot can still have SSTs at or past
+		// expireEndVersion. Its descriptor is the only record of the job id, so it is kept until its tree
+		// is empty; describe reports it unrestorable, as unreliableEndVersion is already past it.
+		std::set<std::string> expiringBulkDumpJobs;
+		std::set<std::string> retainedBulkDumpJobs;
+		std::map<std::string, std::string> snapshotBulkDumpJobs;
 		for (auto& f : desc.snapshots) {
-			if (f.endVersion < expireEndVersion)
+			std::string jobId = co_await readBulkDumpJobId(bc, f);
+			if (jobId.empty()) {
+				continue;
+			}
+			snapshotBulkDumpJobs[f.fileName] = jobId;
+			if (f.endVersion < expireEndVersion) {
+				expiringBulkDumpJobs.insert(jobId);
+			} else {
+				retainedBulkDumpJobs.insert(jobId);
+			}
+		}
+		// Deleted only after every other file: an interrupted expire that had already removed a descriptor
+		// would leave the rest of its tree unreachable by any later run.
+		std::vector<std::string> deleteLast;
+		std::set<std::string> partlyExpiredBulkDumpJobs;
+		for (const auto& jobId : expiringBulkDumpJobs) {
+			if (retainedBulkDumpJobs.contains(jobId)) {
+				TraceEvent("BackupContainerExpireBulkDumpJobStillReferenced")
+				    .detail("URL", bc->getURL())
+				    .detail("BulkDumpJobId", jobId);
+				continue;
+			}
+			BackupContainerFileSystem::FilesAndSizesT sstFiles = co_await bc->listFiles("bulkdump_data/" + jobId + "/");
+			std::vector<std::string> unversioned;
+			int64_t expiredCount = 0;
+			int64_t keptCount = 0;
+			for (auto& fs : sstFiles) {
+				Optional<Version> v = bulkDumpFileVersion(fs.first);
+				if (!v.present()) {
+					unversioned.push_back(std::move(fs.first));
+				} else if (v.get() < expireEndVersion) {
+					toDelete.push_back(std::move(fs.first));
+					++expiredCount;
+				} else {
+					++keptCount;
+				}
+			}
+			if (keptCount > 0) {
+				partlyExpiredBulkDumpJobs.insert(jobId);
+			} else {
+				deleteLast.insert(deleteLast.end(),
+				                  std::make_move_iterator(unversioned.begin()),
+				                  std::make_move_iterator(unversioned.end()));
+			}
+			TraceEvent("BackupContainerExpireBulkDumpJob")
+			    .detail("URL", bc->getURL())
+			    .detail("BulkDumpJobId", jobId)
+			    .detail("ExpiredFiles", expiredCount)
+			    .detail("KeptFiles", keptCount)
+			    .detail("UnversionedFiles", unversioned.size());
+		}
+
+		for (auto& f : desc.snapshots) {
+			if (f.endVersion >= expireEndVersion) {
+				continue;
+			}
+			auto job = snapshotBulkDumpJobs.find(f.fileName);
+			if (job == snapshotBulkDumpJobs.end()) {
 				toDelete.push_back(std::move(f.fileName));
+			} else if (!partlyExpiredBulkDumpJobs.contains(job->second)) {
+				deleteLast.push_back(std::move(f.fileName));
+			}
 		}
 		desc = BackupDescription();
 
@@ -1105,33 +1337,35 @@ public:
 
 		if (progress != nullptr) {
 			progress->step = "Deleting files";
-			progress->total = toDelete.size();
+			progress->total = toDelete.size() + deleteLast.size();
 			progress->done = 0;
 		}
 
-		// Delete files, but limit parallelism because the file list could use a lot of memory and the corresponding
-		// delete actor states would use even more if they all existed at the same time.
-		std::list<Future<Void>> deleteFutures;
+		for (std::vector<std::string>* batch : { &toDelete, &deleteLast }) {
+			// Delete files, but limit parallelism because the file list could use a lot of memory and the
+			// corresponding delete actor states would use even more if they all existed at the same time.
+			std::list<Future<Void>> deleteFutures;
 
-		while (!toDelete.empty() || !deleteFutures.empty()) {
+			while (!batch->empty() || !deleteFutures.empty()) {
 
-			// While there are files to delete and budget in the deleteFutures list, start a delete
-			while (!toDelete.empty() && deleteFutures.size() < CLIENT_KNOBS->BACKUP_CONCURRENT_DELETES) {
-				deleteFutures.push_back(bc->deleteFile(toDelete.back()));
-				toDelete.pop_back();
-			}
-
-			// Wait for deletes to finish until there are only targetDeletesInFlight remaining.
-			// If there are no files left to start then this value is 0, otherwise it is one less
-			// than the delete concurrency limit.
-			int targetFuturesSize = toDelete.empty() ? 0 : (CLIENT_KNOBS->BACKUP_CONCURRENT_DELETES - 1);
-
-			while (deleteFutures.size() > targetFuturesSize) {
-				co_await deleteFutures.front();
-				if (progress != nullptr) {
-					++progress->done;
+				// While there are files to delete and budget in the deleteFutures list, start a delete
+				while (!batch->empty() && deleteFutures.size() < CLIENT_KNOBS->BACKUP_CONCURRENT_DELETES) {
+					deleteFutures.push_back(bc->deleteFile(batch->back()));
+					batch->pop_back();
 				}
-				deleteFutures.pop_front();
+
+				// Wait for deletes to finish until there are only targetDeletesInFlight remaining.
+				// If there are no files left to start then this value is 0, otherwise it is one less
+				// than the delete concurrency limit.
+				int targetFuturesSize = batch->empty() ? 0 : (CLIENT_KNOBS->BACKUP_CONCURRENT_DELETES - 1);
+
+				while (deleteFutures.size() > targetFuturesSize) {
+					co_await deleteFutures.front();
+					if (progress != nullptr) {
+						++progress->done;
+					}
+					deleteFutures.pop_front();
+				}
 			}
 		}
 
@@ -1170,7 +1404,7 @@ public:
 		// for each range in tags, check all tags from 1 are continouous
 		for (const auto& [beginEnd, count] : tags) {
 			for (int i = 1; i < count; i++) {
-				if (!isContinuous(files, tagIndices[i], beginEnd.first, std::min(beginEnd.second - 1, end), nullptr)) {
+				if (!isContinuous(files, tagIndices[i], beginEnd.first, beginEnd.second, nullptr)) {
 					TraceEvent(SevWarn, "BackupFileNotContinuous")
 					    .detail("Partition", i)
 					    .detail("RangeBegin", beginEnd.first)
@@ -1206,6 +1440,24 @@ public:
 		return filtered;
 	}
 
+	static Optional<RestorableFileSet> getRestoreSetFromPartitionedLogs(std::vector<LogFile> logs,
+	                                                                    Version begin,
+	                                                                    RestorableFileSet restorable) {
+		std::erase_if(logs, [&](const LogFile& file) { return file.beginVersion > restorable.targetVersion; });
+		// A retried upload can leave duplicate files within a tag.
+		std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
+			return std::tie(a.tagId, a.beginVersion, a.endVersion) < std::tie(b.tagId, b.beginVersion, b.endVersion);
+		});
+		restorable.logs = filterDuplicates(logs);
+		std::sort(restorable.logs.begin(), restorable.logs.end());
+		if (!isPartitionedLogsContinuous(restorable.logs, begin, restorable.targetVersion)) {
+			return {};
+		}
+		restorable.continuousBeginVersion = begin;
+		restorable.continuousEndVersion = restorable.targetVersion + 1;
+		return restorable;
+	}
+
 	static Optional<RestorableFileSet> getRestoreSetFromLogs(const std::vector<LogFile>& logs,
 	                                                         Version targetVersion,
 	                                                         RestorableFileSet restorable) {
@@ -1229,30 +1481,47 @@ public:
 	static Future<Optional<RestorableFileSet>> getRestoreSet(Reference<BackupContainerFileSystem> bc,
 	                                                         Version targetVersion,
 	                                                         VectorRef<KeyRangeRef> keyRangesFilter,
-	                                                         bool logsOnly = false,
-	                                                         Version beginVersion = invalidVersion) {
+	                                                         bool logsOnly,
+	                                                         Version beginVersion,
+	                                                         bool useBulkDump) {
+		bool latestBulkDump = useBulkDump && targetVersion == invalidVersion;
+		Optional<RestorableFileSet> best;
 		for (const auto& range : keyRangesFilter) {
 			TraceEvent("BackupContainerGetRestoreSet").detail("RangeFilter", printable(range));
 		}
 
 		if (logsOnly) {
+			if (beginVersion != invalidVersion && beginVersion > targetVersion) {
+				co_return Optional<RestorableFileSet>();
+			}
 			RestorableFileSet restorableSet;
 			restorableSet.targetVersion = targetVersion;
-			std::vector<LogFile> logFiles;
 			Version begin = beginVersion == invalidVersion ? 0 : beginVersion;
-			logFiles = co_await bc->listLogFiles(begin, targetVersion, MutationLogType::DEFAULT);
-			// List logs in version order so log continuity can be analyzed
+			auto logFiles = co_await bc->listLogFiles(begin, targetVersion, MutationLogType::DEFAULT);
 			std::sort(logFiles.begin(), logFiles.end());
-			if (!logFiles.empty()) {
-				co_return getRestoreSetFromLogs(logFiles, targetVersion, restorableSet);
+			if (!logFiles.empty() &&
+			    (beginVersion == invalidVersion || logFiles.front().beginVersion <= beginVersion)) {
+				auto result = getRestoreSetFromLogs(logFiles, targetVersion, restorableSet);
+				if (result.present() || beginVersion == invalidVersion) {
+					co_return result;
+				}
+			}
+			if (beginVersion != invalidVersion) {
+				auto partitioned = co_await bc->listLogFiles(begin, targetVersion, MutationLogType::PARTITIONED_LOG);
+				co_return getRestoreSetFromPartitionedLogs(std::move(partitioned), begin, std::move(restorableSet));
 			}
 		}
 
 		// Find the most recent keyrange snapshot through which we can restore filtered key ranges into targetVersion.
 		std::vector<KeyspaceSnapshotFile> snapshots = co_await bc->listKeyspaceSnapshots();
+		// A snapshot ending below unreliableEndVersion may be partly deleted; see describeBackup.
+		Optional<Version> unreliableEnd = co_await bc->unreliableEndVersion().get();
 		for (int i = snapshots.size() - 1; i >= 0; i--) {
 			// The smallest version of filtered range files >= snapshot beginVersion > targetVersion
 			if (targetVersion >= 0 && snapshots[i].beginVersion > targetVersion) {
+				continue;
+			}
+			if (snapshots[i].endVersion < unreliableEnd.orDefault(0)) {
 				continue;
 			}
 
@@ -1260,39 +1529,111 @@ public:
 			Version minKeyRangeVersion = MAX_VERSION;
 			Version maxKeyRangeVersion = -1;
 
-			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
-			    co_await bc->readKeyspaceSnapshot(snapshots[i]);
-
-			// If there is no key ranges filter for the restore OR if the snapshot contains no per-file key range info
-			// then return all of the range files
-			if (keyRangesFilter.empty() || results.second.empty()) {
-				restorable.ranges = std::move(results.first);
-				restorable.keyRanges = std::move(results.second);
-				minKeyRangeVersion = snapshots[i].beginVersion;
-				maxKeyRangeVersion = snapshots[i].endVersion;
-			} else {
-				for (const auto& rangeFile : results.first) {
-					const auto& keyRange = results.second.at(rangeFile.fileName);
-					if (keyRange.intersects(keyRangesFilter)) {
-						restorable.ranges.push_back(rangeFile);
-						restorable.keyRanges[rangeFile.fileName] = keyRange;
-						minKeyRangeVersion = std::min(minKeyRangeVersion, rangeFile.version);
-						maxKeyRangeVersion = std::max(maxKeyRangeVersion, rangeFile.version);
+			if (useBulkDump) {
+				// Traditional snapshots always contain at least one range file.
+				if (snapshots[i].totalSize != 0) {
+					continue;
+				}
+				std::vector<BulkDumpRangeVersion> ranges;
+				try {
+					restorable.bulkDumpJobId = co_await readBulkDumpJobId(bc, snapshots[i], true);
+					if (restorable.bulkDumpJobId.empty()) {
+						continue;
+					}
+					ranges = co_await BackupContainerFileSystem::readBulkDumpRanges(bc, restorable.bulkDumpJobId);
+				} catch (Error& e) {
+					if (!unusableSnapshot(e)) {
+						throw;
+					}
+					TraceEvent(SevWarn, "BackupRestoreUnreadableBulkDump")
+					    .error(e)
+					    .detail("Snapshot", snapshots[i].fileName);
+					continue;
+				}
+				KeyRange coverage(KeyRangeRef(ranges.front().range.begin, ranges.back().range.end));
+				if (std::any_of(keyRangesFilter.begin(), keyRangesFilter.end(), [&](KeyRangeRef r) {
+					    return !coverage.contains(r);
+				    })) {
+					continue;
+				}
+				for (const auto& batch : ranges) {
+					auto include = [&](KeyRangeRef range) {
+						restorable.bulkDumpRanges.push_back({ KeyRange(range), batch.version });
+						minKeyRangeVersion = std::min(minKeyRangeVersion, batch.version);
+						maxKeyRangeVersion = std::max(maxKeyRangeVersion, batch.version);
+					};
+					if (keyRangesFilter.empty()) {
+						include(batch.range);
+					} else {
+						for (const auto& filter : keyRangesFilter) {
+							KeyRange intersection = batch.range & filter;
+							if (!intersection.empty()) {
+								include(intersection);
+							}
+						}
 					}
 				}
-				// No range file matches 'keyRangesFilter'.
-				if (restorable.ranges.empty()) {
-					throw backup_not_overlapped_with_keys_filter();
+			} else {
+				std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
+				    co_await bc->readKeyspaceSnapshot(snapshots[i]);
+				if (results.first.empty()) {
+					continue;
+				}
+
+				// If there is no key ranges filter for the restore OR if the snapshot contains no per-file key range
+				// info then return all of the range files
+				if (keyRangesFilter.empty() || results.second.empty()) {
+					restorable.ranges = std::move(results.first);
+					restorable.keyRanges = std::move(results.second);
+					minKeyRangeVersion = snapshots[i].beginVersion;
+					maxKeyRangeVersion = snapshots[i].endVersion;
+				} else {
+					for (const auto& rangeFile : results.first) {
+						const auto& keyRange = results.second.at(rangeFile.fileName);
+						if (keyRange.intersects(keyRangesFilter)) {
+							restorable.ranges.push_back(rangeFile);
+							restorable.keyRanges[rangeFile.fileName] = keyRange;
+							minKeyRangeVersion = std::min(minKeyRangeVersion, rangeFile.version);
+							maxKeyRangeVersion = std::max(maxKeyRangeVersion, rangeFile.version);
+						}
+					}
+					// No range file matches 'keyRangesFilter'.
+					if (restorable.ranges.empty()) {
+						throw backup_not_overlapped_with_keys_filter();
+					}
+				}
+			}
+			std::vector<LogFile> logs, plogs;
+			Version resolvedTarget = targetVersion;
+			if (latestBulkDump) {
+				// Different snapshot types and disjoint log chains can have different frontiers.
+				co_await (
+				    store(logs, bc->listLogFiles(minKeyRangeVersion, MAX_VERSION, MutationLogType::DEFAULT)) &&
+				    store(plogs, bc->listLogFiles(minKeyRangeVersion, MAX_VERSION, MutationLogType::PARTITIONED_LOG)));
+				std::sort(logs.begin(), logs.end());
+				std::sort(plogs.begin(), plogs.end());
+				resolvedTarget = plogs.empty() ? findContinuousLogEnd(logs, minKeyRangeVersion) - 1
+				                               : getPartitionedLogsContinuousEndVersion(plogs, minKeyRangeVersion);
+				if (minKeyRangeVersion == maxKeyRangeVersion) {
+					resolvedTarget = std::max(resolvedTarget, maxKeyRangeVersion);
+				}
+				if (best.present() && best.get().targetVersion >= resolvedTarget) {
+					continue;
 				}
 			}
 			// 'latestVersion' represents using the minimum restorable version in a snapshot.
-			restorable.targetVersion = targetVersion == latestVersion ? maxKeyRangeVersion : targetVersion;
+			restorable.targetVersion =
+			    resolvedTarget == latestVersion && !latestBulkDump ? maxKeyRangeVersion : resolvedTarget;
 			// Any version < maxKeyRangeVersion is not restorable.
 			if (restorable.targetVersion < maxKeyRangeVersion)
 				continue;
 
 			// restorable.snapshot.beginVersion is set to the smallest(oldest) snapshot's beginVersion
 			restorable.snapshot = snapshots[i];
+			if (useBulkDump) {
+				restorable.snapshot.beginVersion = minKeyRangeVersion;
+				restorable.snapshot.endVersion = maxKeyRangeVersion;
+			}
 
 			// No logs needed if there is a complete filtered key space snapshot at the target version.
 			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion) {
@@ -1301,37 +1642,34 @@ public:
 				    .detail("KeyRangeVersion", restorable.targetVersion)
 				    .detail("NumberOfRangeFiles", restorable.ranges.size())
 				    .detail("KeyRangesFilter", printable(keyRangesFilter));
+				if (latestBulkDump) {
+					best = std::move(restorable);
+					continue;
+				}
 				co_return Optional<RestorableFileSet>(restorable);
 			}
 
 			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
-			std::vector<LogFile> logs;
-			std::vector<LogFile> plogs;
-			co_await (
-			    store(logs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, MutationLogType::DEFAULT)) &&
-			    store(
-			        plogs,
-			        bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, MutationLogType::PARTITIONED_LOG)));
+			if (!latestBulkDump) {
+				co_await (
+				    store(logs,
+				          bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, MutationLogType::DEFAULT)) &&
+				    store(plogs,
+				          bc->listLogFiles(
+				              minKeyRangeVersion, restorable.targetVersion, MutationLogType::PARTITIONED_LOG)));
+			}
 
 			if (!plogs.empty()) {
-				logs.swap(plogs);
-				// sort by tag ID so that filterDuplicates works.
-				std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
-					return std::tie(a.tagId, a.beginVersion, a.endVersion) <
-					       std::tie(b.tagId, b.beginVersion, b.endVersion);
-				});
-
-				// Remove duplicated log files that can happen for old epochs.
-				std::vector<LogFile> filtered = filterDuplicates(logs);
-				restorable.logs.swap(filtered);
-				// sort by version order again for continuous analysis
-				std::sort(restorable.logs.begin(), restorable.logs.end());
-				if (isPartitionedLogsContinuous(restorable.logs, minKeyRangeVersion, restorable.targetVersion)) {
-					restorable.continuousBeginVersion = minKeyRangeVersion;
-					restorable.continuousEndVersion = restorable.targetVersion + 1; // not inclusive
-					co_return Optional<RestorableFileSet>(restorable);
+				auto result =
+				    getRestoreSetFromPartitionedLogs(std::move(plogs), minKeyRangeVersion, std::move(restorable));
+				if (result.present() && latestBulkDump) {
+					best = std::move(result);
+					continue;
 				}
-				co_return Optional<RestorableFileSet>();
+				if (!result.present() && useBulkDump) {
+					continue;
+				}
+				co_return result;
 			}
 
 			// List logs in version order so log continuity can be analyzed
@@ -1339,10 +1677,18 @@ public:
 			// If there are logs and the first one starts at or before the keyrange's snapshot begin version, then
 			// it is valid restore set and proceed
 			if (!logs.empty() && logs.front().beginVersion <= minKeyRangeVersion) {
-				co_return getRestoreSetFromLogs(logs, targetVersion, restorable);
+				auto result = getRestoreSetFromLogs(logs, restorable.targetVersion, restorable);
+				if (!useBulkDump ||
+				    (result.present() && result.get().continuousEndVersion > restorable.targetVersion)) {
+					if (latestBulkDump) {
+						best = std::move(result);
+						continue;
+					}
+					co_return result;
+				}
 			}
 		}
-		co_return Optional<RestorableFileSet>();
+		co_return best;
 	}
 
 	static std::string versionFolderString(Version v, int smallestBucket) {
@@ -1403,6 +1749,9 @@ public:
 	}
 
 	static bool pathToLogFile(LogFile& out, const std::string& path, int64_t size) {
+		if (!listedPathIsContained(path))
+			return false;
+
 		std::string name = fileNameOnly(path);
 		LogFile f;
 		f.fileName = path;
@@ -1433,6 +1782,9 @@ public:
 	}
 
 	static bool pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile& out, const std::string& path) {
+		if (!listedPathIsContained(path))
+			return false;
+
 		std::string name = fileNameOnly(path);
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
@@ -1493,28 +1845,43 @@ public:
 		co_await keyFile->sync();
 	}
 
+	static constexpr int ENCRYPTION_KEY_MAX_RETRIES = 5;
+
 	static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
-		Reference<IAsyncFile> keyFile;
 		StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
-		try {
-			Reference<IAsyncFile> _keyFile = co_await IAsyncFileSystem::filesystem()->open(
-			    encryptionKeyFileName,
-			    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
-			    0400);
-			keyFile = _keyFile;
-		} catch (Error& e) {
-			TraceEvent(SevError, "FailedToOpenEncryptionKeyFile").error(e).detail("FileName", encryptionKeyFileName);
-			throw e;
+		for (int retries = 0;; ++retries) {
+			const char* errorEvent = "FailedToOpenEncryptionKeyFile";
+			try {
+				Reference<IAsyncFile> keyFile = co_await IAsyncFileSystem::filesystem()->open(
+				    encryptionKeyFileName,
+				    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
+				    0400);
+				errorEvent = "FailedToReadEncryptionKeyFile";
+				int bytesRead = co_await uncancellable(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
+				if (bytesRead != cipherKey->size()) {
+					TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
+					    .detail("ExpectedSize", cipherKey->size())
+					    .detail("ActualSize", bytesRead)
+					    .detail("FileName", encryptionKeyFileName);
+					throw invalid_encryption_key_file();
+				}
+				co_return;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				bool retry = e.isDiskError() && retries < ENCRYPTION_KEY_MAX_RETRIES;
+				TraceEvent(retry ? SevWarn : SevError, errorEvent)
+				    .error(e)
+				    .detail("FileName", encryptionKeyFileName)
+				    .detail("Retries", retries);
+				if (!retry) {
+					throw;
+				}
+			}
+			// Containers retain this setup future, so recover disk errors before publishing a permanent failure.
+			co_await delay(1.0);
 		}
-		int bytesRead = co_await uncancellable(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
-		if (bytesRead != cipherKey->size()) {
-			TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
-			    .detail("ExpectedSize", cipherKey->size())
-			    .detail("ActualSize", bytesRead)
-			    .detail("FileName", encryptionKeyFileName);
-			throw invalid_encryption_key_file();
-		}
-		ASSERT_EQ(bytesRead, cipherKey->size());
 	}
 
 	static Future<Void> writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem> bc,
@@ -1871,12 +2238,69 @@ Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeF
 	return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file, cx);
 }
 
+Future<std::vector<BulkDumpRangeVersion>> BackupContainerFileSystem::readBulkDumpRanges(Reference<IBackupContainer> bc,
+                                                                                        std::string jobId) {
+	if (jobId.size() != 32 || jobId.find_first_not_of("0123456789abcdef") != std::string::npos) {
+		throw restore_corrupted_data();
+	}
+	auto file = co_await bc->readFile("bulkdump_data/" + jobId + "/" + getBulkLoadJobManifestFileName());
+	int64_t size = co_await file->size();
+	std::vector<BulkDumpRangeVersion> ranges;
+	size_t expected = 0;
+	std::string line;
+	for (int64_t offset = 0; offset < size;) {
+		int length = std::min<int64_t>(std::min(CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE, 64 * 1024), size - offset);
+		auto chunk = std::make_shared<std::string>(length, '\0');
+		if (co_await uncancellable(holdWhile(chunk, file->read(chunk->data(), length, offset))) != length) {
+			throw restore_bad_read();
+		}
+		offset += length;
+		for (size_t begin = 0; begin < chunk->size();) {
+			size_t end = chunk->find(bulkLoadJobManifestLineTerminator, begin);
+			line.append(*chunk, begin, end == std::string::npos ? std::string::npos : end - begin);
+			if (end == std::string::npos && offset < size) {
+				break;
+			}
+			try {
+				if (!expected) {
+					expected = BulkLoadJobManifestFileHeader(line).getManifestCount();
+				} else {
+					BulkLoadJobFileManifestEntry entry(line);
+					if ((!ranges.empty() && ranges.back().range.end != entry.getBeginKey()) || entry.getVersion() < 0 ||
+					    ranges.size() >= expected) {
+						throw restore_corrupted_data();
+					}
+					ranges.push_back({ entry.getRange(), entry.getVersion() });
+				}
+			} catch (const std::logic_error&) {
+				// Numeric fields in a malformed manifest can fail std::sto* conversion.
+				throw restore_corrupted_data();
+			}
+			line.clear();
+			if (end == std::string::npos) {
+				break;
+			}
+			begin = end + 1;
+		}
+		co_await yield();
+	}
+	if (!expected || ranges.size() != expected) {
+		throw restore_corrupted_data();
+	}
+	co_return ranges;
+}
+
 Future<Optional<RestorableFileSet>> BackupContainerFileSystem::getRestoreSet(Version targetVersion,
                                                                              VectorRef<KeyRangeRef> keyRangesFilter,
                                                                              bool logsOnly,
-                                                                             Version beginVersion) {
-	return BackupContainerFileSystemImpl::getRestoreSet(
-	    Reference<BackupContainerFileSystem>::addRef(this), targetVersion, keyRangesFilter, logsOnly, beginVersion);
+                                                                             Version beginVersion,
+                                                                             bool useBulkDump) {
+	return BackupContainerFileSystemImpl::getRestoreSet(Reference<BackupContainerFileSystem>::addRef(this),
+	                                                    targetVersion,
+	                                                    keyRangesFilter,
+	                                                    logsOnly,
+	                                                    beginVersion,
+	                                                    useBulkDump);
 }
 
 Future<Optional<Version>> BackupContainerFileSystem::VersionProperty::get() {
@@ -2242,6 +2666,10 @@ TEST_CASE("/backup/continuous") {
 	ASSERT(!BackupContainerFileSystemImpl::isPartitionedLogsContinuous(files, 0, 99));
 	ASSERT(BackupContainerFileSystemImpl::getPartitionedLogsContinuousEndVersion(files, 0) == 0);
 
+	files.push_back({ 0, 99, 10, "short", 200, 1, 2 });
+	ASSERT(!BackupContainerFileSystemImpl::isPartitionedLogsContinuous(files, 0, 99));
+	files.pop_back();
+
 	files.push_back({ 0, 100, 10, "file2", 200, 1, 2 }); // Tag 1: 0-100
 	std::sort(files.begin(), files.end());
 	ASSERT(BackupContainerFileSystemImpl::isPartitionedLogsContinuous(files, 0, 99));
@@ -2446,6 +2874,105 @@ TEST_CASE("/backup/logs_continuous") {
 	return Void();
 }
 
+// writeRangeFile() paths parse; the same name under an escaping path doesn't.
+TEST_CASE("/backup/pathToRangeFile") {
+	const Version fileVersion = 123;
+	const int blockSize = 1048576;
+	const std::string name = format(
+	    "range,%" PRId64 ",%s,%d", fileVersion, deterministicRandom()->randomUniqueID().toString().c_str(), blockSize);
+	const std::string folder = BackupContainerFileSystemImpl::snapshotFolderString(100) + format("/%d/", 0);
+	const std::string oldFolder = BackupContainerFileSystemImpl::old_rangeVersionFolderString(fileVersion);
+
+	for (const std::string& path : { folder + name, oldFolder + name }) {
+		RangeFile rf;
+		ASSERT(BackupContainerFileSystemImpl::pathToRangeFile(rf, path, 4096));
+		ASSERT_EQ(rf.version, fileVersion);
+		ASSERT_EQ(rf.blockSize, blockSize);
+		ASSERT_EQ(rf.fileName, path);
+		ASSERT_EQ(rf.fileSize, 4096);
+	}
+
+	const std::vector<std::string> escaping = {
+		"kvranges/../../x/" + name,
+		folder + "../../../../" + name,
+		oldFolder + "../../../../" + name,
+		"/" + folder + name,
+	};
+	for (const std::string& path : escaping) {
+		RangeFile rf;
+		ASSERT(!BackupContainerFileSystemImpl::pathToRangeFile(rf, path, 4096));
+	}
+
+	return Void();
+}
+
+// writeLogFile() and writeTaggedLogFile() paths parse; the same names under an escaping path don't.
+TEST_CASE("/backup/pathToLogFile") {
+	const Version beginVersion = 100;
+	const Version endVersion = 200;
+	const int blockSize = 1048576;
+	const std::string uid = deterministicRandom()->randomUniqueID().toString();
+	const std::string name = format("log,%lld,%lld,%s,%d", beginVersion, endVersion, uid.c_str(), blockSize);
+	const std::string taggedName =
+	    format("log,%lld,%lld,%s,%d-of-%d,%d", beginVersion, endVersion, uid.c_str(), 1, 3, blockSize);
+	const std::string folder =
+	    BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, MutationLogType::DEFAULT);
+	const std::string taggedFolder =
+	    BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, MutationLogType::PARTITIONED_LOG);
+
+	LogFile lf;
+	ASSERT(BackupContainerFileSystemImpl::pathToLogFile(lf, folder + name, 4096));
+	ASSERT_EQ(lf.beginVersion, beginVersion);
+	ASSERT_EQ(lf.endVersion, endVersion);
+	ASSERT_EQ(lf.blockSize, blockSize);
+	ASSERT_EQ(lf.fileName, folder + name);
+	ASSERT_EQ(lf.fileSize, 4096);
+	ASSERT_EQ(lf.tagId, -1);
+
+	LogFile tagged;
+	ASSERT(BackupContainerFileSystemImpl::pathToLogFile(tagged, taggedFolder + taggedName, 4096));
+	ASSERT_EQ(tagged.beginVersion, beginVersion);
+	ASSERT_EQ(tagged.endVersion, endVersion);
+	ASSERT_EQ(tagged.blockSize, blockSize);
+	ASSERT_EQ(tagged.fileName, taggedFolder + taggedName);
+	ASSERT_EQ(tagged.tagId, 1);
+	ASSERT_EQ(tagged.totalTags, 3);
+
+	const std::vector<std::string> escaping = {
+		"logs/../../x/" + name,
+		folder + "../../../../" + name,
+		"/" + folder + name,
+		taggedFolder + "../../../../" + taggedName,
+		"/" + taggedFolder + taggedName,
+	};
+	for (const std::string& path : escaping) {
+		LogFile f;
+		ASSERT(!BackupContainerFileSystemImpl::pathToLogFile(f, path, 4096));
+	}
+
+	return Void();
+}
+
+// writeKeyspaceSnapshotFile() paths parse; the same name under an escaping path doesn't.
+TEST_CASE("/backup/pathToKeyspaceSnapshotFile") {
+	const std::string name = format("snapshot,%lld,%lld,%lld", 100LL, 200LL, 4096LL);
+	const std::string path = "snapshots/" + name;
+
+	KeyspaceSnapshotFile sf;
+	ASSERT(BackupContainerFileSystemImpl::pathToKeyspaceSnapshotFile(sf, path));
+	ASSERT_EQ(sf.beginVersion, 100);
+	ASSERT_EQ(sf.endVersion, 200);
+	ASSERT_EQ(sf.totalSize, 4096);
+	ASSERT_EQ(sf.fileName, path);
+
+	for (const std::string& escaping : { "snapshots/../../x/" + name, "/" + path }) {
+		KeyspaceSnapshotFile f;
+		ASSERT(!BackupContainerFileSystemImpl::pathToKeyspaceSnapshotFile(f, escaping));
+	}
+
+	return Void();
+}
+
 void printFileList(BackupFileList& backupFileList) {
 	printf("\nRangeFiles count:%lu", backupFileList.ranges.size());
 	for (const auto& r : backupFileList.ranges)
@@ -2595,6 +3122,34 @@ Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Optional<s
 	ASSERT_EQ(empty.snapshots.size(), 0);
 
 	printf("BackupContainerTest URL=%s PASSED.\n", url.c_str());
+}
+
+TEST_CASE("/backup/containers/localdir/incrementalBeginVersion") {
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	auto container = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await container->create();
+	auto getLogs = [&](Version begin) { return container->getRestoreSet(190, {}, true, begin); };
+
+	auto log = co_await container->writeLogFile(150, 200, 1024);
+	co_await log->finish();
+	ASSERT(!(co_await getLogs(100)).present());
+	ASSERT((co_await getLogs(150)).present());
+	ASSERT((co_await getLogs(175)).present());
+	ASSERT(!(co_await getLogs(191)).present());
+	ASSERT((co_await getLogs(invalidVersion)).present());
+
+	auto tagged = co_await container->writeTaggedLogFile(120, 200, 1024, 0, 1);
+	co_await tagged->finish();
+	ASSERT(!(co_await getLogs(100)).present());
+	auto taggedSet = co_await getLogs(120);
+	ASSERT(taggedSet.present());
+	ASSERT_EQ(taggedSet.get().logs.size(), 1);
+	ASSERT_EQ(taggedSet.get().logs.front().fileName, tagged->getFileName());
+	auto ordinarySet = co_await getLogs(150);
+	ASSERT(ordinarySet.present());
+	ASSERT_EQ(ordinarySet.get().logs.size(), 1);
+	ASSERT_EQ(ordinarySet.get().logs.front().fileName, log->getFileName());
+	co_await container->deleteContainer();
 }
 
 TEST_CASE("/backup/containers/localdir/missingLogRangesRestorability") {
@@ -2787,6 +3342,260 @@ Future<Void> testExpireProgressVersions(std::string url, Optional<std::string> p
 TEST_CASE("/backup/containers/localdir/expireProgressVersions") {
 	co_await testExpireProgressVersions(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
 	                                    Optional<std::string>());
+}
+
+// A bulkdump snapshot's data is an SST tree under bulkdump_data/<jobId>/, which expireData's file
+// listings do not cover. Verify expiring such a snapshot reclaims that tree; that, as with range files,
+// only SSTs dumped before the expire point go, so a later expire finishes a partly expired tree; and --
+// because BulkDumpTaskFunc joins an already-submitted job rather than starting its own, so two snapshots
+// can name the same job -- that a tree still referenced by a surviving snapshot is left alone.
+Future<Void> testExpireBulkDumpData(std::string url) {
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	try {
+		co_await c->deleteContainer();
+	} catch (Error& e) {
+		if (e.code() != error_code_backup_invalid_url && e.code() != error_code_backup_does_not_exist)
+			throw;
+	}
+	co_await c->create();
+	Reference<BackupContainerFileSystem> bc = c.castTo<BackupContainerFileSystem>();
+	ASSERT(bc.isValid());
+
+	std::string expiringJob = deterministicRandom()->randomUniqueID().toString();
+	std::string sharedJob = deterministicRandom()->randomUniqueID().toString();
+	std::string straddlingJob = deterministicRandom()->randomUniqueID().toString();
+
+	auto plantSst = [&](std::string const& jobId, std::string const& leaf) -> std::string {
+		return "bulkdump_data/" + jobId + "/" + leaf;
+	};
+	co_await bc->writeEntireFile(plantSst(expiringJob, "job-manifest.txt"), "expiring-job-manifest");
+	co_await bc->writeEntireFile(plantSst(expiringJob, "t/0/200-data.sst"), "expiring-sst");
+	co_await bc->writeEntireFile(plantSst(expiringJob, "t/0/200-data.sst-sample.sst"), "expiring-sample");
+	co_await bc->writeEntireFile(plantSst(sharedJob, "t/0/200-data.sst"), "shared-sst");
+	// Dumped on both sides of the first expire point.
+	co_await bc->writeEntireFile(plantSst(straddlingJob, "job-manifest.txt"), "straddling-job-manifest");
+	co_await bc->writeEntireFile(plantSst(straddlingJob, "t/0/500-data.sst"), "straddling-early-sst");
+	co_await bc->writeEntireFile(plantSst(straddlingJob, "t/1/3000-data.sst"), "straddling-late-sst");
+
+	// Four bulkdump snapshots. Three early ones expire; the late one survives and shares sharedJob
+	// with an early one, so sharedJob's tree must stay whole.
+	Version early = 100;
+	Version late = 5000;
+	co_await bc->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(expiringJob, early, early, 0));
+	co_await bc->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(sharedJob, early + 1, early + 1, 0));
+	co_await bc->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(straddlingJob, early + 2, early + 2, 0));
+	co_await bc->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(sharedJob, late, late, 0));
+
+	// A log file ending exactly at the expire point. It must not straddle that point: expireData rolls
+	// the actual expiration back to a straddling log's begin version, which would move it before the
+	// early snapshots and expire nothing. (That rollback is what testExpireProgressVersions covers.)
+	Version expireTo = 1000; // after the early snapshots, before the late one
+	Reference<IBackupFile> log = co_await bc->writeLogFile(1, expireTo, 1024);
+	co_await log->append("x", 1);
+	co_await log->finish();
+
+	co_await c->expireData(expireTo, true);
+
+	BackupContainerFileSystem::FilesAndSizesT expiringLeft =
+	    co_await bc->listFiles("bulkdump_data/" + expiringJob + "/");
+	BackupContainerFileSystem::FilesAndSizesT sharedLeft = co_await bc->listFiles("bulkdump_data/" + sharedJob + "/");
+	BackupContainerFileSystem::FilesAndSizesT straddlingLeft =
+	    co_await bc->listFiles("bulkdump_data/" + straddlingJob + "/");
+
+	fmt::print("expiringJob files left={} sharedJob files left={} straddlingJob files left={}\n",
+	           expiringLeft.size(),
+	           sharedLeft.size(),
+	           straddlingLeft.size());
+
+	// The expired job's tree is gone...
+	ASSERT_EQ(expiringLeft.size(), 0);
+	// ...the tree a surviving snapshot still names is untouched...
+	ASSERT_EQ(sharedLeft.size(), 1);
+	// ...and only the straddling job's SSTs dumped before the expire point went.
+	ASSERT_EQ(straddlingLeft.size(), 2);
+	for (const auto& [name, size] : straddlingLeft) {
+		ASSERT(name.find("500-data.sst") == std::string::npos);
+	}
+
+	// The straddling job's descriptor is kept so a later expire can find the rest of its tree, but must
+	// not be offered for restore now that part of its data is gone.
+	BackupDescription desc = co_await c->describeBackup();
+	int keptStraddling = 0;
+	for (const auto& s : desc.snapshots) {
+		if (s.endVersion == early + 2) {
+			++keptStraddling;
+			ASSERT(!s.restorable.orDefault(true));
+		}
+	}
+	ASSERT_EQ(keptStraddling, 1);
+	Optional<RestorableFileSet> rest = co_await c->getRestoreSet(early + 2);
+	ASSERT(!rest.present());
+
+	// Advancing the expire point past the remaining SSTs reclaims the rest of the tree and the descriptor.
+	co_await c->expireData(4000, true);
+	straddlingLeft = co_await bc->listFiles("bulkdump_data/" + straddlingJob + "/");
+	sharedLeft = co_await bc->listFiles("bulkdump_data/" + sharedJob + "/");
+	std::vector<KeyspaceSnapshotFile> snapshotsLeft = co_await bc->listKeyspaceSnapshots();
+	fmt::print("after second expire: straddlingJob files left={} sharedJob files left={} snapshots left={}\n",
+	           straddlingLeft.size(),
+	           sharedLeft.size(),
+	           snapshotsLeft.size());
+	ASSERT_EQ(straddlingLeft.size(), 0);
+	ASSERT_EQ(sharedLeft.size(), 1);
+	ASSERT_EQ(snapshotsLeft.size(), 1);
+	ASSERT_EQ(snapshotsLeft[0].endVersion, late);
+
+	// deleteContainer was only ever assumed to reclaim this data, as a side effect of removing the
+	// container's data path -- which is why expire was the command that needed teaching. Assert it, so
+	// the two commands cannot start leaking in different ways unnoticed.
+	std::string containerDir = url.substr(std::string("file://").size());
+	std::string sharedDir = joinPath(joinPath(containerDir, "bulkdump_data"), sharedJob);
+	ASSERT(directoryExists(sharedDir));
+
+	co_await c->deleteContainer();
+
+	fmt::print("after deleteContainer: sharedJob tree present={}\n", directoryExists(sharedDir));
+	ASSERT(!directoryExists(sharedDir));
+	co_return;
+}
+
+TEST_CASE("/backup/containers/localdir/expireBulkDumpData") {
+	co_await testExpireBulkDumpData(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()));
+}
+
+// A bulkdump is a fuzzy snapshot even when its legacy descriptor says it was taken at one version.
+TEST_CASE("/backup/containers/localdir/bulkDumpRestoreVersions") {
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	auto c = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await c->create();
+	auto bc = c.castTo<BackupContainerFileSystem>();
+	std::string job = deterministicRandom()->randomUniqueID().toString();
+	std::string jobManifest =
+	    "[FormatVersion]: 1, [ManifestCount]: 2\n"
+	    "[BeginKey]: , [EndKey]: 6d, [ManifestRelativePath]: a/200-manifest.txt, [Version]: 200, [Bytes]: 1\n"
+	    "[BeginKey]: 6d, [EndKey]: ff, [ManifestRelativePath]: b/300-manifest.txt, [Version]: 300, [Bytes]: 0\n";
+	co_await bc->writeEntireFile("bulkdump_data/" + job + "/" + getBulkLoadJobManifestFileName(), jobManifest);
+	co_await bc->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(job, 100, 100, 0));
+	auto getBulk = [&](Version version) { return c->getRestoreSet(version, {}, false, invalidVersion, true); };
+	ASSERT(!(co_await getBulk(100)).present());
+	ASSERT(!(co_await getBulk(250)).present());
+	ASSERT(!(co_await getBulk(300)).present()); // the older batch still needs mutations
+	ASSERT(!(co_await c->getRestoreSet(100)).present()); // no traditional range files
+	Standalone<VectorRef<KeyRangeRef>> firstBatch;
+	firstBatch.push_back_deep(firstBatch.arena(), KeyRangeRef("a"_sr, "m"_sr));
+	auto partial = co_await c->getRestoreSet(200, firstBatch, false, invalidVersion, true);
+	ASSERT(partial.present() && partial.get().logs.empty());
+	ASSERT_EQ(partial.get().bulkDumpRanges.size(), 1);
+	ASSERT(partial.get().bulkDumpRanges[0].range == firstBatch[0]);
+
+	auto log = co_await c->writeTaggedLogFile(150, 401, 1024, 0, 1);
+	co_await log->append("x", 1);
+	co_await log->finish();
+	auto minimum = co_await getBulk(latestVersion);
+	ASSERT(minimum.present());
+	ASSERT_EQ(minimum.get().targetVersion, 300);
+	ASSERT_EQ(minimum.get().snapshot.beginVersion, 200);
+	ASSERT_EQ(minimum.get().snapshot.endVersion, 300);
+	ASSERT_EQ(minimum.get().bulkDumpJobId, job);
+	ASSERT_EQ(minimum.get().bulkDumpRanges.size(), 2);
+	ASSERT_EQ(minimum.get().bulkDumpRanges[0].version, 200);
+	ASSERT_EQ(minimum.get().bulkDumpRanges[1].version, 300); // the empty batch has a watermark too
+	ASSERT_EQ(minimum.get().logs.size(), 1);
+	auto latest = co_await getBulk(invalidVersion);
+	ASSERT(latest.present());
+	ASSERT_EQ(latest.get().targetVersion, 400);
+	ASSERT(!(co_await getBulk(401)).present());
+
+	auto legacyDescription = co_await c->describeBackup();
+	ASSERT_EQ(legacyDescription.snapshots.front().beginVersion, 200);
+	ASSERT_EQ(legacyDescription.snapshots.front().endVersion, 300);
+	ASSERT_EQ(legacyDescription.minRestorableVersion.get(), 300);
+	ASSERT_EQ(legacyDescription.maxRestorableVersion.get(), 400);
+
+	// Keep an older ordinary snapshot when it is the only way to restore to 100.
+	auto rangeFile = co_await c->writeRangeFile(90, 0, 90, 1024);
+	co_await testWriteSnapshotFile(rangeFile, ""_sr, "z"_sr, 1024);
+	std::vector<std::string> rangeFiles{ rangeFile->getFileName() };
+	std::vector<std::pair<Key, Key>> rangeBounds{ { ""_sr, "z"_sr } };
+	co_await c->writeKeyspaceSnapshotFile(rangeFiles, rangeBounds, 1024, IncludeKeyRangeMap::False);
+	auto earlyLog = co_await c->writeTaggedLogFile(90, 101, 1024, 0, 1);
+	co_await earlyLog->append("x", 1);
+	co_await earlyLog->finish();
+	ASSERT((co_await c->getRestoreSet(100)).present());
+	try {
+		co_await c->expireData(95, false, nullptr, 100);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_backup_cannot_expire);
+	}
+	ASSERT((co_await c->getRestoreSet(100)).present());
+
+	// Newly written descriptors expose the same bounds to describeBackup without opening the SSTs.
+	co_await bc->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(job, 200, 300, 0));
+	auto desc = co_await c->describeBackup();
+	ASSERT_EQ(desc.snapshots.back().beginVersion, 200);
+	ASSERT_EQ(desc.snapshots.back().endVersion, 300);
+	ASSERT(desc.snapshots.back().restorable.orDefault(false));
+	// An unreadable newer dump must not hide a usable older one. Nor may an older
+	// unreadable dump invalidate a result already found when searching all snapshots.
+	for (Version marker : { 50, 325 }) {
+		auto missingJob = deterministicRandom()->randomUniqueID().toString();
+		co_await c->writeKeyspaceSnapshotFile(
+		    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(missingJob, marker, marker, 0));
+	}
+	auto explicitTarget = co_await getBulk(350);
+	ASSERT(explicitTarget.present() && explicitTarget.get().bulkDumpJobId == job);
+	auto latestWithMissing = co_await getBulk(invalidVersion);
+	ASSERT(latestWithMissing.present() && latestWithMissing.get().targetVersion == 400);
+	co_await c->deleteContainer();
+}
+
+TEST_CASE("/backup/containers/localdir/expireMissingBulkDump") {
+	auto c = IBackupContainer::openContainer(
+	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}, {}, 0);
+	co_await c->create();
+	auto file = co_await c->writeRangeFile(90, 0, 90, 1024);
+	co_await testWriteSnapshotFile(file, ""_sr, "z"_sr, 1024);
+	std::vector<std::string> files{ file->getFileName() };
+	std::vector<std::pair<Key, Key>> bounds{ { ""_sr, "z"_sr } };
+	co_await c->writeKeyspaceSnapshotFile(files, bounds, 1024, IncludeKeyRangeMap::False);
+	for (auto [begin, end] : { std::pair{ 90, 100 }, std::pair{ 100, 151 } }) {
+		auto log = co_await c->writeLogFile(begin, end, 1024);
+		co_await log->append("x", 1);
+		co_await log->finish();
+	}
+	// This newer descriptor has accurate bounds but its job manifest has disappeared.
+	auto job = deterministicRandom()->randomUniqueID().toString();
+	co_await c->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(job, 120, 140, 0));
+	// An empty or omitted job ID also leaves nothing for bulkload to ingest.
+	co_await c->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump("", 121, 141, 0));
+	auto bc = c.castTo<BackupContainerFileSystem>();
+	co_await bc->writeEntireFile("snapshots/snapshot,122,142,0",
+	                             R"({"files":[],"beginVersion":122,"endVersion":142,"snapshotType":"bulkdump"})");
+	// Without a type field, an empty file list still cannot be a traditional snapshot.
+	co_await bc->writeEntireFile("snapshots/snapshot,123,143,0", R"({"files":[],"beginVersion":123,"endVersion":143})");
+	auto desc = co_await c->describeBackup();
+	ASSERT_EQ(desc.snapshots.size(), 5);
+	ASSERT(desc.snapshots.front().restorable.orDefault(false));
+	for (size_t i = 1; i < desc.snapshots.size(); ++i) {
+		ASSERT(!desc.snapshots[i].restorable.orDefault(true));
+	}
+	try {
+		co_await c->expireData(100, false, nullptr, 150);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_backup_cannot_expire);
+	}
+	ASSERT((co_await c->getRestoreSet(150)).present());
+	co_await c->deleteContainer();
 }
 
 // Verify that writeKeyspaceSnapshotFile correctly writes and reads back a snapshot manifest even when the

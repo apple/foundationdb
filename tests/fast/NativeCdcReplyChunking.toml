@@ -29,5 +29,6 @@ runFailureWorkloads = false
     writesPerRound = 1
     rounds = 0
     testReplyChunking = true
+    testReplyChunkingProxyReplacement = true
     memoryTestValueBytes = 512
     operationTimeout = 120.0
