@@ -167,17 +167,18 @@ struct SnapshotMetadata {
 	std::string snapshotType = "rangefile"; // "rangefile" or "bulkdump"
 	std::string bulkDumpJobId; // Only used for bulkdump snapshots
 	int64_t totalKeys = 0; // Key count (primarily for bulkdump)
-	Version snapshotVersion = invalidVersion; // For bulkdump: the snapshot version (beginVersion == endVersion)
-	                                          // For rangefile: ignored (derived from files)
+	Version beginVersion = invalidVersion;
+	Version endVersion = invalidVersion;
 
 	bool isBulkDump() const { return snapshotType == "bulkdump"; }
 
 	// Factory for creating BulkDump metadata
-	static SnapshotMetadata bulkDump(const std::string& jobId, Version version, int64_t totalBytes, int64_t keys) {
+	static SnapshotMetadata bulkDump(const std::string& jobId, Version begin, Version end, int64_t keys) {
 		SnapshotMetadata m;
 		m.snapshotType = "bulkdump";
 		m.bulkDumpJobId = jobId;
-		m.snapshotVersion = version;
+		m.beginVersion = begin;
+		m.endVersion = end;
 		m.totalKeys = keys;
 		return m;
 	}
@@ -242,6 +243,11 @@ struct BackupDescription {
 	std::string toJSON() const;
 };
 
+struct BulkDumpRangeVersion {
+	KeyRange range;
+	Version version;
+};
+
 struct RestorableFileSet {
 	Version targetVersion;
 	std::vector<LogFile> logs;
@@ -254,7 +260,9 @@ struct RestorableFileSet {
 	// when the entire key space snapshot is at the target version.
 	Version continuousBeginVersion, continuousEndVersion;
 
-	KeyspaceSnapshotFile snapshot; // Info. for debug purposes
+	KeyspaceSnapshotFile snapshot;
+	std::string bulkDumpJobId;
+	std::vector<BulkDumpRangeVersion> bulkDumpRanges;
 };
 
 /* IBackupContainer is an interface to a set of backup data, which contains
@@ -368,7 +376,8 @@ public:
 	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
 	                                                          VectorRef<KeyRangeRef> keyRangesFilter = {},
 	                                                          bool logsOnly = false,
-	                                                          Version beginVersion = -1) = 0;
+	                                                          Version beginVersion = -1,
+	                                                          bool useBulkDump = false) = 0;
 
 	// Get an IBackupContainer based on a container spec string
 	static Reference<IBackupContainer> openContainer(const std::string& url,

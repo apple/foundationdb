@@ -177,7 +177,7 @@ void GrpcServer::stopServerSync() {
 }
 
 void GrpcServer::stopServerSyncInternal() {
-	if (server_ != nullptr) {
+	if (server_ == nullptr) {
 		return;
 	}
 

@@ -183,22 +183,7 @@ public:
 		return false;
 	}
 
-	bool operator==(RangeLockStateSet const& r) const {
-		auto rLocks = r.getLocks();
-		if (locks.size() != rLocks.size()) {
-			return false;
-		}
-		auto iterator = locks.begin();
-		auto rIterator = rLocks.begin();
-		while (iterator != locks.end() && rIterator != rLocks.end()) {
-			if (iterator->first != rIterator->first || iterator->second != rIterator->second) {
-				return false;
-			}
-			++iterator;
-			++rIterator;
-		}
-		return true;
-	}
+	bool operator==(RangeLockStateSet const& r) const { return locks == r.locks; }
 
 	void insertIfNotExist(const RangeLockState& inputLock) {
 		ASSERT(inputLock.isValid());

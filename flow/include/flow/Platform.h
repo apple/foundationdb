@@ -395,6 +395,11 @@ std::string joinPath(std::string const& directory, std::string const& filename);
 // Relative paths remain relative and are NOT rebased on the current working directory.
 std::string cleanPath(std::string const& path);
 
+// Returns true if `path`, when joined onto a base directory, can only resolve to the base itself or something
+// within it. The check is purely lexical, so it does not account for symbolic links inside the base.  An empty path
+// is contained, as is "."; any ".." component is rejected, even one that stays within the base.
+bool relativePathIsContained(const std::string& path);
+
 // Removes the last component from a path string (if possible) and returns the result with one trailing separator.
 // If there is only one path component, the result will be "" for relative paths and "/" for absolute paths.
 // Note that this is NOT the same as getting the parent of path, as the final component could be ".."

@@ -315,3 +315,17 @@ TEST_CASE("/bulkload/getBackupDataPath/prefix") {
 	}
 	return Void();
 }
+
+TEST_CASE("/bulkload/jobManifestEntry/documentedExample") {
+	// The example raw string from the BulkLoadJobFileManifestEntry comment.
+	const std::string relativePath =
+	    "5676202155931feac1bbd501d491170b/ca5d8fe85737a30b59da5f2c67343fad/0/50705947-manifest.txt";
+	const std::string rawString =
+	    "[BeginKey]: , [EndKey]: ae a3 fc d4 33 cc 3b 3d 7a 00, [ManifestRelativePath]: " + relativePath +
+	    ", [Version]: 50705947, [Bytes]: 6889";
+	BulkLoadJobFileManifestEntry entry(rawString);
+	ASSERT(entry.isValid());
+	ASSERT_EQ(entry.getManifestRelativePath(), relativePath);
+	ASSERT_EQ(entry.toString(), rawString);
+	return Void();
+}

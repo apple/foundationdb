@@ -31,49 +31,9 @@
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/flow.h"
-
-// Waits until no ValidateRestore audit is running, then `settleSeconds` more, and checks again. A data distributor
-// that takes over can run an audit again after it was reported complete; such an audit compares the live data with
-// the restored copy, so it must not overlap anything that changes either. Best effort: gives up after
-// `maxWaitSeconds`.
-inline Future<Void> waitForAuditsToSettle(Database cx, double settleSeconds = 30.0, double maxWaitSeconds = 300.0) {
-	double deadline = now() + maxWaitSeconds;
-	bool settled = false;
-	while (!settled && now() < deadline) {
-		bool running = false;
-		Error readError;
-		try {
-			std::vector<AuditStorageState> states =
-			    co_await getAuditStates(cx, AuditType::ValidateRestore, true, 1, AuditPhase::Running);
-			running = !states.empty();
-		} catch (Error& e) {
-			readError = e;
-		}
-		if (readError.isValid() && !isTransientAuditStateReadError(readError)) {
-			throw readError;
-		}
-		if (running || readError.isValid()) {
-			co_await delay(2.0);
-			continue;
-		}
-		co_await delay(settleSeconds);
-		bool stillIdle = false;
-		Error recheckError;
-		try {
-			std::vector<AuditStorageState> states =
-			    co_await getAuditStates(cx, AuditType::ValidateRestore, true, 1, AuditPhase::Running);
-			stillIdle = states.empty();
-		} catch (Error& e) {
-			recheckError = e;
-		}
-		if (recheckError.isValid() && !isTransientAuditStateReadError(recheckError)) {
-			throw recheckError;
-		}
-		settled = stillIdle;
-	}
-}
 
 // Runs an audit_storage ValidateRestore audit over `range` and waits for it to complete. The audit compares `range`
 // of the live database with its copy under validateRestoreLogKeys.begin, as written by a restore with that add-prefix,
@@ -127,13 +87,6 @@ struct RestoreValidationGate {
 	}
 };
 
-// Waits until nothing reads the live data or the validation prefix, so the in-place restore can overwrite the live
-// data: no validation restore is pending, and no ValidateRestore audit is running.
-inline Future<Void> waitForValidationsToFinish(Database cx) {
-	co_await RestoreValidationGate::waitUntilNonePending();
-	co_await waitForAuditsToSettle(cx);
-}
-
 // One workload instance's claim on the pending-validation count. Releases it on every exit path, so a failed instance
 // cannot leave the in-place restore waiting forever.
 struct PendingValidationClaim : NonCopyable {
@@ -161,12 +114,9 @@ struct ValidationTraceOptions {
 	bool traceRestorableVersions = false;
 };
 
-// Restores the latest version of the backup in `container` under the validation prefix and audits it against the live
-// data, one `backupRanges` entry at a time. The data must be quiescent and covered by the backup. Runs one at a time
-// per RestoreValidationGate. The prefix is left in place: a data distributor can re-dispatch an audit after it was
-// reported complete, and that audit would read a cleared prefix as an empty baseline. Rows left by earlier validations
-// equal the live data, so they cause no false failures, but they can hide a key that a later restore of an
-// overlapping range failed to write.
+// Restores the latest version of the backup in `container` under the validation prefix, which it clears first, and
+// audits it against the live data, one `backupRanges` entry at a time. The data must be quiescent and covered by the
+// backup. Runs one at a time per RestoreValidationGate.
 inline Future<Void> validateAgainstPrefixedRestore(Database cx,
                                                    FileBackupAgent* backupAgent,
                                                    Reference<IBackupContainer> container,
@@ -180,7 +130,14 @@ inline Future<Void> validateAgainstPrefixedRestore(Database cx,
 	FlowLock::Releaser releaser(RestoreValidationGate::lock);
 	Key prefix = validateRestoreLogKeys.begin;
 	Standalone<StringRef> validationTag(backupTag.toString() + "_validate");
-	co_await waitForAuditsToSettle(cx);
+	// Start from an empty prefix, so that a key the restore failed to write cannot be masked by a row left by an
+	// earlier validation.
+	co_await runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->clear(validateRestoreLogKeys);
+		return Void();
+	});
 	TraceEvent(startEvent.c_str(), trace.id).detail("Tag", printable(backupTag));
 	Version maxRestorable = -1;
 	if (trace.traceRestorableVersions) {
