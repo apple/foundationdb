@@ -4828,6 +4828,52 @@ struct RestoreFileTaskFuncBase : RestoreTaskFuncBase {
 	}
 };
 
+// Optional observer for the deterministic writer recovery simulation. The size limit applies only to
+// writer transactions, so task setup and unrelated cluster activity retain their normal limits.
+struct RestoreWriterTestState {
+	int rejections = 0;
+	int commits = 0;
+	int committedRecords = 0;
+	int lastRejectedLimit = 0;
+	int lastCommittedLimit = 0;
+	std::vector<int> batchLimits;
+	std::vector<int> batchCommits;
+
+	void beginBatch(int limit) {
+		if (lastCommittedLimit) {
+			ASSERT_EQ(limit, lastCommittedLimit);
+		}
+		batchLimits.push_back(limit);
+		batchCommits.push_back(0);
+	}
+
+	Future<Void> commit(Reference<ReadYourWritesTransaction> tr, int limit, int records) {
+		ASSERT(g_network->isSimulated());
+		int64_t sizeLimit = 4096;
+		tr->setOption(FDBTransactionOptions::SIZE_LIMIT, StringRef((uint8_t*)&sizeLimit, sizeof(sizeLimit)));
+		try {
+			co_await tr->commit();
+		} catch (Error& e) {
+			if (e.code() == error_code_transaction_too_large) {
+				++rejections;
+				lastRejectedLimit = limit;
+			}
+			throw;
+		}
+		ASSERT_GT(rejections, 0);
+		ASSERT_LT(limit, lastRejectedLimit);
+		if (lastCommittedLimit) {
+			ASSERT_LE(limit, lastCommittedLimit);
+		}
+		lastCommittedLimit = limit;
+		++commits;
+		committedRecords += records;
+		if (!batchCommits.empty()) {
+			++batchCommits.back();
+		}
+	}
+};
+
 struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	static struct : InputParams {
 		// The range of data that the (possibly empty) data represented, which is set if it intersects the target
@@ -4857,7 +4903,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	static Future<Void> _execute(Database cx,
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
-	                             Reference<Task> task) {
+	                             Reference<Task> task,
+	                             RestoreWriterTestState* test = nullptr) {
 		RestoreConfig restore(task);
 
 		RestoreFile rangeFile = Params.inputFile().get(task);
@@ -4964,8 +5011,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 			int start = 0;
 			int end = data.size();
-			int dataSizeLimit =
-			    buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+			int dataSizeLimit = !test && buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6)
+			                                       : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 			tr->reset();
 			while (true) {
@@ -5010,7 +5057,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 					co_await checkLock;
 
-					co_await tr->commit();
+					co_await (test ? test->commit(tr, dataSizeLimit, i - start) : tr->commit());
 
 					TraceEvent("FileRestoreCommittedRange")
 					    .suppressFor(60)
@@ -5039,10 +5086,12 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.code() == error_code_transaction_too_large)
+				if (err.code() == error_code_transaction_too_large && dataSizeLimit > 1) {
 					dataSizeLimit /= 2;
-				else
+					tr->reset();
+				} else {
 					co_await tr->onError(err);
+				}
 			}
 		}
 		if (!originalFileRanges.empty()) {
@@ -5299,7 +5348,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 	static Future<Void> _execute(Database cx,
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
-	                             Reference<Task> task) {
+	                             Reference<Task> task,
+	                             RestoreWriterTestState* test = nullptr) {
 		RestoreConfig restore(task);
 
 		RestoreFile logFile = Params.inputFile().get(task);
@@ -5353,8 +5403,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		int start = 0;
 		int end = dataFiltered.size();
-		int dataSizeLimit =
-		    buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+		int dataSizeLimit = !test && buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6)
+		                                       : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 		tr->reset();
 		while (true) {
@@ -5383,7 +5433,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				// Add to bytes written count
 				restore.bytesWritten().atomicOp(tr, txBytes, MutationRef::Type::AddValue);
 
-				co_await tr->commit();
+				co_await (test ? test->commit(tr, dataSizeLimit, i - start) : tr->commit());
 
 				TraceEvent("FileRestoreCommittedLog")
 				    .suppressFor(60)
@@ -5408,10 +5458,12 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.code() == error_code_transaction_too_large)
+			if (err.code() == error_code_transaction_too_large && dataSizeLimit > 1) {
 				dataSizeLimit /= 2;
-			else
+				tr->reset();
+			} else {
 				co_await tr->onError(err);
+			}
 		}
 	}
 
@@ -5663,22 +5715,26 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	}
 
 	// Writes backup mutations to the database
-	static Future<Void> writeMutations(Database cx,
-	                                   std::vector<Standalone<VectorRef<KeyValueRef>>> mutations,
-	                                   Key mutationLogPrefix,
-	                                   Reference<Task> task,
-	                                   Reference<TaskBucket> taskBucket) {
+	static Future<int> writeMutations(Database cx,
+	                                  std::vector<Standalone<VectorRef<KeyValueRef>>> mutations,
+	                                  Key mutationLogPrefix,
+	                                  Reference<Task> task,
+	                                  Reference<TaskBucket> taskBucket,
+	                                  int txBytesLimit,
+	                                  RestoreWriterTestState* test = nullptr) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Standalone<VectorRef<KeyValueRef>> oldFormatMutations;
 		int mutationIndex = 0;
 		int mutationCount = 0;
 		int txBytes = 0;
-		int txBytesLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 		for (const auto& data : mutations) {
 			oldFormatMutations.append(oldFormatMutations.arena(), data.begin(), data.size());
 		}
 		int totalMutation = oldFormatMutations.size();
+		if (test && totalMutation > 0) {
+			test->beginBatch(txBytesLimit);
+		}
 
 		// multiple transactions are needed, so this has to be in a _execute method rather than
 		// a _finish method
@@ -5705,7 +5761,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 					++mutationCount;
 				}
 				co_await taskBucket->keepRunning(tr, task);
-				co_await tr->commit();
+				co_await (test ? test->commit(tr, txBytesLimit, mutationCount) : tr->commit());
 
 				int64_t oldBytes = Params.bytesWritten().get(task);
 				Params.bytesWritten().set(task, oldBytes + txBytes);
@@ -5715,23 +5771,26 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				    .detail("TotalMutation", totalMutation)
 				    .detail("Bytes", txBytes);
 				mutationIndex += mutationCount; // update mutationIndex after the commit succeeds
+				tr->reset();
 				continue;
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.code() == error_code_transaction_too_large) {
+			if (err.code() == error_code_transaction_too_large && txBytesLimit > 1 && mutationCount > 1) {
 				txBytesLimit /= 2;
+				tr->reset();
 			} else {
 				co_await tr->onError(err);
 			}
 		}
-		co_return;
+		co_return txBytesLimit;
 	}
 
 	static Future<Void> _execute(Database cx,
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
-	                             Reference<Task> task) {
+	                             Reference<Task> task,
+	                             RestoreWriterTestState* test = nullptr) {
 		RestoreConfig restore(task);
 
 		int64_t maxTagID = Params.maxTagID().get(task);
@@ -5809,6 +5868,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		Future<Void> reader = readLogData(mutationStream, iterators, begin, end);
 
 		std::vector<Standalone<VectorRef<KeyValueRef>>> mutations;
+		int txBytesLimit = std::max(1, CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE);
 		int64_t totalBytes = 0;
 		Standalone<VectorRef<KeyValueRef>> oneVersionData;
 		while (true) {
@@ -5819,8 +5879,9 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 
 				// batching mutations from multiple versions together before writing to the database
 				int64_t bytes = oneVersionData.expectedSize();
-				if (totalBytes + bytes > CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE) {
-					co_await writeMutations(cx, mutations, restore.mutationLogPrefix(), task, taskBucket);
+				if (totalBytes + bytes > txBytesLimit) {
+					txBytesLimit = co_await writeMutations(
+					    cx, mutations, restore.mutationLogPrefix(), task, taskBucket, txBytesLimit, test);
 					mutations.clear();
 					totalBytes = 0;
 				}
@@ -5832,7 +5893,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			}
 			if (err.code() == error_code_end_of_stream) {
 				if (!mutations.empty()) {
-					co_await writeMutations(cx, mutations, restore.mutationLogPrefix(), task, taskBucket);
+					txBytesLimit = co_await writeMutations(
+					    cx, mutations, restore.mutationLogPrefix(), task, taskBucket, txBytesLimit, test);
 				}
 				break;
 			} else {
@@ -5916,29 +5978,209 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 StringRef RestoreLogDataPartitionedTaskFunc::name = "restore_log_data_partitioned"_sr;
 REGISTER_TASKFUNC(RestoreLogDataPartitionedTaskFunc);
 
-// each task can be partitioned to smaller ranges because commit proxy would
-// only start to commit alog/ prefix mutations to original prefix when
-// the final version is set, but do it in a single task for now for simplicity
+// Runs the actual writers against a database, including the partitioned reader's batch handoff.
+Future<Void> testRestoreWriterRecovery(Database cx) {
+	ASSERT(g_network->isSimulated());
+	ASSERT_EQ(CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE, 16384);
+	constexpr int recordCount = 96;
+	const int blockSize = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+	KeyRange dataRange = KeyRangeRef("restore-writer/"_sr, "restore-writer0"_sr);
+	for (int writer = 0; writer < 3; ++writer) {
+		RestoreConfig restore(deterministicRandom()->randomUniqueID());
+		Reference<IBackupContainer> bc = IBackupContainer::openContainer(
+		    "file://" + abspath("simfdb/restore-writer-" + restore.getUid().toString()), {}, {}, 0);
+		co_await bc->create();
+		Reference<IBackupFile> file;
+		StringRef taskName;
+		if (writer == 0) {
+			taskName = RestoreRangeTaskFunc::name;
+			file = co_await bc->writeRangeFile(1, 0, 1, blockSize);
+		} else if (writer == 1) {
+			taskName = RestoreLogDataTaskFunc::name;
+			file = co_await bc->writeLogFile(1, recordCount + 1, blockSize);
+		} else {
+			taskName = RestoreLogDataPartitionedTaskFunc::name;
+			file = co_await bc->writeTaggedLogFile(1, recordCount + 1, blockSize, 0, 1);
+			co_await file->append((uint8_t*)&PARTITIONED_MLOG_VERSION, sizeof(PARTITIONED_MLOG_VERSION));
+		}
+		fileBackup::RangeFileWriter rangeWriter(file, blockSize);
+		fileBackup::LogFileWriter logWriter(file, blockSize);
+		std::map<Key, Value> expected;
+		if (writer == 0) {
+			co_await rangeWriter.writeKey(dataRange.begin);
+		}
+		for (int i = 0; i < recordCount; ++i) {
+			Key key = StringRef(format("restore-writer/%04d", i));
+			Value value = StringRef(std::string(512, 'a' + i % 26));
+			if (writer == 0) {
+				co_await rangeWriter.writeKV(key, value);
+				expected[key] = value;
+			} else {
+				Standalone<VectorRef<VersionedMutation>> versionMutations;
+				VersionedMutation vm;
+				vm.version = i + 1;
+				vm.subsequence = 0;
+				vm.mutation = MutationRef(MutationRef::SetValue, key, value);
+				versionMutations.push_back_deep(versionMutations.arena(), vm);
+				auto oldFormat = generateOldFormatMutations(vm.version, { versionMutations });
+				ASSERT_EQ(oldFormat.size(), 1);
+				expected[oldFormat[0].key.withPrefix(restore.mutationLogPrefix())] = oldFormat[0].value;
+				if (writer == 1) {
+					co_await logWriter.writeKV(oldFormat[0].key, oldFormat[0].value);
+				} else {
+					BinaryWriter mutation(AssumeVersion(g_network->protocolVersion()));
+					mutation << vm.mutation;
+					BinaryWriter header(Unversioned());
+					header << bigEndian64(vm.version) << bigEndian32(vm.subsequence)
+					       << bigEndian32(mutation.getLength());
+					co_await file->append(header.getData(), header.getLength());
+					co_await file->append(mutation.getData(), mutation.getLength());
+				}
+			}
+		}
+		if (writer == 0) {
+			co_await rangeWriter.writeKey(dataRange.end);
+			co_await rangeWriter.finish();
+		}
+		co_await file->finish();
+		ASSERT_LT(file->size(), blockSize);
+		if (writer == 0) {
+			// A bare range file is not a complete backup; deletion requires a snapshot manifest or log.
+			std::vector<std::string> snapshotFiles{ file->getFileName() };
+			std::vector<std::pair<Key, Key>> snapshotRanges{ { dataRange.begin, dataRange.end } };
+			co_await bc->writeKeyspaceSnapshotFile(
+			    snapshotFiles, snapshotRanges, file->size(), IncludeKeyRangeMap::True);
+		}
+		RestoreFile input{ 1, file->getFileName(), writer == 0, blockSize, file->size(), recordCount + 1, 0, 1 };
+		auto task = makeReference<Task>(taskName, 1);
+		RestoreFileTaskFuncBase::InputParams::inputFile().set(task, input);
+		RestoreFileTaskFuncBase::InputParams::readOffset().set(task, 0);
+		RestoreFileTaskFuncBase::InputParams::readLen().set(task, file->size());
+		RestoreLogDataPartitionedTaskFunc::Params.logs().set(task, { input });
+		RestoreLogDataPartitionedTaskFunc::Params.maxTagID().set(task, 0);
+		RestoreLogDataPartitionedTaskFunc::Params.beginVersion().set(task, 1);
+		RestoreLogDataPartitionedTaskFunc::Params.endVersion().set(task, recordCount + 1);
+		RestoreLogDataPartitionedTaskFunc::Params.bytesWritten().set(task, 0);
+		KeyBackedTaskConfig::TaskParams.uid().set(task, restore.getUid());
+		Key taskPrefix = "writer-tasks/"_sr.withPrefix(restore.mutationLogPrefix());
+		auto taskBucket = makeReference<TaskBucket>(Subspace(taskPrefix), AccessSystemKeys::True);
+		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			restore.sourceContainer().set(tr, bc);
+			restore.restoreRange().set(tr, dataRange);
+			restore.bytesWritten().set(tr, 0);
+			taskBucket->addTask(
+			    tr, task, restore.sourceContainer().key, TupleCodec<Reference<IBackupContainer>>::pack(bc));
+			return Future<Void>(Void());
+		});
+		// An unknown commit result can leave the task leased; retry until its lease expires and it is requeued.
+		while (true) {
+			task = co_await taskBucket->getOne(cx);
+			if (task) {
+				break;
+			}
+			co_await delay(1.0);
+		}
+		RestoreWriterTestState test;
+		if (writer == 0) {
+			while (true) {
+				try {
+					co_await RestoreRangeTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+					break;
+				} catch (Error& e) {
+					// The direct call bypasses TaskBucket's retry of transient errors injected by the range decoder.
+					// Only restart before writing, so retries cannot hide a writer failure or duplicate the counters.
+					if (test.commits != 0 ||
+					    (e.code() != error_code_http_request_failed && e.code() != error_code_connection_failed &&
+					     e.code() != error_code_timed_out && e.code() != error_code_lookup_failed)) {
+						throw;
+					}
+				}
+				co_await delay(1.0);
+			}
+		} else if (writer == 1) {
+			co_await RestoreLogDataTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+		} else {
+			co_await RestoreLogDataPartitionedTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+			ASSERT_GE(test.batchLimits.size(), 3);
+			ASSERT_EQ(test.batchLimits.front(), CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE);
+			ASSERT_GT(test.batchCommits.front(), 1);
+			for (int i = 1; i < test.batchLimits.size(); ++i) {
+				ASSERT_EQ(test.batchLimits[i], test.lastCommittedLimit);
+				ASSERT_GT(test.batchCommits[i], 0);
+			}
+		}
+		ASSERT_GT(test.rejections, 0);
+		ASSERT_GT(test.commits, 1);
+		ASSERT_EQ(test.committedRecords, recordCount);
+		KeyRange outputRange = writer == 0 ? dataRange : prefixRange(restore.mutationLogPrefix());
+		co_await taskBucket->clear(cx);
+		RangeResult rows = co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			return tr->getRange(outputRange, recordCount + 1);
+		});
+		ASSERT(!rows.more);
+		ASSERT_EQ(rows.size(), expected.size());
+		int i = 0;
+		for (const auto& [key, value] : expected) {
+			ASSERT_EQ(rows[i].key, key);
+			ASSERT_EQ(rows[i].value, value);
+			++i;
+		}
+		// A successful cleanup with an unknown commit result must not retry verification against deleted data.
+		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->clear(outputRange);
+			restore.clear(tr);
+			return Void();
+		});
+		co_await bc->deleteContainer();
+		TraceEvent("RestoreWriterRecoveryTestPassed")
+		    .detail("Writer", writer)
+		    .detail("Rejections", test.rejections)
+		    .detail("Commits", test.commits)
+		    .detail("Batches", test.batchLimits.size())
+		    .detail("ReducedLimit", test.lastCommittedLimit);
+	}
+}
+
+// Dispatch each version batch across bounded transactions. Commit proxies apply the loaded mutations only after
+// all range and log tasks in the batch complete.
 struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 	static StringRef name;
-	static constexpr uint32_t version = 1;
+	// Version 2 adds a range-file cursor. Older agents must not run continuation tasks because they would
+	// dispatch the range files again from the beginning of the version batch.
+	static constexpr uint32_t version = 2;
 	StringRef getName() const override { return name; };
 
 	static struct {
 		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
 		static TaskParam<Version> firstVersion() { return __FUNCTION__sr; }
 		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
+		// The version window stays fixed across dispatch transactions. This cursor identifies the next
+		// snapshot block within it; a version alone cannot distinguish files or blocks at the same version.
+		static TaskParam<Version> beginRangeVersion() { return __FUNCTION__sr; }
+		static TaskParam<std::string> beginRangeFile() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> beginRangeBlock() { return __FUNCTION__sr; }
+		static TaskParam<int> dispatchTaskLimit() { return __FUNCTION__sr; }
 	} Params;
 
-	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
-	                            Reference<TaskBucket> taskBucket,
-	                            Reference<FutureBucket> futureBucket,
-	                            Reference<Task> task) {
+	static Future<Void> dispatch(Reference<ReadYourWritesTransaction> tr,
+	                             Reference<TaskBucket> taskBucket,
+	                             Reference<FutureBucket> futureBucket,
+	                             Reference<Task> task,
+	                             int taskBatchSize) {
 		RestoreConfig restore(task);
 
 		Version beginVersion = Params.beginVersion().get(task);
 		Version firstVersion = Params.firstVersion().get(task);
 		Version endVersion = Params.endVersion().get(task);
+		// Version 1 tasks have no cursor and start a new batch. A cursor marks a continuation which is joined
+		// to the existing batch future until all range-file blocks have been dispatched.
+		bool addingToExistingBatch = Params.beginRangeVersion().exists(task);
+		Version beginRangeVersion = Params.beginRangeVersion().getOrDefault(task, beginVersion);
+		std::string beginRangeFile = Params.beginRangeFile().getOrDefault(task);
+		int64_t beginRangeBlock = Params.beginRangeBlock().getOrDefault(task);
 		Reference<IBackupContainer> _bc = co_await restore.sourceContainer().getOrThrow(tr);
 		Reference<IBackupContainer> bc = getBackupContainerWithProxy(_bc);
 		Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
@@ -5965,7 +6207,9 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait
-		if (applyLag > (buggify() ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
+		// This requeue path has no cursor or completion dependency. Continuations must preserve both,
+		// so apply backpressure only before starting a new version batch.
+		if (!addingToExistingBatch && applyLag > (buggify() ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
 			// Wait a small amount of time and then re-add this same task.
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 			co_await RestoreDispatchPartitionedTaskFunc::addTask(
@@ -5981,27 +6225,10 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			co_return;
 		}
 
-		// Get a batch of files.  We're targeting batchSize blocks(30k) being dispatched so query for batchSize(150)
-		// files (each of which is 0 or more blocks).
-		// lets say files have [10, 20), [20, 30) then if our range is [15, 25], we need to include both files,
-		// because [15, 20] is included in the first file, and [20, 25] is included in the second file
-		// say we have b and e
-		// as a result, the first file(inclusive): largest file whose begin <= b,
-		// the last file(exclusive): smallest file whose begin > e
-		// because of the encoding, version comes before the type of files(log or range),
-		// begin needs to start from the beginning --
-		// if we have a 3 files, (log,100,200), (range, 180), (log, 200, 300), then if we want to restore[190, 250]
-		// it would stop at (range, 180) and not looking at (log, 100, 200)
-		Optional<RestoreConfig::RestoreFile> beginLogInclude = Optional<RestoreConfig::RestoreFile>{};
-		// because of the encoding of RestoreFile, we use greaterThanOrEqual(end + 1) instead of greaterThan(end)
-		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result
-		// in a end+1
-		Optional<RestoreConfig::RestoreFile> endLogExclude = co_await restore.logFileSet().seekGreaterOrEqual(
-		    tr, RestoreConfig::RestoreFile({ endVersion + 1, "", false }));
-		RestoreConfig::FileSetT::RangeResultType logFiles =
-		    co_await restore.logFileSet().getRange(tr, beginLogInclude, endLogExclude, fileLimit);
-		Optional<RestoreConfig::RestoreFile> beginRangeInclude = co_await restore.rangeFileSet().seekGreaterOrEqual(
-		    tr, RestoreConfig::RestoreFile({ beginVersion, "", true }));
+		// Use the saved cursor as an inclusive key even past the last file. A seek returning no entry
+		// would turn into an unbounded getRange start and redispatch files from the beginning.
+		Optional<RestoreConfig::RestoreFile> beginRangeInclude =
+		    Optional<RestoreConfig::RestoreFile>({ beginRangeVersion, beginRangeFile, true });
 		// greaterThanOrEqual(end + 1) instead of greaterThan(end)
 		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result
 		// in a end+1
@@ -6009,30 +6236,24 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		    tr, RestoreConfig::RestoreFile({ endVersion + 1, "", true }));
 		RestoreConfig::FileSetT::RangeResultType rangeFiles =
 		    co_await restore.rangeFileSet().getRange(tr, beginRangeInclude, endRangeExclude, fileLimit);
-		int64_t maxTagID = 0;
-		std::vector<RestoreConfig::RestoreFile> logs;
 		std::vector<RestoreConfig::RestoreFile> ranges;
-		for (const auto& f : logFiles.results) {
-			if (f.endVersion > beginVersion) {
-				// skip all files whose endVersion is smaller or equal to beginVersion
-				logs.push_back(f);
-				maxTagID = std::max(maxTagID, f.tagId);
-			}
-		}
 		for (const auto& f : rangeFiles.results) {
 			// the getRange might get out-of-bound range file because log files need them to work
 			if (f.version >= beginVersion && f.version < endVersion) {
 				ranges.push_back(f);
 			}
 		}
-		// allPartsDone will be set once all block tasks in the current batch are finished.
-		// create a new future for the new batch
-		Reference<TaskFuture> allPartsDone = futureBucket->future(tr);
-		restore.batchFuture().set(tr, allPartsDone->pack());
-
-		// if there are no files, if i am not the last batch, then on to the next batch
-		// if there are no files and i am the last batch, then just wait for applying to finish
-		// do we need this files.results.size() == 0 at all?
+		// All dispatch transactions for this version window share one completion future. Each continuation
+		// also joins it, so workers finishing one chunk cannot release the batch while more blocks remain
+		// undispatched. Creating a new future here would separate those dependencies.
+		Reference<TaskFuture> allPartsDone;
+		if (addingToExistingBatch) {
+			Key fKey = co_await restore.batchFuture().getD(tr);
+			allPartsDone = makeReference<TaskFuture>(futureBucket, fKey);
+		} else {
+			allPartsDone = futureBucket->future(tr);
+			restore.batchFuture().set(tr, allPartsDone->pack());
+		}
 		if (beginVersion > restoreVersion) {
 			if (applyLag == 0) {
 				// i am the last batch
@@ -6064,12 +6285,11 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			co_return;
 		}
 
-		// if we reach here, this batch is not empty(i.e. we have range and/or mutation files in this)
-		// Start moving through the file list and queuing up blocks.  Only queue up to RESTORE_DISPATCH_ADDTASK_SIZE
-		// blocks per Dispatch task and target batchSize total per batch but a batch must end on a complete version
-		// boundary so exceed the limit if necessary to reach the end of a version of files.
+		// Queue a bounded number of range-file blocks in this transaction. The version batch remains open across
+		// continuation tasks, so the next batch cannot advance the apply version until every block is finished.
 		std::vector<Future<Key>> addTaskFutures;
 		int i = 0;
+		int blocksDispatched = 0;
 		// need to process all range files, keep using the same RestoreRangeTaskFunc as non-partitioned restore.
 		// this can be done first, because they are not overlap within a restore uid
 		// each task will read the file, restore those key to their original keys after clear that range
@@ -6080,8 +6300,12 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// after each RestoreDispatchPartitionedTaskFunc, keyVersionMap will be clear if mutation version is larger.
 		for (; i < ranges.size(); ++i) {
 			RestoreConfig::RestoreFile& f = ranges[i];
+			beginRangeVersion = f.version;
+			beginRangeFile = f.fileName;
 			// For each block of the file
-			for (int64_t j = 0; j < f.fileSize; j += f.blockSize) {
+			int64_t j = beginRangeBlock * f.blockSize;
+			bool txFull = false;
+			for (; j < f.fileSize && blocksDispatched < taskBatchSize && !txFull; j += f.blockSize) {
 				addTaskFutures.push_back(RestoreRangeTaskFunc::addTask(tr,
 				                                                       taskBucket,
 				                                                       task,
@@ -6089,23 +6313,83 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				                                                       j,
 				                                                       std::min<int64_t>(f.blockSize, f.fileSize - j),
 				                                                       TaskCompletionKey::joinWith(allPartsDone)));
+				++beginRangeBlock;
+				++blocksDispatched;
+				// addTask may yield before adding its metadata; wait so the size check includes those writes.
+				// This serializes task creation and may slow dispatch, but avoids accumulating unmeasured writes.
+				co_await addTaskFutures.back();
+				txFull = tr->getApproximateSize() >= CLIENT_KNOBS->RESTORE_DISPATCH_TX_SIZE;
+			}
+			if (j < f.fileSize) {
+				break;
+			}
+			// The next query must start after this file, including when the file was empty.
+			beginRangeFile += '\x00';
+			beginRangeBlock = 0;
+			if (blocksDispatched == taskBatchSize ||
+			    tr->getApproximateSize() >= CLIENT_KNOBS->RESTORE_DISPATCH_TX_SIZE) {
+				break;
 			}
 		}
-		addTaskFutures.push_back(RestoreLogDataPartitionedTaskFunc::addTask(
-		    tr, taskBucket, task, maxTagID, logs, beginVersion, endVersion, TaskCompletionKey::joinWith(allPartsDone)));
-		// even if file exsists, but they are empty, in this case just start the next batch
-
-		addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(tr,
-		                                                                     taskBucket,
-		                                                                     task,
-		                                                                     firstVersion,
-		                                                                     endVersion,
-		                                                                     nextEndVersion,
-		                                                                     TaskCompletionKey::noSignal(),
-		                                                                     allPartsDone));
+		if (!ranges.empty()) {
+			CODE_PROBE(true, "Partitioned restore dispatch continued");
+			// Query again from the saved cursor even if this page was fully consumed. An empty page proves all
+			// range files in the version batch have been dispatched, including batches with more than one page of
+			// files.
+			addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(
+			    tr,
+			    taskBucket,
+			    task,
+			    firstVersion,
+			    beginVersion,
+			    endVersion,
+			    TaskCompletionKey::joinWith(allPartsDone),
+			    Reference<TaskFuture>(),
+			    Optional<RestoreConfig::RestoreFile>({ beginRangeVersion, beginRangeFile, true }),
+			    beginRangeBlock));
+		} else {
+			// Log files are only needed after all snapshot blocks in this window have been dispatched.
+			// Include files starting before beginVersion if their end overlaps this window.
+			Optional<RestoreConfig::RestoreFile> beginLogInclude = Optional<RestoreConfig::RestoreFile>{};
+			// because of the encoding of RestoreFile, we use greaterThanOrEqual(end + 1) instead of greaterThan(end)
+			// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not
+			// result in a end+1
+			Optional<RestoreConfig::RestoreFile> endLogExclude = co_await restore.logFileSet().seekGreaterOrEqual(
+			    tr, RestoreConfig::RestoreFile({ endVersion + 1, "", false }));
+			RestoreConfig::FileSetT::RangeResultType logFiles =
+			    co_await restore.logFileSet().getRange(tr, beginLogInclude, endLogExclude, fileLimit);
+			int64_t maxTagID = 0;
+			std::vector<RestoreConfig::RestoreFile> logs;
+			for (const auto& f : logFiles.results) {
+				if (f.endVersion > beginVersion) {
+					// skip all files whose endVersion is smaller or equal to beginVersion
+					logs.push_back(f);
+					maxTagID = std::max(maxTagID, f.tagId);
+				}
+			}
+			addTaskFutures.push_back(
+			    RestoreLogDataPartitionedTaskFunc::addTask(tr,
+			                                               taskBucket,
+			                                               task,
+			                                               maxTagID,
+			                                               logs,
+			                                               beginVersion,
+			                                               endVersion,
+			                                               TaskCompletionKey::joinWith(allPartsDone)));
+			addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(tr,
+			                                                                     taskBucket,
+			                                                                     task,
+			                                                                     firstVersion,
+			                                                                     endVersion,
+			                                                                     nextEndVersion,
+			                                                                     TaskCompletionKey::noSignal(),
+			                                                                     allPartsDone));
+		}
 
 		co_await waitForAll(addTaskFutures);
-		co_await taskBucket->finish(tr, task);
+		// Add the next blocker before releasing this continuation's blocker, in case all block tasks finished.
+		Future<Void> setDone = addingToExistingBatch ? onDone->set(tr, taskBucket) : Void();
+		co_await (setDone && taskBucket->finish(tr, task));
 
 		TraceEvent("FileRestorePartitionDispatch")
 		    .detail("RestoreUID", restore.getUid())
@@ -6113,7 +6397,10 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		    .detail("EndVersion", endVersion)
 		    .detail("NextEndVersion", nextEndVersion)
 		    .detail("ApplyLag", applyLag)
-		    .detail("Decision", "dispatch_batch_complete");
+		    .detail("Decision", ranges.empty() ? "dispatch_batch_complete" : "dispatch_range_chunk")
+		    .detail("BlocksDispatched", blocksDispatched)
+		    .detail("TaskLimit", taskBatchSize)
+		    .detail("TransactionBytes", tr->getApproximateSize());
 
 		co_return;
 	}
@@ -6125,11 +6412,13 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 	                           Version beginVersion,
 	                           Version endVersion,
 	                           TaskCompletionKey completionKey = TaskCompletionKey::noSignal(),
-	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
+	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>(),
+	                           Optional<RestoreConfig::RestoreFile> rangeStart = Optional<RestoreConfig::RestoreFile>(),
+	                           int64_t beginRangeBlock = 0) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
 
 		// Use high priority for dispatch tasks that have to queue more blocks for the current batch
-		unsigned int priority = 0;
+		unsigned int priority = rangeStart.present() ? 1 : 0;
 		auto task = makeReference<Task>(
 		    RestoreDispatchPartitionedTaskFunc::name, RestoreDispatchPartitionedTaskFunc::version, doneKey, priority);
 
@@ -6138,6 +6427,19 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		Params.firstVersion().set(task, firstVersion);
 		Params.beginVersion().set(task, beginVersion);
 		Params.endVersion().set(task, endVersion);
+		// Preserve reductions for continuations and requeues of this window. Later windows may have smaller
+		// task metadata, so let them start with the configured limit again.
+		int taskLimit = CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
+		if (Params.beginVersion().getOrDefault(parentTask, invalidVersion) == beginVersion &&
+		    Params.endVersion().getOrDefault(parentTask, invalidVersion) == endVersion) {
+			taskLimit = Params.dispatchTaskLimit().getOrDefault(parentTask, taskLimit);
+		}
+		Params.dispatchTaskLimit().set(task, taskLimit);
+		if (rangeStart.present()) {
+			Params.beginRangeVersion().set(task, rangeStart.get().version);
+			Params.beginRangeFile().set(task, rangeStart.get().fileName);
+			Params.beginRangeBlock().set(task, beginRangeBlock);
+		}
 
 		if (!waitFor) {
 			co_return taskBucket->addTask(tr, task);
@@ -6147,21 +6449,241 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		co_return "OnSetAddTask"_sr;
 	}
 
+	// TaskBucket commits after finish() returns, outside the dispatcher's error handling. Own the commit
+	// here so oversized or expired transactions can rebuild a smaller dispatch. New tasks, their continuation cursor,
+	// and retirement of the current task must commit together to make retries safe.
+	static Future<Void> dispatchWithRetry(Database cx,
+	                                      Reference<TaskBucket> taskBucket,
+	                                      Reference<FutureBucket> futureBucket,
+	                                      Reference<Task> task,
+	                                      std::function<void(int)> beforeCommitForTest = {}) {
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
+		int taskBatchSize =
+		    std::max(1, Params.dispatchTaskLimit().getOrDefault(task, CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE));
+		// Dispatch commits also retire the task. Keep its timeout key stable until the commit is resolved.
+		co_await task->extendMutex.take();
+		FlowLock::Releaser releaser(task->extendMutex, 1);
+		while (true) {
+			Error err;
+			try {
+				taskBucket->setOptions(tr);
+				// A previous attempt may have committed despite returning commit_unknown_result.
+				if (co_await taskBucket->isFinished(tr, task)) {
+					co_return;
+				}
+				co_await taskBucket->keepRunning(tr, task);
+				Params.dispatchTaskLimit().set(task, taskBatchSize);
+				co_await dispatch(tr, taskBucket, futureBucket, task, taskBatchSize);
+				if (beforeCommitForTest) {
+					ASSERT(g_network->isSimulated());
+					beforeCommitForTest(taskBatchSize);
+				} else if (taskBatchSize > 1 && buggify()) {
+					throw transaction_too_large();
+				}
+				co_await tr->commit();
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			bool reduceTaskLimit = taskBatchSize > 1 && (err.code() == error_code_transaction_too_large ||
+			                                             err.code() == error_code_transaction_too_old);
+			if (reduceTaskLimit) {
+				// The failed transaction persisted neither tasks nor cursor. Rebuild from the current task's
+				// original cursor, with fewer blocks; the successor receives the new cursor only on commit.
+				// Serial task creation can also exhaust the transaction lifetime without hitting the byte limit.
+				int oldLimit = taskBatchSize;
+				taskBatchSize /= 2;
+				CODE_PROBE(err.code() == error_code_transaction_too_large,
+				           "Partitioned restore dispatch shrank after transaction_too_large");
+				CODE_PROBE(err.code() == error_code_transaction_too_old,
+				           "Partitioned restore dispatch shrank after transaction_too_old");
+				TraceEvent("FileRestorePartitionDispatchResize")
+				    .detail("RestoreUID", RestoreConfig(task).getUid())
+				    .detail("ErrorCode", err.code())
+				    .detail("OldTaskLimit", oldLimit)
+				    .detail("NewTaskLimit", taskBatchSize);
+			}
+			if (reduceTaskLimit && err.code() == error_code_transaction_too_large) {
+				tr->reset();
+			} else {
+				// Preserve the normal retry delay for transaction_too_old, including at the minimum task limit.
+				co_await tr->onError(err);
+			}
+			if (reduceTaskLimit) {
+				// Persist the smaller limit under the current lease so a handoff cannot restore the original batch.
+				// Keep the timeout key stable: an earlier dispatch may have committed with an unknown result.
+				Params.dispatchTaskLimit().set(task, taskBatchSize);
+				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> resizeTr) {
+					return taskBucket->updateTaskParam(
+					    resizeTr, task, Params.dispatchTaskLimit().key, TupleCodec<int>::pack(taskBatchSize));
+				});
+			}
+		}
+	}
+
 	Future<Void> execute(Database cx,
 	                     Reference<TaskBucket> tb,
 	                     Reference<FutureBucket> fb,
 	                     Reference<Task> task) override {
-		return Void();
-	};
+		return dispatchWithRetry(cx, tb, fb, task);
+	}
 	Future<Void> finish(Reference<ReadYourWritesTransaction> tr,
 	                    Reference<TaskBucket> tb,
 	                    Reference<FutureBucket> fb,
 	                    Reference<Task> task) override {
-		return _finish(tr, tb, fb, task);
-	};
+		// Dispatch and task retirement are committed together by execute().
+		return Void();
+	}
 };
 StringRef RestoreDispatchPartitionedTaskFunc::name = "restore_dispatch_partitioned"_sr;
 REGISTER_TASKFUNC(RestoreDispatchPartitionedTaskFunc);
+
+Future<Void> testRestoreDispatchRecovery(Database cx) {
+	ASSERT(g_network->isSimulated());
+	using Dispatch = RestoreDispatchPartitionedTaskFunc;
+	RestoreConfig restore(deterministicRandom()->randomUniqueID());
+	std::string tagName = "dispatch-recovery-" + restore.getUid().toString();
+	Reference<IBackupContainer> bc =
+	    IBackupContainer::openContainer("file://" + abspath("simfdb/" + tagName), {}, {}, 0);
+	Subspace testSpace("dispatch-recovery/"_sr.withPrefix(restore.mutationLogPrefix()));
+	auto taskBucket = makeReference<TaskBucket>(testSpace.get("tasks"_sr), AccessSystemKeys::True);
+	auto futureBucket = makeReference<FutureBucket>(testSpace.get("futures"_sr), AccessSystemKeys::True);
+	// Dispatch reads only this metadata; the range tasks are inspected without reading a backup file.
+	RestoreFile file{ 1, "range-file", true, 4096, 32LL * 4096 };
+	auto task = makeReference<Task>(Dispatch::name, Dispatch::version);
+	KeyBackedTaskConfig::TaskParams.uid().set(task, restore.getUid());
+	TaskBucket::setValidationCondition(
+	    task, restore.sourceContainer().key, TupleCodec<Reference<IBackupContainer>>::pack(bc));
+	Dispatch::Params.firstVersion().set(task, 1);
+	Dispatch::Params.beginVersion().set(task, 1);
+	Dispatch::Params.endVersion().set(task, 2);
+	Dispatch::Params.dispatchTaskLimit().set(task, 16);
+	co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		// Replacing the isolated setup also makes an unknown commit result safe to retry.
+		tr->clear(testSpace.range());
+		restore.sourceContainer().set(tr, bc);
+		restore.tag().set(tr, tagName);
+		makeRestoreTag(tagName).set(tr, { restore.getUid(), false });
+		restore.restoreVersion().set(tr, 2);
+		restore.rangeFileSet().insert(tr, file);
+		taskBucket->addTask(tr, task);
+		return Void();
+	});
+	while (true) {
+		task = co_await taskBucket->getOne(cx);
+		if (task) {
+			break;
+		}
+		co_await delay(1.0);
+	}
+	int rejectedLimit = 0;
+	int ageFailures = 0;
+	bool handedOff = false;
+	auto beforeCommit = [&](int limit) {
+		// Model persistent latency: retrying an expired chunk unchanged must fail this test promptly.
+		if (rejectedLimit) {
+			ASSERT_LT(limit, rejectedLimit);
+		}
+		if (limit > 4) {
+			rejectedLimit = limit;
+			++ageFailures;
+			throw transaction_too_old();
+		}
+		if (!handedOff) {
+			handedOff = true;
+			throw task_interrupted();
+		}
+	};
+	try {
+		co_await Dispatch::dispatchWithRetry(cx, taskBucket, futureBucket, task, beforeCommit);
+		ASSERT(false);
+	} catch (Error& e) {
+		if (e.code() != error_code_task_interrupted || !handedOff) {
+			throw;
+		}
+	}
+	// Drop the in-memory task and let a new owner reclaim its persisted parameters after the lease expires.
+	task.clear();
+	while (true) {
+		task = co_await taskBucket->getOne(cx);
+		if (task) {
+			break;
+		}
+		co_await delay(1.0);
+	}
+	ASSERT_LE(Dispatch::Params.dispatchTaskLimit().get(task), 4);
+	co_await Dispatch::dispatchWithRetry(cx, taskBucket, futureBucket, task, beforeCommit);
+	ASSERT_GT(ageFailures, 0);
+	int committedLimit = Dispatch::Params.dispatchTaskLimit().get(task);
+	ASSERT_LE(committedLimit, 4);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
+	while (true) {
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			ASSERT(co_await taskBucket->isFinished(tr, task));
+			ASSERT_EQ(co_await taskBucket->getTaskCount(tr), committedLimit + 1);
+			Subspace space = taskBucket->getAvailableSpace(1);
+			RangeResult rows = co_await tr->getRange(space.range(), 1000);
+			ASSERT(!rows.empty() && !rows.more);
+			auto continuation = makeReference<Task>();
+			Key key = space.unpack(rows[0].key).getString(0);
+			for (const auto& row : rows) {
+				Tuple tuple = space.unpack(row.key);
+				ASSERT_EQ(tuple.getString(0), key);
+				continuation->params[tuple.getString(1)] = row.value;
+			}
+			ASSERT_EQ(continuation->params[Task::reservedTaskParamKeyType], Dispatch::name);
+			ASSERT_EQ(Dispatch::Params.beginRangeVersion().get(continuation), file.version);
+			ASSERT_EQ(Dispatch::Params.beginRangeFile().get(continuation), file.fileName);
+			ASSERT_EQ(Dispatch::Params.beginRangeBlock().get(continuation), committedLimit);
+			ASSERT_EQ(Dispatch::Params.dispatchTaskLimit().get(continuation), committedLimit);
+			space = taskBucket->getAvailableSpace();
+			rows = co_await tr->getRange(space.range(), 1000);
+			ASSERT(!rows.more);
+			std::set<int64_t> offsets;
+			std::vector<Key> rangeDoneKeys;
+			for (const auto& row : rows) {
+				if (space.unpack(row.key).getString(1) == RestoreRangeTaskFunc::Params.readOffset().key) {
+					ASSERT(offsets.insert(TupleCodec<int64_t>::unpack(row.value)).second);
+				}
+				if (space.unpack(row.key).getString(1) == Task::reservedTaskParamKeyDone) {
+					rangeDoneKeys.push_back(row.value);
+				}
+			}
+			ASSERT_EQ(offsets.size(), committedLimit);
+			for (int i = 0; i < committedLimit; ++i) {
+				ASSERT(offsets.count(i * file.blockSize));
+			}
+			Key batchKey = co_await restore.batchFuture().getOrThrow(tr);
+			auto batch = futureBucket->unpack(batchKey);
+			ASSERT(!(co_await batch->isSet(tr)));
+			ASSERT_EQ(rangeDoneKeys.size(), committedLimit);
+			for (const auto& key : rangeDoneKeys) {
+				co_await futureBucket->unpack(key)->set(tr, taskBucket);
+			}
+			// Finishing every dispatched block must still leave the continuation holding the batch open.
+			ASSERT(!(co_await batch->isSet(tr)));
+			co_await futureBucket->unpack(continuation->params[Task::reservedTaskParamKeyDone])->set(tr, taskBucket);
+			ASSERT(co_await batch->isSet(tr));
+			break;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr->onError(err);
+	}
+	co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->clear(testSpace.range());
+		makeRestoreTag(tagName).clear(tr);
+		restore.clear(tr);
+		return Void();
+	});
+	TraceEvent("RestoreDispatchRecoveryTestPassed")
+	    .detail("AgeFailures", ageFailures)
+	    .detail("CommittedTaskLimit", committedLimit);
+}
 
 struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 	static StringRef name;
