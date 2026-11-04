@@ -355,6 +355,10 @@ Future<Void> BackupContainerLocalDirectory::deleteContainer(int* pNumDeleted) {
 	});
 }
 
+std::string BackupContainerLocalDirectory::getLocation() const {
+	return "file://" + m_path;
+}
+
 TEST_CASE("/backup/containers/localdir/rejectsEscapingPaths") {
 	// Nothing is read or written: every name below is rejected before the container directory is touched.
 	auto bc = makeReference<BackupContainerLocalDirectory>(
