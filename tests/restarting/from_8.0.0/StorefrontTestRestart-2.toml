@@ -1,0 +1,13 @@
+[configuration]
+storageEngineExcludeTypes=[3,5]
+
+[[test]]
+testTitle="StorefrontTest"
+runSetup=false
+
+    [[test.workload]]
+    testName="Storefront"
+    actorsPerClient=10
+    transactionsPerSecond=200
+    itemCount=10000
+    maxOrderSize=4
