@@ -306,7 +306,7 @@ private:
 		std::function<R()> func;
 		ErrorOr<R> result;
 		Promise<Void> done;
-		explicit Dispatch(std::function<R()> const& func) : func(func) {}
+		explicit Dispatch(std::function<R()> func) : func(std::move(func)) {}
 	};
 
 	int fd, flags;
@@ -524,7 +524,8 @@ private:
 
 	template <class R>
 	static Future<R> dispatch_impl(std::function<R()> func, ExplicitVoid = {}) {
-		Dispatch<R> data(func);
+		// Coroutine parameters can outlive completion while the Future remains referenced.
+		Dispatch<R> data(std::move(func));
 		TaskPriority taskID = g_network->getCurrentTask();
 
 		eio_req* r = eio_custom(
