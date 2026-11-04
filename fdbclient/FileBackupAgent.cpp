@@ -282,6 +282,24 @@ KeyBackedTag::KeyBackedTag(std::string tagName, StringRef tagMapPrefix)
   : KeyBackedProperty<UidAndAbortedFlagT>(TagUidMap(tagMapPrefix).getProperty(tagName)), tagName(tagName),
     tagMapPrefix(tagMapPrefix) {}
 
+Future<BackupConfig::LogProgress> BackupConfig::getLogProgress(Reference<ReadYourWritesTransaction> tr,
+                                                               ReadLegacyLogMode readLegacy) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	auto logEnd = latestLogEndVersion().get(tr);
+	auto workerEnd = latestBackupWorkerSavedVersion().get(tr);
+	KeyBackedProperty<bool> legacyPartitioned = configSpace.pack("partitionedLogEnabled"_sr);
+	Optional<MutationLogType> type = co_await mutationLogType().get(tr);
+	// 7.4 stored the log mode as a tuple-encoded boolean. A worker can publish a late checkpoint
+	// after the backup stops, so status only uses this fallback for a running backup.
+	if (readLegacy && !type.present() && (co_await legacyPartitioned.getD(tr))) {
+		type = MutationLogType::PARTITIONED_LOG;
+	}
+	co_await (success(logEnd) && success(workerEnd));
+	co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT),
+		                   type == MutationLogType::PARTITIONED_LOG ? workerEnd.get() : logEnd.get() };
+}
+
 // Lists all backups and find if any partitioned backup is running.
 Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -7540,15 +7558,16 @@ public:
 					statusDoc.setKey("Running", BackupAgentBase::isRunnable(backupState));
 					doc.setKey("Status", statusDoc);
 
-					Future<Void> done = Void();
+					Future<BackupConfig::LogProgress> logs;
 
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						Reference<IBackupContainer> bc;
 						TimestampedVersion latestRestorable;
+						logs = config.getLogProgress(tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
 
-						co_await (
-						    store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))) &&
-						    store(bc, config.backupContainer().getOrThrow(tr)));
+						co_await (store(latestRestorable,
+						                getTimestampedVersion(tr, config.getLatestRestorableVersion(tr, logs))) &&
+						          store(bc, config.backupContainer().getOrThrow(tr)));
 						bc = fileBackup::getBackupContainerWithProxy(bc);
 
 						doc.setKey("Restorable", latestRestorable.present());
@@ -7586,7 +7605,7 @@ public:
 						    store(snapshotBegin, getTimestampedVersion(tr, config.snapshotBeginVersion().get(tr))) &&
 						    store(snapshotTargetEnd,
 						          getTimestampedVersion(tr, config.snapshotTargetEndVersion().get(tr))) &&
-						    store(latestLogEnd, getTimestampedVersion(tr, config.latestLogEndVersion().get(tr))) &&
+						    store(latestLogEnd, getTimestampedVersion(tr, logs.get().logEnd)) &&
 						    store(latestSnapshotEnd,
 						          getTimestampedVersion(tr, config.latestSnapshotEndVersion().get(tr))) &&
 						    store(snapshotLastDispatch,
@@ -7761,8 +7780,9 @@ public:
 					Reference<IBackupContainer> bc;
 					Optional<Version> latestRestorableVersion;
 					Version recentReadVersion{ 0 };
+					auto logs = config.getLogProgress(tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
 
-					co_await (store(latestRestorableVersion, config.getLatestRestorableVersion(tr)) &&
+					co_await (store(latestRestorableVersion, config.getLatestRestorableVersion(tr, logs)) &&
 					          store(bc, config.backupContainer().getOrThrow(tr)) &&
 					          store(recentReadVersion, tr->getReadVersion()));
 					bc = fileBackup::getBackupContainerWithProxy(bc);
@@ -7836,7 +7856,7 @@ public:
 						Version snapshotBeginVersion{ 0 };
 						Version snapshotTargetEndVersion{ 0 };
 						Optional<Version> latestSnapshotEndVersion;
-						Optional<Version> latestLogEndVersion;
+						Optional<Version> latestLogEndVersion = logs.get().logEnd;
 						Optional<int64_t> logBytesWritten;
 						Optional<int64_t> rangeBytesWritten;
 						Optional<int64_t> latestSnapshotEndVersionTimestamp;
@@ -7850,7 +7870,6 @@ public:
 						          store(snapshotInterval, config.snapshotIntervalSeconds().getOrThrow(tr)) &&
 						          store(logBytesWritten, config.logBytesWritten().get(tr)) &&
 						          store(rangeBytesWritten, config.rangeBytesWritten().get(tr)) &&
-						          store(latestLogEndVersion, config.latestLogEndVersion().get(tr)) &&
 						          store(latestSnapshotEndVersion, config.latestSnapshotEndVersion().get(tr)) &&
 						          store(stopWhenDone, config.stopWhenDone().getOrThrow(tr)));
 

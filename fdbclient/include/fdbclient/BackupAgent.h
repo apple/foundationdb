@@ -49,6 +49,7 @@ FDB_BOOLEAN_PARAM(DeleteData);
 FDB_BOOLEAN_PARAM(SetValidation);
 FDB_BOOLEAN_PARAM(PartialBackup);
 FDB_BOOLEAN_PARAM(ReadLowPriority);
+FDB_BOOLEAN_PARAM(ReadLegacyLogMode);
 
 extern Optional<std::string> fileBackupAgentProxy;
 
@@ -945,24 +946,27 @@ public:
 
 	KeyBackedProperty<Key> destUidValue() { return configSpace.pack(__FUNCTION__sr); }
 
+	struct LogProgress {
+		MutationLogType type;
+		Optional<Version> logEnd;
+	};
+
+	Future<LogProgress> getLogProgress(Reference<ReadYourWritesTransaction> tr, ReadLegacyLogMode readLegacy);
+
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-		auto lastLog = latestLogEndVersion().get(tr);
+		return getLatestRestorableVersion(tr, getLogProgress(tr, ReadLegacyLogMode::False));
+	}
+
+	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr,
+	                                                     Future<LogProgress> logs) {
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
-		auto mutLogType = mutationLogType().get(tr);
-		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
 		auto incrementalBackup = incrementalBackupOnly().get(tr);
 		auto snapMode = snapshotMode().get(tr);
 		auto bulkDumpSnapshot = bulkDumpSnapshotEndVersion().get(tr);
-		return map(success(lastLog) && success(firstSnapshot) && success(mutLogType) && success(workerVersion) &&
-		               success(incrementalBackup) && success(snapMode) && success(bulkDumpSnapshot),
+		return map(success(logs) && success(firstSnapshot) && success(incrementalBackup) && success(snapMode) &&
+		               success(bulkDumpSnapshot),
 		           [=](Void) -> Optional<Version> {
-			           MutationLogType mutationLogType =
-			               mutLogType.get().present() ? mutLogType.get().get() : MutationLogType::DEFAULT;
-			           // The latest log greater than the oldest snapshot is the restorable version
-			           Optional<Version> logVersion =
-			               mutationLogType == MutationLogType::PARTITIONED_LOG ? workerVersion.get() : lastLog.get();
+			           Optional<Version> logVersion = logs.get().logEnd;
 
 			           // For mode=BOTH (2), require both rangefile and bulkdump snapshots to be complete
 			           int mode = snapMode.get().present() ? snapMode.get().get() : 0;
