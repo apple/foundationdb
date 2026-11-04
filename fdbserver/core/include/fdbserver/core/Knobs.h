@@ -487,9 +487,8 @@ public:
 	bool DD_BULKDUMP_USE_REMOTE_REGION; // dump from the remote region instead of the primary. The dumping server
 	                                    // uploads the files, so its region must reach the destination. Ignored
 	                                    // with usable_regions == 1, where the remote holds no storage servers.
-	double DD_BULKDUMP_NO_TARGET_REPLICA_FAIL_SEC; // fail a bulk dump job when the number of ranges skipped for
-	                                               // lacking a replica in the dumping DC has not dropped for this long.
-	                                               // 0 never fails the job.
+	double DD_BULKDUMP_NO_TARGET_REPLICA_FAIL_SEC; // fail a job whose ranges skipped for lacking a replica in the
+	                                               // dumping DC have not dropped in number for this long. 0 disables.
 	int SS_SERVE_BULKDUMP_PARALLELISM; // the number of bulk dump tasks that can concurrently happen at a SS
 	int64_t SS_BULKDUMP_BATCH_BYTES; // the max bytes when SS creates a batch to dump
 	int SS_BULKLOAD_GETRANGE_BATCH_SIZE; // the max number of keys to scan before do context switch

@@ -30,7 +30,7 @@ enum class BulkDumpPhase : uint8_t {
 	Invalid = 0,
 	Submitted = 1,
 	Complete = 2,
-	Error = 3, // Set by DD on ranges it has given up dumping. The job cannot complete; `bulkdump cancel` clears it.
+	Error = 3, // Set by DD on ranges it has given up dumping; the job cannot complete.
 };
 
 // Definition of bulkdump metadata

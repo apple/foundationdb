@@ -385,14 +385,13 @@ struct DDBulkLoadJobManager {
 	bool isValid() const { return jobState.isValid(); }
 };
 
-// Decides when ranges that lack a replica in the dumping DC have stayed unplaceable long enough to fail the job.
 // The window restarts whenever the skipped count falls below its lowest value so far, so a DC that is catching up
 // (e.g. after usable_regions goes from 1 to 2) is not failed while it is making progress.
 struct BulkDumpSkipTracker {
 	Optional<double> stalledSince;
-	int lowestSkipped = 0;
+	size_t lowestSkipped = 0;
 
-	bool shouldFail(int skipped, double currentTime, double failAfterSec) {
+	bool shouldFail(size_t skipped, double currentTime, double failAfterSec) {
 		if (skipped == 0) {
 			stalledSince.reset();
 			return false;
@@ -2758,34 +2757,31 @@ Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 	self->bulkDumpParallelismLimitor.decrementTaskCounter();
 }
 
-// Persists the Error phase over `ranges` so the failure is visible to pollers and survives a DD restart.
+// Marks ranges Error in the metadata so the failure is visible to pollers and survives a DD restart.
 Future<Void> markBulkDumpRangesFailed(Reference<DataDistributor> self, std::map<Key, KeyRange> rangeMap) {
 	const BulkDumpState errorState = self->bulkDumpJobManager.jobState.generateErrorMetadata();
 	const UID jobId = errorState.getJobId();
-	std::vector<KeyRange> ranges;
-	for (const auto& [begin, range] : rangeMap) {
-		ranges.push_back(range);
-	}
 	constexpr int rangesPerTransaction = 100;
 	Transaction tr(self->txnProcessor->context());
-	int nextRange = 0;
-	while (nextRange < static_cast<int>(ranges.size())) {
+	auto batchBegin = rangeMap.begin();
+	while (batchBegin != rangeMap.end()) {
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			const int batchEnd = std::min(nextRange + rangesPerTransaction, static_cast<int>(ranges.size()));
-			for (int i = nextRange; i < batchEnd; ++i) {
-				RangeResult current = co_await krmGetRanges(&tr, bulkDumpPrefix, ranges[i]);
+			auto it = batchBegin;
+			for (int n = 0; n < rangesPerTransaction && it != rangeMap.end(); ++n, ++it) {
+				const KeyRange& range = it->second;
+				RangeResult current = co_await krmGetRanges(&tr, bulkDumpPrefix, range);
 				for (int j = 0; j < static_cast<int>(current.size()) - 1; ++j) {
 					if (current[j].value.empty() || decodeBulkDumpState(current[j].value).getJobId() != jobId) {
 						throw bulkdump_task_outdated();
 					}
 				}
-				co_await krmSetRange(&tr, bulkDumpPrefix, ranges[i], bulkDumpStateValue(errorState));
+				co_await krmSetRange(&tr, bulkDumpPrefix, range, bulkDumpStateValue(errorState));
 			}
 			co_await tr.commit();
-			nextRange = batchEnd;
+			batchBegin = it;
 			tr.reset();
 			continue;
 		} catch (Error& e) {
