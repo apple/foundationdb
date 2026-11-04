@@ -72,6 +72,26 @@ class RestartTestPolicyTest(unittest.TestCase):
     def test_unversioned_restarts(self):
         self.assert_selection("same_version", "7.4.3", ("new", "new"))
 
+    def test_required_release_cannot_fall_back_to_current(self):
+        for directory, binary_version in (
+            ("from_7.4.3_until_7.4.4", "7.4.8"),
+            ("to_7.4.8_until_7.4.9", "7.4.3"),
+            ("same_version", "7.4.3"),
+        ):
+            with self.subTest(directory=directory, binary_version=binary_version):
+                with patch.object(
+                    TestRunner.subprocess,
+                    "check_output",
+                    return_value=f"FoundationDB (v{binary_version})\n".encode(),
+                ):
+                    with self.assertRaises(ValueError):
+                        TestRunner.RestartTestPolicy(
+                            f"/tests/restarting/{directory}/Restart-1.toml",
+                            "old",
+                            "new",
+                            required_version="7.4.3",
+                        )
+
 
 if __name__ == "__main__":
     unittest.main()

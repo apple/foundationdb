@@ -460,6 +460,20 @@ if(WITH_PYTHON)
     add_fdb_test(
       TEST_FILES restarting/to_8.0.0/CycleTestRestart-1.toml
       restarting/to_8.0.0/CycleTestRestart-2.toml)
+
+    # Each range contains one released patch. Reuse the existing workloads so
+    # both CTest and Joshua exercise the same restart in each direction.
+    foreach(version_range IN ITEMS 7.4.3_until_7.4.4 7.4.8_until_7.4.9)
+      add_fdb_test(RESTART_VARIANT from_${version_range}
+        TEST_FILES restarting/from_7.4.0/SnapTestSimpleRestart-1.toml
+                   restarting/from_7.4.0/SnapTestSimpleRestart-2.toml)
+    endforeach()
+    add_fdb_test(RESTART_VARIANT to_7.4.3_until_7.4.4
+      TEST_FILES restarting/to_7.4.5/CycleTestRestart-1.toml
+                 restarting/to_7.4.3_until_7.4.4/CycleTestRestart-2.toml)
+    add_fdb_test(RESTART_VARIANT to_7.4.8_until_7.4.9
+      TEST_FILES restarting/to_7.4.5/CycleTestRestart-1.toml
+                 restarting/to_7.4.5/CycleTestRestart-2.toml)
   endif()
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
