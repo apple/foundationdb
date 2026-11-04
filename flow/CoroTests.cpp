@@ -1410,10 +1410,18 @@ AsyncResult<std::unique_ptr<int>> asyncUniqueInt(Future<Void> signal, int value)
 	co_return std::make_unique<int>(value);
 }
 
-template <class Input>
-concept CanJoin = requires(Input input) { join(std::move(input)); };
+struct CopyableWithDeletedMove {
+	CopyableWithDeletedMove() = default;
+	CopyableWithDeletedMove(const CopyableWithDeletedMove&) = default;
+	CopyableWithDeletedMove(CopyableWithDeletedMove&&) = delete;
+};
+
+template <class... Inputs>
+concept CanJoin = requires(Inputs... inputs) { join(std::move(inputs)...); };
 
 static_assert(!CanJoin<Future<std::unique_ptr<int>>>);
+static_assert(!CanJoin<Future<CopyableWithDeletedMove>, AsyncResult<std::unique_ptr<int>>>);
+static_assert(!CanJoin<AsyncResult<CopyableWithDeletedMove>>);
 
 AsyncResult<int> failingAsyncResultInt(Future<Void> signal) {
 	co_await signal;
@@ -2169,6 +2177,69 @@ void assertNoThrowOnCancelDestroyedAfterFirstWait(NoThrowOnCancelRecorder const&
 	ASSERT_EQ(recorder.count(NoThrowOnCancelEvent::AfterWait), 0);
 }
 
+template <class Result, class NextWait>
+Result failJoinSibling(NoThrowOnCancelRecorder& recorder,
+                       Future<Void> start,
+                       Promise<Void> sibling,
+                       NextWait nextWait,
+                       NoThrowOnCancel = {}) {
+	recorder.record(NoThrowOnCancelEvent::Start);
+	NoThrowOnCancelLifetimeTracker tracker(recorder);
+	try {
+		co_await start;
+		// join drops its last handle to this producer inside sendError().
+		sibling.sendError(io_error());
+		recorder.record(NoThrowOnCancelEvent::WaitReturned);
+		if (nextWait.isValid()) {
+			co_await nextWait;
+			recorder.record(NoThrowOnCancelEvent::AfterWait);
+		}
+	} catch (Error&) {
+		recorder.record(NoThrowOnCancelEvent::CatchBlock);
+	}
+	co_return;
+}
+
+template <class Result>
+void checkJoinDropsRunningProducer() {
+	auto check = [](auto nextWait) {
+		NoThrowOnCancelRecorder recorder;
+		Promise<Void> start;
+		Promise<Void> sibling;
+		auto joined = join(failJoinSibling<Result>(recorder, start.getFuture(), sibling, std::move(nextWait)),
+		                   sibling.getFuture());
+		ASSERT(!joined.isReady());
+		start.send(Void());
+		ASSERT(joined.isError());
+		ASSERT_EQ(joined.getError().code(), error_code_io_error);
+		assertNoThrowOnCancelDestroyedAfterFirstWait(recorder);
+	};
+	Promise<Void> pending;
+	check(Future<Void>());
+	check(Future<Void>(Void()));
+	check(pending.getFuture());
+	check(delayedAsyncResultVoid(Void()));
+	check(delayedAsyncResultVoid(pending.getFuture()));
+	ASSERT_EQ(pending.getFutureReferenceCount(), 0);
+}
+
+template <class Result>
+void checkCancellationDiscardsReturnedValue() {
+	auto producer = [](Future<Void> start, Result& result, NoThrowOnCancel = {}) -> Result {
+		co_await start;
+		result.cancel();
+		co_return LifetimeTracked{};
+	};
+	const int initialLiveCount = LifetimeTracked::liveCount;
+	Promise<Void> start;
+	Result result;
+	result = producer(start.getFuture(), result);
+	start.send(Void());
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), error_code_actor_cancelled);
+	ASSERT_EQ(LifetimeTracked::liveCount, initialLiveCount);
+}
+
 template <typename T>
 Future<Void> simple_await_test(std::stringstream& ss, Future<T> f) {
 	ss << "start. ";
@@ -2910,6 +2981,12 @@ TEST_CASE("/flow/coro/noThrowOnCancel/normalCompletionValue") {
 	return Void();
 }
 
+TEST_CASE("/flow/coro/noThrowOnCancel/reentrantCancelDiscardsReturnedValue") {
+	checkCancellationDiscardsReturnedValue<Future<LifetimeTracked>>();
+	checkCancellationDiscardsReturnedValue<AsyncResult<LifetimeTracked>>();
+	return Void();
+}
+
 TEST_CASE("/flow/coro/noThrowOnCancel/awaitedFutureErrorRunsCatch") {
 	NoThrowOnCancelRecorder recorder;
 	Promise<Void> signal;
@@ -2968,6 +3045,53 @@ TEST_CASE("/flow/coro/noThrowOnCancel/futureStreamCancel") {
 	ASSERT(f.isReady() && f.isError() && f.getError().code() == error_code_actor_cancelled);
 	ASSERT(stream.getFutureReferenceCount() == 0);
 	assertNoThrowOnCancelDestroyedAtWait(recorder);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/noThrowOnCancel/cancelDuringStreamDelivery") {
+	class OnCopy {
+	public:
+		explicit OnCopy(std::function<void()> action) : action(std::move(action)) {}
+		OnCopy(const OnCopy& other) : action(other.action) { action(); }
+		OnCopy(OnCopy&&) noexcept = default;
+		OnCopy& operator=(const OnCopy&) = default;
+		OnCopy& operator=(OnCopy&&) noexcept = default;
+
+	private:
+		std::function<void()> action;
+	};
+
+	auto consume = [](FutureStream<OnCopy> input, NoThrowOnCancel = {}) -> Future<Void> {
+		co_await input;
+		ASSERT(false);
+	};
+	PromiseStream<OnCopy> stream;
+	auto waiter = consume(stream.getFuture());
+	const OnCopy value([&] {
+		waiter.cancel();
+		stream.sendError(end_of_stream());
+		ASSERT(!waiter.isReady());
+	});
+	stream.send(value);
+	ASSERT(waiter.isError());
+	ASSERT_EQ(waiter.getError().code(), error_code_actor_cancelled);
+	ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+
+	PromiseStream<OnCopy> throwingStream;
+	auto failedWaiter = consume(throwingStream.getFuture());
+	const OnCopy throwingValue([&] {
+		throwingStream.sendError(end_of_stream());
+		throw io_error();
+	});
+	try {
+		throwingStream.send(throwingValue);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+	ASSERT(failedWaiter.isError());
+	ASSERT_EQ(failedWaiter.getError().code(), error_code_io_error);
+	ASSERT_EQ(throwingStream.getFuture().getError().code(), error_code_end_of_stream);
 	return Void();
 }
 
@@ -3300,6 +3424,12 @@ TEST_CASE("/flow/coro/join/reentrantErrorDuringCopy") {
 		ASSERT_EQ(joined.getError().code(), error_code_io_error);
 	}
 	ASSERT_EQ(LifetimeTracked::liveCount, initialLiveCount);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/join/dropRunningNoThrowOnCancelProducer") {
+	checkJoinDropsRunningProducer<Future<Void>>();
+	checkJoinDropsRunningProducer<AsyncResult<Void>>();
 	return Void();
 }
 

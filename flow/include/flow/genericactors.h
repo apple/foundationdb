@@ -1483,9 +1483,10 @@ Future<bool> shortCircuitAny(std::vector<Future<bool>> f);
 
 namespace coro {
 template <class Input>
-concept JoinInput = std::same_as<Input, AsyncResult<typename Input::Element>> ||
-                    (std::same_as<Input, Future<typename Input::Element>> &&
-                     std::constructible_from<typename Input::Element, const typename Input::Element&>);
+concept JoinInput = std::is_move_constructible_v<typename Input::Element> &&
+                    (std::same_as<Input, AsyncResult<typename Input::Element>> ||
+                     (std::same_as<Input, Future<typename Input::Element>> &&
+                      std::constructible_from<typename Input::Element, const typename Input::Element&>));
 
 template <std::size_t I, JoinInput Input, class Slots>
 Future<Void> collectJoinInput(Input arg, Reference<ReferencedObject<Slots>> resultSlots, ExplicitVoid = {}) {
@@ -1514,7 +1515,8 @@ Future<std::tuple<typename Inputs::Element...>> joinImpl(std::tuple<Inputs...> a
 } // namespace coro
 
 // Collect one value per input in argument order, including Void. Fail on the first observed error.
-// Future payloads are copied. Move-only payloads require AsyncResult, and named AsyncResults must be moved in.
+// Each payload T must be constructible from T&&. Future payloads are copied from const T&.
+// Move-only payloads require AsyncResult, and named AsyncResults must be moved in.
 template <coro::JoinInput... Inputs>
     requires(sizeof...(Inputs) > 0)
 [[nodiscard]] auto join(Inputs... inputs) -> Future<std::tuple<typename Inputs::Element...>> {

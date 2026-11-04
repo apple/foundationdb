@@ -524,9 +524,8 @@ unwinds through the coroutine body — running destructors, entering catch
 blocks — until it reaches `unhandled_exception()`, which stores the error on
 the SAV.
 
-If the coroutine is not waiting (between co_await points, which shouldn't
-happen in cooperative scheduling), the flag is just set. The next
-`await_ready()` will detect it.
+A synchronous callback can request cancellation while the coroutine is running
+between awaits. In that case the next `await_ready()` observes the flag.
 
 ### `Uncancellable` coroutines
 
@@ -542,27 +541,12 @@ Uses `NoThrowOnCancelCoroActor<T>` instead of `CoroActor`. Key differences:
    (via `new ActorType()` in the promise). This is necessary because cancel
    destroys the frame while the SAV must survive for Future observers.
 
-2. **`cancel()` destroys the frame directly** instead of resuming:
-
-```cpp
-void cancel() override {
-    if (!canBeSet()) return;
-
-    if (cancelHandler) {
-        // Detach the awaiter's callback before destroying the frame
-        cancelHandler->cancelWait();
-    }
-
-    destroyFrame();  // handle.destroy() — RAII destructors run
-
-    if (futures) {
-        sendErrorAndDelPromiseRef(actor_cancelled());
-    } else {
-        promises = 0;
-        delete this;
-    }
-}
-```
+2. **Cancellation requires a safe suspension point.** A registered wait can be
+   detached and its frame destroyed immediately. If the coroutine is executing,
+   `cancel()` records the request. The next Flow await forces suspension, even
+   for a ready input, so the frame can be destroyed before installing a new
+   waiter. If the coroutine returns or throws first, observers receive
+   `actor_cancelled` and any constructed return value is destroyed.
 
 3. **`final_suspend` returns `false`** from `await_suspend`. After completing
    the SAV and clearing the handle, the frame auto-destructs (the coroutine was
@@ -603,9 +587,9 @@ which manages `producerHandle` and `producerWaitState` directly rather than
 inheriting from Actor.
 
 Cancellation for AsyncResult coroutines goes through
-`AsyncResultState::cancelProducer()`, which mirrors the Actor cancel logic:
-either resumes the producer to throw `actor_cancelled()` or (with
-`noThrowOnCancel`) destroys the producer frame directly.
+`AsyncResultState::cancelProducer()`. A suspended producer normally resumes
+and throws `actor_cancelled()`. A `NoThrowOnCancel` producer follows the same
+safe-destruction rules as a `Future` coroutine.
 
 ---
 

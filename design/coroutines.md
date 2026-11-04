@@ -83,7 +83,8 @@ order matters.
 
 Use `join(...)` when the next step needs all the results. It accepts one or more `Future<T>` or `AsyncResult<T>`
 arguments and returns a `Future<std::tuple<...>>`. Each argument contributes one value in argument order, including
-a `Void` value for a completion-only input. A shared `Future<T>` supplies its value by copy from `const T&`.
+a `Void` value for a completion-only input. Each `T` must be constructible from `T&&` to assemble the tuple.
+A shared `Future<T>` supplies its value by copy from `const T&`.
 Use `AsyncResult<T>` for move-only values, and pass a named `AsyncResult` with `std::move` to transfer ownership.
 
 ```c++
@@ -294,7 +295,9 @@ Future<Void> waitForSignal(Future<Void> signal, NoThrowOnCancel = {}) {
 }
 ```
 
-Cancellation runs normal RAII cleanup for locals in scope, but it does not enter the coroutine's `catch` handlers.
+If synchronous callbacks request cancellation while the coroutine is running, destruction waits until its next
+Flow await (even an already-ready one) or completion. Cancellation runs normal RAII cleanup for locals in scope,
+but it does not enter the coroutine's `catch` handlers.
 Observers of its returned future still receive `actor_cancelled`. `NoThrowOnCancel` and `Uncancellable` are mutually
 exclusive, and neither marker is supported by `AsyncGenerator`.
 
