@@ -64,8 +64,8 @@
 #elif defined(__FreeBSD__)
 #define INIT_SEG __attribute__((init_priority(1000)))
 #elif defined(__APPLE__)
-#pragma message "init_priority is not supported on this platform; will this be a problem?"
-#define INIT_SEG
+#define INIT_SEG __attribute__((init_priority(1000)))
+// WARNING: init_priority for macOS linker is just "within single module" not "entire application"
 #else
 #error Where am I?
 #endif

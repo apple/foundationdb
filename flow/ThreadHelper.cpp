@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+#include <atomic>
 #include <thread>
+#include <vector>
 
 #include "flow/flow.h"
 #include "flow/network.h"
@@ -71,4 +73,140 @@ TEST_CASE("/flow/safeThreadFutureToFuture/Cancel") {
 		ASSERT(e.code() == error_code_actor_cancelled);
 	}
 	thread.join();
+}
+
+namespace {
+
+struct OnMainThreadLifetimeResult final : ThreadSingleAssignmentVar<int> {
+	Future<int> operation;
+	Future<Void> const* completion = nullptr;
+	bool& detachedBeforeRelease;
+	bool& destroyed;
+
+	OnMainThreadLifetimeResult(Future<int> operation, bool& detachedBeforeRelease, bool& destroyed)
+	  : operation(std::move(operation)), detachedBeforeRelease(detachedBeforeRelease), destroyed(destroyed) {}
+
+	void delref() override {
+		if (isReady() && completion->getPromiseReferenceCount() != 0) {
+			// Keep an observer reference so this is safe even on the broken implementation. Before dropping the
+			// coroutine's result reference, only that observer may still own its completion future. Otherwise a
+			// client can destroy the result and release cancelFuture while final_suspend() is using the same SAV.
+			detachedBeforeRelease = completion->getFutureReferenceCount() == 1;
+		}
+		ThreadSingleAssignmentVar<int>::delref();
+	}
+
+	~OnMainThreadLifetimeResult() override { destroyed = true; }
+};
+
+void testOnMainThreadLifetime(bool ready, bool error, bool cancel, bool releaseEarly) {
+	Promise<Void> signal;
+	Promise<int> operation;
+	bool detachedBeforeRelease = false;
+	bool destroyed = false;
+	Future<Void> completion;
+	auto* result = new OnMainThreadLifetimeResult(operation.getFuture(), detachedBeforeRelease, destroyed);
+	ThreadFuture<int> client(result);
+	result->addref(); // Owned by doOnMainThread.
+	completion = internal_thread_helper::doOnMainThread<int>(
+	    signal.getFuture(),
+	    { [](ThreadSingleAssignmentVar<int>* result) {
+		     return static_cast<OnMainThreadLifetimeResult*>(result)->operation;
+	     },
+	      [](ThreadSingleAssignmentVar<int>* result) {
+		      static_cast<OnMainThreadLifetimeResult*>(result)->operation = Future<int>();
+	      } },
+	    result);
+	result->completion = &completion;
+	result->setCancel(Future<Void>(completion));
+	if (releaseEarly) {
+		client = ThreadFuture<int>();
+	}
+	auto finish = [&] {
+		if (cancel) {
+			completion.cancel();
+		} else if (error) {
+			operation.sendError(operation_failed());
+		} else {
+			operation.send(42);
+		}
+	};
+	if (ready) {
+		finish();
+	}
+	signal.send(Void());
+	if (!ready) {
+		finish();
+	}
+	ASSERT(completion.isReady() && !completion.isError());
+	ASSERT(detachedBeforeRelease);
+	ASSERT(destroyed == releaseEarly);
+	if (!releaseEarly) {
+		if (cancel || error) {
+			ASSERT(client.isError());
+			ASSERT(client.getError().code() == (cancel ? actor_cancelled() : operation_failed()).code());
+		} else {
+			ASSERT(client.get() == 42);
+		}
+		client.cancel();
+		ASSERT(destroyed);
+	}
+}
+
+Future<int> onMainThreadTestOperation(int i) {
+	if (i % 2) {
+		co_await delay(0);
+	}
+	if (i % 3 == 0) {
+		throw operation_failed();
+	}
+	co_return 42;
+}
+
+} // namespace
+
+TEST_CASE("/flow/onMainThread/CompletionLifetime") {
+	for (bool ready : { false, true }) {
+		for (bool releaseEarly : { false, true }) {
+			testOnMainThreadLifetime(ready, false, false, releaseEarly);
+			testOnMainThreadLifetime(ready, true, false, releaseEarly);
+			testOnMainThreadLifetime(ready, false, true, releaseEarly);
+		}
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/onMainThread/ConcurrentDestroy") {
+	if (g_network->isSimulated()) {
+		co_return;
+	}
+	std::atomic<int> completed{ 0 };
+	std::atomic<int> failures{ 0 };
+	std::vector<std::thread> workers;
+	workers.reserve(4);
+	for (int worker = 0; worker < 4; ++worker) {
+		workers.emplace_back([&] {
+			for (int i = 0; i < 1000; ++i) {
+				auto result = onMainThread([i] { return onMainThreadTestOperation(i); });
+				if (i % 5 == 0) {
+					result.cancel(); // Also exercise destruction before the operation completes.
+					continue;
+				}
+				result.blockUntilReady();
+				if (i % 3 == 0 ? !result.isError() || result.getError().code() != error_code_operation_failed
+				               : result.isError() || result.get() != 42) {
+					++failures;
+				}
+				result.cancel(); // Mirrors fdb_future_destroy() on a client thread.
+			}
+			++completed;
+		});
+	}
+	while (completed.load() != 4) {
+		co_await delay(0.001);
+	}
+	for (auto& worker : workers) {
+		worker.join();
+	}
+	ASSERT(failures.load() == 0);
 }
