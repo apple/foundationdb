@@ -62,14 +62,15 @@ ACTOR Future<std::pair<Standalone<VectorRef<KeyValueRef>>, Version>> readDatabas
 
 ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> readMutations(Database cx,
                                                                           Key rangeID,
-                                                                          Promise<Version> end) {
-	state Version begin = 0;
+                                                                          Promise<Version> end,
+                                                                          Version begin = 0,
+                                                                          KeyRange range = normalKeys) {
 	state Standalone<VectorRef<MutationsAndVersionRef>> output;
 	loop {
 		try {
 			state Reference<ChangeFeedData> results = makeReference<ChangeFeedData>();
 			state Future<Void> stream =
-			    cx->getChangeFeedStream(results, rangeID, begin, std::numeric_limits<Version>::max(), normalKeys);
+			    cx->getChangeFeedStream(results, rangeID, begin, std::numeric_limits<Version>::max(), range);
 			loop {
 				choose {
 					when(Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(results->mutations.getFuture())) {
@@ -167,15 +168,20 @@ bool compareData(Standalone<VectorRef<KeyValueRef>> source, Standalone<VectorRef
 struct ChangeFeedsWorkload : TestWorkload {
 	static constexpr auto NAME = "ChangeFeeds";
 	double testDuration;
+	bool testStreamReadyTimeout;
 	Future<Void> client;
 
 	ChangeFeedsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		testStreamReadyTimeout = getOption(options, "testStreamReadyTimeout"_sr, false);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
+			if (testStreamReadyTimeout) {
+				return timeoutError(checkStreamReadyTimeout(cx->clone()), testDuration);
+			}
 			client = changeFeedClient(cx->clone(), this);
 			return delay(testDuration);
 		}
@@ -186,6 +192,86 @@ struct ChangeFeedsWorkload : TestWorkload {
 		return true;
 	}
 	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	ACTOR static Future<Version> writeMarker(Database cx, Key key, Value value) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.set(key, value);
+				wait(tr.commit());
+				return tr.getCommittedVersion();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> checkStreamReadyTimeout(Database cx) {
+		state Key key = "changeFeedMarker"_sr;
+		state KeyRange range = singleKeyRange(key);
+		state Key feedID = "stalledReader"_sr;
+		wait(updateChangeFeed(cx, feedID, ChangeFeedStatus::CHANGE_FEED_CREATE, range));
+		state Transaction tr(cx);
+		state Version begin = wait(tr.getReadVersion());
+		KeyRangeLocationInfo loc = wait(getKeyLocation_internal(
+		    cx, TenantInfo(), key, SpanContext(), {}, UseProvisionalProxies::False, Reverse::False, begin));
+		// Local streams bypass the transport byte limit.
+		int i = 0;
+		while (i < loc.locations->size() && loc.locations->getInterface(i).changeFeedStream.getEndpoint().isLocal()) {
+			++i;
+		}
+		ASSERT(i < loc.locations->size());
+		state StorageServerInterface ss = loc.locations->getInterface(i);
+		wait(success(ss.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(begin))));
+		ChangeFeedStreamRequest req;
+		req.id = deterministicRandom()->randomUniqueID();
+		req.rangeID = feedID;
+		req.range = range;
+		req.begin = begin;
+		req.end = MAX_VERSION;
+		req.canReadPopped = false;
+		req.replyBufferSize = 1;
+		state ReplyPromiseStream<ChangeFeedStreamReply> stalled = ss.changeFeedStream.getReplyStream(req);
+		state Future<ErrorOr<Void>> streamError = errorOr(stalled.onError());
+		state Version resume;
+		loop {
+			ChangeFeedStreamReply reply = waitNext(stalled.getFuture());
+			if (reply.atLatestVersion) {
+				resume = reply.mutations.back().version + 1;
+				break;
+			}
+		}
+
+		state Version first = wait(writeMarker(cx, key, "first"_sr));
+		// Keep the first reply queued and unacknowledged. The second write must then block the sender.
+		while (stalled.size() == 0) {
+			wait(delay(0.01));
+		}
+		state Version second = wait(writeMarker(cx, key, "second"_sr));
+		ChangeFeedVersionUpdateReply pinned =
+		    wait(ss.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(second)));
+		ASSERT(pinned.version < second);
+		ErrorOr<Void> stopped = wait(streamError);
+		ASSERT(stopped.isError() && stopped.getError().code() == error_code_connection_failed);
+		ChangeFeedVersionUpdateReply released =
+		    wait(ss.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(second)));
+		ASSERT(released.version >= second);
+
+		Promise<Version> end;
+		end.send(second);
+		Standalone<VectorRef<MutationsAndVersionRef>> replay = wait(readMutations(cx, feedID, end, resume, range));
+		int count = 0;
+		for (const auto& row : replay) {
+			for (const auto& m : row.mutations) {
+				ASSERT(m.type == MutationRef::SetValue && m.param1 == key);
+				ASSERT(row.version == (count == 0 ? first : second));
+				ASSERT(m.param2 == (count == 0 ? "first"_sr : "second"_sr));
+				++count;
+			}
+		}
+		ASSERT(count == 2);
+		return Void();
+	}
 
 	ACTOR Future<Void> changeFeedClient(Database cx, ChangeFeedsWorkload* self) {
 		// Enable change feeds for a key range
