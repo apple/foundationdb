@@ -228,6 +228,12 @@ public:
 	// If true, TLS handshakes that time out or whose connection closes do not count toward per-address TLS connection
 	// throttling.
 	bool TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS;
+	// If true, an outgoing TLS connection whose handshake timed out or whose connection closed during the handshake
+	// does not count as a connect failure toward peer health.
+	bool TLS_HANDSHAKE_TIMEOUT_IS_NOT_CONNECT_FAILURE;
+	// If true, a peer's connect failure count is reset when a connection to it succeeds, and cancelled connection
+	// attempts do not count as connect failures.
+	bool RESET_CONNECT_FAILED_COUNT_ON_CONNECT;
 	int TLS_CLIENT_HANDSHAKE_THREADS;
 	int TLS_SERVER_HANDSHAKE_THREADS;
 	int TLS_HANDSHAKE_THREAD_STACKSIZE;

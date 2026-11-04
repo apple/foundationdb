@@ -82,6 +82,11 @@ public:
 	// local endpoint. For non-TLS connections this is always true for any valid open connection.
 	virtual bool hasTrustedPeer() const = 0;
 
+	// Returns whether a failed acceptHandshake() or connectHandshake() timed out or ended because the connection
+	// closed, which overload on either end causes, rather than failing with a TLS error. Always false for non-TLS
+	// connections.
+	virtual bool handshakeTimedOutOrDisconnected() const { return false; }
+
 	virtual UID getDebugID() const = 0;
 
 	// At present, implemented by Sim2Conn where we want to disable bits flip for connections between parent process and
