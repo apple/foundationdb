@@ -1483,12 +1483,16 @@ Future<bool> shortCircuitAny(std::vector<Future<bool>> f);
 
 namespace coro {
 template <class Input>
-concept JoinInput =
-    std::same_as<Input, Future<typename Input::Element>> || std::same_as<Input, AsyncResult<typename Input::Element>>;
+concept JoinInput = std::same_as<Input, AsyncResult<typename Input::Element>> ||
+                    (std::same_as<Input, Future<typename Input::Element>> &&
+                     std::constructible_from<typename Input::Element, const typename Input::Element&>);
 
-template <JoinInput Input>
-Future<Void> collectJoinInput(Input& input, std::optional<typename Input::Element>& value, ExplicitVoid = {}) {
-	value.emplace(co_await std::move(input));
+template <std::size_t I, JoinInput Input, class Slots>
+Future<Void> collectJoinInput(Input arg, Reference<ReferencedObject<Slots>> resultSlots, ExplicitVoid = {}) {
+	// Constructing a payload can synchronously fail a sibling and unwind joinImpl while emplace is still running.
+	auto input = std::move(arg);
+	auto slots = std::move(resultSlots);
+	std::get<I>(slots->mutate()).emplace(co_await std::move(input));
 	co_return Void();
 }
 
@@ -1501,16 +1505,16 @@ Future<std::tuple<typename Inputs::Element...>> joinImpl(std::tuple<Inputs...> a
 		co_return Result{ std::get<I>(std::move(inputs)).get()... };
 	}
 
-	std::tuple<std::optional<typename Inputs::Element>...> values;
-	// Destroy collectors before the inputs and result slots they borrow, including on error or cancellation.
-	Future<Void> collectors[] = { collectJoinInput(std::get<I>(inputs), std::get<I>(values))... };
+	using Slots = std::tuple<std::optional<typename Inputs::Element>...>;
+	auto slots = makeReference<ReferencedObject<Slots>>();
+	Future<Void> collectors[] = { collectJoinInput<I>(std::get<I>(std::move(inputs)), slots)... };
 	co_await quorum(collectors, sizeof...(Inputs), sizeof...(Inputs));
-	co_return Result{ std::move(*std::get<I>(values))... };
+	co_return Result{ std::move(*std::get<I>(slots->mutate()))... };
 }
 } // namespace coro
 
 // Collect one value per input in argument order, including Void. Fail on the first observed error.
-// Named AsyncResults must be moved in. Failure or cancellation releases the join's interest in every input.
+// Future payloads are copied. Move-only payloads require AsyncResult, and named AsyncResults must be moved in.
 template <coro::JoinInput... Inputs>
     requires(sizeof...(Inputs) > 0)
 [[nodiscard]] auto join(Inputs... inputs) -> Future<std::tuple<typename Inputs::Element...>> {

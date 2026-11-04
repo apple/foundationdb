@@ -1410,6 +1410,11 @@ AsyncResult<std::unique_ptr<int>> asyncUniqueInt(Future<Void> signal, int value)
 	co_return std::make_unique<int>(value);
 }
 
+template <class Input>
+concept CanJoin = requires(Input input) { join(std::move(input)); };
+
+static_assert(!CanJoin<Future<std::unique_ptr<int>>>);
+
 AsyncResult<int> failingAsyncResultInt(Future<Void> signal) {
 	co_await signal;
 	throw io_error();
@@ -3262,6 +3267,39 @@ TEST_CASE("/flow/coro/join/asyncError") {
 	ASSERT(!shared.isReady());
 	sharedSignal.send(Void());
 	ASSERT(shared.canGet());
+	return Void();
+}
+
+TEST_CASE("/flow/coro/join/reentrantErrorDuringCopy") {
+	class FailSiblingOnCopy {
+	public:
+		explicit FailSiblingOnCopy(const Promise<Void>& sibling) : sibling(sibling) {}
+		FailSiblingOnCopy(FailSiblingOnCopy&&) noexcept = default;
+		FailSiblingOnCopy(const FailSiblingOnCopy& other) : lifetime(other.lifetime), sibling(other.sibling) {
+			if (sibling.canBeSet()) {
+				sibling.sendError(io_error());
+			}
+		}
+
+	private:
+		LifetimeTracked lifetime;
+		const Promise<Void>& sibling;
+	};
+
+	const int initialLiveCount = LifetimeTracked::liveCount;
+	{
+		Promise<Void> sibling;
+		Promise<FailSiblingOnCopy> data;
+		auto joined = join(data.getFuture(), sibling.getFuture());
+		data.send(FailSiblingOnCopy(sibling));
+		if (sibling.canBeSet()) {
+			// A join that defers copying until all inputs succeed also has to propagate this error.
+			sibling.sendError(io_error());
+		}
+		ASSERT(joined.isError());
+		ASSERT_EQ(joined.getError().code(), error_code_io_error);
+	}
+	ASSERT_EQ(LifetimeTracked::liveCount, initialLiveCount);
 	return Void();
 }
 
