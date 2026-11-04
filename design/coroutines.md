@@ -81,9 +81,22 @@ Losing inputs are detached from the race, not explicitly cancelled, but dropping
 them. All argument expressions are evaluated before `race` is called; use separate statements when their evaluation
 order matters.
 
+Use `join(...)` when the next step needs all the results. It accepts one or more `Future<T>` or `AsyncResult<T>`
+arguments and returns a `Future<std::tuple<...>>`. Each argument contributes one value in argument order, including
+a `Void` value for a completion-only input. Pass a named `AsyncResult` with `std::move` to transfer ownership.
+
+```c++
+auto [status, destUid] = co_await join(statusFuture, destUidFuture);
+```
+
+An error in any input fails the joined future immediately, even if an earlier argument is still pending. On failure
+or cancellation, `join` drops its references to the other inputs. Outstanding work can be cancelled when that
+releases its last reference. For a tuple containing move-only values, keep the returned future alive and bind
+its result by const reference. As with `race`, start the operations in separate statements if launch order matters.
+
 Use helpers such as `quorum`, `waitForAll`, `waitForAllReady`, `timeoutError`, or `operator||` when they express the
 required behavior more directly. `race` and `Choose` are defined in
-[`CoroUtils.h`](../flow/include/flow/CoroUtils.h); the other helpers are in
+[`CoroUtils.h`](../flow/include/flow/CoroUtils.h); `join` and the other helpers are in
 [`genericactors.h`](../flow/include/flow/genericactors.h).
 
 ### Ordered Evaluation with Choose

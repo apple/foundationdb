@@ -31,9 +31,11 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <ranges>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -1401,6 +1403,11 @@ AsyncResult<int> immediateAsyncResultInt(int value) {
 AsyncResult<int> delayedAsyncResultInt(Future<Void> signal, int value) {
 	co_await signal;
 	co_return value;
+}
+
+AsyncResult<std::unique_ptr<int>> asyncUniqueInt(Future<Void> signal, int value) {
+	co_await signal;
+	co_return std::make_unique<int>(value);
 }
 
 AsyncResult<int> failingAsyncResultInt(Future<Void> signal) {
@@ -3194,4 +3201,88 @@ TEST_CASE("/flow/coro/raceAsyncResultError") {
 		ASSERT_EQ(e.code(), error_code_io_error);
 	}
 	co_return;
+}
+
+TEST_CASE("/flow/coro/join/ordered") {
+	Promise<int> first;
+	Promise<Void> last;
+	auto shared = first.getFuture();
+	auto single = delayedAsyncResultInt(last.getFuture(), 23);
+	Future<std::tuple<int, Void, int, int>> joined = join(shared, Future<Void>(Void()), shared, std::move(single));
+	ASSERT(!single.isValid());
+	last.send(Void());
+	ASSERT(!joined.isReady());
+	first.send(17);
+	ASSERT(joined.canGet());
+	auto [a, done, b, c] = co_await joined;
+	ASSERT_EQ(a, 17);
+	ASSERT_EQ(b, 17);
+	ASSERT_EQ(c, 23);
+	ASSERT_EQ(shared.get(), 17);
+}
+
+TEST_CASE("/flow/coro/join/moveOnly") {
+	auto ready = join(asyncUniqueInt(Void(), 17));
+	ASSERT(ready.canGet());
+	const auto& [value] = co_await ready;
+	ASSERT_EQ(*value, 17);
+
+	Promise<Void> signal;
+	auto pending = join(asyncUniqueInt(signal.getFuture(), 23), immediateAsyncResultInt(29));
+	ASSERT(!pending.isReady());
+	signal.send(Void());
+	ASSERT(pending.canGet());
+	const auto& [pointer, integer] = co_await pending;
+	ASSERT_EQ(*pointer, 23);
+	ASSERT_EQ(integer, 29);
+}
+
+TEST_CASE("/flow/coro/join/readyError") {
+	int cancelled = 0;
+	auto joined = join(noteCancel(&cancelled), Future<int>(broken_promise()), Future<int>(io_error()));
+	ASSERT(joined.isError());
+	ASSERT_EQ(joined.getError().code(), error_code_broken_promise);
+	ASSERT_EQ(cancelled, 1);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/join/asyncError") {
+	Promise<Void> sharedSignal;
+	auto shared = oneWaitActor(sharedSignal.getFuture());
+	Promise<Void> ownedSignal;
+	int cleanedUp = 0;
+	Promise<Void> errorSignal;
+	auto joined = join(shared,
+	                   noThrowOnCancelAsyncResult(ownedSignal.getFuture(), &cleanedUp),
+	                   failingAsyncResultInt(errorSignal.getFuture()));
+	auto cleanupAtCompletion = map(ready(joined), [&](Void) { return cleanedUp; });
+	errorSignal.send(Void());
+	ASSERT(joined.isError());
+	ASSERT_EQ(joined.getError().code(), error_code_io_error);
+	ASSERT_EQ(cleanupAtCompletion.get(), 1);
+	ASSERT(!shared.isReady());
+	sharedSignal.send(Void());
+	ASSERT(shared.canGet());
+	return Void();
+}
+
+TEST_CASE("/flow/coro/join/cancel") {
+	Promise<int> pending;
+	int cancelled = 0;
+	auto joined = join(noteCancel(&cancelled), pending.getFuture());
+	joined.cancel();
+	ASSERT(joined.isError());
+	ASSERT_EQ(joined.getError().code(), error_code_actor_cancelled);
+	ASSERT_EQ(cancelled, 1);
+	ASSERT_EQ(pending.getFutureReferenceCount(), 0);
+	pending.send(42);
+
+	int cleanedUp = 0;
+	Promise<Void> signal;
+	{
+		auto dropped = join(noThrowOnCancelAsyncResult(signal.getFuture(), &cleanedUp));
+		ASSERT(!dropped.isReady());
+	}
+	ASSERT_EQ(cleanedUp, 1);
+	return Void();
 }

@@ -30,8 +30,10 @@
 #include <functional>
 #include <unordered_set>
 
+#include <concepts>
 #include <list>
 #include <optional>
+#include <tuple>
 #include <type_traits>
 
 #include "flow/flow.h"
@@ -1478,6 +1480,42 @@ Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
                          double waitMultiplierForSlowFutures = 1.0);
 
 Future<bool> shortCircuitAny(std::vector<Future<bool>> f);
+
+namespace coro {
+template <class Input>
+concept JoinInput =
+    std::same_as<Input, Future<typename Input::Element>> || std::same_as<Input, AsyncResult<typename Input::Element>>;
+
+template <JoinInput Input>
+Future<Void> collectJoinInput(Input& input, std::optional<typename Input::Element>& value, ExplicitVoid = {}) {
+	value.emplace(co_await std::move(input));
+	co_return Void();
+}
+
+template <class... Inputs, std::size_t... I>
+Future<std::tuple<typename Inputs::Element...>> joinImpl(std::tuple<Inputs...> args, std::index_sequence<I...>) {
+	using Result = std::tuple<typename Inputs::Element...>;
+	// Coroutine parameters can outlive completion. Release our input handles before notifying the caller.
+	auto inputs = std::move(args);
+	if ((std::get<I>(inputs).canGet() && ...)) {
+		co_return Result{ std::get<I>(std::move(inputs)).get()... };
+	}
+
+	std::tuple<std::optional<typename Inputs::Element>...> values;
+	// Destroy collectors before the inputs and result slots they borrow, including on error or cancellation.
+	Future<Void> collectors[] = { collectJoinInput(std::get<I>(inputs), std::get<I>(values))... };
+	co_await quorum(collectors, sizeof...(Inputs), sizeof...(Inputs));
+	co_return Result{ std::move(*std::get<I>(values))... };
+}
+} // namespace coro
+
+// Collect one value per input in argument order, including Void. Fail on the first observed error.
+// Named AsyncResults must be moved in. Failure or cancellation releases the join's interest in every input.
+template <coro::JoinInput... Inputs>
+    requires(sizeof...(Inputs) > 0)
+[[nodiscard]] auto join(Inputs... inputs) -> Future<std::tuple<typename Inputs::Element...>> {
+	return coro::joinImpl(std::make_tuple(std::move(inputs)...), std::index_sequence_for<Inputs...>{});
+}
 
 template <class T>
 Future<std::vector<T>> getAll(std::vector<Future<T>> input) {
