@@ -52,7 +52,7 @@ bool readyOnCancellation(Promise* promise) {
 	if constexpr (Promise::noThrowOnCancel) {
 		return false;
 	}
-	promise->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
+	promise->waitState() = ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK;
 	return true;
 }
 
@@ -374,7 +374,7 @@ public:
 
 	T take() {
 		ASSERT(canGet());
-		return std::move(value());
+		return T(std::move(value()));
 	}
 
 	void registerContinuation(n_coroutine::coroutine_handle<> h) {
@@ -535,7 +535,7 @@ struct AwaitableAsyncResult : AwaitCancelHandler {
 			if (result.resultState) {
 				result.resultState->clearContinuation();
 			}
-		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
+		case ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK:
 			throw actor_cancelled();
 		}
 
@@ -679,8 +679,7 @@ public:
 		switch (self->pt->waitState()) {
 		case ACTOR_WAIT_STATE_CANCELLED:
 			self->remove();
-		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
-			// await_ready() observed cancellation before callback registration.
+		case ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK:
 			throw actor_cancelled();
 		}
 
@@ -694,26 +693,26 @@ public:
 template <class Awaiter, class Value>
 void deliverStreamValue(Awaiter& awaiter, Value&& value) {
 	auto* promise = awaiter.pt;
-	if constexpr (std::remove_pointer_t<decltype(promise)>::noThrowOnCancel) {
-		// Claim this item before its constructor can send another item or error to the same stream.
-		awaiter.resumeImpl();
-		ScopeExit finish([promise] {
-			if (!finishCancellationAtSuspend(promise)) {
-				promise->resume();
+	// Detach before the payload constructor can send another item or cancel this producer.
+	awaiter.resumeImpl();
+	ScopeExit finish([promise] {
+		if (actorWaitStateIsCancelled(promise->waitState())) {
+			if constexpr (std::remove_pointer_t<decltype(promise)>::noThrowOnCancel) {
+				promise->finishCancellation();
+				return;
 			}
-		});
-		try {
-			awaiter.store.set(std::forward<Value>(value));
-		} catch (const Error& error) {
-			awaiter.store.setError(error);
-			throw;
-		} catch (...) {
-			awaiter.store.setError(unknown_error());
-			throw;
+			promise->waitState() = ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK;
 		}
-	} else {
-		awaiter.store.set(std::forward<Value>(value));
 		promise->resume();
+	});
+	try {
+		awaiter.store.set(std::forward<Value>(value));
+	} catch (const Error& error) {
+		awaiter.store.setError(error);
+		throw;
+	} catch (...) {
+		awaiter.store.setError(unknown_error());
+		throw;
 	}
 }
 

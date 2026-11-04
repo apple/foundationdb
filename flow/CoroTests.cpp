@@ -32,6 +32,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <sstream>
 #include <string>
@@ -3048,19 +3049,56 @@ TEST_CASE("/flow/coro/noThrowOnCancel/futureStreamCancel") {
 	return Void();
 }
 
-TEST_CASE("/flow/coro/noThrowOnCancel/cancelDuringStreamDelivery") {
-	class OnCopy {
-	public:
-		explicit OnCopy(std::function<void()> action) : action(std::move(action)) {}
-		OnCopy(const OnCopy& other) : action(other.action) { action(); }
-		OnCopy(OnCopy&&) noexcept = default;
-		OnCopy& operator=(const OnCopy&) = default;
-		OnCopy& operator=(OnCopy&&) noexcept = default;
+namespace {
+class OnCopy {
+public:
+	explicit OnCopy(std::function<void()> action) : action(std::move(action)) {}
+	OnCopy(const OnCopy& other) : action(other.action) { action(); }
+	OnCopy(OnCopy&&) noexcept = default;
+	OnCopy& operator=(const OnCopy&) = default;
+	OnCopy& operator=(OnCopy&&) noexcept = default;
 
-	private:
-		std::function<void()> action;
+private:
+	std::function<void()> action;
+};
+
+template <class Result>
+void checkJoinCancelsDuringStreamDelivery() {
+	auto consume = [](FutureStream<OnCopy> input, std::string& events) -> Result {
+		ScopeExit cleanup([&events] { events += "cleanup"; });
+		try {
+			co_await input;
+			events += "received ";
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_actor_cancelled);
+			events += "cancelled ";
+			throw;
+		}
 	};
 
+	std::string events;
+	PromiseStream<OnCopy> stream;
+	Promise<Void> sibling;
+	auto joined = join(consume(stream.getFuture(), events), sibling.getFuture());
+	const OnCopy value([&] {
+		sibling.sendError(io_error());
+		events += "copied ";
+	});
+	stream.send(value);
+	ASSERT_EQ(events, "copied cancelled cleanup"s);
+	ASSERT(joined.isError());
+	ASSERT_EQ(joined.getError().code(), error_code_io_error);
+	ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+}
+} // namespace
+
+TEST_CASE("/flow/coro/join/cancelDuringStreamDelivery") {
+	checkJoinCancelsDuringStreamDelivery<Future<Void>>();
+	checkJoinCancelsDuringStreamDelivery<AsyncResult<Void>>();
+	return Void();
+}
+
+TEST_CASE("/flow/coro/noThrowOnCancel/cancelDuringStreamDelivery") {
 	auto consume = [](FutureStream<OnCopy> input, NoThrowOnCancel = {}) -> Future<Void> {
 		co_await input;
 		ASSERT(false);
@@ -3363,6 +3401,29 @@ TEST_CASE("/flow/coro/join/moveOnly") {
 	const auto& [pointer, integer] = co_await pending;
 	ASSERT_EQ(*pointer, 23);
 	ASSERT_EQ(integer, 29);
+}
+
+TEST_CASE("/flow/coro/join/constructiblePayloads") {
+	struct ExplicitMoveOnly {
+		explicit ExplicitMoveOnly(int value) : value(value) {}
+		explicit ExplicitMoveOnly(ExplicitMoveOnly&&) = default;
+		int value;
+	};
+	auto produce = [](Future<Void> signal) -> AsyncResult<ExplicitMoveOnly> {
+		co_await signal;
+		co_return ExplicitMoveOnly(42);
+	};
+
+	Promise<Void> signal;
+	auto joined =
+	    join(produce(signal.getFuture()), Future<std::nullopt_t>(std::nullopt), Future<std::in_place_t>(std::in_place));
+	ASSERT(!joined.isReady());
+	signal.send(Void());
+	const auto& [payload, emptyTag, inPlaceTag] = co_await joined;
+	std::optional<int> empty(emptyTag);
+	std::optional<int> populated(inPlaceTag, payload.value);
+	ASSERT(!empty.has_value());
+	ASSERT_EQ(populated.value(), 42);
 }
 
 TEST_CASE("/flow/coro/join/readyError") {

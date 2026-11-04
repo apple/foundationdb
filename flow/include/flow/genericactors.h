@@ -35,6 +35,7 @@
 #include <optional>
 #include <tuple>
 #include <type_traits>
+#include <variant>
 
 #include "flow/flow.h"
 #include "flow/CoroUtils.h"
@@ -1493,7 +1494,7 @@ Future<Void> collectJoinInput(Input arg, Reference<ReferencedObject<Slots>> resu
 	// Constructing a payload can synchronously fail a sibling and unwind joinImpl while emplace is still running.
 	auto input = std::move(arg);
 	auto slots = std::move(resultSlots);
-	std::get<I>(slots->mutate()).emplace(co_await std::move(input));
+	std::get<I>(slots->mutate()).template emplace<1>(co_await std::move(input));
 	co_return Void();
 }
 
@@ -1506,11 +1507,12 @@ Future<std::tuple<typename Inputs::Element...>> joinImpl(std::tuple<Inputs...> a
 		co_return Result{ std::get<I>(std::move(inputs)).get()... };
 	}
 
-	using Slots = std::tuple<std::optional<typename Inputs::Element>...>;
+	// The occupied alternative can hold any payload, including std::optional's reserved tag types.
+	using Slots = std::tuple<std::variant<std::monostate, typename Inputs::Element>...>;
 	auto slots = makeReference<ReferencedObject<Slots>>();
 	Future<Void> collectors[] = { collectJoinInput<I>(std::get<I>(std::move(inputs)), slots)... };
 	co_await quorum(collectors, sizeof...(Inputs), sizeof...(Inputs));
-	co_return Result{ std::move(*std::get<I>(slots->mutate()))... };
+	co_return Result{ std::get<1>(std::get<I>(std::move(slots->mutate())))... };
 }
 } // namespace coro
 
