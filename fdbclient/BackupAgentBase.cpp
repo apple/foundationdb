@@ -249,6 +249,49 @@ TEST_CASE("/backup/logversion") {
 	}
 	return Void();
 }
+
+TEST_CASE("/backup/status/legacyPartitionedLog") {
+	Database db = DatabaseContext::create(
+	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
+	auto tr = makeReference<ReadYourWritesTransaction>(db);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	BackupConfig config(UID(1, 2));
+	config.clear(tr);
+	config.firstSnapshotEndVersion().set(tr, 100);
+	config.latestLogEndVersion().set(tr, 121);
+	config.latestBackupWorkerSavedVersion().set(tr, 301);
+
+	auto checkStatus = [&](MutationLogType expectedType, Version expectedEnd) -> Future<Void> {
+		auto logs = config.getLogProgress(tr, ReadLegacyLogMode::True);
+		auto progress = co_await logs;
+		ASSERT(progress.type == expectedType);
+		ASSERT(progress.logEnd == expectedEnd);
+		ASSERT((co_await config.getLatestRestorableVersion(tr, logs)) == expectedEnd - 1);
+		co_return;
+	};
+
+	Subspace oldConfig(uidPrefixKey("uid->config/"_sr.withPrefix(fileBackupPrefixRange.begin), config.getUid()));
+	Key legacyKey = oldConfig.pack("partitionedLogEnabled"_sr);
+	co_await checkStatus(MutationLogType::DEFAULT, 121);
+	tr->set(legacyKey, "\x14"_sr); // 7.4 tuple encoding of false
+	co_await checkStatus(MutationLogType::DEFAULT, 121);
+	tr->set(legacyKey, "\x15\x01"_sr); // 7.4 tuple encoding of true
+	co_await checkStatus(MutationLogType::PARTITIONED_LOG, 301);
+	config.latestBackupWorkerSavedVersion().clear(tr);
+	auto missing = config.getLogProgress(tr, ReadLegacyLogMode::True);
+	ASSERT(!(co_await config.getLatestRestorableVersion(tr, missing)).present());
+	config.latestBackupWorkerSavedVersion().set(tr, 401);
+	co_await checkStatus(MutationLogType::PARTITIONED_LOG, 401);
+	ASSERT((co_await config.getLogProgress(tr, ReadLegacyLogMode::False)).logEnd == 121);
+
+	config.mutationLogType().set(tr, MutationLogType::DEFAULT);
+	co_await checkStatus(MutationLogType::DEFAULT, 121);
+	config.mutationLogType().set(tr, MutationLogType::RANGE_PARTITIONED_LOG);
+	co_await checkStatus(MutationLogType::RANGE_PARTITIONED_LOG, 121);
+	tr->set(legacyKey, "\x14"_sr);
+	config.mutationLogType().set(tr, MutationLogType::PARTITIONED_LOG);
+	co_await checkStatus(MutationLogType::PARTITIONED_LOG, 401);
+}
 } // namespace
 
 Version getLogKeyVersion(Key key) {
