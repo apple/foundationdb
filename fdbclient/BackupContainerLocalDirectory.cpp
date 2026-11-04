@@ -378,7 +378,7 @@ TEST_CASE("/backup/containers/localdir/rejectsEscapingPaths") {
 		ASSERT(false);
 	};
 
-	for (const std::string& path : { "../x", "a/../../x", "/etc/passwd" }) {
+	for (const char* path : { "../x", "a/../../x", "/etc/passwd" }) {
 		expectRejected([&] { (void)bc->readFile(path); });
 		expectRejected([&] { (void)bc->writeFile(path); });
 		expectRejected([&] { (void)bc->deleteFile(path); });
@@ -386,7 +386,7 @@ TEST_CASE("/backup/containers/localdir/rejectsEscapingPaths") {
 	}
 
 	// Names that resolve to the container directory itself are only allowed for listing.
-	for (const std::string& path : { "", ".", "a/.." }) {
+	for (const char* path : { "", ".", "a/.." }) {
 		expectRejected([&] { (void)bc->readFile(path); });
 		expectRejected([&] { (void)bc->writeFile(path); });
 		expectRejected([&] { (void)bc->deleteFile(path); });

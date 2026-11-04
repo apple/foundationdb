@@ -341,8 +341,8 @@ AsyncResult<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<IC
 			}
 		}
 
-		co_await (smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) &&
-		              smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5) ||
+		co_await ((smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) &&
+		           smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5)) ||
 		          delay(std::min(2.0, std::max(0.0, statusDeadline - now()))));
 
 		statusObj["quorum_reachable"] = *quorum_reachable =
