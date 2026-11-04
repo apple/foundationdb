@@ -22,6 +22,7 @@
 #include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
 #include "flow/BooleanParam.h"
+#include "flow/Platform.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "BackupContainerLocalDirectory.h"
 #include "BackupContainerBlobStore.h"
@@ -168,7 +169,20 @@ public:
 		return path.substr(pos + 1);
 	}
 
+	// Listed paths are used as file names under the container (and fdbdecode --save writes them locally), so skip any
+	// that could escape it.
+	static bool listedPathIsContained(const std::string& path) {
+		if (relativePathIsContained(path)) {
+			return true;
+		}
+		TraceEvent(SevWarnAlways, "BackupContainerInvalidListedPath").suppressFor(60).detail("Path", path);
+		return false;
+	}
+
 	static bool pathToRangeFile(RangeFile& out, const std::string& path, int64_t size) {
+		if (!listedPathIsContained(path))
+			return false;
+
 		std::string name = fileNameOnly(path);
 		RangeFile f;
 		f.fileName = path;
@@ -1408,6 +1422,9 @@ public:
 	}
 
 	static bool pathToLogFile(LogFile& out, const std::string& path, int64_t size) {
+		if (!listedPathIsContained(path))
+			return false;
+
 		std::string name = fileNameOnly(path);
 		LogFile f;
 		f.fileName = path;
@@ -1438,6 +1455,9 @@ public:
 	}
 
 	static bool pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile& out, const std::string& path) {
+		if (!listedPathIsContained(path))
+			return false;
+
 		std::string name = fileNameOnly(path);
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
@@ -1498,28 +1518,43 @@ public:
 		co_await keyFile->sync();
 	}
 
+	static constexpr int ENCRYPTION_KEY_MAX_RETRIES = 5;
+
 	static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
-		Reference<IAsyncFile> keyFile;
 		StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
-		try {
-			Reference<IAsyncFile> _keyFile = co_await IAsyncFileSystem::filesystem()->open(
-			    encryptionKeyFileName,
-			    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
-			    0400);
-			keyFile = _keyFile;
-		} catch (Error& e) {
-			TraceEvent(SevError, "FailedToOpenEncryptionKeyFile").error(e).detail("FileName", encryptionKeyFileName);
-			throw e;
+		for (int retries = 0;; ++retries) {
+			const char* errorEvent = "FailedToOpenEncryptionKeyFile";
+			try {
+				Reference<IAsyncFile> keyFile = co_await IAsyncFileSystem::filesystem()->open(
+				    encryptionKeyFileName,
+				    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
+				    0400);
+				errorEvent = "FailedToReadEncryptionKeyFile";
+				int bytesRead = co_await uncancellable(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
+				if (bytesRead != cipherKey->size()) {
+					TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
+					    .detail("ExpectedSize", cipherKey->size())
+					    .detail("ActualSize", bytesRead)
+					    .detail("FileName", encryptionKeyFileName);
+					throw invalid_encryption_key_file();
+				}
+				co_return;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				bool retry = e.isDiskError() && retries < ENCRYPTION_KEY_MAX_RETRIES;
+				TraceEvent(retry ? SevWarn : SevError, errorEvent)
+				    .error(e)
+				    .detail("FileName", encryptionKeyFileName)
+				    .detail("Retries", retries);
+				if (!retry) {
+					throw;
+				}
+			}
+			// Containers retain this setup future, so recover disk errors before publishing a permanent failure.
+			co_await delay(1.0);
 		}
-		int bytesRead = co_await uncancellable(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
-		if (bytesRead != cipherKey->size()) {
-			TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
-			    .detail("ExpectedSize", cipherKey->size())
-			    .detail("ActualSize", bytesRead)
-			    .detail("FileName", encryptionKeyFileName);
-			throw invalid_encryption_key_file();
-		}
-		ASSERT_EQ(bytesRead, cipherKey->size());
 	}
 
 	static Future<Void> writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem> bc,
@@ -2447,6 +2482,105 @@ TEST_CASE("/backup/logs_continuous") {
 	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 400) == invalidVersion);
 	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 401) == invalidVersion);
 	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 450) == invalidVersion);
+
+	return Void();
+}
+
+// writeRangeFile() paths parse; the same name under an escaping path doesn't.
+TEST_CASE("/backup/pathToRangeFile") {
+	const Version fileVersion = 123;
+	const int blockSize = 1048576;
+	const std::string name = format(
+	    "range,%" PRId64 ",%s,%d", fileVersion, deterministicRandom()->randomUniqueID().toString().c_str(), blockSize);
+	const std::string folder = BackupContainerFileSystemImpl::snapshotFolderString(100) + format("/%d/", 0);
+	const std::string oldFolder = BackupContainerFileSystemImpl::old_rangeVersionFolderString(fileVersion);
+
+	for (const std::string& path : { folder + name, oldFolder + name }) {
+		RangeFile rf;
+		ASSERT(BackupContainerFileSystemImpl::pathToRangeFile(rf, path, 4096));
+		ASSERT_EQ(rf.version, fileVersion);
+		ASSERT_EQ(rf.blockSize, blockSize);
+		ASSERT_EQ(rf.fileName, path);
+		ASSERT_EQ(rf.fileSize, 4096);
+	}
+
+	const std::vector<std::string> escaping = {
+		"kvranges/../../x/" + name,
+		folder + "../../../../" + name,
+		oldFolder + "../../../../" + name,
+		"/" + folder + name,
+	};
+	for (const std::string& path : escaping) {
+		RangeFile rf;
+		ASSERT(!BackupContainerFileSystemImpl::pathToRangeFile(rf, path, 4096));
+	}
+
+	return Void();
+}
+
+// writeLogFile() and writeTaggedLogFile() paths parse; the same names under an escaping path don't.
+TEST_CASE("/backup/pathToLogFile") {
+	const Version beginVersion = 100;
+	const Version endVersion = 200;
+	const int blockSize = 1048576;
+	const std::string uid = deterministicRandom()->randomUniqueID().toString();
+	const std::string name = format("log,%lld,%lld,%s,%d", beginVersion, endVersion, uid.c_str(), blockSize);
+	const std::string taggedName =
+	    format("log,%lld,%lld,%s,%d-of-%d,%d", beginVersion, endVersion, uid.c_str(), 1, 3, blockSize);
+	const std::string folder =
+	    BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, MutationLogType::DEFAULT);
+	const std::string taggedFolder =
+	    BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, MutationLogType::PARTITIONED_LOG);
+
+	LogFile lf;
+	ASSERT(BackupContainerFileSystemImpl::pathToLogFile(lf, folder + name, 4096));
+	ASSERT_EQ(lf.beginVersion, beginVersion);
+	ASSERT_EQ(lf.endVersion, endVersion);
+	ASSERT_EQ(lf.blockSize, blockSize);
+	ASSERT_EQ(lf.fileName, folder + name);
+	ASSERT_EQ(lf.fileSize, 4096);
+	ASSERT_EQ(lf.tagId, -1);
+
+	LogFile tagged;
+	ASSERT(BackupContainerFileSystemImpl::pathToLogFile(tagged, taggedFolder + taggedName, 4096));
+	ASSERT_EQ(tagged.beginVersion, beginVersion);
+	ASSERT_EQ(tagged.endVersion, endVersion);
+	ASSERT_EQ(tagged.blockSize, blockSize);
+	ASSERT_EQ(tagged.fileName, taggedFolder + taggedName);
+	ASSERT_EQ(tagged.tagId, 1);
+	ASSERT_EQ(tagged.totalTags, 3);
+
+	const std::vector<std::string> escaping = {
+		"logs/../../x/" + name,
+		folder + "../../../../" + name,
+		"/" + folder + name,
+		taggedFolder + "../../../../" + taggedName,
+		"/" + taggedFolder + taggedName,
+	};
+	for (const std::string& path : escaping) {
+		LogFile f;
+		ASSERT(!BackupContainerFileSystemImpl::pathToLogFile(f, path, 4096));
+	}
+
+	return Void();
+}
+
+// writeKeyspaceSnapshotFile() paths parse; the same name under an escaping path doesn't.
+TEST_CASE("/backup/pathToKeyspaceSnapshotFile") {
+	const std::string name = format("snapshot,%lld,%lld,%lld", 100LL, 200LL, 4096LL);
+	const std::string path = "snapshots/" + name;
+
+	KeyspaceSnapshotFile sf;
+	ASSERT(BackupContainerFileSystemImpl::pathToKeyspaceSnapshotFile(sf, path));
+	ASSERT_EQ(sf.beginVersion, 100);
+	ASSERT_EQ(sf.endVersion, 200);
+	ASSERT_EQ(sf.totalSize, 4096);
+	ASSERT_EQ(sf.fileName, path);
+
+	for (const std::string& escaping : { "snapshots/../../x/" + name, "/" + path }) {
+		KeyspaceSnapshotFile f;
+		ASSERT(!BackupContainerFileSystemImpl::pathToKeyspaceSnapshotFile(f, escaping));
+	}
 
 	return Void();
 }

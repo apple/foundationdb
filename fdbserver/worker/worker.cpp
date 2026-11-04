@@ -718,9 +718,10 @@ bool addressInDbAndPrimaryDc(
 		}
 	}
 
-	auto localityIsInPrimaryDc = [&dbInfo](const LocalityData& locality) {
-		return locality.dcId() == dbInfo->get().master.locality.dcId();
-	};
+	// LocalityData::dcId() is a std::map lookup that returns a Standalone by value, so keep the
+	// loop-invariant master lookup out of the per-tlog comparison below.
+	const auto masterDcId = dbi.master.locality.dcId();
+	auto localityIsInPrimaryDc = [&masterDcId](const LocalityData& locality) { return locality.dcId() == masterDcId; };
 
 	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
 		for (const auto& tlog : logSet.tLogs) {
@@ -1089,28 +1090,34 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		// If peer->lastLoggedTime == 0, we just started monitor this peer and haven't logged it once yet.
 		double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
 
-		TraceEvent(SevDebug, "PeerHealthMonitor")
-		    .suppressFor(5.0)
-		    .detail("Peer", address)
-		    .detail("PeerAddress", address)
-		    .detail("Force", enablePrimaryTxnSystemHealthCheck->get())
-		    .detail("Elapsed", now() - lastLoggedTime)
-		    .detail("Disconnected", disconnectedPeer)
-		    .detail("MinLatency", peer->pingLatencies.min())
-		    .detail("MaxLatency", peer->pingLatencies.max())
-		    .detail("MeanLatency", peer->pingLatencies.mean())
-		    .detail("MedianLatency", peer->pingLatencies.median())
-		    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
-		    .detail("CheckedPercentileLatency",
-		            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
-		    .detail("PingCount", peer->pingLatencies.getPopulationSize())
-		    .detail("PingTimeoutCount", peer->timeoutCount)
-		    .detail("ConnectionFailureCount", peer->connectFailedCount)
-		    .detail("WorkerLocation", workerLocation)
-		    .detail("PeerInPrimaryDc", addressInDbAndPrimaryDc(address, dbInfo))
-		    .detail("PeerInRemoteDc", addressInDbAndRemoteDc(address, dbInfo))
-		    .detail("PeerInPrimarySatelliteDc", addressInDbAndPrimarySatelliteDc(address, dbInfo))
-		    .detail("PeerIsRemoteLogRouter", addressIsRemoteLogRouter(address, dbInfo));
+		// .detail() arguments are evaluated by the caller even when the event is filtered out, and
+		// the addressInDbAnd*Dc() predicates each walk ServerDBInfo. This runs once per peer, every
+		// WORKER_HEALTH_MONITOR_INTERVAL, on every process, so guard the whole chain. suppressFor()
+		// does not help: suppression is applied when the event is logged, not when it is built.
+		TraceEvent peerHealthEvent(SevDebug, "PeerHealthMonitor");
+		if (peerHealthEvent.isEnabled()) {
+			peerHealthEvent.suppressFor(5.0)
+			    .detail("Peer", address)
+			    .detail("PeerAddress", address)
+			    .detail("Force", enablePrimaryTxnSystemHealthCheck->get())
+			    .detail("Elapsed", now() - lastLoggedTime)
+			    .detail("Disconnected", disconnectedPeer)
+			    .detail("MinLatency", peer->pingLatencies.min())
+			    .detail("MaxLatency", peer->pingLatencies.max())
+			    .detail("MeanLatency", peer->pingLatencies.mean())
+			    .detail("MedianLatency", peer->pingLatencies.median())
+			    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
+			    .detail("CheckedPercentileLatency",
+			            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
+			    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+			    .detail("PingTimeoutCount", peer->timeoutCount)
+			    .detail("ConnectionFailureCount", peer->connectFailedCount)
+			    .detail("WorkerLocation", workerLocation)
+			    .detail("PeerInPrimaryDc", addressInDbAndPrimaryDc(address, dbInfo))
+			    .detail("PeerInRemoteDc", addressInDbAndRemoteDc(address, dbInfo))
+			    .detail("PeerInPrimarySatelliteDc", addressInDbAndPrimarySatelliteDc(address, dbInfo))
+			    .detail("PeerIsRemoteLogRouter", addressIsRemoteLogRouter(address, dbInfo));
+		}
 
 		if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 		    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
@@ -1486,6 +1493,48 @@ Future<Void> runProfiler(ProfilerRequest req) {
 	}
 
 	co_return;
+}
+
+// outputFile joined onto logDir, if it names something inside logDir other than logDir itself.
+static Optional<std::string> profilerOutputPath(const std::string& logDir, const std::string& outputFile) {
+	if (!relativePathIsContained(outputFile) || cleanPath(outputFile) == ".") {
+		return Optional<std::string>();
+	}
+	return joinPath(abspath(logDir), cleanPath(outputFile));
+}
+
+// Names inside the log directory are allowed; the directory itself, absolute names, and names with a ".." component
+// are not.
+TEST_CASE("/fdbserver/worker/profilerOutputPath") {
+	const std::string logDir = "/profiler-test/logs";
+	const std::vector<std::string> rejected = {
+		"",
+		".",
+		"a/..",
+		"/cpu.prof",
+		"a/../cpu.prof",
+		"../logs/cpu.prof",
+		"..",
+		"../cpu.prof",
+		"../logs2/cpu.prof",
+		"../../etc/cpu.prof",
+	};
+	for (const std::string& dir : { logDir, logDir + "/", logDir + "/./" }) {
+		ASSERT_EQ(profilerOutputPath(dir, "cpu.prof").get(), logDir + "/cpu.prof");
+		ASSERT_EQ(profilerOutputPath(dir, "a/cpu.prof").get(), logDir + "/a/cpu.prof");
+		ASSERT_EQ(profilerOutputPath(dir, "./cpu.prof").get(), logDir + "/cpu.prof");
+		ASSERT_EQ(profilerOutputPath(dir, "cpu.prof/").get(), logDir + "/cpu.prof");
+
+		for (const std::string& outputFile : rejected) {
+			ASSERT(!profilerOutputPath(dir, outputFile).present());
+		}
+	}
+
+	// A log directory of "/", e.g. the default "." when running from "/".
+	ASSERT_EQ(profilerOutputPath("/", "cpu.prof").get(), std::string("/cpu.prof"));
+	ASSERT(!profilerOutputPath("/", "").present());
+
+	return Void();
 }
 
 bool checkHighMemory(int64_t threshold, bool* error) {
@@ -2134,16 +2183,12 @@ class WorkerServerCore {
 			ProfilerRequest req = co_await interf.clientInterface.profiler.getFuture();
 
 			ProfilerRequest profilerReq = req;
-			// There really isn't a great "filepath sanitizer" or "filepath escape" function available,
-			// thus we instead enforce a different requirement.  One can only write to a file that's
-			// beneath the working directory, and we remove the ability to do any symlink or ../..
-			// tricks by resolving all paths through `abspath` first.
+			// Only write profiles inside the log directory; see profilerOutputPath().
 			try {
-				std::string realLogDir = abspath(SERVER_KNOBS->LOG_DIRECTORY);
-				std::string realOutPath = abspath(realLogDir + "/" + profilerReq.outputFile.toString());
-				if (realLogDir.size() < realOutPath.size() &&
-				    strncmp(realLogDir.c_str(), realOutPath.c_str(), realLogDir.size()) == 0) {
-					profilerReq.outputFile = realOutPath;
+				Optional<std::string> outputPath =
+				    profilerOutputPath(SERVER_KNOBS->LOG_DIRECTORY, profilerReq.outputFile.toString());
+				if (outputPath.present()) {
+					profilerReq.outputFile = outputPath.get();
 					uncancellable(runProfiler(profilerReq));
 					profilerReq.reply.send(Void());
 				} else {

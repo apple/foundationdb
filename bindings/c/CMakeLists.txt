@@ -271,6 +271,20 @@ if(NOT WIN32)
     add_fdbclient_test(
       NAME fdb_c_setup_tests
       COMMAND $<TARGET_FILE:fdb_c_setup_tests>)
+    if(NOT USE_SANITIZER)
+      if(APPLE)
+        set(FDB_BLOB_GRANULE_LIBRARY_PATH_ENV "DYLD_LIBRARY_PATH")
+      else()
+        set(FDB_BLOB_GRANULE_LIBRARY_PATH_ENV "LD_LIBRARY_PATH")
+      endif()
+      add_test(NAME fdb_c_blob_granule_fatal_exports
+        COMMAND ${CMAKE_COMMAND} -E env
+        "${FDB_BLOB_GRANULE_LIBRARY_PATH_ENV}=${CMAKE_BINARY_DIR}/lib:$ENV{${FDB_BLOB_GRANULE_LIBRARY_PATH_ENV}}"
+        $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_blob_granule_fatal_exports.py
+        --library $<TARGET_FILE:fdb_c>
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+      set_tests_properties(fdb_c_blob_granule_fatal_exports PROPERTIES TIMEOUT 120)
+    endif()
     add_fdbclient_test(
       NAME fdb_c_unit_tests
       COMMAND $<TARGET_FILE:fdb_c_unit_tests>

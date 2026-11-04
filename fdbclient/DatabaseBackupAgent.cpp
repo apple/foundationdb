@@ -31,6 +31,7 @@
 #include "flow/flow.h"
 #include "flow/genericactors.h"
 #include "flow/Hash3.h"
+#include "flow/UnitTest.h"
 #include <numeric>
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/KeyBackedTypes.h"
@@ -691,6 +692,80 @@ struct EraseLogRangeTaskFunc : TaskFuncBase {
 StringRef EraseLogRangeTaskFunc::name = "dr_erase_log_range"_sr;
 REGISTER_TASKFUNC(EraseLogRangeTaskFunc);
 
+// A timed-out copy must finish its current version and resume from the first omitted version.
+template <class CopyMutation>
+static Optional<Version> copyLogMutations(const std::vector<RangeResult>& mutations,
+                                          Optional<Version> stopAfterVersion,
+                                          CopyMutation&& copyMutation) {
+	for (const auto& group : mutations) {
+		for (const auto& kv : group) {
+			if (stopAfterVersion.present()) {
+				Version version = getLogKeyVersion(kv.key);
+				if (version > stopAfterVersion.get()) {
+					return version;
+				}
+			}
+			copyMutation(kv);
+		}
+	}
+	return Optional<Version>();
+}
+
+namespace {
+
+std::vector<RangeResult> copyLogTestGroups(const std::vector<std::vector<Version>>& versions) {
+	std::vector<RangeResult> groups;
+	Key uid = BinaryWriter::toValue(UID(1, 2), Unversioned());
+	uint32_t part = 0;
+	for (const auto& groupVersions : versions) {
+		RangeResult group;
+		for (Version version : groupVersions) {
+			Key key = getLogKey(version, uid, CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE)
+			              .withSuffix(BinaryWriter::toValue(bigEndian32(part++), Unversioned()));
+			group.push_back_deep(group.arena(), KeyValueRef(key, "mutation"_sr));
+		}
+		groups.push_back(group);
+	}
+	return groups;
+}
+
+TEST_CASE("/backup/copy-log-continuation/first-uncopied-version") {
+	const auto groups = copyLogTestGroups({ { 101 }, { 102 }, { 103 } });
+	int copied = 0;
+	Optional<Version> nextVersion = copyLogMutations(groups, 100, [&](const KeyValueRef&) { ++copied; });
+	ASSERT(nextVersion.present() && nextVersion.get() == 101);
+	ASSERT(copied == 0);
+	return Void();
+}
+
+TEST_CASE("/backup/copy-log-continuation/complete-version-and-retry") {
+	const auto groups = copyLogTestGroups({ { 100, 100 }, { 100 }, { 101 }, { 102 } });
+	const std::vector<Key> expected = { groups[0][0].key, groups[0][1].key, groups[1][0].key };
+	for (int attempt = 0; attempt < 2; ++attempt) {
+		std::vector<Key> copied;
+		Optional<Version> nextVersion =
+		    copyLogMutations(groups, 100, [&](const KeyValueRef& kv) { copied.push_back(kv.key); });
+		ASSERT(nextVersion.present() && nextVersion.get() == 101);
+		ASSERT(copied == expected);
+	}
+	return Void();
+}
+
+TEST_CASE("/backup/copy-log-continuation/no-boundary") {
+	const auto groups = copyLogTestGroups({ { 100, 100 }, { 101 }, { 102 } });
+	const std::vector<Key> expected = { groups[0][0].key, groups[0][1].key, groups[1][0].key, groups[2][0].key };
+	for (Optional<Version> stopAfterVersion : { Optional<Version>(), Optional<Version>(102) }) {
+		std::vector<Key> copied;
+		Optional<Version> nextVersion =
+		    copyLogMutations(groups, stopAfterVersion, [&](const KeyValueRef& kv) { copied.push_back(kv.key); });
+		ASSERT(!nextVersion.present());
+		ASSERT(copied == expected);
+	}
+	return Void();
+}
+
+} // namespace
+
 struct CopyLogRangeTaskFunc : TaskFuncBase {
 	static StringRef name;
 	static constexpr uint32_t version = 1;
@@ -788,30 +863,23 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 						int64_t bytesSet = 0;
 
 						bool first = true;
-						for (const auto& m : mutations) {
-							for (auto kv : m) {
-								if (isTimeoutOccurred) {
-									Version newVersion = getLogKeyVersion(kv.key);
-
-									if (newVersion > lastVersion) {
-										nextVersionAfterBreak = newVersion;
-										break;
-									}
-								}
-								if (first) {
-									tr.addReadConflictRange(singleKeyRange(kv.key));
-									first = false;
-								}
-								tr.set(kv.key.removePrefix(backupLogKeys.begin)
-								           .removePrefix(task->params[BackupAgentBase::destUid])
-								           .withPrefix(task->params[BackupAgentBase::keyConfigLogUid])
-								           .withPrefix(applyLogKeys.begin),
-								       kv.value);
-								bytesSet += kv.expectedSize() - backupLogKeys.begin.expectedSize() +
-								            applyLogKeys.begin.expectedSize();
-								lastKey = kv.key;
-							}
-						}
+						nextVersionAfterBreak =
+						    copyLogMutations(mutations,
+						                     isTimeoutOccurred ? Optional<Version>(lastVersion) : Optional<Version>(),
+						                     [&](const KeyValueRef& kv) {
+							                     if (first) {
+								                     tr.addReadConflictRange(singleKeyRange(kv.key));
+								                     first = false;
+							                     }
+							                     tr.set(kv.key.removePrefix(backupLogKeys.begin)
+							                                .removePrefix(task->params[BackupAgentBase::destUid])
+							                                .withPrefix(task->params[BackupAgentBase::keyConfigLogUid])
+							                                .withPrefix(applyLogKeys.begin),
+							                            kv.value);
+							                     bytesSet += kv.expectedSize() - backupLogKeys.begin.expectedSize() +
+							                                 applyLogKeys.begin.expectedSize();
+							                     lastKey = kv.key;
+						                     });
 
 						co_await tr.commit();
 						Params.bytesWritten().set(task, Params.bytesWritten().getOrDefault(task) + bytesSet);

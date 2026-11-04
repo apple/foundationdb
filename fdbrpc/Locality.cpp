@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/Locality.h"
+#include "flow/UnitTest.h"
 
 const UID LocalityData::UNSET_ID = UID(0x0ccb4e0feddb5583, 0x010f6b77d9d10ece);
 alignas(8) const StringRef LocalityData::keyProcessId = "processid"_sr;
@@ -40,4 +41,33 @@ LBDistance::Type loadBalanceDistance(LocalityData const& loc1, LocalityData cons
 		return LBDistance::SAME_DC;
 	}
 	return LBDistance::DISTANT;
+}
+
+TEST_CASE("/fdbrpc/LocalityData/isPresent") {
+	LocalityData locality;
+	const Standalone<StringRef> value = "value"_sr;
+	const Standalone<StringRef> otherValue = "other"_sr;
+	const Standalone<StringRef> emptyValue = ""_sr;
+	const Optional<Standalone<StringRef>> unset;
+
+	locality.set("key"_sr, value);
+	ASSERT(locality.isPresent("key"_sr, value));
+	ASSERT(!locality.isPresent("key"_sr, otherValue));
+	ASSERT(!locality.isPresent("key"_sr, unset));
+
+	locality.set("unset"_sr, unset);
+	ASSERT(locality.isPresent("unset"_sr, unset));
+	ASSERT(!locality.isPresent("unset"_sr, value));
+	ASSERT(!locality.isPresent("unset"_sr, emptyValue));
+
+	locality.set("empty"_sr, emptyValue);
+	ASSERT(locality.isPresent("empty"_sr, emptyValue));
+	ASSERT(!locality.isPresent("empty"_sr, unset));
+	ASSERT(!locality.isPresent("empty"_sr, value));
+
+	ASSERT(!locality.isPresent("missing"_sr, value));
+	ASSERT(!locality.isPresent("missing"_sr, unset));
+	ASSERT(!LocalityData().isPresent("missing"_sr, value));
+	ASSERT(!LocalityData().isPresent("missing"_sr, unset));
+	return Void();
 }

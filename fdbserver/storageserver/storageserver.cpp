@@ -45,7 +45,6 @@
 #include "fdbserver/checkpoint/BulkSstFiles.h"
 #include "fdbserver/checkpoint/Checkpoint.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
-#include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/kvstore/FDBExecHelper.h"
@@ -107,6 +106,14 @@
 #include "flow/CoroUtils.h"
 #include "flow/TDMetric.h"
 #include "flow/genericactors.h"
+
+#ifdef WITH_ROCKSDB
+#include "fdbserver/core/FDBRocksDBVersion.h"
+#else
+#define FDB_ROCKSDB_MAJOR 0
+#define FDB_ROCKSDB_MINOR 0
+#define FDB_ROCKSDB_PATCH 0
+#endif
 
 #ifndef __INTEL_COMPILER
 #pragma region Data Structures
@@ -7235,6 +7242,12 @@ Future<Void> tryGetRangeForBulkLoadFromSST(PromiseStream<RangeResult> results,
 	try {
 		std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader(
 		    keys, SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE, SERVER_KNOBS->FETCH_BLOCK_BYTES);
+		if (reader == nullptr) {
+			TraceEvent(SevWarnAlways, "SSBulkLoadNoSstReader")
+			    .detail("Reason", "Binary was built without RocksDB and cannot read SST files")
+			    .detail("File", sstFilePath);
+			throw unsupported_operation();
+		}
 		// TODO(BulkLoad): this can be a slow task. We will make this as async call.
 		reader->open(abspath(sstFilePath));
 		while (true) {
@@ -7347,6 +7360,12 @@ static Future<Void> processSampleFiles(StorageServer* data,
 						// Store as KeyValueRef to keep the original encoded size value
 						rawSamples.clear();
 						reader = newRocksDBSstFileReader();
+						if (reader == nullptr) {
+							TraceEvent(SevWarnAlways, "StorageServerNoSstReader", data->thisServerID)
+							    .detail("Reason", "Binary was built without RocksDB and cannot read SST files")
+							    .detail("File", sampleFilePath);
+							throw unsupported_operation();
+						}
 						reader->open(abspath(sampleFilePath));
 
 						TraceEvent(SevInfo, "StorageServerProcessingSampleFile", data->thisServerID)
@@ -10791,10 +10810,11 @@ Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* data,
 				}
 				anyFileCreated = false;
 				sstWriter = newRocksDBSstFileWriter();
-				sstWriter->open(bytesSampleFile);
+				// Null when built without RocksDB.
 				if (sstWriter == nullptr) {
 					break;
 				}
+				sstWriter->open(bytesSampleFile);
 				ASSERT(!metaData.ranges.empty());
 				std::sort(metaData.ranges.begin(), metaData.ranges.end(), [](KeyRange a, KeyRange b) {
 					// Debug usage: make sure no overlapping between compared two ranges
@@ -12220,6 +12240,7 @@ Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
 	    self->thisServerID.toString() + "/StorageMetrics",
 	    [self = self](TraceEvent& te) {
 		    te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
+		    // if not WITH_ROCKSDB: "0.0.0"
 		    te.detail("RocksDBVersion", format("%d.%d.%d", FDB_ROCKSDB_MAJOR, FDB_ROCKSDB_MINOR, FDB_ROCKSDB_PATCH));
 		    te.detail("Tag", self->tag.toString());
 		    std::vector<int> rpr = self->readPriorityRanks;

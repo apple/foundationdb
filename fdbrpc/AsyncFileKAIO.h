@@ -39,6 +39,61 @@
 // /data/v7/fdb/
 #define KAIO_LOGGING 0
 
+namespace kaio_detail {
+// Truncation runs synchronously on the network thread; repeated signals must not keep it in a retry loop indefinitely.
+constexpr int MAX_EINTR_RETRIES = 3;
+
+struct SyscallResult {
+	int result;
+	int errorCode;
+	int retries;
+};
+
+template <class Call>
+SyscallResult retryOnEINTR(Call&& call) {
+	for (int retries = 0;; ++retries) {
+		int result = call();
+		if (result == 0)
+			return { result, 0, retries };
+		int errorCode = errno;
+		if (errorCode != EINTR || retries == MAX_EINTR_RETRIES)
+			return { result, errorCode, retries };
+	}
+}
+
+struct TruncateResult {
+	int result;
+	int errorCode;
+	int fallocateErrorCode;
+	int fallocateRetries;
+	int ftruncateRetries;
+};
+
+template <class Fallocate, class Ftruncate>
+TruncateResult truncateSyscalls(int fd,
+                                int64_t size,
+                                int64_t lastFileSize,
+                                bool& fallocateSupported,
+                                Fallocate&& fallocateCall,
+                                Ftruncate&& ftruncateCall) {
+	int fallocateRetries = 0;
+	int fallocateErrorCode = 0;
+	if (fallocateSupported && size >= lastFileSize) {
+		auto allocation = retryOnEINTR([&] { return fallocateCall(fd, 0, 0, size); });
+		fallocateRetries = allocation.retries;
+		if (allocation.result == 0)
+			return { 0, 0, 0, fallocateRetries, 0 };
+		fallocateErrorCode = allocation.errorCode;
+		if (fallocateErrorCode != EOPNOTSUPP)
+			return { allocation.result, allocation.errorCode, fallocateErrorCode, fallocateRetries, 0 };
+		fallocateSupported = false;
+	}
+
+	auto truncation = retryOnEINTR([&] { return ftruncateCall(fd, size); });
+	return { truncation.result, truncation.errorCode, fallocateErrorCode, fallocateRetries, truncation.retries };
+}
+} // namespace kaio_detail
+
 struct SlowAioSubmit {
 	int64_t submitDuration;
 	int64_t truncateDuration;
@@ -299,33 +354,31 @@ public:
 #if KAIO_LOGGING
 		uint32_t id = OpLogEntry::nextID();
 #endif
-		int result = -1;
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::START, size / 4096);
-		bool completed = false;
 		double begin = timer_monotonic();
 
-		if (ctx.fallocateSupported && size >= lastFileSize) {
-			result = fallocate(fd, 0, 0, size);
-			if (result != 0) {
-				int fallocateErrCode = errno;
-				TraceEvent("AsyncFileKAIOAllocateError")
-				    .detail("Fd", fd)
-				    .detail("Filename", filename)
-				    .detail("Size", size)
-				    .GetLastError();
-				if (fallocateErrCode == EOPNOTSUPP) {
-					// Mark fallocate as unsupported. Try again with truncate.
-					ctx.fallocateSupported = false;
-				} else {
-					KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
-					return io_error();
-				}
-			} else {
-				completed = true;
+		auto outcome =
+		    kaio_detail::truncateSyscalls(fd, size, lastFileSize, ctx.fallocateSupported, ::fallocate, ::ftruncate);
+		if (outcome.fallocateRetries || outcome.ftruncateRetries) {
+			TraceEvent("AsyncFileKAIOTruncateInterrupted")
+			    .suppressFor(60)
+			    .detail("Fd", fd)
+			    .detail("Filename", filename)
+			    .detail("FallocateRetries", outcome.fallocateRetries)
+			    .detail("FtruncateRetries", outcome.ftruncateRetries);
+		}
+		if (outcome.fallocateErrorCode != 0) {
+			errno = outcome.fallocateErrorCode;
+			TraceEvent("AsyncFileKAIOAllocateError")
+			    .detail("Fd", fd)
+			    .detail("Filename", filename)
+			    .detail("Size", size)
+			    .GetLastError();
+			if (outcome.fallocateErrorCode != EOPNOTSUPP) {
+				KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, outcome.result);
+				return io_error();
 			}
 		}
-		if (!completed)
-			result = ftruncate(fd, size);
 
 		double end = timer_monotonic();
 		if (nondeterministicRandom()->random01() < end - begin) {
@@ -333,9 +386,10 @@ public:
 			    .detail("TruncateTime", end - begin)
 			    .detail("TruncateBytes", size - lastFileSize);
 		}
-		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
+		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, outcome.result);
 
-		if (result != 0) {
+		if (outcome.result != 0) {
+			errno = outcome.errorCode;
 			TraceEvent("AsyncFileKAIOTruncateError").detail("Fd", fd).detail("Filename", filename).GetLastError();
 			return io_error();
 		}
