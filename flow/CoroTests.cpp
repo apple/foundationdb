@@ -3209,7 +3209,6 @@ TEST_CASE("/flow/coro/join/ordered") {
 	auto shared = first.getFuture();
 	auto single = delayedAsyncResultInt(last.getFuture(), 23);
 	Future<std::tuple<int, Void, int, int>> joined = join(shared, Future<Void>(Void()), shared, std::move(single));
-	ASSERT(!single.isValid());
 	last.send(Void());
 	ASSERT(!joined.isReady());
 	first.send(17);

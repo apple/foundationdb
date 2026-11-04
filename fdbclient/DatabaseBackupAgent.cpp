@@ -2928,9 +2928,8 @@ public:
 				logUid = _logUid;
 				logUidValue = BinaryWriter::toValue(logUid, Unversioned());
 
-				Future<EBackupState> statusFuture = backupAgent->getStateValue(tr, logUid);
-				Future<UID> destUidFuture = backupAgent->getDestUid(tr, logUid);
-				auto [status, destUid] = co_await join(statusFuture, destUidFuture);
+				auto [status, destUid] =
+				    co_await join(backupAgent->getStateValue(tr, logUid), backupAgent->getDestUid(tr, logUid));
 
 				if (!backupAgent->isRunnable(status)) {
 					throw backup_unneeded();

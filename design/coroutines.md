@@ -86,7 +86,7 @@ arguments and returns a `Future<std::tuple<...>>`. Each argument contributes one
 a `Void` value for a completion-only input. Pass a named `AsyncResult` with `std::move` to transfer ownership.
 
 ```c++
-auto [status, destUid] = co_await join(statusFuture, destUidFuture);
+auto [status, destUid] = co_await join(backupAgent->getStateValue(tr, logUid), backupAgent->getDestUid(tr, logUid));
 ```
 
 An error in any input fails the joined future immediately, even if an earlier argument is still pending. On failure
