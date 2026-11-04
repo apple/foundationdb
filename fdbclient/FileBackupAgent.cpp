@@ -414,6 +414,38 @@ Future<bool> anyRangePartitionedBackupRunning(Reference<ReadYourWritesTransactio
 	co_return false;
 }
 
+Future<Optional<std::string>> FileBackupAgent::findRunningBackupAtLocation(Reference<ReadYourWritesTransaction> tr,
+                                                                           Reference<IBackupContainer> bc,
+                                                                           std::string excludeTag) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
+
+	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
+	futures.reserve(tags.size());
+	for (const auto& tag : tags) {
+		futures.push_back(tag.get(tr));
+	}
+
+	co_await waitForAll(futures);
+	std::string location = bc->getLocation();
+	for (int i = 0; i < futures.size(); i++) {
+		if (!futures[i].get().present() || tags[i].tagName == excludeTag) {
+			continue;
+		}
+		BackupConfig config(futures[i].get().get().first);
+		EBackupState eState = co_await config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN);
+		if (!FileBackupAgent::isRunnable(eState)) {
+			continue;
+		}
+		Optional<Reference<IBackupContainer>> other = co_await config.backupContainer().get(tr);
+		if (other.present() && other.get() && other.get()->getLocation() == location) {
+			co_return tags[i].tagName;
+		}
+	}
+	co_return Optional<std::string>();
+}
+
 class RestoreConfig : public KeyBackedTaskConfig {
 public:
 	explicit RestoreConfig(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
@@ -7925,6 +7957,21 @@ public:
 
 		Reference<IBackupContainer> bc =
 		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName, encryptionBlockSize);
+
+		// Two backups writing the same files would corrupt each other. If our own tag were running,
+		// backup_duplicate has already been thrown above.
+		Optional<std::string> conflictingTag = co_await FileBackupAgent::findRunningBackupAtLocation(tr, bc, tagName);
+		if (conflictingTag.present()) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupLocationInUse")
+			    .detail("TagName", tagName)
+			    .detail("ConflictingTag", conflictingTag.get())
+			    .detail("Location", bc->getLocation());
+			fprintf(stderr,
+			        "ERROR: The backup location is already in use by the running backup on tag `%s'.\n",
+			        printable(StringRef(conflictingTag.get())).c_str());
+			throw backup_error();
+		}
+
 		try {
 			// Use longer timeout for blobstore:// URLs in simulation to handle slow S3 mock operations
 			double createTimeout = (g_network->isSimulated() && isBlobstoreUrl(backupContainer)) ? 300.0 : 30.0;
