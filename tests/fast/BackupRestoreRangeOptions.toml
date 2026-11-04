@@ -10,6 +10,11 @@
 # audit, no in-place restore). The previous test's writers have stopped when it starts; it reads its quiescent version
 # validateAfter seconds into its test, well after the Cycle end time (Cycle can still land commits shortly after it).
 # The validation copy is cleared after the audit; the workload fails if any of it remains.
+#
+# Backup A is also restored from its container (useExistingBackup) once no backup is logging: 'cy2/' to the latest
+# restorable version, with a RangeDigest before the clear and after the restore (verifyDigest), and 'cy2/' to the middle of
+# the restorable window (targetVersionFraction, checked against the window), where the Cycle
+# invariant must hold.
 
 testClass = "Backup"
 
@@ -123,6 +128,77 @@ runConsistencyCheck = false
 
 [[test]]
 testTitle = 'VerifyCycles'
+checkOnly = true
+# Without this the tester clears the database after the check.
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    keyPrefix = 'cy/'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    keyPrefix = 'cy2/'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    keyPrefix = 'other/'
+
+[[test]]
+testTitle = 'RestoreAFromItsContainer'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'RestoreBackup'
+    tag = 'existingA'
+    backupDir = 'file://simfdb/backups/rangesA/'
+    useExistingBackup = true
+    delayFor = 0
+    restoreRangePrefix = 'cy2/'
+    verifyDigest = true
+
+[[test]]
+testTitle = 'VerifyAfterExistingRestore'
+checkOnly = true
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    keyPrefix = 'cy/'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    keyPrefix = 'cy2/'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    keyPrefix = 'other/'
+
+[[test]]
+testTitle = 'RestoreAToMiddleOfItsWindow'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'RestoreBackup'
+    tag = 'middleA'
+    backupDir = 'file://simfdb/backups/rangesA/'
+    useExistingBackup = true
+    delayFor = 0
+    restoreRangePrefix = 'cy2/'
+    targetVersionFraction = 0.5
+
+[[test]]
+testTitle = 'VerifyAfterMiddleRestore'
 checkOnly = true
 
     [[test.workload]]
