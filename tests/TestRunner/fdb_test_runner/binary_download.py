@@ -125,6 +125,8 @@ class FdbBinaryDownloader:
                 )
             )
         else:
+            local_file_tmp.unlink(missing_ok=True)
+            local_sha256.unlink(missing_ok=True)
             raise RuntimeError(
                 f"Failed to download {remote_file} after {MAX_DOWNLOAD_ATTEMPTS} attempts"
             )
@@ -135,13 +137,13 @@ class FdbBinaryDownloader:
         os.remove(local_sha256)
 
     def get_server(self, version):
-        if not is_local_build_version(version) and not self.version_in_local_repo(
-            version
-        ):
-            self.download_old_binary(
-                version, "fdbserver", f"fdbserver.{self.platform}", True
-            )
-        return self.binary_path(version, "fdbserver")
+        server = self.binary_path(version, "fdbserver")
+        if is_local_build_version(version) or server.is_file():
+            return server
+        self.download_old_binary(
+            version, "fdbserver", f"fdbserver.{self.platform}", True
+        )
+        return self.download_dir / version / "fdbserver"
 
     # Copy a client library file from the local old binaries repository
     # The file needs to be renamed to libfdb_c.so, because it is loaded with this name by fdbcli

@@ -596,6 +596,12 @@ class TestRun:
             "-s",
             str(self.random_seed),
         ]
+        # Restart phases can link different Boost versions. Give the simulator a
+        # host machine ID so neither binary reads the other's shared memory.
+        if is_restarting_test(self.test_file) and not any(
+            arg in ("-i", "--machine-id", "--machine_id") for arg in self.extra_args
+        ):
+            command += ["-i", "1"]
         memory_limit = resolve_fdbserver_memory(self.binary, self.extra_args)
         if memory_limit is not None:
             command += ["--memory", memory_limit]
