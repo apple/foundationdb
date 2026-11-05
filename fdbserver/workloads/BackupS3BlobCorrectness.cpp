@@ -158,6 +158,10 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	// expectBulkEncryptionRejection: assert --encryption-key-file is refused on a bulkdump backup. Only
 	// the backup side is probed; the comment at the probe records why the restore side cannot be.
 	bool expectBulkEncryptionRejection;
+	// mutationLogType: 0 = classic blog mutation logs, 1 = partitioned logs written by backup workers,
+	// -1 = pick one of the two at random per seed.
+	// Only the real backup uses it; the refusal probes keep passing DEFAULT so they stay independent of it.
+	int mutationLogType;
 	// expectBulkPrefixRejection: assert --add-prefix/--remove-prefix is refused on a bulkload restore.
 	bool expectBulkPrefixRejection;
 	// expectRestoreFailure: the bulkload restore is expected NOT to complete, so the workload asserts the
@@ -240,6 +244,10 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		performValidation = getOption(options, "performValidation"_sr, false);
 		expectBulkIncrementalRejection = getOption(options, "expectBulkIncrementalRejection"_sr, false);
 		expectBulkEncryptionRejection = getOption(options, "expectBulkEncryptionRejection"_sr, false);
+		mutationLogType = getOption(options, "mutationLogType"_sr, 0);
+		if (mutationLogType < 0) {
+			mutationLogType = deterministicRandom()->coinflip() ? 1 : 0;
+		}
 		expectBulkPrefixRejection = getOption(options, "expectBulkPrefixRejection"_sr, false);
 		// Mutually exclusive with performValidation, whose audit compares restored contents that by
 		// definition do not exist when the restore is expected to fail.
@@ -269,7 +277,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			// An idle instance still needs non-empty ranges to construct; reuse the last active backup's.
 			MultiBackupRanges::addRanges(
 			    multiBackupScenario, std::min(multiBackupIndex, multiBackupCount - 1), multiBackupCount, backupRanges);
-		} else if (backupRangePrefix.size() > 0) {
+		} else if (!backupRangePrefix.empty()) {
 			// Narrower than normalKeys so the out-of-range sentinels below have an outside to occupy.
 			backupRanges.push_back_deep(backupRanges.arena(), prefixRange(backupRangePrefix));
 		} else {
@@ -676,7 +684,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			                                   tag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ !stopDifferentialDelay },
-			                                   MutationLogType::DEFAULT,
+			                                   (MutationLogType)mutationLogType,
 			                                   IncrementalBackupOnly::False,
 			                                   encryptionKeyFileName,
 			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
@@ -770,7 +778,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("AbortAndRestartAfter", abortAndRestartAfter)
 		    .detail("DifferentialAfter", stopDifferentialAfter);
 
-		if (backupRangePrefix.size() > 0) {
+		if (!backupRangePrefix.empty()) {
 			KeyRange prefixed = prefixRange(backupRangePrefix);
 			RangeResult sample =
 			    co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {

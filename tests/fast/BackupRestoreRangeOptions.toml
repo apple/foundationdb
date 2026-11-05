@@ -1,0 +1,117 @@
+# Two concurrent v1 backups with distinct tags and containers over three Cycle rings: backup A covers 'cy/' and
+# 'cy2/' (backupRanges), backup B covers only 'cy/' (backupRangePrefix). The ring 'other/' is in no backup.
+#
+# Restore A with restoreRangePrefix = 'cy/', a strict subset of its ranges: it must clear and restore just 'cy/', so
+# 'cy2/' and 'other/' must survive. Then restore B with no restore options: a default restore must clear and restore
+# only its backup's own ranges, so 'cy2/' and 'other/' must survive again. The restores run after the writers stop and
+# each ring is an independent cycle, so every ring is checked with the Cycle invariant.
+
+testClass = "Backup"
+
+[[test]]
+testTitle = 'SubmitBackups'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 3000.0
+    testDuration = 10.0
+    keyPrefix = 'cy/'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 1000.0
+    testDuration = 10.0
+    keyPrefix = 'cy2/'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 1000.0
+    testDuration = 10.0
+    keyPrefix = 'other/'
+
+    [[test.workload]]
+    testName = 'SubmitBackup'
+    tag = 'rangesA'
+    backupDir = 'file://simfdb/backups/rangesA/'
+    delayFor = 0
+    stopWhenDone = false
+    encrypted = false
+    backupRanges = 'cy/:cy0;cy2/:cy20'
+
+    [[test.workload]]
+    testName = 'SubmitBackup'
+    tag = 'prefixB'
+    backupDir = 'file://simfdb/backups/prefixB/'
+    delayFor = 0
+    stopWhenDone = false
+    encrypted = false
+    backupRangePrefix = 'cy/'
+
+[[test]]
+testTitle = 'RestoreSubsetOfBackupA'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'RestoreBackup'
+    tag = 'rangesA'
+    delayFor = 0
+    restoreRangePrefix = 'cy/'
+
+[[test]]
+testTitle = 'VerifyAfterRestoreA'
+checkOnly = true
+# Without this the tester clears the database after the check, and the clear is also captured by backup B.
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    keyPrefix = 'cy/'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    keyPrefix = 'cy2/'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    keyPrefix = 'other/'
+
+[[test]]
+testTitle = 'RestoreBackupBDefault'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'RestoreBackup'
+    tag = 'prefixB'
+    delayFor = 0
+
+[[test]]
+testTitle = 'VerifyCycles'
+checkOnly = true
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    keyPrefix = 'cy/'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    keyPrefix = 'cy2/'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    keyPrefix = 'other/'

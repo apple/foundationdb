@@ -524,7 +524,7 @@ public:
 		}
 
 		Future<Void> loadExtent() {
-			ASSERT(mode == POP | mode == READONLY);
+			ASSERT(mode == POP || mode == READONLY);
 			debug_printf("FIFOQueue::Cursor(%s) loadExtent\n", toString().c_str());
 			page = co_await queue->pager->readExtent(pageID);
 			debug_printf("FIFOQueue::Cursor(%s) loadExtent done. Page: %p\n", toString().c_str(), page->rawData());
@@ -7427,7 +7427,7 @@ public:
 		std::vector<PathEntry> path;
 
 	public:
-		BTreeCursor() : reason(PagerEventReasons::MAXEVENTREASONS) {}
+		BTreeCursor() : reason(PagerEventReasons::MAXEVENTREASONS), btree(nullptr), valid(false) {}
 
 		bool initialized() const { return pager.isValid(); }
 		bool isValid() const { return valid; }

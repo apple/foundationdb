@@ -411,7 +411,7 @@ public:
 			std::string byteSampleFileName = stringRemovePrefix(parts[5], "[ByteSampleFileName]: ");
 			std::string checksumValue = stringRemovePrefix(parts[6], "[ChecksumValue]: ");
 			std::string checksumMethod = stringRemovePrefix(parts[7], "[ChecksumMethod]: ");
-			BulkLoadChecksum checksum(checksumValue, checksumMethod);
+			BulkLoadChecksum checksum(checksumMethod, checksumValue);
 			fileSet =
 			    BulkLoadFileSet(rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName, checksum);
 			beginKey = getKeyFromHexString(stringRemovePrefix(parts[8], "[BeginKey]: "));
@@ -1003,6 +1003,8 @@ public:
 		}
 	}
 
+	size_t getManifestCount() const { return manifestCount; }
+
 	bool isValid() const { return formatVersion > 0 && manifestCount > 0; }
 
 	// Generate human-readable string and the string is stored in the bulkload job-manifest.txt file.
@@ -1077,6 +1079,8 @@ public:
 	bool isValid() const {
 		return beginKey < endKey && version != invalidVersion && relativePathIsContained(manifestRelativePath);
 	}
+
+	Version getVersion() const { return version; }
 
 	bool hasEmptyData() const { return bytes == 0; }
 

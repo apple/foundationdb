@@ -107,6 +107,8 @@ inline std::uint32_t xorshift32(std::uint32_t& s) {
 	return x;
 }
 
+#ifdef __linux__
+
 // Per-thread stack bounds, populated lazily on first use of captureFramesFP.
 // Used by captureFramesFP to terminate the FP walk when it crosses into
 // FP-elided code (notably glibc's pthread shutdown / TLS-destructor
@@ -120,8 +122,6 @@ inline std::uint32_t xorshift32(std::uint32_t& s) {
 // so far.
 thread_local uintptr_t gStackLow = 0;
 thread_local uintptr_t gStackHigh = 0;
-
-#ifdef __linux__
 
 void initStackBoundsForThread() {
 	pthread_attr_t attr;

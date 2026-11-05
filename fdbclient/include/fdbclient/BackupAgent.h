@@ -271,6 +271,14 @@ public:
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return restoreStatus(tr, tagName); });
 	}
 
+	// As restoreStatus(), serialized as a JSON document. An empty tagName reports every restore tag, so
+	// the result is always one object with a "Restores" array rather than a document per tag.
+	Future<std::string> restoreStatusJSON(Reference<ReadYourWritesTransaction> tr, Key tagName);
+	Future<std::string> restoreStatusJSON(Database cx, Key tagName) {
+		return runRYWTransaction(
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return restoreStatusJSON(tr, tagName); });
+	}
+
 	/** BACKUP METHODS **/
 
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
@@ -989,9 +997,9 @@ public:
 					           }
 					           return {}; // Not restorable until both complete
 				           }
-				           // Use the minimum of both as the effective first snapshot version
+				           // The log must cover either restore method before the backup can stop.
 				           Version effectiveFirstSnapshot =
-				               std::min(firstSnapshot.get().get(), bulkDumpSnapshot.get().get());
+				               std::max(firstSnapshot.get().get(), bulkDumpSnapshot.get().get());
 				           if (logVersion.present() && logVersion.get() > effectiveFirstSnapshot) {
 					           return std::max(logVersion.get() - 1, effectiveFirstSnapshot);
 				           }
