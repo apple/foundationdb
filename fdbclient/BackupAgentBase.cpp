@@ -294,6 +294,15 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 402, 401);
 	ASSERT((co_await config.getLogProgress(tr, ReadLegacyLogMode::False)).checkpoint == 121);
 
+	// A newly registered logs-only backup can see another backup's checkpoint before it has any files.
+	config.firstSnapshotEndVersion().clear(tr);
+	config.incrementalBackupOnly().set(tr, true);
+	config.latestLogEndVersion().clear(tr);
+	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, {}, {});
+	config.latestLogEndVersion().set(tr, 121);
+	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
+	config.incrementalBackupOnly().clear(tr);
+
 	config.firstSnapshotEndVersion().set(tr, 100);
 	config.mutationLogType().set(tr, MutationLogType::DEFAULT);
 	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);

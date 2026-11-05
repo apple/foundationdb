@@ -290,11 +290,17 @@ Future<BackupConfig::LogProgress> BackupConfig::getLogProgress(Reference<ReadYou
 	auto workerEnd = latestBackupWorkerSavedVersion().get(tr);
 	KeyBackedProperty<bool> legacyPartitioned = configSpace.pack("partitionedLogEnabled"_sr);
 	auto workersStarted = allWorkerStarted();
+	auto logsOnly = incrementalBackupOnly();
 	Optional<MutationLogType> type = co_await mutationLogType().get(tr);
-	// A backup submitted on 7.4 can start ordinary logging on 8.0. Only registered
-	// partitioned workers acknowledge startup for this backup UID.
-	if (readLegacy && !type.present() && (co_await legacyPartitioned.getD(tr)) && (co_await workersStarted.getD(tr))) {
-		type = MutationLogType::PARTITIONED_LOG;
+	if (readLegacy && !type.present()) {
+		bool partitioned, started, incremental;
+		co_await (store(partitioned, legacyPartitioned.getD(tr)) && store(started, workersStarted.getD(tr)) &&
+		          store(incremental, logsOnly.getD(tr)));
+		// A backup queued on 7.4 can start ordinary logging on 8.0. For a logs-only
+		// backup, even registered workers can publish a shared checkpoint before its first file.
+		if (partitioned && started && !incremental) {
+			type = MutationLogType::PARTITIONED_LOG;
+		}
 	}
 	co_await (success(logEnd) && success(workerEnd));
 	co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT),
