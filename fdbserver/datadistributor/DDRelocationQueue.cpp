@@ -867,7 +867,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 	// boundaries so they cover the failed range without undoing the newer boundary change.
 	const bool destinationFailureRetry = rs.retryIntent.present();
 	if (destinationFailureRetry) {
-		// Cancelling a restored move can subdivide team ownership inside a single tracked shard.
+		// Cancelling an older move recovered by DD can restore source-team records for only part of a
+		// shard that has since been merged. The team map then has extra boundaries inside that shard.
+		// Use the shard tracker's current boundaries so the retry preserves the newer split or merge.
 		auto shards = trackedShards->intersectingRanges(rs.keys);
 		if (shards.begin()->end() < rs.keys.end) {
 			std::vector<KeyRange> pieces;
