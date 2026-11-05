@@ -56,9 +56,21 @@ var _ = Describe("Testing the pruning of shared binaries", func() {
 			logger:       GinkgoLogr,
 			processCount: 2,
 			activeConfiguration: &api.ProcessConfiguration{
-				Version: &newVersion,
+				Version:         &newVersion,
+				UseSharedBinary: new(true),
 			},
 		}
+	})
+
+	When("the configuration doesn't use the shared binary", func() {
+		BeforeEach(func() {
+			mon.activeConfiguration.UseSharedBinary = nil
+		})
+
+		It("should not prune anything", func() {
+			mon.pruneSharedBinaries()
+			Expect(listDir()).To(HaveLen(5))
+		})
 	})
 
 	When("no process is running", func() {
