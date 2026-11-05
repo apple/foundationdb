@@ -1533,7 +1533,7 @@ static inline void destruct(T& t) {
 
 // These stay as int8_t constants rather than an enum class because actor_wait_state also stores generated callback
 // group numbers, so the code frequently mixes named sentinel states with arbitrary positive integer values.
-constexpr int8_t ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK = -2;
+constexpr int8_t ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK = -2;
 constexpr int8_t ACTOR_WAIT_STATE_CANCELLED = -1;
 constexpr int8_t ACTOR_WAIT_STATE_NOT_WAITING = 0;
 constexpr int8_t ACTOR_WAIT_STATE_WAITING = 1;
