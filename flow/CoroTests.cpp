@@ -2179,17 +2179,16 @@ void assertNoThrowOnCancelDestroyedAfterFirstWait(NoThrowOnCancelRecorder const&
 }
 
 template <class Result, class NextWait>
-Result failJoinSibling(NoThrowOnCancelRecorder& recorder,
-                       Future<Void> start,
-                       Promise<Void> sibling,
-                       NextWait nextWait,
-                       NoThrowOnCancel = {}) {
+Result dropLastObserverWhileRunning(NoThrowOnCancelRecorder& recorder,
+                                    Future<Void> start,
+                                    std::optional<Result>& observer,
+                                    NextWait nextWait,
+                                    NoThrowOnCancel = {}) {
 	recorder.record(NoThrowOnCancelEvent::Start);
 	NoThrowOnCancelLifetimeTracker tracker(recorder);
 	try {
 		co_await start;
-		// join drops its last handle to this producer inside sendError().
-		sibling.sendError(io_error());
+		observer.reset();
 		recorder.record(NoThrowOnCancelEvent::WaitReturned);
 		if (nextWait.isValid()) {
 			co_await nextWait;
@@ -2202,17 +2201,15 @@ Result failJoinSibling(NoThrowOnCancelRecorder& recorder,
 }
 
 template <class Result>
-void checkJoinDropsRunningProducer() {
+void checkDropLastObserverWhileRunning() {
 	auto check = [](auto nextWait) {
 		NoThrowOnCancelRecorder recorder;
 		Promise<Void> start;
-		Promise<Void> sibling;
-		auto joined = join(failJoinSibling<Result>(recorder, start.getFuture(), sibling, std::move(nextWait)),
-		                   sibling.getFuture());
-		ASSERT(!joined.isReady());
+		std::optional<Result> observer;
+		observer.emplace(dropLastObserverWhileRunning(recorder, start.getFuture(), observer, std::move(nextWait)));
+		ASSERT(!observer->isReady());
 		start.send(Void());
-		ASSERT(joined.isError());
-		ASSERT_EQ(joined.getError().code(), error_code_io_error);
+		ASSERT(!observer.has_value());
 		assertNoThrowOnCancelDestroyedAfterFirstWait(recorder);
 	};
 	Promise<Void> pending;
@@ -2982,6 +2979,12 @@ TEST_CASE("/flow/coro/noThrowOnCancel/normalCompletionValue") {
 	return Void();
 }
 
+TEST_CASE("/flow/coro/noThrowOnCancel/dropLastObserverWhileRunning") {
+	checkDropLastObserverWhileRunning<Future<Void>>();
+	checkDropLastObserverWhileRunning<AsyncResult<Void>>();
+	return Void();
+}
+
 TEST_CASE("/flow/coro/noThrowOnCancel/reentrantCancelDiscardsReturnedValue") {
 	checkCancellationDiscardsReturnedValue<Future<LifetimeTracked>>();
 	checkCancellationDiscardsReturnedValue<AsyncResult<LifetimeTracked>>();
@@ -3063,7 +3066,7 @@ private:
 };
 
 template <class Result>
-void checkJoinCancelsDuringStreamDelivery() {
+void checkCancellationDuringStreamDelivery() {
 	auto consume = [](FutureStream<OnCopy> input, std::string& events) -> Result {
 		ScopeExit cleanup([&events] { events += "cleanup"; });
 		try {
@@ -3078,23 +3081,21 @@ void checkJoinCancelsDuringStreamDelivery() {
 
 	std::string events;
 	PromiseStream<OnCopy> stream;
-	Promise<Void> sibling;
-	auto joined = join(consume(stream.getFuture(), events), sibling.getFuture());
+	std::optional<Result> waiter(consume(stream.getFuture(), events));
 	const OnCopy value([&] {
-		sibling.sendError(io_error());
+		waiter.reset();
 		events += "copied ";
 	});
 	stream.send(value);
 	ASSERT_EQ(events, "copied cancelled cleanup"s);
-	ASSERT(joined.isError());
-	ASSERT_EQ(joined.getError().code(), error_code_io_error);
+	ASSERT(!waiter.has_value());
 	ASSERT_EQ(stream.getFutureReferenceCount(), 0);
 }
 } // namespace
 
-TEST_CASE("/flow/coro/join/cancelDuringStreamDelivery") {
-	checkJoinCancelsDuringStreamDelivery<Future<Void>>();
-	checkJoinCancelsDuringStreamDelivery<AsyncResult<Void>>();
+TEST_CASE("/flow/coro/cancelDuringStreamDelivery") {
+	checkCancellationDuringStreamDelivery<Future<Void>>();
+	checkCancellationDuringStreamDelivery<AsyncResult<Void>>();
 	return Void();
 }
 
@@ -3505,9 +3506,25 @@ TEST_CASE("/flow/coro/join/reentrantErrorDuringCopy") {
 	return Void();
 }
 
-TEST_CASE("/flow/coro/join/dropRunningNoThrowOnCancelProducer") {
-	checkJoinDropsRunningProducer<Future<Void>>();
-	checkJoinDropsRunningProducer<AsyncResult<Void>>();
+TEST_CASE("/flow/coro/join/runningProducerCleanup") {
+	auto produce = [](Future<Void> start, Promise<Void> sibling, Future<Void> next, int& cleanups, NoThrowOnCancel = {})
+	    -> AsyncResult<Void> {
+		ScopeExit cleanup([&] { ++cleanups; });
+		co_await start;
+		sibling.sendError(io_error());
+		co_await next;
+	};
+
+	int cleanups = 0;
+	Promise<Void> start, sibling, next;
+	auto joined = join(produce(start.getFuture(), sibling, next.getFuture(), cleanups), sibling.getFuture());
+	auto cleanupsWhenCallerResumes = map(ready(joined), [&](Void) { return cleanups; });
+	start.send(Void());
+	ASSERT(joined.isError());
+	ASSERT_EQ(joined.getError().code(), error_code_io_error);
+	ASSERT_EQ(cleanupsWhenCallerResumes.get(), 0);
+	ASSERT_EQ(cleanups, 1);
+	ASSERT_EQ(next.getFutureReferenceCount(), 0);
 	return Void();
 }
 
