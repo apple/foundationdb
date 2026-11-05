@@ -359,10 +359,11 @@ Future<BackupConfig::LogProgress> BackupConfig::getLogProgress(Reference<ReadYou
 	auto logEnd = latestLogEndVersion().get(tr);
 	auto workerEnd = latestBackupWorkerSavedVersion().get(tr);
 	KeyBackedProperty<bool> legacyPartitioned = configSpace.pack("partitionedLogEnabled"_sr);
+	auto workersStarted = allWorkerStarted();
 	Optional<MutationLogType> type = co_await mutationLogType().get(tr);
-	// 7.4 stored the log mode as a tuple-encoded boolean. A worker can publish a late checkpoint
-	// after the backup stops, so status only uses this fallback for a running backup.
-	if (readLegacy && !type.present() && (co_await legacyPartitioned.getD(tr))) {
+	// A backup submitted on 7.4 can start ordinary logging on 8.0. Only registered
+	// partitioned workers acknowledge startup for this backup UID.
+	if (readLegacy && !type.present() && (co_await legacyPartitioned.getD(tr)) && (co_await workersStarted.getD(tr))) {
 		type = MutationLogType::PARTITIONED_LOG;
 	}
 	co_await (success(logEnd) && success(workerEnd));
@@ -8400,15 +8401,17 @@ public:
 					statusDoc.setKey("Running", BackupAgentBase::isRunnable(backupState));
 					doc.setKey("Status", statusDoc);
 
-					Future<BackupConfig::LogProgress> logs;
+					Future<Optional<Version>> logEnd;
 
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						Reference<IBackupContainer> bc;
 						TimestampedVersion latestRestorable;
-						logs = config.getLogProgress(tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
+						auto logs =
+						    config.getLogProgress(tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
+						logEnd = map(logs, [](const BackupConfig::LogProgress& p) { return p.exclusiveLogEnd(); });
 
 						co_await (store(latestRestorable,
-						                getTimestampedVersion(tr, config.getLatestRestorableVersion(tr, logs))) &&
+						                getTimestampedVersion(tr, config.getLatestRestorableVersion(tr, logEnd))) &&
 						          store(bc, config.backupContainer().getOrThrow(tr)));
 						bc = fileBackup::getBackupContainerWithProxy(bc);
 
@@ -8448,7 +8451,7 @@ public:
 						    store(snapshotBegin, getTimestampedVersion(tr, config.snapshotBeginVersion().get(tr))) &&
 						    store(snapshotTargetEnd,
 						          getTimestampedVersion(tr, config.snapshotTargetEndVersion().get(tr))) &&
-						    store(latestLogEnd, getTimestampedVersion(tr, logs.get().logEnd)) &&
+						    store(latestLogEnd, getTimestampedVersion(tr, logEnd)) &&
 						    store(latestSnapshotEnd,
 						          getTimestampedVersion(tr, config.latestSnapshotEndVersion().get(tr))) &&
 						    store(snapshotLastDispatch,
@@ -8624,8 +8627,9 @@ public:
 					Optional<Version> latestRestorableVersion;
 					Version recentReadVersion{ 0 };
 					auto logs = config.getLogProgress(tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
+					auto logEnd = map(logs, [](const BackupConfig::LogProgress& p) { return p.exclusiveLogEnd(); });
 
-					co_await (store(latestRestorableVersion, config.getLatestRestorableVersion(tr, logs)) &&
+					co_await (store(latestRestorableVersion, config.getLatestRestorableVersion(tr, logEnd)) &&
 					          store(bc, config.backupContainer().getOrThrow(tr)) &&
 					          store(recentReadVersion, tr->getReadVersion()));
 					bc = fileBackup::getBackupContainerWithProxy(bc);
@@ -8701,7 +8705,7 @@ public:
 						Version snapshotBeginVersion{ 0 };
 						Version snapshotTargetEndVersion{ 0 };
 						Optional<Version> latestSnapshotEndVersion;
-						Optional<Version> latestLogEndVersion = logs.get().logEnd;
+						Optional<Version> latestLogEndVersion = logEnd.get();
 						Optional<int64_t> logBytesWritten;
 						Optional<int64_t> rangeBytesWritten;
 						Optional<int64_t> latestSnapshotEndVersionTimestamp;
@@ -8796,7 +8800,7 @@ public:
 						statusText += format("\nMutation Logs:\n");
 						statusText += format(" Bytes written: %s\n",
 						                     formatBytesHumanReadable(logBytesWritten.orDefault(0)).c_str());
-						statusText += format(" Last complete version: %s (%s)\n",
+						statusText += format(" Log end version (exclusive): %s (%s)\n",
 						                     versionToString(latestLogEndVersion).c_str(),
 						                     timeStampToString(latestLogEndVersionTimestamp).c_str());
 
