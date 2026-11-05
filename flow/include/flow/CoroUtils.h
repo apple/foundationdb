@@ -36,7 +36,8 @@ struct ActorAsyncResultCallback : AsyncResultCallback<ValueType> {
 	void remove() {
 		if (state) {
 			state->clearCallback(this);
-			state = nullptr;
+			// addCallbackAndClear transferred the consumer reference. The producer holds its own during delivery.
+			std::exchange(state, nullptr)->delRef();
 		}
 	}
 
