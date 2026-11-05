@@ -325,6 +325,7 @@ class RestartTestPolicy:
         self._second_binary = new_binary
         if old_binary is None:
             _logger.info("No old binary provided")
+            return
         old_binary_version_raw = subprocess.check_output(
             [old_binary, "--version"]
         ).decode("utf-8")

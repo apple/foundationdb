@@ -72,6 +72,16 @@ class RestartTestPolicyTest(unittest.TestCase):
     def test_unversioned_restarts(self):
         self.assert_selection("same_version", "7.4.3", ("new", "new"))
 
+    def test_no_old_binary(self):
+        policy = TestRunner.RestartTestPolicy(
+            "/source/tests/restarting/from_7.3.0_until_7.4.0/Restart-1.toml",
+            None,
+            "new",
+        )
+        self.assertEqual(
+            (policy.first_binary(), policy.second_binary()), ("new", "new")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
