@@ -348,13 +348,30 @@ struct RaceImplActor final : Actor<Result>,
 
 	template <std::size_t Idx, class T>
 	void finish(T&& value) {
-		Result result(std::in_place_index<Idx>, std::forward<T>(value));
+		// A payload constructor can cancel this race or synchronously fire another input.
 		this->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
 		RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
-		{
-			auto futuresToRelease = std::move(futures);
+		try {
+			// Keep the source of value alive through construction and release losers before notifying observers.
+			auto inputs = std::move(futures);
+			new (&this->value()) Result(std::in_place_index<Idx>, std::forward<T>(value));
+		} catch (Error& e) {
+			finishConstructionError(e);
+			throw;
+		} catch (...) {
+			finishConstructionError(unknown_error());
+			throw;
 		}
-		this->SAV<Result>::sendAndDelPromiseRef(std::move(result));
+		if (actorWaitStateIsCancelled(this->actor_wait_state)) {
+			destruct(this->value());
+			this->sendErrorAndDelPromiseRef(actor_cancelled());
+		} else {
+			this->finishSendAndDelPromiseRef();
+		}
+	}
+
+	void finishConstructionError(Error e) {
+		this->sendErrorAndDelPromiseRef(actorWaitStateIsCancelled(this->actor_wait_state) ? actor_cancelled() : e);
 	}
 
 	void fail(Error e) {

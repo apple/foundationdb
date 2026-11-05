@@ -3130,6 +3130,81 @@ TEST_CASE("/flow/coro/raceStreamSuccess") {
 	co_return;
 }
 
+namespace {
+struct RaceStreamItem {
+	int value;
+	std::function<void()> onCopy;
+
+	explicit RaceStreamItem(int value, std::function<void()> onCopy = {}) : value(value), onCopy(std::move(onCopy)) {}
+	RaceStreamItem(const RaceStreamItem& other) : value(other.value), onCopy(other.onCopy) {
+		if (onCopy) {
+			onCopy();
+		}
+	}
+	RaceStreamItem(RaceStreamItem&&) noexcept = default;
+};
+} // namespace
+
+TEST_CASE("/flow/coro/raceStreamDropLastObserverDuringCopy") {
+	PromiseStream<RaceStreamItem> winner;
+	Promise<Void> loser;
+	auto raced = race(winner.getFuture(), loser.getFuture());
+	const RaceStreamItem item(1, [&] { raced = {}; });
+	winner.send(item);
+	ASSERT(!raced.isValid());
+	ASSERT_EQ(winner.getFutureReferenceCount(), 0);
+	ASSERT_EQ(loser.getFutureReferenceCount(), 0);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceStreamCancelDuringCopy") {
+	PromiseStream<RaceStreamItem> winner;
+	Promise<Void> loser;
+	auto raced = race(winner.getFuture(), loser.getFuture());
+	const RaceStreamItem item(1, [&] { raced.cancel(); });
+	winner.send(item);
+	ASSERT(raced.isError());
+	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);
+	ASSERT_EQ(winner.getFutureReferenceCount(), 0);
+	ASSERT_EQ(loser.getFutureReferenceCount(), 0);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceStreamNestedSendsDuringCopy") {
+	PromiseStream<RaceStreamItem> winner;
+	PromiseStream<int> loser;
+	auto raced = race(winner.getFuture(), loser.getFuture());
+	const RaceStreamItem first(1, [&] {
+		loser.send(3);
+		winner.send(RaceStreamItem(2));
+	});
+	winner.send(first);
+	ASSERT(raced.canGet());
+	ASSERT_EQ(raced.get().index(), 0);
+	ASSERT_EQ(std::get<0>(raced.get()).value, 1);
+	ASSERT_EQ(winner.getFuture().pop().value, 2);
+	ASSERT_EQ(loser.getFuture().pop(), 3);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceStreamThrowDuringCopy") {
+	PromiseStream<RaceStreamItem> winner;
+	Promise<Void> loser;
+	auto raced = race(winner.getFuture(), loser.getFuture());
+	const RaceStreamItem item(1, [] { throw io_error(); });
+	try {
+		winner.send(item);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+	ASSERT(raced.isError());
+	ASSERT_EQ(raced.getError().code(), error_code_io_error);
+	ASSERT_EQ(winner.getFutureReferenceCount(), 0);
+	ASSERT_EQ(loser.getFutureReferenceCount(), 0);
+	return Void();
+}
+
 TEST_CASE("/flow/coro/raceThreadFutureStreamSuccess") {
 	ThreadReturnPromiseStream<int> intStream;
 	Promise<std::string> stringPromise;
