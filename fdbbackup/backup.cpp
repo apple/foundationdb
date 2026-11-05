@@ -2345,7 +2345,7 @@ Future<Void> runRestore(Database db,
 			}
 		} else {
 			Optional<RestorableFileSet> rset = co_await bc->getRestoreSet(
-			    targetVersion, ranges, false, invalidVersion, restoreMode == RestoreMode::BULKLOAD);
+			    targetVersion, ranges, onlyApplyMutationLogs, beginVersion, restoreMode == RestoreMode::BULKLOAD);
 
 			if (!rset.present()) {
 				fmt::print(stderr,

@@ -388,9 +388,6 @@ struct DDBulkLoadJobManager {
 struct DDBulkDumpJobManager {
 	BulkDumpState jobState;
 	std::map<Key, BulkLoadManifest> taskManifestMap;
-	// Limits the "no replica in the target DC" warning to once per job rather than once per
-	// affected range per scheduling cycle. This manager is reconstructed for each job.
-	bool warnedNoServerInTargetDc = false;
 
 	DDBulkDumpJobManager() = default;
 	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -518,10 +515,11 @@ public:
 	}
 
 	// The DC whose storage servers perform bulkdump uploads, or empty when the cluster has no
-	// region configuration. Resolved per dispatch rather than cached so it follows a failover.
+	// region configuration. Resolved per scheduling pass rather than cached so it follows a failover.
 	std::string bulkDumpTargetDcId() const {
-		const std::vector<Optional<Key>>& dcIds =
-		    SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION ? remoteDcIds : primaryDcId;
+		// With usable_regions == 1 the remote DC is configured but holds no storage servers.
+		const bool useRemote = SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION && configuration.usableRegions > 1;
+		const std::vector<Optional<Key>>& dcIds = useRemote ? remoteDcIds : primaryDcId;
 		if (!dcIds.empty() && dcIds[0].present()) {
 			return dcIds[0].get().toString();
 		}
@@ -2805,25 +2803,24 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 				    .detail("BulkDumpRange", bulkDumpRange)
 				    .detail("BeginKey", bulkDumpResult[bulkDumpResultIndex].key)
 				    .detail("EndKey", rangeLocations.back().range.end);
+				const std::string targetDcId = self->bulkDumpTargetDcId();
 				rangeLocationIndex = 0;
 				for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
 					// Spawn task per shard
 					taskRange = rangeLocations[rangeLocationIndex].range;
 					ASSERT(!taskRange.empty());
 					// Skip rather than fall back to another region: the dumping server uploads the
-					// files, so a DC that cannot reach the destination would fail every task.
-					const std::string targetDcId = self->bulkDumpTargetDcId();
+					// files, so a DC that cannot reach the destination would fail every task. The
+					// one exception is usable_regions == 1, handled in bulkDumpTargetDcId().
 					if (!targetDcId.empty()) {
 						const auto& servers = rangeLocations[rangeLocationIndex].servers;
 						auto targetDc = servers.find(targetDcId);
 						if (targetDc == servers.end() || targetDc->second.empty()) {
-							if (!self->bulkDumpJobManager.warnedNoServerInTargetDc) {
-								self->bulkDumpJobManager.warnedNoServerInTargetDc = true;
-								TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDc", self->ddId)
-								    .detail("JobID", jobId)
-								    .detail("TargetDcId", targetDcId)
-								    .detail("FirstSkippedRange", taskRange);
-							}
+							TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDc", self->ddId)
+							    .suppressFor(60.0)
+							    .detail("JobID", jobId)
+							    .detail("TargetDcId", targetDcId)
+							    .detail("SkippedRange", taskRange);
 							continue;
 						}
 					}
@@ -5900,6 +5897,19 @@ private:
 	int64_t saved;
 };
 
+class BulkDumpUseRemoteRegionGuard {
+public:
+	BulkDumpUseRemoteRegionGuard() : saved(SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION) {}
+	~BulkDumpUseRemoteRegionGuard() { set(saved); }
+	BulkDumpUseRemoteRegionGuard(BulkDumpUseRemoteRegionGuard const&) = delete;
+	BulkDumpUseRemoteRegionGuard& operator=(BulkDumpUseRemoteRegionGuard const&) = delete;
+
+	void set(bool value) { const_cast<ServerKnobs*>(SERVER_KNOBS)->DD_BULKDUMP_USE_REMOTE_REGION = value; }
+
+private:
+	bool saved;
+};
+
 } // namespace
 
 TEST_CASE("/DataDistribution/Audit/BoundAuditTaskRange") {
@@ -5984,6 +5994,28 @@ TEST_CASE("/DataDistribution/Initialization/DcIds") {
 	dcIds = getDataDistributorDcIds(regions, Optional<Key>("unknown"_sr));
 	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
 	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/BulkDump/TargetDcId") {
+	Reference<DDSharedContext> context(new DDSharedContext(UID()));
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+	Reference<DataDistributor> self(new DataDistributor(dbInfo, UID(), context, ""));
+	self->primaryDcId = { Optional<Key>("primary"_sr) };
+	self->remoteDcIds = { Optional<Key>("remote"_sr) };
+	BulkDumpUseRemoteRegionGuard useRemoteRegion;
+
+	useRemoteRegion.set(true);
+	self->configuration.usableRegions = 2;
+	ASSERT_EQ(self->bulkDumpTargetDcId(), "remote");
+	// The remote DC is configured but holds no storage servers.
+	self->configuration.usableRegions = 1;
+	ASSERT_EQ(self->bulkDumpTargetDcId(), "primary");
+
+	useRemoteRegion.set(false);
+	self->configuration.usableRegions = 2;
+	ASSERT_EQ(self->bulkDumpTargetDcId(), "primary");
 
 	return Void();
 }
