@@ -1493,28 +1493,37 @@ template <class... Values>
 class JoinResults : public ReferenceCounted<JoinResults<Values...>> {
 	// The occupied alternative can hold any payload, including std::optional's reserved tag types.
 	std::tuple<std::variant<std::monostate, Values>...> slots;
-	Error firstError;
-
-	Error recordError(Error error) {
-		// Several collectors can fail before quorum registers its callbacks. Preserve their observation order.
-		if (!firstError.isValid()) {
-			firstError = error;
-		}
-		return firstError;
-	}
+	std::size_t remaining = sizeof...(Values);
+	Promise<Void> completion;
 
 public:
+	Future<Void> onReady() const { return completion.getFuture(); }
+
 	template <std::size_t I, JoinInput Input>
-	static Future<Void> collect(Input arg, Reference<JoinResults> results, ExplicitVoid = {}) {
-		// A payload constructor can synchronously fail a sibling and unwind joinImpl while emplace is running.
-		auto input = std::move(arg);
-		auto self = std::move(results);
+	static Future<Void> collect(Input input, Reference<JoinResults> results, ExplicitVoid = {}) {
+		// Both handles must survive a sibling failing synchronously during value construction.
+		Error error;
 		try {
-			std::get<I>(self->slots).template emplace<1>(co_await std::move(input));
+			std::get<I>(results->slots).template emplace<1>(co_await std::move(input));
 		} catch (Error& e) {
-			throw self->recordError(e);
+			error = e;
 		} catch (...) {
-			throw self->recordError(unknown_error());
+			error = unknown_error();
+		}
+
+		// Claim completion before releasing the input, which can synchronously complete another collector.
+		Promise<Void> notify(nullptr);
+		if (error.isValid() || --results->remaining == 0) {
+			notify = std::move(results->completion);
+		}
+		input = Input{};
+		results.clear();
+		if (notify.isValid()) {
+			if (error.isValid()) {
+				notify.sendError(error);
+			} else {
+				notify.send(Void());
+			}
 		}
 		co_return Void();
 	}
@@ -1537,8 +1546,11 @@ Future<std::tuple<typename Inputs::Element...>> joinImpl(std::tuple<Inputs...> a
 
 	using Results = JoinResults<typename Inputs::Element...>;
 	auto results = makeReference<Results>();
-	Future<Void> collectors[] = { Results::template collect<I>(std::get<I>(std::move(inputs)), results)... };
-	co_await quorum(collectors, sizeof...(Inputs), sizeof...(Inputs));
+	auto completion = results->onReady();
+	[[maybe_unused]] Future<Void> collectors[] = {
+		Results::template collect<I>(std::get<I>(std::move(inputs)), results)...,
+	};
+	co_await completion;
 	co_return results->take(indices);
 }
 } // namespace coro
