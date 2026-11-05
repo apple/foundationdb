@@ -47,12 +47,13 @@ func (monitor *monitor) setProcessVersion(processNumber int, version *api.Versio
 
 // versionsToKeep returns the versions whose shared binaries must be kept: the desired version and every version a
 // running process was started from. The returned bool is false if a bounce is pending, i.e. a running process was
-// started from a version other than the desired one, or if there is no active configuration yet.
+// started from a version other than the desired one. It is also false if there is no active configuration or the
+// configuration doesn't use the shared binary, as nothing is staged for the monitor in that case.
 func (monitor *monitor) versionsToKeep() (map[string]struct{}, api.Version, bool) {
 	monitor.mutex.Lock()
 	defer monitor.mutex.Unlock()
 
-	if monitor.activeConfiguration == nil || monitor.activeConfiguration.Version == nil {
+	if monitor.activeConfiguration == nil || monitor.activeConfiguration.Version == nil || !monitor.activeConfiguration.ShouldUseSharedBinary() {
 		return nil, api.Version{}, false
 	}
 
