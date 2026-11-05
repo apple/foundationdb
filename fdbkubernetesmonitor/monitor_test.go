@@ -22,7 +22,9 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path"
+	"syscall"
 	"time"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
@@ -82,6 +84,41 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 				Expect(mon.customEnvironment).To(HaveKeyWithValue("NODE_LABEL_KUBERNETES_IO_HOSTNAME", "ip-172-20-114-199.ec2.internal"))
 			})
 		})
+	})
+
+	DescribeTable("launching a child after it is no longer wanted", func(processCount int, runServers bool) {
+		cmd := exec.Command("sleep", "60")
+		mon := &monitor{
+			processCount:        processCount,
+			processIDs:          []int{0, -1},
+			activeConfiguration: &api.ProcessConfiguration{RunServers: &runServers},
+		}
+		_, _, err := mon.startProcess(1, cmd, GinkgoLogr)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cmd.Process).To(BeNil())
+		Expect(mon.processIDs[1]).To(BeZero())
+	}, Entry("isolation", 1, false), Entry("shutdown", 0, true))
+
+	It("registers the child for the next signal before returning from launch", func() {
+		version := api.Version{Major: 7, Minor: 1, Patch: 51}
+		mon := &monitor{
+			logger:              GinkgoLogr,
+			processCount:        1,
+			processIDs:          []int{0, -1},
+			activeConfiguration: &api.ProcessConfiguration{Version: &version},
+		}
+		cmd := exec.Command("sleep", "60")
+		_, _, err := mon.startProcess(1, cmd, GinkgoLogr)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = cmd.Process.Kill() })
+		Expect(mon.processIDs[1]).To(Equal(cmd.Process.Pid))
+
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		mon.signalProcesses(syscall.SIGTERM, mon.processIDs)
+		Eventually(done).Should(Receive(&err))
+		Expect(err).To(BeAssignableToTypeOf((*exec.ExitError)(nil)))
+		Expect(err.(*exec.ExitError).Sys().(syscall.WaitStatus).Signal()).To(Equal(syscall.SIGTERM))
 	})
 
 	DescribeTable("when getting the backoff time", func(errorCount int, expected time.Duration) {

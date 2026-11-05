@@ -366,7 +366,6 @@ func getBackoffDuration(errorCounter int) time.Duration {
 
 // runProcess runs a loop to continually start and watch a process.
 func (monitor *monitor) runProcess(processNumber int) {
-	pid := 0
 	logger := monitor.logger.WithValues("processNumber", processNumber, "area", "runProcess")
 	logger.Info("Starting run loop")
 	startTime := time.Now()
@@ -408,17 +407,7 @@ func (monitor *monitor) runProcess(processNumber int) {
 
 		logger.Info("Starting subprocess", "arguments", arguments)
 
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			logger.Error(err, "Error getting stdout from subprocess")
-		}
-
-		stderr, err := cmd.StderrPipe()
-		if err != nil {
-			logger.Error(err, "Error getting stderr from subprocess")
-		}
-
-		err = cmd.Start()
+		stdout, stderr, err := monitor.startProcess(processNumber, &cmd, logger)
 		if err != nil {
 			backoffDuration := getBackoffDuration(errorCounter)
 			logger.Error(err, "Error starting subprocess", "backoffDuration", backoffDuration.String())
@@ -427,19 +416,16 @@ func (monitor *monitor) runProcess(processNumber int) {
 			continue
 		}
 
+		if cmd.Process == nil {
+			return
+		}
+
 		// Update the prometheus metrics for the process.
 		monitor.metrics.registerProcessStartup(processNumber, config.Version.String())
 
-		if cmd.Process != nil {
-			pid = cmd.Process.Pid
-		} else {
-			logger.Error(nil, "No Process information available for subprocess")
-		}
-
+		pid := cmd.Process.Pid
 		startTime = time.Now()
 		logger.Info("Subprocess started", "PID", pid)
-
-		monitor.updateProcessID(processNumber, pid)
 
 		if stdout != nil {
 			stdoutScanner := bufio.NewScanner(stdout)
@@ -470,7 +456,9 @@ func (monitor *monitor) runProcess(processNumber int) {
 
 		processDuration := time.Since(startTime)
 		logger.Info("Subprocess terminated", "exitCode", exitCode, "PID", pid, "lastExecutionDurationSeconds", processDuration.String())
-		monitor.updateProcessID(processNumber, -1)
+		monitor.mutex.Lock()
+		monitor.processIDs[processNumber] = -1
+		monitor.mutex.Unlock()
 
 		// Only backoff if the exit code is non-zero.
 		if exitCode != 0 {
@@ -532,11 +520,29 @@ func (monitor *monitor) processIsIsolated(ctx context.Context) bool {
 	return isolated
 }
 
-// updateProcessID records a new Process ID from a newly launched process.
-func (monitor *monitor) updateProcessID(processNumber int, pid int) {
+// startProcess holds the configuration lock through Start and PID publication so isolation and
+// shutdown either prevent the launch or find the child in their signal snapshot.
+func (monitor *monitor) startProcess(processNumber int, cmd *exec.Cmd, logger logr.Logger) (io.ReadCloser, io.ReadCloser, error) {
 	monitor.mutex.Lock()
 	defer monitor.mutex.Unlock()
-	monitor.processIDs[processNumber] = pid
+	if processNumber > monitor.processCount || !monitor.activeConfiguration.ShouldRunServers() {
+		monitor.processIDs[processNumber] = 0
+		return nil, nil, nil
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		logger.Error(err, "Error getting stdout from subprocess")
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		logger.Error(err, "Error getting stderr from subprocess")
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, err
+	}
+	monitor.processIDs[processNumber] = cmd.Process.Pid
+	return stdout, stderr, nil
 }
 
 // addWatcher adds a watch for the provided file. If an error is returned it will be retried for a maximum of 10 retries.
