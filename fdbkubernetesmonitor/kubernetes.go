@@ -23,12 +23,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"strconv"
 	"time"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
@@ -47,12 +47,15 @@ import (
 
 var _ toolscache.ResourceEventHandler = (*kubernetesClient)(nil)
 
+// A metadata change forces a reload. ConfigMap reminders carry an operator-supplied Unix timestamp.
+type reloadRequest struct {
+	force     bool
+	timestamp int64
+}
+
 // kubernetesClient is a wrapper around the Kubernetes API.
 type kubernetesClient struct {
-	// TimestampFeed is a channel where the kubernetes client will send updates with
-	// the values from api.OutdatedConfigMapAnnotation. If the api.IsolateProcessGroupAnnotation is changed the current
-	// timestamp will be sent to the channel to force the monitor to change its configuration accordingly.
-	TimestampFeed chan int64
+	reloadRequests chan reloadRequest
 
 	// Logger is the logger we use for this client.
 	Logger logr.Logger
@@ -129,11 +132,11 @@ func createPodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 	}
 
 	podClient := &kubernetesClient{
-		podName:       podName,
-		namespace:     namespace,
-		TimestampFeed: make(chan int64, 10),
-		Logger:        logger,
-		Client:        internalClient,
+		podName:        podName,
+		namespace:      namespace,
+		reloadRequests: make(chan reloadRequest, 10),
+		Logger:         logger,
+		Client:         internalClient,
 	}
 
 	if enableNodeWatcher {
@@ -179,32 +182,30 @@ func createPodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 }
 
 // getPodMetadata returns a copy of the pod metadata.
-func (podClient *kubernetesClient) getPodMetadata(ctx context.Context) (*metav1.PartialObjectMetadata, error) {
-	metadata := &metav1.PartialObjectMetadata{}
-	metadata.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Pod"))
-	err := podClient.Client.Get(ctx, client.ObjectKey{Namespace: podClient.namespace, Name: podClient.podName}, metadata)
+func (podClient *kubernetesClient) getPodMetadata(ctx context.Context) (*metav1.ObjectMeta, error) {
+	pod := &corev1.Pod{}
+	err := podClient.Client.Get(ctx, client.ObjectKey{Namespace: podClient.namespace, Name: podClient.podName}, pod)
 	if err != nil {
 		return nil, err
 	}
 
-	return metadata, nil
+	return &pod.ObjectMeta, nil
 }
 
 // getNodeMetadata returns a copy of the node metadata.
-func (podClient *kubernetesClient) getNodeMetadata(ctx context.Context) (*metav1.PartialObjectMetadata, error) {
+func (podClient *kubernetesClient) getNodeMetadata(ctx context.Context) (*metav1.ObjectMeta, error) {
 	// Only if the fdb-kubernetes-monitor is watching node events we should be returning the node metadata.
 	if podClient.nodeName == "" {
 		return nil, nil
 	}
 
-	metadata := &metav1.PartialObjectMetadata{}
-	metadata.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Node"))
-	err := podClient.Client.Get(ctx, client.ObjectKey{Name: podClient.nodeName}, metadata)
+	node := &corev1.Node{}
+	err := podClient.Client.Get(ctx, client.ObjectKey{Name: podClient.nodeName}, node)
 	if err != nil {
 		return nil, err
 	}
 
-	return metadata, nil
+	return &node.ObjectMeta, nil
 }
 
 // retrieveEnvironmentVariables extracts the environment variables we have for
@@ -266,66 +267,36 @@ func (podClient *kubernetesClient) updateAnnotationsOnPod(ctx context.Context, a
 		return fmt.Errorf("pod is marked for deletion, cannot update annotations")
 	}
 
-	// If any error occurs during the update of the annotations, make sure we retry it.
+	changes := make(map[string]string)
+	for key, value := range annotationChanges {
+		if current, present := meta.Annotations[key]; !present || current != value {
+			changes[key] = value
+		}
+	}
+	if len(changes) == 0 {
+		return nil
+	}
+
+	// Generate a merge patch containing only these keys. Other annotations may have changed since the cached read.
+	base := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: meta.Namespace, Name: meta.Name}}
+	patch := client.MergeFrom(base)
 	return retry.OnError(retry.DefaultRetry, func(err error) bool {
 		podClient.Logger.Error(err, "could not update annotations of pod")
-		// If the pod is marked for deletion, we don't have to retry the patch.
-		if !meta.DeletionTimestamp.IsZero() {
-			return false
-		}
-
-		// If the resource is not found or the process is forbidden to update the metadata, don't retry it.
-		if k8serrors.IsNotFound(err) || k8serrors.IsForbidden(err) {
-			return false
-		}
-
-		return true
+		return ctx.Err() == nil && !k8serrors.IsNotFound(err) && !k8serrors.IsForbidden(err)
 	}, func() error {
-		currentAnnotations := meta.Annotations
-		if len(currentAnnotations) == 0 {
-			currentAnnotations = map[string]string{}
-		}
-
-		var hasChanges bool
-		for key, val := range annotationChanges {
-			currentValue, present := currentAnnotations[key]
-			if !present || currentValue != val {
-				podClient.Logger.Info("update annotation with new value", "annotation", key, "currentValue", currentValue, "newValue", val, "present", present)
-				currentAnnotations[key] = val
-				hasChanges = true
-			}
-		}
-
-		// If no changes are present, we can skip the patch.
-		if !hasChanges {
-			return nil
-		}
-
-		unstructuredPod, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&corev1.Pod{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       "Pod",
-				APIVersion: "v1",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace:   meta.Namespace,
-				Name:        meta.Name,
-				Annotations: currentAnnotations,
-			},
-		})
-		if err != nil {
-			return err
-		}
-
-		return podClient.Apply(
-			context.Background(),
-			client.ApplyConfigurationFromUnstructured(&unstructured.Unstructured{Object: unstructuredPod}),
-			client.FieldOwner("fdb-kubernetes-monitor"),
-			client.ForceOwnership)
+		pod := base.DeepCopy()
+		pod.Annotations = maps.Clone(changes)
+		return podClient.Patch(ctx, pod, patch, client.FieldOwner("fdb-kubernetes-monitor"))
 	})
 }
 
 // OnAdd is called when an object is added.
-func (podClient *kubernetesClient) OnAdd(_ interface{}, _ bool) {}
+func (podClient *kubernetesClient) OnAdd(obj interface{}, isInInitialList bool) {
+	// Startup reads the initial list. A later node addition can make a previously rejected configuration usable.
+	if _, ok := obj.(*corev1.Node); ok && !isInInitialList {
+		podClient.reloadRequests <- reloadRequest{force: true}
+	}
+}
 
 // OnUpdate is also called when a re-list happens, and it will
 // get called even if nothing changed. This is useful for periodically
@@ -348,8 +319,7 @@ func (podClient *kubernetesClient) OnUpdate(prevObj, newObj interface{}) {
 		newIsolateProcessGroupAnnotationValue := castedObj.Annotations[api.IsolateProcessGroupAnnotation]
 		if previousIsolateProcessGroupAnnotationValue != newIsolateProcessGroupAnnotationValue {
 			podClient.Logger.Info("Got change in isolate process group annotation", "previous", previousIsolateProcessGroupAnnotationValue, "new", newIsolateProcessGroupAnnotationValue)
-			podClient.TimestampFeed <- time.Now().Unix()
-			// In this case we can return as the timestamp feed already has a new value.
+			podClient.reloadRequests <- reloadRequest{force: true}
 			return
 		}
 
@@ -364,7 +334,12 @@ func (podClient *kubernetesClient) OnUpdate(prevObj, newObj interface{}) {
 			return
 		}
 
-		podClient.TimestampFeed <- timestamp
+		podClient.reloadRequests <- reloadRequest{timestamp: timestamp}
+	case *corev1.Node:
+		prevNode, ok := prevObj.(*corev1.Node)
+		if !ok || prevNode == nil || !maps.Equal(prevNode.Labels, castedObj.Labels) {
+			podClient.reloadRequests <- reloadRequest{force: true}
+		}
 	}
 }
 

@@ -28,6 +28,7 @@ import (
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/json"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -38,11 +39,12 @@ import (
 var _ = Describe("Testing FDB Kubernetes monitor", func() {
 	When("updating the custom environment variables from the node metadata", func() {
 		var mon *monitor
+		var environment map[string]string
 
 		BeforeEach(func() {
 			mon = &monitor{
 				logger: GinkgoLogr,
-				customEnvironment: map[string]string{
+				baseEnvironment: map[string]string{
 					"testing": "testing",
 				},
 				podClient: &kubernetesClient{},
@@ -50,13 +52,15 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 		})
 
 		JustBeforeEach(func() {
-			Expect(mon.updateCustomEnvironmentFromNodeMetadata(context.Background())).To(Succeed())
+			var err error
+			environment, err = mon.environmentFromNodeMetadata(context.Background())
+			Expect(err).NotTo(HaveOccurred())
 		})
 
 		When("no node metadata is present", func() {
 			It("shouldn't add new entries", func() {
-				Expect(mon.customEnvironment).To(HaveLen(1))
-				Expect(mon.customEnvironment).To(HaveKeyWithValue("testing", "testing"))
+				Expect(environment).To(HaveLen(1))
+				Expect(environment).To(HaveKeyWithValue("testing", "testing"))
 			})
 		})
 
@@ -75,11 +79,27 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 				})
 			})
 
+			It("keeps previous snapshots stable and drops removed labels", func() {
+				ctx := context.Background()
+				node := &corev1.Node{}
+				Expect(mon.podClient.Client.Get(ctx, client.ObjectKey{Name: mon.podClient.nodeName}, node)).To(Succeed())
+				delete(node.Labels, "topology.kubernetes.io/zone")
+				node.Labels["kubernetes.io/hostname"] = "replacement"
+				Expect(mon.podClient.Client.Update(ctx, node)).To(Succeed())
+
+				current, err := mon.environmentFromNodeMetadata(ctx)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(current).NotTo(HaveKey("NODE_LABEL_TOPOLOGY_KUBERNETES_IO_ZONE"))
+				Expect(current).To(HaveKeyWithValue("NODE_LABEL_KUBERNETES_IO_HOSTNAME", "replacement"))
+				Expect(environment).To(HaveKeyWithValue("NODE_LABEL_TOPOLOGY_KUBERNETES_IO_ZONE", "us-east-1c"))
+				Expect(mon.baseEnvironment).To(Equal(map[string]string{"testing": "testing"}))
+			})
+
 			It("should add the new entries", func() {
-				Expect(mon.customEnvironment).To(HaveLen(3))
-				Expect(mon.customEnvironment).To(HaveKeyWithValue("testing", "testing"))
-				Expect(mon.customEnvironment).To(HaveKeyWithValue("NODE_LABEL_TOPOLOGY_KUBERNETES_IO_ZONE", "us-east-1c"))
-				Expect(mon.customEnvironment).To(HaveKeyWithValue("NODE_LABEL_KUBERNETES_IO_HOSTNAME", "ip-172-20-114-199.ec2.internal"))
+				Expect(environment).To(HaveLen(3))
+				Expect(environment).To(HaveKeyWithValue("testing", "testing"))
+				Expect(environment).To(HaveKeyWithValue("NODE_LABEL_TOPOLOGY_KUBERNETES_IO_ZONE", "us-east-1c"))
+				Expect(environment).To(HaveKeyWithValue("NODE_LABEL_KUBERNETES_IO_HOSTNAME", "ip-172-20-114-199.ec2.internal"))
 			})
 		})
 	})
@@ -123,9 +143,9 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 			Expect(os.WriteFile(fdbserverPath, []byte(""), 0700)).NotTo(HaveOccurred())
 			configurationFilePath = path.Join(tmpDir, "config.json")
 			mon = &monitor{
-				logger:            GinkgoLogr,
-				configFile:        configurationFilePath,
-				customEnvironment: map[string]string{},
+				logger:          GinkgoLogr,
+				configFile:      configurationFilePath,
+				baseEnvironment: map[string]string{},
 				podClient: &kubernetesClient{
 					podName:   "test-pod",
 					namespace: "test",
@@ -141,7 +161,7 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 		})
 
 		JustBeforeEach(func() {
-			configuration, configurationBytes = mon.readConfiguration(context.Background())
+			configuration, configurationBytes, _ = mon.readConfiguration(context.Background())
 		})
 
 		When("the configuration file is empty", func() {
@@ -189,6 +209,35 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 							},
 						},
 					})).To(Succeed())
+				})
+
+				When("a label required for launching has disappeared", func() {
+					BeforeEach(func() {
+						config := &api.ProcessConfiguration{
+							Version:   &defaultVersion,
+							Arguments: []api.Argument{{ArgumentType: api.EnvironmentArgumentType, Source: "NODE_LABEL_REMOVED"}},
+						}
+						data, err := json.Marshal(config)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(os.WriteFile(configurationFilePath, data, 0600)).To(Succeed())
+					})
+
+					It("still accepts isolation", func() {
+						Expect(configuration).NotTo(BeNil())
+						Expect(configuration.ShouldRunServers()).To(BeFalse())
+					})
+				})
+
+				When("the watched node and the launch binary are unavailable", func() {
+					BeforeEach(func() {
+						mon.podClient.nodeName = "missing-node"
+						Expect(os.Remove(fdbserverPath)).To(Succeed())
+					})
+
+					It("still accepts isolation", func() {
+						Expect(configuration).NotTo(BeNil())
+						Expect(configuration.ShouldRunServers()).To(BeFalse())
+					})
 				})
 
 				It("should return the configuration with runServers set to false", func() {
