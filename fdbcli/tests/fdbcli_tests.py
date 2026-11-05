@@ -1015,13 +1015,25 @@ def tls_address_suffix():
                 assert err_out == err_output_server_tls, f"unexpected output: {err_out}"
 
 
-def read_audit_events(trace_dir):
+def read_audit_events(trace_dir, prefix="trace_audit."):
     events = []
-    for name in sorted(os.listdir(trace_dir)):
-        if name.startswith("trace.") and name.endswith(".xml"):
-            with open(os.path.join(trace_dir, name)) as f:
-                events += [ET.fromstring(line).attrib for line in f if 'Type="FdbCliAudit"' in line]
+    for name in trace_files(trace_dir, prefix):
+        with open(os.path.join(trace_dir, name)) as f:
+            for line in f:
+                if name.endswith(".xml") and 'Type="FdbCliAudit"' in line:
+                    events.append(ET.fromstring(line).attrib)
+                elif name.endswith(".json") and '"Type": "FdbCliAudit"' in line:
+                    events.append(json.loads(line))
     return events
+
+
+def trace_files(d, prefix):
+    return sorted(n for n in os.listdir(d) if n.startswith(prefix))
+
+
+def ip_pid(trace_file):
+    # <prefix>.<ip>.<pid>.<time>.<random>.<width>.<index>.xml, where <ip>.<pid> is Machine (<ip>:<pid>)
+    return trace_file.split(".")[1:-5]
 
 
 def run_fdbcli_audit(cwd, args, env, commands):
@@ -1040,41 +1052,130 @@ def cluster_description():
 
 
 @enable_logging()
-def audit_log_flags(logger):
-    cwd, log_dir = tempfile.mkdtemp(), tempfile.mkdtemp()
-    audit_modes = {
-        "off": ([], {}),
-        "flag": (["--audit-log"], {}),
-        "env": ([], {"FDB_CLI_AUDIT_LOG_ENABLE": "1"}),
-    }
-    # mode -> (args, env, directory the trace file should land in)
-    trace_modes = {
-        "off": ([], {}, None),
-        "log": (["--log"], {}, cwd),
-        "log_dir": (["--log", "--log-dir", log_dir], {}, log_dir),
-        "env": ([], {"FDB_NETWORK_OPTION_TRACE_ENABLE": log_dir}, log_dir),
-    }
-    for audit, (audit_args, audit_env) in audit_modes.items():
-        for trace, (trace_args, trace_env, trace_dir) in trace_modes.items():
-            process = run_fdbcli_audit(
-                cwd, audit_args + trace_args, {**audit_env, **trace_env}, "get audit_a"
-            )
-            case = (audit, trace, process.returncode)
-            if audit != "off" and trace_dir is None:
-                assert process.returncode == -signal.SIGABRT, case
-                assert b"audit logging is enabled but tracing is not" in process.stderr
-            else:
-                assert process.returncode == 0, case
-            if trace_dir:
-                assert any(n.endswith(".xml") for n in os.listdir(trace_dir)), case
-                events = read_audit_events(trace_dir)
-                assert len(events) == (0 if audit == "off" else 1), (case, events)
-            logger.debug("audit={} trace={} exit={}".format(*case))
-            for d in (cwd, log_dir):
-                for name in os.listdir(d):
-                    os.remove(os.path.join(d, name))
+def audit_log_dirs(logger):
+    # Audit logging is set up like tracing: --audit-log, --audit-log-dir and FDB_CLI_AUDIT_LOG_ENABLE=<dir> work like
+    # --log, --log-dir and FDB_NETWORK_OPTION_TRACE_ENABLE=<dir>, but separately. trace_audit.* files go to the
+    # FDB_CLI_AUDIT_LOG_ENABLE value if it's set, else --audit-log-dir, and if that's empty, the trace directory, else
+    # the current directory.
+    dirs = {name: tempfile.mkdtemp() for name in ("cwd", "trace", "audit", "audit2")}
+    trace, audit, audit2 = dirs["trace"], dirs["audit"], dirs["audit2"]
+    TRACE_ENV, AUDIT_ENV = "FDB_NETWORK_OPTION_TRACE_ENABLE", "FDB_CLI_AUDIT_LOG_ENABLE"
+    # args, env, where trace.* goes, where trace_audit.* goes (None for nowhere)
+    cases = [
+        ([], {}, None, None),
+        # tracing alone doesn't audit
+        (["--log"], {}, "cwd", None),
+        (["--log", "--log-dir", trace], {}, "trace", None),
+        ([], {TRACE_ENV: trace}, "trace", None),
+        # audit logging alone doesn't trace
+        (["--audit-log"], {}, None, "cwd"),
+        ([], {AUDIT_ENV: ""}, None, "cwd"),
+        ([], {AUDIT_ENV: audit}, None, "audit"),
+        (["--audit-log", "--audit-log-dir", audit], {}, None, "audit"),
+        # without an audit directory, audit files go next to the trace files
+        (["--audit-log", "--log"], {}, "cwd", "cwd"),
+        (["--audit-log", "--log", "--log-dir", trace], {}, "trace", "trace"),
+        (["--audit-log"], {TRACE_ENV: trace}, "trace", "trace"),
+        (["--log", "--log-dir", trace], {AUDIT_ENV: ""}, "trace", "trace"),
+        # an audit directory overrides that, and doesn't move the trace files
+        (["--log", "--log-dir", trace], {AUDIT_ENV: audit}, "trace", "audit"),
+        ([], {TRACE_ENV: trace, AUDIT_ENV: audit}, "trace", "audit"),
+        (["--audit-log", "--audit-log-dir", audit, "--log", "--log-dir", trace], {}, "trace", "audit"),
+        # --audit-log with the env var: the env var's directory is the only one given
+        (["--audit-log"], {AUDIT_ENV: audit}, None, "audit"),
+        # the env var wins over --audit-log-dir, even when empty...
+        (["--audit-log", "--audit-log-dir", audit], {AUDIT_ENV: audit2}, None, "audit2"),
+        (["--audit-log-dir", audit], {AUDIT_ENV: audit2}, None, "audit2"),
+        (["--audit-log-dir", audit], {AUDIT_ENV: ""}, None, "cwd"),
+        # ...the same way FDB_NETWORK_OPTION_TRACE_ENABLE wins over --log-dir
+        (["--log", "--log-dir", trace], {TRACE_ENV: audit2}, "audit2", None),
+        (["--log", "--log-dir", trace], {TRACE_ENV: ""}, "cwd", None),
+    ]
+    for args, env, trace_at, audit_at in cases:
+        shown = " ".join(["{}={}".format(k, v) for k, v in env.items()] + ["fdbcli"] + args)
+        for name, d in dirs.items():
+            shown = shown.replace(d, name)
+        process = run_fdbcli_audit(dirs["cwd"], args, env, "get audit_a")
+        assert process.returncode == 0, (shown, process.stderr)
+        for name, d in dirs.items():
+            assert bool(trace_files(d, "trace.")) == (name == trace_at), (shown, name, os.listdir(d))
+            assert bool(trace_files(d, "trace_audit.")) == (name == audit_at), (shown, name, os.listdir(d))
+            # audit events only go to trace_audit.* files
+            assert read_audit_events(d, "trace.") == [], shown
+            assert len(read_audit_events(d)) == (name == audit_at), shown
+        if audit_at:
+            # the audit file names Machine, same as fdbcli's trace file
+            audit_file = trace_files(dirs[audit_at], "trace_audit.")[0]
+            machine = read_audit_events(dirs[audit_at])[0]["Machine"]
+            assert ip_pid(audit_file) == machine.replace(":", ".").split("."), (shown, audit_file, machine)
+            if trace_at:
+                # with the external client, its own trace.* files are there too, named by an identifier
+                main_files = trace_files(dirs[trace_at], "trace.")
+                assert ip_pid(audit_file) in [ip_pid(f) for f in main_files], (shown, main_files, audit_file)
+        logger.debug("{} -> trace.* in {}, trace_audit.* in {}".format(shown, trace_at, audit_at))
+        for d in dirs.values():
+            for name in os.listdir(d):
+                os.remove(os.path.join(d, name))
+    for d in dirs.values():
+        shutil.rmtree(d)
+
+
+@enable_logging()
+def audit_log_errors(logger):
+    cwd = tempfile.mkdtemp()
+    missing, not_a_dir = os.path.join(cwd, "missing"), os.path.join(cwd, "file")
+    open(not_a_dir, "w").close()
+    # --audit-log-dir without audit logging is an error, unlike --log-dir without --log, so reads don't go unaudited
+    for args in (["--audit-log-dir", cwd], ["--audit-log-dir", cwd, "--log"]):
+        process = run_fdbcli_audit(cwd, args, {}, "get audit_a")
+        logger.debug("{} -> exit {}".format(args, process.returncode))
+        assert process.returncode == 1, (args, process.returncode)
+        assert b"--audit-log-dir requires audit logging to be enabled" in process.stderr, process.stderr
+    # An audit directory that can't be written to aborts instead of running unaudited
+    bad = [
+        (["--audit-log", "--audit-log-dir", missing], {}, missing),
+        (["--audit-log", "--audit-log-dir", not_a_dir], {}, not_a_dir),
+        ([], {"FDB_CLI_AUDIT_LOG_ENABLE": missing}, missing),
+        # the value is a directory, not a flag
+        ([], {"FDB_CLI_AUDIT_LOG_ENABLE": "1"}, "1"),
+        # the trace directory it falls back to is checked too
+        (["--audit-log", "--log", "--log-dir", missing], {}, missing),
+    ]
+    if os.geteuid() != 0:  # root can write to any directory
+        read_only = tempfile.mkdtemp()
+        os.chmod(read_only, 0o555)
+        bad.append((["--audit-log", "--audit-log-dir", read_only], {}, read_only))
+    for args, env, d in bad:
+        process = run_fdbcli_audit(cwd, args, env, "get audit_a")
+        logger.debug("{} {} -> exit {}".format(env, args, process.returncode))
+        assert process.returncode == -signal.SIGABRT, (args, env, process.returncode)
+        expected = "ERROR: audit log directory `{}' does not exist or is not writable".format(d)
+        assert expected.encode() in process.stderr, (args, env, process.stderr)
+        assert trace_files(cwd, "trace_audit.") == [], (args, env)
     shutil.rmtree(cwd)
-    shutil.rmtree(log_dir)
+
+
+@enable_logging()
+def audit_log_format(logger):
+    # --trace-format and --log-group apply to trace_audit.* files too, with or without --log
+    for log_args in ([], ["--log"]):
+        cwd = tempfile.mkdtemp()
+        args = ["--audit-log", "--trace-format", "json", "--log-group", "audit_group"] + log_args
+        process = run_fdbcli_audit(cwd, args, {}, "get audit_a")
+        assert process.returncode == 0, process.stderr
+        names = os.listdir(cwd)
+        logger.debug("{} -> {}".format(args, sorted(names)))
+        assert trace_files(cwd, "trace_audit.") and all(n.endswith(".json") for n in names), names
+        assert bool(trace_files(cwd, "trace.")) == bool(log_args), names
+        assert [e["LogGroup"] for e in read_audit_events(cwd)] == ["audit_group"]
+        shutil.rmtree(cwd)
+    # without them it's xml and the default log group
+    cwd = tempfile.mkdtemp()
+    process = run_fdbcli_audit(cwd, ["--audit-log"], {}, "get audit_a")
+    assert process.returncode == 0, process.stderr
+    assert all(n.endswith(".xml") for n in os.listdir(cwd)), os.listdir(cwd)
+    assert [e["LogGroup"] for e in read_audit_events(cwd)] == ["default"]
+    shutil.rmtree(cwd)
 
 
 @enable_logging()
@@ -1104,6 +1205,13 @@ def audit_log_values(logger):
     process = run_fdbcli_audit(None, ["--audit-log", "--audit-log-values", "bogus"], {}, "get audit_a")
     assert process.returncode == 1
     assert b"invalid --audit-log-values" in process.stderr
+
+    # without audit logging it does nothing
+    cwd = tempfile.mkdtemp()
+    process = run_fdbcli_audit(cwd, ["--log", "--audit-log-values", "all"], {}, "get audit_a")
+    assert process.returncode == 0, process.stderr
+    assert trace_files(cwd, "trace_audit.") == [], os.listdir(cwd)
+    shutil.rmtree(cwd)
 
 
 @enable_logging()
@@ -1194,7 +1302,9 @@ def set_audit_keys():
 
 def audit_log():
     set_audit_keys()
-    audit_log_flags()
+    audit_log_dirs()
+    audit_log_errors()
+    audit_log_format()
     audit_log_values()
     audit_log_commands()
     audit_log_cluster()

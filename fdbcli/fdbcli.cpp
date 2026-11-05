@@ -66,6 +66,7 @@
 
 #ifdef __unixish__
 #include <stdio.h>
+#include <unistd.h>
 #include "linenoise/linenoise.h"
 #endif
 
@@ -104,6 +105,7 @@ enum {
 	OPT_MEMORY,
 	OPT_USE_FUTURE_PROTOCOL_VERSION,
 	OPT_AUDIT_LOG,
+	OPT_AUDIT_LOG_DIR,
 	OPT_AUDIT_LOG_VALUES
 };
 
@@ -133,6 +135,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_MEMORY, "--memory", SO_REQ_SEP },
 	                                  { OPT_USE_FUTURE_PROTOCOL_VERSION, "--use-future-protocol-version", SO_NONE },
 	                                  { OPT_AUDIT_LOG, "--audit-log", SO_NONE },
+	                                  { OPT_AUDIT_LOG_DIR, "--audit-log-dir", SO_REQ_SEP },
 	                                  { OPT_AUDIT_LOG_VALUES, "--audit-log-values", SO_REQ_SEP },
 	                                  TLS_OPTION_FLAGS,
 	                                  SO_END_OF_OPTIONS };
@@ -496,11 +499,20 @@ static void printProgramUsage(const char* name) {
 	       "                 events in the trace output (defaults to `default').\n"
 	       "  --trace-format FORMAT\n"
 	       "                 Select the format of the log files. xml (the default) and json\n"
-	       "                 are supported. Has no effect unless --log is specified.\n"
-	       "  --audit-log    Logs the keys returned by get, getrange, getrangekeys and\n"
-	       "                 getall to the trace file, plus values per --audit-log-values.\n"
-	       "                 Also enabled by setting FDB_CLI_AUDIT_LOG_ENABLE. Requires\n"
-	       "                 tracing (--log or FDB_NETWORK_OPTION_TRACE_ENABLE).\n"
+	       "                 are supported. Has no effect unless --log or --audit-log is\n"
+	       "                 specified.\n"
+	       "  --audit-log    Enables audit logging: the keys returned by get, getrange,\n"
+	       "                 getrangekeys and getall, plus values per --audit-log-values,\n"
+	       "                 go to trace_audit.* files. Also enabled by setting\n"
+	       "                 FDB_CLI_AUDIT_LOG_ENABLE, whose value, if not empty, is the\n"
+	       "                 audit log directory. Works with or without --log.\n"
+	       "  --audit-log-dir PATH\n"
+	       "                 Specifies the output directory for trace_audit.* files. If\n"
+	       "                 unspecified, defaults to the trace file directory if tracing\n"
+	       "                 is enabled, then the current directory. Requires audit\n"
+	       "                 logging to be enabled. FDB_CLI_AUDIT_LOG_ENABLE, if set,\n"
+	       "                 overrides it, like FDB_NETWORK_OPTION_TRACE_ENABLE does\n"
+	       "                 --log-dir.\n"
 	       "  --audit-log-values MODE\n"
 	       "                 Which returned values are audit logged: none, system (only\n"
 	       "                 values of system and special keys, the default) or all. Has\n"
@@ -882,6 +894,18 @@ void LogCommand(std::string line, UID randomID, std::string errMsg) {
 	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line).detail("Error", errMsg);
 }
 
+// True if path is a directory this process can create files in.
+static bool isWritableDirectory(std::string const& path) {
+	if (!directoryExists(path)) {
+		return false;
+	}
+#ifdef __unixish__
+	return access(path.c_str(), W_OK | X_OK) == 0;
+#else
+	return true;
+#endif
+}
+
 struct CLIOptions {
 	static constexpr int DEFERRED_EXIT_CODE = -2;
 
@@ -893,6 +917,7 @@ struct CLIOptions {
 	std::string clusterFile;
 	bool trace = false;
 	bool auditLog = false;
+	std::string auditLogDir;
 	AuditLogValues auditLogValues = kDefaultAuditLogValues;
 	std::string traceDir;
 	std::string traceFormat;
@@ -938,9 +963,21 @@ struct CLIOptions {
 				return;
 			}
 		}
+		// Like FDB_NETWORK_OPTION_TRACE_ENABLE, setting FDB_CLI_AUDIT_LOG_ENABLE turns audit logging on, its value is
+		// the audit log directory (empty means the default), and it wins over the command line: it replaces
+		// --audit-log-dir even when empty, the same way FDB_NETWORK_OPTION_TRACE_ENABLE replaces --log-dir.
 		std::string auditLogEnv;
 		if (platform::getEnvironmentVar("FDB_CLI_AUDIT_LOG_ENABLE", auditLogEnv)) {
 			auditLog = true;
+			auditLogDir = auditLogEnv;
+		}
+		// Unlike --log-dir without --log, don't silently ignore it, or reads would go unaudited.
+		if (!auditLog && !auditLogDir.empty()) {
+			fprintf(stderr,
+			        "ERROR: --audit-log-dir requires audit logging to be enabled with --audit-log or "
+			        "FDB_CLI_AUDIT_LOG_ENABLE\n");
+			exit_code = FDB_EXIT_ERROR;
+			return;
 		}
 		if (exit_timeout && !exec.present() && !statusJsonFile.present()) {
 			fprintf(stderr, "ERROR: --timeout may only be specified with --exec\n");
@@ -995,6 +1032,9 @@ struct CLIOptions {
 			break;
 		case OPT_AUDIT_LOG:
 			auditLog = true;
+			break;
+		case OPT_AUDIT_LOG_DIR:
+			auditLogDir = args.OptionArg();
 			break;
 		case OPT_AUDIT_LOG_VALUES: {
 			std::string mode = args.OptionArg();
@@ -1144,13 +1184,25 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 		co_return 1;
 	}
 
-	// Client tracing is initialized when the local database is created, whether it was enabled by --log or by
-	// FDB_NETWORK_OPTION_TRACE_ENABLE. Audit records only go to the trace file, so refuse to run without one.
-	if (opt.auditLog && !traceFileIsOpen()) {
-		fprintf(stderr,
-		        "ERROR: audit logging is enabled but tracing is not. Enable tracing with --log or "
-		        "FDB_NETWORK_OPTION_TRACE_ENABLE.\n");
-		ASSERT_ABORT(false);
+	// Audit events go to their own trace_audit.* files: in the FDB_CLI_AUDIT_LOG_ENABLE value or --audit-log-dir, else
+	// next to the trace files if tracing is enabled, else in the current directory. Tracing isn't required.
+	if (opt.auditLog) {
+		std::string auditLogDir = opt.auditLogDir;
+		if (auditLogDir.empty()) {
+			auditLogDir = getClientTraceDirectory().orDefault("");
+		}
+		// Still empty if tracing is off, or if it's on without --log-dir (TRACE_ENABLE with no value stores ""), in
+		// which case the trace files go in the current directory too.
+		if (auditLogDir.empty()) {
+			auditLogDir = ".";
+		}
+		// The trace file writer would keep retrying in the background without writing any audit records, so check up
+		// front and refuse to run.
+		if (!isWritableDirectory(auditLogDir)) {
+			fprintf(stderr, "ERROR: audit log directory `%s' does not exist or is not writable\n", auditLogDir.c_str());
+			ASSERT_ABORT(false);
+		}
+		initializeClientAuditTracing(ccf, auditLogDir);
 	}
 	fdb_cli::auditLogEnabled = opt.auditLog;
 	fdb_cli::auditLogValues = opt.auditLogValues;
@@ -2167,11 +2219,13 @@ int main(int argc, char** argv) {
 		else
 			setNetworkOption(FDBNetworkOptions::TRACE_ENABLE, StringRef(opt.traceDir));
 
+		setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
+	}
+	// Audit trace files use the trace format and log group too, so set them for --audit-log even without --log.
+	if (opt.trace || opt.auditLog) {
 		if (!opt.traceFormat.empty()) {
 			setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, StringRef(opt.traceFormat));
 		}
-		setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
-
 		if (!opt.logGroup.empty()) {
 			setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(opt.logGroup));
 		}

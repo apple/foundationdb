@@ -45,6 +45,7 @@ void auditLogReturnedKey(Database const& cx,
 		return;
 	}
 	TraceEvent ev("FdbCliAudit"_audit);
+	ev.logToAuditFile();
 	// -1 means no truncation. The default would cut off long keys and values, and an audit record needs them whole.
 	ev.setMaxFieldLength(-1).setMaxEventLength(-1);
 	ev.detail("Command", command)
