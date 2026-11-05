@@ -142,9 +142,13 @@ public:
 		return res;
 	}
 
+	// Keeps only the job-level fields, as submitted: *this may be another range's entry, whose taskId and manifest
+	// describe that range's dump.
 	BulkDumpState generateErrorMetadata() const {
 		BulkDumpState res = *this;
 		res.phase = BulkDumpPhase::Error;
+		res.taskId.reset();
+		res.manifest = BulkLoadManifest(getType(), getTransportMethod(), getJobRoot());
 		return res;
 	}
 
