@@ -421,7 +421,9 @@ void printProgressSummary(const char* operationName,
 void printStalledTasks(const std::vector<BulkLoadStalledTask>& stalledTasks) {
 	if (!stalledTasks.empty()) {
 		fmt::println("");
-		fmt::println("WARNING: {} stalled tasks (no progress > 60s):", stalledTasks.size());
+		fmt::println("WARNING: {} stalled tasks (no progress > {:.0f}s):",
+		             stalledTasks.size(),
+		             BULK_TASK_STALL_THRESHOLD_SECONDS);
 		for (const auto& stalled : stalledTasks) {
 			fmt::println(" Task {}: {}, stalled {:.0f}s, {} restarts",
 			             stalled.taskId.shortString(),
