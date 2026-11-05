@@ -67,6 +67,10 @@ public:
 	}
 
 	static Future<Reference<IAsyncFile>> open(std::string filename, int flags, int mode, void* ignore) {
+		if (flags & OPEN_ASYNC_ATOMIC_RENAME) {
+			ASSERT((flags & (OPEN_ATOMIC_WRITE_AND_CREATE | OPEN_NO_AIO | OPEN_UNCACHED)) ==
+			       (OPEN_ATOMIC_WRITE_AND_CREATE | OPEN_NO_AIO | OPEN_UNCACHED));
+		}
 		std::string open_filename = filename;
 		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
 			ASSERT((flags & OPEN_CREATE) && (flags & OPEN_READWRITE) && !(flags & OPEN_EXCLUSIVE));
@@ -184,7 +188,7 @@ public:
 		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
 			flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
 
-			return waitAndAtomicRename(fsync, filename + ".part", filename);
+			return waitAndAtomicRename(fsync, filename + ".part", filename, (flags & OPEN_ASYNC_ATOMIC_RENAME) != 0);
 		}
 
 		return fsync;
@@ -196,7 +200,35 @@ public:
 	}
 	std::string getFilename() const override { return filename; }
 
-	static Future<Void> async_fsync_parent(std::string filename) {
+	static Future<Void> async_fsync_parent(std::string filename, bool asyncMetadata = false) {
+		if (asyncMetadata) {
+			// Keep the descriptor and dispatch alive through close even if the caller cancels.
+			co_await uncancellable(dispatch<Void>([filename]() {
+				std::string folder = parentDirectory(filename);
+				TraceEvent("FSyncParentDir").detail("Folder", folder).detail("File", filename);
+				int folderFD = ::open(folder.c_str(), O_DIRECTORY | O_CLOEXEC, 0);
+				if (folderFD < 0)
+					throw io_error();
+#ifdef __APPLE__
+				int result = fcntl(folderFD, F_FULLFSYNC, 0);
+#else
+				int result = ::fsync(folderFD);
+#endif
+				int syncErrno = errno;
+				::close(folderFD);
+				if (result) {
+					errno = syncErrno;
+					TraceEvent("SyncError")
+					    .error(io_error())
+					    .detail("Fd", folderFD)
+					    .detail("Result", result)
+					    .GetLastError();
+					throw io_error();
+				}
+				return Void();
+			}));
+			co_return;
+		}
 		std::string folder = parentDirectory(filename);
 		TraceEvent("FSyncParentDir").detail("Folder", folder).detail("File", filename);
 		int folderFD = ::open(folder.c_str(), O_DIRECTORY | O_CLOEXEC, 0);
@@ -219,18 +251,30 @@ public:
 		// Used by AsyncFileKAIO, since kernel AIO doesn't really implement fsync yet
 		return sync_impl(fd, makeReference<ErrorInfo>(), true);
 	}
-	static Future<Void> waitAndAtomicRename(Future<Void> fsync, std::string part_filename, std::string final_filename) {
+	static Future<Void> waitAndAtomicRename(Future<Void> fsync,
+	                                        std::string part_filename,
+	                                        std::string final_filename,
+	                                        bool asyncRename = false) {
 		// First wait for the data in the part file to be durable
 		co_await fsync;
 
-		// rename() is atomic
-		if (rename(part_filename.c_str(), final_filename.c_str())) {
+		if (asyncRename) {
+			try {
+				co_await renameFile(part_filename, final_filename);
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				TraceEvent("AsyncFileEIORenameError").error(e).detail("Filename", final_filename);
+				throw io_error();
+			}
+		} else if (rename(part_filename.c_str(), final_filename.c_str())) {
+			// Storage disposal must not race a rename that completes after cancellation.
 			TraceEvent("AsyncFileEIORenameError").detail("Filename", final_filename).GetLastError();
 			throw io_error();
 		}
 
 		// fsync the parent directory to make it durable as well
-		co_await async_fsync_parent(final_filename);
+		co_await async_fsync_parent(final_filename, asyncRename);
 	}
 
 	// Run the given function on the EIO thread pool and return its result
@@ -479,7 +523,7 @@ private:
 	}
 
 	template <class R>
-	static Future<R> dispatch_impl(std::function<R()> func) {
+	static Future<R> dispatch_impl(std::function<R()> func, ExplicitVoid = {}) {
 		Dispatch<R> data(func);
 		TaskPriority taskID = g_network->getCurrentTask();
 
