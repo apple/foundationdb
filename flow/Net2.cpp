@@ -1097,7 +1097,13 @@ public:
 			// certificate against.
 			if (!self->sni_hostname.empty()) {
 				int result = SSL_set_tlsext_host_name(self->ssl_sock.native_handle(), self->sni_hostname.c_str());
-				SSL_set1_host(self->ssl_sock.native_handle(), self->sni_hostname.c_str());
+				// The hostname check is the only identity check beyond the CA chain, so it must not fail open.
+				if (SSL_set1_host(self->ssl_sock.native_handle(), self->sni_hostname.c_str()) != 1) {
+					TraceEvent(SevWarnAlways, "TLSSetHostnameCheckFailed")
+					    .detail("Hostname", self->sni_hostname)
+					    .detail("Addr", self->peer_address);
+					throw connection_failed();
+				}
 				SSL_set_hostflags(self->ssl_sock.native_handle(), X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
 				TraceEvent("SSLSetSNIResult")
 				    .detail("Hostname", self->sni_hostname)
@@ -1975,6 +1981,7 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket*
 		throw connection_failed();
 	}
 
+	ASSERT(existingSocket == nullptr);
 	return Connection::connect(&this->reactor.ios, toAddr);
 }
 
@@ -1983,8 +1990,8 @@ Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr) {
 }
 
 Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr,
-                                                                const std::string& hostname,
-                                                                tcp::socket* existingSocket) {
+                                                                 const std::string& hostname,
+                                                                 tcp::socket* existingSocket) {
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
 		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, existingSocket, hostname);
