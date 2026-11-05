@@ -47,7 +47,7 @@ struct EIOBlockingJob {
 	void release() {
 		std::lock_guard<std::mutex> lock(mutex);
 		released = true;
-		condition.notify_one();
+		condition.notify_all();
 	}
 
 	Void run() {
@@ -96,46 +96,37 @@ Future<Void> waitForEIOIdle() {
 	co_return;
 }
 
-// Occupy every EIO worker so tests can distinguish inline rename from queued rename without timing a syscall.
+// EIO serves equal-priority requests in order. Queue one blocker per configured slot.
+// If the library starts fewer workers, the extra blockers can stay queued until release.
 struct EIOBlockedPool {
-	std::vector<std::shared_ptr<EIOBlockingJob>> jobs;
+	std::shared_ptr<EIOBlockingJob> blocker = std::make_shared<EIOBlockingJob>();
 	std::vector<Future<Void>> operations;
 
 	EIOBlockedPool() {
 		ASSERT_GT(FLOW_KNOBS->EIO_MAX_PARALLELISM, 0);
 		for (int i = 0; i < FLOW_KNOBS->EIO_MAX_PARALLELISM; ++i) {
-			auto job = std::make_shared<EIOBlockingJob>();
-			jobs.push_back(job);
-			operations.push_back(uncancellable(AsyncFileEIO::dispatch<Void>([job]() { return job->run(); })));
+			operations.push_back(AsyncFileEIO::dispatch<Void>([job = blocker] { return job->run(); }));
 		}
 	}
 	~EIOBlockedPool() { release(); }
 
-	Future<Void> ready() {
-		std::vector<Future<Void>> started;
-		for (auto const& job : jobs)
-			started.push_back(waitForEIOJobStart(job));
-		return waitForAll(started);
-	}
-	void release() {
-		for (auto const& job : jobs)
-			job->release();
-	}
+	void release() { blocker->release(); }
 	Future<Void> done() { return waitForAll(operations); }
 };
 
 } // namespace
 
-TEST_CASE("/fileio/eio/cancelBlockedDispatch") {
+TEST_CASE("noSim/fileio/eio/cancelBlockedDispatch") {
 	if (g_network->isSimulated())
 		co_return;
 	noUnseed = true;
 
 	std::shared_ptr<EIOBlockingJob> job = std::make_shared<EIOBlockingJob>();
 	std::weak_ptr<EIOBlockingJob> lifetime = job;
-	Future<Void> operation = uncancellable(AsyncFileEIO::dispatch<Void>([job = job]() { return job->run(); }));
+	Future<Void> operation = AsyncFileEIO::dispatch<Void>([job] { return job->run(); });
 	co_await timeoutError(waitForEIOJobStart(job), 5.0);
 	operation.cancel();
+	ASSERT(operation.isError() && operation.getError().code() == error_code_actor_cancelled);
 	job.reset();
 
 	// The Flow timer must run while the syscall stand-in is still blocked, and cancellation must not free its job.
@@ -150,7 +141,7 @@ TEST_CASE("/fileio/eio/cancelBlockedDispatch") {
 	co_return;
 }
 
-TEST_CASE("/fileio/eio/atomicRenameOrdering") {
+TEST_CASE("noSim/fileio/eio/atomicRenameOrdering") {
 	if (g_network->isSimulated())
 		co_return;
 	noUnseed = true;
@@ -171,8 +162,10 @@ TEST_CASE("/fileio/eio/atomicRenameOrdering") {
 	ASSERT(!finished.isReady());
 	ASSERT(fileExists(part));
 	ASSERT(!fileExists(final));
+	TaskPriority callerPriority = g_network->getCurrentTask();
 	dataSynced.send(Void());
 	co_await timeoutError(finished, 5.0);
+	ASSERT(g_network->getCurrentTask() == callerPriority);
 	ASSERT(!fileExists(part));
 	ASSERT(fileExists(final));
 	ASSERT_EQ(fileSize(final), 6);
@@ -198,7 +191,7 @@ TEST_CASE("/fileio/eio/atomicRenameOrdering") {
 	co_return;
 }
 
-TEST_CASE("/fileio/eio/storageAtomicRenameCancellation") {
+TEST_CASE("noSim/fileio/eio/storageAtomicRenameCancellation") {
 	if (g_network->isSimulated())
 		co_return;
 	noUnseed = true;
@@ -212,8 +205,7 @@ TEST_CASE("/fileio/eio/storageAtomicRenameCancellation") {
 	co_await file->sync();
 	file.clear();
 
-	std::unique_ptr<EIOBlockedPool> pool = std::make_unique<EIOBlockedPool>();
-	co_await timeoutError(pool->ready(), 5.0);
+	EIOBlockedPool pool;
 	Promise<Void> dataSynced;
 	// Storage callers, including KAIO, use the default synchronous rename.
 	Future<Void> finished = AsyncFileEIO::waitAndAtomicRename(dataSynced.getFuture(), part, final);
@@ -223,15 +215,15 @@ TEST_CASE("/fileio/eio/storageAtomicRenameCancellation") {
 	ASSERT(fileExists(final)); // Rename must already be complete before cancellation/disposal can run.
 	finished.cancel();
 	::deleteFile(final);
-	pool->release();
-	co_await timeoutError(pool->done(), 5.0);
+	pool.release();
+	co_await timeoutError(pool.done(), 5.0);
 	co_await timeoutError(waitForEIOIdle(), 5.0);
 	ASSERT(!fileExists(final));
 	ASSERT(!fileExists(part));
 	co_return;
 }
 
-TEST_CASE("/fileio/eio/backupAtomicRenameUsesEIO") {
+TEST_CASE("noSim/fileio/eio/backupAtomicRenameUsesEIO") {
 	if (g_network->isSimulated())
 		co_return;
 	noUnseed = true;
@@ -245,22 +237,21 @@ TEST_CASE("/fileio/eio/backupAtomicRenameUsesEIO") {
 	co_await file->sync();
 	file.clear();
 
-	std::unique_ptr<EIOBlockedPool> pool = std::make_unique<EIOBlockedPool>();
-	co_await timeoutError(pool->ready(), 5.0);
+	EIOBlockedPool pool;
 	Future<Void> finished = AsyncFileEIO::waitAndAtomicRename(Void(), part, final, true);
 	co_await delay(0.01);
 	ASSERT(!finished.isReady());
 	ASSERT(fileExists(part));
 	ASSERT(!fileExists(final)); // Opted-in backup renames wait for an EIO worker.
-	pool->release();
-	co_await timeoutError(pool->done(), 5.0);
+	pool.release();
+	co_await timeoutError(pool.done(), 5.0);
 	co_await timeoutError(finished, 5.0);
 	ASSERT(!fileExists(part));
 	ASSERT(fileExists(final));
 	co_return;
 }
 
-TEST_CASE("/fileio/eio/prepareBackupPath") {
+TEST_CASE("noSim/fileio/eio/prepareBackupPath") {
 	if (g_network->isSimulated())
 		co_return;
 	noUnseed = true;
@@ -273,7 +264,13 @@ TEST_CASE("/fileio/eio/prepareBackupPath") {
 	ASSERT_EQ(::symlink("real", link.c_str()), 0);
 	std::string filename = joinPath(link, "missing/child/backup");
 	ASSERT(!directoryExists(joinPath(real, "missing/child")));
-	co_await timeoutError(Net2FileSystem::createParentDirectory(filename), 5.0);
+	EIOBlockedPool pool;
+	Future<Void> prepare = Net2FileSystem::createParentDirectory(filename);
+	ASSERT(!prepare.isReady());
+	prepare.cancel();
+	pool.release();
+	co_await timeoutError(pool.done(), 5.0);
+	co_await timeoutError(waitForEIOIdle(), 5.0);
 	ASSERT(directoryExists(joinPath(real, "missing/child")));
 	ASSERT(!fileExists(filename));
 	// Repeated preparation must work for an existing directory too.

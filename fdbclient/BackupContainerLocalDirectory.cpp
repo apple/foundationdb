@@ -308,30 +308,28 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 	return f;
 }
 
-static Future<Reference<IAsyncFile>> openLocalBackupFileWithAsyncMetadata(std::string fullPath, int flags) {
-	co_await Net2FileSystem::createParentDirectory(fullPath);
+static Future<Reference<IAsyncFile>> openBackupTempFile(const std::string& fullPath, int extraFlags = 0) {
+	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
+	            IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | extraFlags;
 	// A cancelled rename can finish later, so only unique intermediate names are safe.
 	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
-	co_return co_await IAsyncFileSystem::filesystem()->open(temp, flags | IAsyncFile::OPEN_ASYNC_ATOMIC_RENAME, 0644);
+	return IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
 }
 
 Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const std::string& path) {
 	validatePathInContainer(path, m_path, /*allowContainerRoot=*/false);
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::writeFile");
-	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
-	            IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
 	std::string fullPath = joinPath(m_path, path);
-	bool asyncMetadata = false;
-#ifdef __unixish__
-	asyncMetadata = CLIENT_KNOBS->BACKUP_LOCAL_FILE_ASYNC_METADATA && !g_network->isSimulated();
-#endif
 	Future<Reference<IAsyncFile>> f;
-	if (asyncMetadata) {
-		f = openLocalBackupFileWithAsyncMetadata(fullPath, flags);
-	} else {
+#ifdef __unixish__
+	if (CLIENT_KNOBS->BACKUP_LOCAL_FILE_ASYNC_METADATA && !g_network->isSimulated()) {
+		f = mapAsync(Net2FileSystem::createParentDirectory(fullPath),
+		             [fullPath](Void) { return openBackupTempFile(fullPath, IAsyncFile::OPEN_ASYNC_ATOMIC_RENAME); });
+	} else
+#endif
+	{
 		platform::createDirectory(parentDirectory(fullPath));
-		std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
-		f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
+		f = openBackupTempFile(fullPath);
 	}
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
