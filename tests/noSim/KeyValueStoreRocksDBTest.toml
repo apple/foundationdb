@@ -5,5 +5,5 @@
 
      [[test.workload]]
      testName = 'UnitTests'
-     maxTestCases = 10
+     maxTestCases = 20
      testsMatching = 'noSim/fdbserver/KeyValueStoreRocksDB/'

@@ -1048,6 +1048,14 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FETCH_KEYS_PARALLELISM,                                  2 );
 	init( FETCH_KEYS_PARALLELISM_CHANGE_FEED,                      6 );
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
+	init( FETCH_KEYS_USE_SST_INGESTION,                         true ); if( randomize && BUGGIFY ) FETCH_KEYS_USE_SST_INGESTION = false;
+	init( FETCH_KEYS_SST_INGESTION_FILE_BYTES,             512LL<<20 ); if( randomize && BUGGIFY ) FETCH_KEYS_SST_INGESTION_FILE_BYTES = deterministicRandom()->randomInt(1, 4000000);
+	init( FETCH_KEYS_SST_INGEST_BOTTOMMOST,                    true ); if( randomize && BUGGIFY ) FETCH_KEYS_SST_INGEST_BOTTOMMOST = false;
+	init( FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_SECONDS,        30.0 ); if( randomize && BUGGIFY ) FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_SECONDS = deterministicRandom()->random01() * 2.0;
+	init( FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_DELAY,           1.0 ); if( randomize && BUGGIFY ) FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_DELAY = deterministicRandom()->random01() * 0.5 + 0.01;
+	init( FETCH_KEYS_SST_INGEST_FALLBACK_PARALLELISM,               1 ); if( randomize && BUGGIFY ) FETCH_KEYS_SST_INGEST_FALLBACK_PARALLELISM = deterministicRandom()->randomInt(1, 3);
+	init( FETCH_KEYS_SST_INGEST_L0_FILE_LIMIT,                    12 ); if( randomize && BUGGIFY ) FETCH_KEYS_SST_INGEST_L0_FILE_LIMIT = deterministicRandom()->randomInt(1, 8); // Well below ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER
+	init( FETCH_KEYS_SST_INGEST_L0_MAX_WAIT_SECONDS,            300.0 ); if( randomize && BUGGIFY ) FETCH_KEYS_SST_INGEST_L0_MAX_WAIT_SECONDS = deterministicRandom()->random01() * 5.0;
 	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
 	init( SERVE_AUDIT_STORAGE_PARALLELISM,                         1 );
 	init( PERSIST_FINISH_AUDIT_COUNT,                             10 ); if ( isSimulated ) PERSIST_FINISH_AUDIT_COUNT = deterministicRandom()->randomInt(1, PERSIST_FINISH_AUDIT_COUNT+1);

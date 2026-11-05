@@ -169,6 +169,32 @@ public:
 		throw not_implemented();
 	}
 
+	// Returns true if the store implements the staged SST functions below.
+	virtual bool supportsStagedSstIngestion() const { return false; }
+
+	// Appends key-values to the SST files staged under `path`, creating them as needed. Keys must be strictly
+	// ascending within and across calls for the same path. The store builds the files with its own options and may
+	// split the data across several files.
+	virtual Future<Void> appendToStagedSstFile(std::string path, Standalone<VectorRef<KeyValueRef>> kvs) {
+		throw not_implemented();
+	}
+
+	// Finishes the SST files staged under `path` and ingests them in one operation, consuming them. The ingested data
+	// is ordered after everything already committed and before everything committed later, including writes that are
+	// pending in the current uncommitted batch. Callers must make earlier writes to the key range durable first.
+	virtual Future<Void> ingestStagedSstFile(std::string path) { throw not_implemented(); }
+
+	// Discards the SST files staged under `path`, if any.
+	virtual Future<Void> abortStagedSstFile(std::string path) { throw not_implemented(); }
+
+	// Clears `range` like clear(), but writes nothing when the range holds no keys. Returns whether a clear was
+	// written. fetchKeys uses it before ingesting a staged SST file, because a range deletion left in the store keeps
+	// the ingested file out of the bottom level.
+	virtual bool clearIfNotEmpty(KeyRangeRef range) {
+		clear(range);
+		return true;
+	}
+
 protected:
 	virtual ~IKeyValueStore() {}
 };

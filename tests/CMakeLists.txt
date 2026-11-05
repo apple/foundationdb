@@ -267,6 +267,7 @@ if(WITH_PYTHON)
     if(MULTIREGION_TEST)
       add_fdb_test(TEST_FILES fast/ValidateStorage.toml)
     endif()
+    add_fdb_test(TEST_FILES fast/FetchKeysSstIngestion.toml)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)
     # TODO: Enable noSim/ShardedRocksDBCheckpointTest.toml once the crash issue is fixed

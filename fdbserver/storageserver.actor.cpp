@@ -222,6 +222,7 @@ static const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
 static const std::string fetchedCheckpointFolder = "fetchedCheckpoints";
 static const std::string serverBulkDumpFolder = "bulkDumpFiles";
 static const std::string serverBulkLoadFolder = "bulkLoadFiles";
+static const std::string serverFetchKeysSstFolder = "fetchKeysSstFiles";
 
 static const KeyRangeRef persistBulkLoadTaskKeys =
     KeyRangeRef(PERSIST_PREFIX "BulkLoadTask/"_sr, PERSIST_PREFIX "BulkLoadTask0"_sr);
@@ -613,6 +614,7 @@ struct StorageServerDisk {
 	void writeMutation(MutationRef mutation);
 	void writeKeyValue(KeyValueRef kv);
 	void clearRange(KeyRangeRef keys);
+	bool clearRangeIfNotEmpty(KeyRangeRef keys);
 
 	Future<Void> addRange(KeyRangeRef range, std::string id) {
 		return storage->addRange(range, id, !SERVER_KNOBS->SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE);
@@ -1406,6 +1408,7 @@ public:
 	std::string fetchedCheckpointFolder;
 	std::string bulkDumpFolder;
 	std::string bulkLoadFolder;
+	std::string fetchKeysSstFolder;
 
 	// defined only during splitMutations()/addMutation()
 	UpdateEagerReadInfo* updateEagerReads;
@@ -9447,6 +9450,16 @@ ACTOR static Future<Void> processSampleFiles(StorageServer* data,
 	return Void();
 }
 
+// Ingests an SST file staged by fetchKeys. Clears of the file's key range sit in the storage engine's write batch until
+// the next commit, so wait for one first: a clear committed after the ingestion would delete the ingested data. The
+// wait is needed even when fetchKeys skipped its own clears, because a cancelled earlier fetch of the range queues a
+// clear too.
+ACTOR Future<Void> ingestFetchedSstFile(StorageServer* data, std::string path) {
+	wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
+	wait(data->storage.getKeyValueStore()->ingestStagedSstFile(path));
+	return Void();
+}
+
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	state TraceInterval interval("FetchKeys");
@@ -9463,6 +9476,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state std::shared_ptr<BulkLoadFileSetKeyMap> localBulkLoadFileSets;
 	// Since the fetchKey can split, so multiple fetchzkeys can have the same data move id. We want each fetchkey
 	// downloads its file without conflict, so we add fetchKeysID to the bulkLoadLocalDir.
+	state bool useSstIngestion = false;
+	state std::string stagedSstPath; // Where fetched blocks are staged as SST files; empty when nothing is staged
+	state int64_t stagedSstBytes = 0;
+	state int stagedSstFileCount = 0;
+	state int64_t skippedEmptyClears = 0;
 	state PromiseStream<Key> destroyedFeeds;
 	state FetchKeysMetricReporter metricReporter(fetchKeysID,
 	                                             startTime,
@@ -9584,6 +9602,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage
 		// server we must refresh the cache manually.
 		data->cx->invalidateCache(Key(), keys);
+
+		useSstIngestion = SERVER_KNOBS->FETCH_KEYS_USE_SST_INGESTION && !isFullRestore && !conductBulkLoad &&
+		                  data->storage.getKeyValueStore()->supportsStagedSstIngestion();
 
 		loop {
 			state Transaction tr(data->cx);
@@ -9802,7 +9823,32 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					state Key blockEnd =
 					    this_block.size() > 0 && this_block.more ? keyAfter(this_block.back().key) : keys.end;
 					state KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
-					wait(data->storage.replaceRange(blockRange, blockData));
+					if (useSstIngestion) {
+						// Clear the block range through the write batch, as replaceRange does, but stage the data in
+						// an SST file instead of writing it key by key. Skip the clear when the range is already
+						// empty: a range deletion left in the store keeps the ingested file out of the bottom level.
+						if (!data->storage.clearRangeIfNotEmpty(blockRange)) {
+							++skippedEmptyClears;
+						}
+						if (!blockData.empty()) {
+							if (stagedSstPath.empty()) {
+								platform::createDirectory(data->fetchKeysSstFolder);
+								stagedSstPath =
+								    joinPath(data->fetchKeysSstFolder,
+								             format("%s-%d.sst", fetchKeysID.toString().c_str(), stagedSstFileCount++));
+							}
+							wait(data->storage.getKeyValueStore()->appendToStagedSstFile(stagedSstPath, blockData));
+							stagedSstBytes += expectedBlockSize;
+						}
+						if (!stagedSstPath.empty() &&
+						    stagedSstBytes >= SERVER_KNOBS->FETCH_KEYS_SST_INGESTION_FILE_BYTES) {
+							wait(ingestFetchedSstFile(data, stagedSstPath));
+							stagedSstPath.clear();
+							stagedSstBytes = 0;
+						}
+					} else {
+						wait(data->storage.replaceRange(blockRange, blockData));
+					}
 
 					if (conductBulkLoad) {
 						TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
@@ -9847,6 +9893,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					wait(data->knownCommittedVersion.whenAtLeast(fetchVersion));
 				}
 				if (blockBegin == keys.begin) {
+					// Nothing was fetched, so nothing was staged either.
+					ASSERT(stagedSstPath.empty());
 					TraceEvent("FKBlockFail", data->thisServerID)
 					    .errorUnsuppressed(lastError)
 					    .suppressFor(1.0)
@@ -9913,6 +9961,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			}
 		} // fetchKeys loop.
 
+		// Ingest what is left in the staged file. After a split this is the part of the range this actor keeps.
+		if (!stagedSstPath.empty()) {
+			wait(ingestFetchedSstFile(data, stagedSstPath));
+			stagedSstPath.clear();
+		}
+
 		if (conductBulkLoad && !SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
 		    data->storage.getKeyValueStore()->supportsSstIngestion()) {
 			// This block is for the fetchKey without SST ingestion case.
@@ -9933,7 +9987,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		TraceEvent(SevInfo, "FetchKeysStats", data->thisServerID)
 		    .detail("TotalBytes", totalBytes)
 		    .detail("Duration", duration)
-		    .detail("Rate", static_cast<double>(totalBytes) / duration);
+		    .detail("Rate", static_cast<double>(totalBytes) / duration)
+		    .detail("SstIngestion", useSstIngestion)
+		    .detail("SstFiles", stagedSstFileCount)
+		    .detail("SkippedEmptyClears", skippedEmptyClears);
 
 		TraceEvent(SevDebug, "FKBeforeFinalCommit", data->thisServerID)
 		    .detail("FKID", interval.pairID)
@@ -10132,6 +10189,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("Version", data->version.get());
 		if (!data->shuttingDown) {
 			data->changeFeedDestroys.erase(fetchKeysID);
+		}
+		if (!stagedSstPath.empty() && !data->shuttingDown) {
+			// Best effort. Files left behind are removed when the storage server restarts.
+			data->storage.getKeyValueStore()->abortStagedSstFile(stagedSstPath);
 		}
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::FetchingCF) {
@@ -13979,6 +14040,17 @@ void StorageServerDisk::clearRange(KeyRangeRef keys) {
 	}
 }
 
+bool StorageServerDisk::clearRangeIfNotEmpty(KeyRangeRef keys) {
+	if (!storage->clearIfNotEmpty(keys)) {
+		return false;
+	}
+	++(*kvClearRanges);
+	if (keys.singleKeyRange()) {
+		++(*kvClearSingleKey);
+	}
+	return true;
+}
+
 void StorageServerDisk::writeKeyValue(KeyValueRef kv) {
 	storage->set(kv);
 	*kvCommitLogicalBytes += kv.expectedSize();
@@ -15803,6 +15875,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
 	self.bulkDumpFolder = joinPath(self.folder, serverBulkDumpFolder);
 	self.bulkLoadFolder = joinPath(self.folder, serverBulkLoadFolder);
+	self.fetchKeysSstFolder = joinPath(self.folder, serverFetchKeysSstFolder);
 	self.actors.add(rocksdbLogCleaner(folder));
 
 	try {
@@ -15821,6 +15894,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		clearFileFolder(self.bulkDumpFolder, self.thisServerID, /*ignoreError=*/false);
 		clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
+		clearFileFolder(self.fetchKeysSstFolder, self.thisServerID, /*ignoreError=*/false);
 
 		EncryptionAtRestMode encryptionMode = wait(self.storage.encryptionMode());
 		TraceEvent("StorageServerInitProgress", ssi.id())
@@ -15924,6 +15998,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
 	self.bulkDumpFolder = joinPath(self.folder, serverBulkDumpFolder);
 	self.bulkLoadFolder = joinPath(self.folder, serverBulkLoadFolder);
+	self.fetchKeysSstFolder = joinPath(self.folder, serverFetchKeysSstFolder);
 
 	if (!directoryExists(self.checkpointFolder)) {
 		TraceEvent(SevWarnAlways, "SSRebootCheckpointDirNotExists", self.thisServerID);
@@ -15936,6 +16011,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 	clearFileFolder(self.bulkDumpFolder, self.thisServerID, /*ignoreError=*/false);
 	clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
+	clearFileFolder(self.fetchKeysSstFolder, self.thisServerID, /*ignoreError=*/false);
 
 	self.actors.add(rocksdbLogCleaner(folder));
 	try {

@@ -1094,6 +1094,14 @@ public:
 	int FETCH_KEYS_PARALLELISM;
 	int FETCH_KEYS_PARALLELISM_CHANGE_FEED;
 	int FETCH_KEYS_LOWER_PRIORITY;
+	bool FETCH_KEYS_USE_SST_INGESTION; // Stage fetched data in a local SST file and ingest it, if supported
+	int64_t FETCH_KEYS_SST_INGESTION_FILE_BYTES; // Ingest the staged file once it holds this many bytes
+	bool FETCH_KEYS_SST_INGEST_BOTTOMMOST; // Make room on the bottom level and ingest staged files there
+	double FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_SECONDS; // Keep retrying the bottom level for this long
+	double FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_DELAY; // First delay between those retries; it doubles each time
+	int FETCH_KEYS_SST_INGEST_FALLBACK_PARALLELISM; // Ingestions that can land in level 0 that run at once per store
+	int FETCH_KEYS_SST_INGEST_L0_FILE_LIMIT; // Before an ingestion that can land in level 0, wait for fewer L0 files
+	double FETCH_KEYS_SST_INGEST_L0_MAX_WAIT_SECONDS; // At most this long
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
 	int SERVE_AUDIT_STORAGE_PARALLELISM;
 	int PERSIST_FINISH_AUDIT_COUNT; // Num of persist complete/failed audits for each type

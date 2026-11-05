@@ -1,0 +1,36 @@
+[configuration]
+storageEngineType = 4 # ssd-rocksdb-v1, the engine that supports staged SST ingestion
+
+[[knobs]]
+fetch_keys_use_sst_ingestion = true
+fetch_keys_sst_ingestion_file_bytes = 1000000 # Several ingestions per larger fetch, so some happen mid-fetch
+rocksdb_target_file_size_base = 100000 # Each ingestion is split into several files
+
+[[test]]
+testTitle = 'FetchKeysSstIngestion'
+
+    # Enough keys that a single fetch spans several staged files.
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 50000
+    transactionsPerSecond = 2500.0
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 60.0
+
+    # Excluding servers moves all of their data to other servers.
+    [[test.workload]]
+    testName = 'RemoveServersSafely'
+    minDelay = 0
+    maxDelay = 30
+    kill1Timeout = 30
+    kill2Timeout = 6000
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 1
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 60.0

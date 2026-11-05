@@ -34,6 +34,7 @@
 #include <rocksdb/rate_limiter.h>
 #include <rocksdb/slice.h>
 #include <rocksdb/slice_transform.h>
+#include <rocksdb/sst_partitioner.h>
 #include <rocksdb/sst_file_reader.h>
 #include <rocksdb/sst_file_writer.h>
 #include <rocksdb/statistics.h>
@@ -115,6 +116,71 @@ rocksdb::CompactionPri getCompactionPriority() {
 	}
 }
 
+// Cuts compaction output files at the given keys, so that no output file spans a key range about to be ingested.
+class FetchRangePartitioner : public rocksdb::SstPartitioner {
+public:
+	explicit FetchRangePartitioner(std::vector<std::string> cuts) : cuts(std::move(cuts)) {}
+
+	const char* Name() const override { return "FdbFetchRangePartitioner"; }
+
+	rocksdb::PartitionerResult ShouldPartition(const rocksdb::PartitionerRequest& request) override {
+		// Start a new file between two adjacent keys if a cut lies in (prev, current].
+		auto it = std::upper_bound(
+		    cuts.begin(), cuts.end(), *request.prev_user_key, [](const rocksdb::Slice& key, const std::string& cut) {
+			    return key.compare(cut) < 0;
+		    });
+		return it != cuts.end() && request.current_user_key->compare(*it) >= 0 ? rocksdb::kRequired
+		                                                                       : rocksdb::kNotRequired;
+	}
+
+	// A file moved down whole keeps spanning a cut until it is rewritten, which only costs efficiency.
+	bool CanDoTrivialMove(const rocksdb::Slice&, const rocksdb::Slice&) override { return true; }
+
+private:
+	const std::vector<std::string> cuts; // Sorted
+};
+
+// Hands each compaction a FetchRangePartitioner for the cuts registered at that moment. fetchKeys registers the first
+// key of a staged batch while it makes room for the batch on the bottom level, so with nothing registered compaction
+// output is cut as usual. Thread safe: compactions create partitioners on RocksDB threads.
+class FetchRangePartitionerFactory : public rocksdb::SstPartitionerFactory {
+public:
+	const char* Name() const override { return "FdbFetchRangePartitionerFactory"; }
+
+	std::unique_ptr<rocksdb::SstPartitioner> CreatePartitioner(const rocksdb::SstPartitioner::Context&) const override {
+		std::lock_guard<std::mutex> lock(mutex);
+		return std::make_unique<FetchRangePartitioner>(std::vector<std::string>(cuts.begin(), cuts.end()));
+	}
+
+	void addCut(const std::string& key) {
+		std::lock_guard<std::mutex> lock(mutex);
+		cuts.insert(key);
+	}
+
+	void removeCut(const std::string& key) {
+		std::lock_guard<std::mutex> lock(mutex);
+		auto it = cuts.find(key);
+		if (it != cuts.end()) {
+			cuts.erase(it);
+		}
+	}
+
+private:
+	mutable std::mutex mutex;
+	std::multiset<std::string> cuts;
+};
+
+// The compression SstFileWriter uses for the files it builds: what the column family uses on its last level.
+rocksdb::CompressionType bottommostCompression(const rocksdb::ColumnFamilyOptions& options) {
+	if (options.bottommost_compression != rocksdb::kDisableCompressionOption) {
+		return options.bottommost_compression;
+	}
+	if (!options.compression_per_level.empty()) {
+		return options.compression_per_level.back();
+	}
+	return options.compression;
+}
+
 class SharedRocksDBState {
 public:
 	SharedRocksDBState(UID id);
@@ -127,6 +193,7 @@ public:
 	rocksdb::Options getOptions() const { return rocksdb::Options(this->dbOptions, this->cfOptions); }
 	rocksdb::ReadOptions getReadOptions() { return this->readOptions; }
 	rocksdb::FlushOptions getFlushOptions() { return this->flushOptions; }
+	std::shared_ptr<FetchRangePartitionerFactory> getPartitionerFactory() const { return this->partitionerFactory; }
 	double getLastFlushTime() const { return this->lastFlushTime_; }
 	void setLastFlushTime(double lastFlushTime) { this->lastFlushTime_ = lastFlushTime; }
 
@@ -140,6 +207,7 @@ private:
 
 	bool closing;
 	std::shared_ptr<rocksdb::Cache> blockCache;
+	std::shared_ptr<FetchRangePartitionerFactory> partitionerFactory;
 	rocksdb::DBOptions dbOptions;
 	rocksdb::ColumnFamilyOptions cfOptions;
 	rocksdb::ReadOptions readOptions;
@@ -149,7 +217,8 @@ private:
 
 // BlockCache should be initialized before DBOptions and CFOptions, because they both need reference to the cache.
 SharedRocksDBState::SharedRocksDBState(UID id)
-  : id(id), closing(false), blockCache(initialBlockCache()), dbOptions(initialDbOptions()),
+  : id(id), closing(false), blockCache(initialBlockCache()),
+    partitionerFactory(std::make_shared<FetchRangePartitionerFactory>()), dbOptions(initialDbOptions()),
     cfOptions(initialCfOptions()), readOptions(initialReadOptions()), flushOptions(initialFlushOptions()) {}
 
 std::shared_ptr<rocksdb::Cache> SharedRocksDBState::initialBlockCache() {
@@ -290,6 +359,10 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 
 	options.compaction_pri = getCompactionPriority();
+
+	if (SERVER_KNOBS->FETCH_KEYS_SST_INGEST_BOTTOMMOST) {
+		options.sst_partitioner_factory = partitionerFactory;
+	}
 
 	return options;
 }
@@ -1321,6 +1394,11 @@ Error statusToError(const rocksdb::Status& s) {
 	}
 }
 
+// Path of the `index`th SST file staged under `path` for fetchKeys.
+std::string stagedSstPartPath(const std::string& path, int index) {
+	return format("%s.%d", path.c_str(), index);
+}
+
 struct RocksDBKeyValueStore : IKeyValueStore {
 	struct Writer : IThreadPoolReceiver {
 		struct CheckpointAction : TypedAction<Writer, CheckpointAction> {
@@ -1413,6 +1491,263 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			a.done.send(Void());
+		}
+
+		// One file of a staged SST batch. Files are cut at the store's target file size, so an ingested file is no
+		// bigger than the files compaction writes and a later compaction does not have to rewrite an oversized file.
+		struct StagedSstPart {
+			std::string path;
+			std::string firstKey;
+			std::string lastKey;
+			int64_t keyCount = 0;
+		};
+
+		// The SST files being built for one fetchKeys staging path, keyed by that path in stagedSstFiles. Only touched
+		// on this thread.
+		struct StagedSstFile {
+			std::unique_ptr<rocksdb::SstFileWriter> writer; // Writes parts.back()
+			std::vector<StagedSstPart> parts;
+			int64_t keyCount = 0;
+			int64_t kvBytes = 0;
+			uint64_t fileBytes = 0; // Of finished parts
+			double buildSeconds = 0;
+			double finishSeconds = 0;
+			bool finished = false; // All parts are complete files, ready to ingest or to try ingesting again
+			std::string tryAgainReason; // Why the last bottom-level attempt did not fit, for tracing
+		};
+
+		// How ingestStagedSstFileImpl got to an ingestion attempt, for tracing.
+		struct StagedSstIngestDetails {
+			int attempts = 0; // Bottom-level attempts for the batch so far, including the current one
+			std::string splitResult = "NotTried"; // See BottomLevelSplitter
+			double splitSeconds = 0;
+			double retrySeconds = 0; // Spent retrying the bottom level after the first attempt
+			double gateWaitSeconds = 0; // Spent waiting for other ingestions that can land in level 0
+			double levelZeroWaitSeconds = 0;
+		};
+
+		struct AppendToStagedSstAction : TypedAction<Writer, AppendToStagedSstAction> {
+			// Copies the key-values into an arena owned by the action, because the action is destroyed on this
+			// thread while the caller may still hold references to the original arena.
+			AppendToStagedSstAction(std::string path, Standalone<VectorRef<KeyValueRef>> toCopy)
+			  : path(std::move(path)), kvs(toCopy.contents()) {}
+
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
+			const std::string path;
+			const Standalone<VectorRef<KeyValueRef>> kvs;
+			ThreadReturnPromise<Void> done;
+		};
+
+		void action(AppendToStagedSstAction& a) {
+			const double start = timer_monotonic();
+			const uint64_t targetFileBytes = sharedState->getCfOptions().target_file_size_base;
+			const uint64_t partBytes = targetFileBytes > 0 ? targetFileBytes : std::numeric_limits<uint64_t>::max();
+			StagedSstFile& staged = stagedSstFiles[a.path];
+			for (int i = 0; i < a.kvs.size(); ++i) {
+				const KeyValueRef& kv = a.kvs[i];
+				if (staged.writer == nullptr || staged.writer->FileSize() >= partBytes) {
+					if (i > 0) {
+						staged.parts.back().lastKey = a.kvs[i - 1].key.toString();
+					}
+					rocksdb::Status status = startStagedSstPart(a.path, staged);
+					if (!status.ok()) {
+						logRocksDBError(id, status, "StagedSstStartPart");
+						discardStagedSst(a.path);
+						a.done.sendError(statusToError(status));
+						return;
+					}
+				}
+				rocksdb::Status status = staged.writer->Put(toSlice(kv.key), toSlice(kv.value));
+				if (!status.ok()) {
+					logRocksDBError(id, status, "StagedSstPut");
+					discardStagedSst(a.path);
+					a.done.sendError(statusToError(status));
+					return;
+				}
+				StagedSstPart& part = staged.parts.back();
+				if (part.keyCount++ == 0) {
+					part.firstKey = kv.key.toString();
+				}
+			}
+			if (!a.kvs.empty()) {
+				staged.parts.back().lastKey = a.kvs.back().key.toString();
+				staged.keyCount += a.kvs.size();
+				staged.kvBytes += a.kvs.expectedSize();
+			}
+			staged.buildSeconds += timer_monotonic() - start;
+			a.done.send(Void());
+		}
+
+		// Finishes the file being written, if any, and starts the next one. Builds with the store's options so the
+		// files have the same table format, filters and compression as files written by flushes.
+		rocksdb::Status startStagedSstPart(const std::string& path, StagedSstFile& staged) {
+			if (staged.writer != nullptr) {
+				rocksdb::ExternalSstFileInfo fileInfo;
+				rocksdb::Status status = staged.writer->Finish(&fileInfo);
+				if (!status.ok()) {
+					return status;
+				}
+				staged.fileBytes += fileInfo.file_size;
+			}
+			StagedSstPart part;
+			part.path = stagedSstPartPath(path, static_cast<int>(staged.parts.size()));
+			staged.parts.push_back(std::move(part));
+			staged.writer =
+			    std::make_unique<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), sharedState->getOptions(), cf);
+			return staged.writer->Open(staged.parts.back().path);
+		}
+
+		struct IngestStagedSstAction : TypedAction<Writer, IngestStagedSstAction> {
+			IngestStagedSstAction(std::string path, bool bottommostOnly, StagedSstIngestDetails details)
+			  : path(std::move(path)), bottommostOnly(bottommostOnly), details(std::move(details)) {}
+
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
+			const std::string path;
+			// Only ingest if the files fit on the bottom level; otherwise send false and keep them staged.
+			const bool bottommostOnly;
+			const StagedSstIngestDetails details;
+			ThreadReturnPromise<bool> done; // Whether the files were ingested
+		};
+
+		void action(IngestStagedSstAction& a) {
+			auto it = stagedSstFiles.find(a.path);
+			if (it == stagedSstFiles.end() || it->second.keyCount == 0) {
+				TraceEvent(SevError, "RocksDBIngestStagedSstNoData", id).detail("Path", a.path);
+				discardStagedSst(a.path);
+				a.done.sendError(internal_error());
+				return;
+			}
+			StagedSstFile& staged = it->second;
+			if (!staged.finished) {
+				const double start = timer_monotonic();
+				rocksdb::ExternalSstFileInfo fileInfo;
+				rocksdb::Status status = staged.writer->Finish(&fileInfo);
+				staged.finishSeconds = timer_monotonic() - start;
+				if (!status.ok()) {
+					logRocksDBError(id, status, "StagedSstFinish");
+					discardStagedSst(a.path);
+					a.done.sendError(statusToError(status));
+					return;
+				}
+				staged.fileBytes += fileInfo.file_size;
+				staged.writer.reset();
+				staged.finished = true;
+			}
+
+			std::vector<std::string> paths;
+			for (const auto& part : staged.parts) {
+				paths.push_back(part.path);
+			}
+			rocksdb::IngestExternalFileOptions options;
+			// Hard link the files into the DB instead of copying them. RocksDB removes the staged paths on success.
+			options.move_files = true;
+			// The files were just built by this thread, so skip reading them again to verify checksums.
+			options.verify_checksums_before_ingest = false;
+			// Keep the assigned sequence number in the MANIFEST instead of writing it back into the files.
+			options.write_global_seqno = false;
+			options.allow_blocking_flush = true;
+			// With this set, RocksDB returns TryAgain instead of placing the files above the bottom level.
+			options.fail_if_not_bottommost_level = a.bottommostOnly;
+			// All files in one call: one sequence number, one MANIFEST update and at most one memtable flush.
+			const double start = timer_monotonic();
+			rocksdb::Status status = db->IngestExternalFile(cf, paths, options);
+			const double ingestSeconds = timer_monotonic() - start;
+			if (a.bottommostOnly && status.IsTryAgain()) {
+				// A failed ingestion leaves the staged files in place, so the caller can try again.
+				staged.tryAgainReason = status.ToString();
+				a.done.send(false);
+				return;
+			}
+			StagedSstFile ingested = std::move(staged);
+			stagedSstFiles.erase(it);
+			if (!status.ok()) {
+				logRocksDBError(id, status, "IngestStagedSst");
+				deleteStagedSstParts(ingested.parts);
+				a.done.sendError(statusToError(status));
+				return;
+			}
+			// As after a commit, iterators created before the ingestion must not be reused.
+			readIterPool->update();
+
+			// Report the levels RocksDB placed the files on. A file above the bottom level is rewritten by compaction
+			// later, which is the cost this ingestion is trying to avoid. Level is the shallowest of them.
+			std::vector<int> levels(ingested.parts.size(), -1);
+			int levelZeroFiles = 0;
+			rocksdb::ColumnFamilyMetaData metaData;
+			db->GetColumnFamilyMetaData(cf, &metaData);
+			for (const auto& levelMetaData : metaData.levels) {
+				if (levelMetaData.level == 0) {
+					levelZeroFiles = static_cast<int>(levelMetaData.files.size());
+				}
+				for (const auto& file : levelMetaData.files) {
+					for (int i = 0; i < ingested.parts.size(); ++i) {
+						if (file.smallestkey == ingested.parts[i].firstKey &&
+						    file.largestkey == ingested.parts[i].lastKey) {
+							levels[i] = levelMetaData.level;
+						}
+					}
+				}
+			}
+			TraceEvent("RocksDBIngestStagedSst", id)
+			    .detail("Path", a.path)
+			    .detail("Keys", ingested.keyCount)
+			    .detail("KVBytes", ingested.kvBytes)
+			    .detail("Files", ingested.parts.size())
+			    .detail("FileBytes", ingested.fileBytes)
+			    .detail("BuildSeconds", ingested.buildSeconds)
+			    .detail("FinishSeconds", ingested.finishSeconds)
+			    .detail("IngestSeconds", ingestSeconds)
+			    .detail("Level", *std::min_element(levels.begin(), levels.end()))
+			    .detail("Levels", describe(levels))
+			    .detail("NumLevels", metaData.levels.size())
+			    .detail("LevelZeroFiles", levelZeroFiles)
+			    .detail("TriedBottommost", a.details.attempts > 0)
+			    .detail("BottommostFallback", a.details.attempts > 0 && !a.bottommostOnly)
+			    .detail("Attempts", a.details.attempts)
+			    .detail("TryAgainReason", ingested.tryAgainReason)
+			    .detail("SplitBottomFile", a.details.splitResult)
+			    .detail("SplitSeconds", a.details.splitSeconds)
+			    .detail("BottommostRetrySeconds", a.details.retrySeconds)
+			    .detail("FallbackGateWaitSeconds", a.details.gateWaitSeconds)
+			    .detail("LevelZeroWaitSeconds", a.details.levelZeroWaitSeconds);
+			a.done.send(true);
+		}
+
+		struct AbortStagedSstAction : TypedAction<Writer, AbortStagedSstAction> {
+			AbortStagedSstAction(std::string path) : path(std::move(path)) {}
+
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
+			const std::string path;
+			ThreadReturnPromise<Void> done;
+		};
+
+		void action(AbortStagedSstAction& a) {
+			discardStagedSst(a.path);
+			a.done.send(Void());
+		}
+
+		// Drops the staged writer for `path`, if any, and deletes the files it wrote. Destroying an unfinished
+		// SstFileWriter abandons its file but leaves it on disk.
+		void discardStagedSst(const std::string& path) {
+			auto it = stagedSstFiles.find(path);
+			if (it == stagedSstFiles.end()) {
+				return;
+			}
+			std::vector<StagedSstPart> parts = std::move(it->second.parts);
+			stagedSstFiles.erase(it);
+			deleteStagedSstParts(parts);
+		}
+
+		void deleteStagedSstParts(const std::vector<StagedSstPart>& parts) {
+			for (const auto& part : parts) {
+				rocksdb::Status status = db->GetEnv()->DeleteFile(part.path);
+				if (!status.ok() && !status.IsNotFound()) {
+					logRocksDBError(id, status, "StagedSstDelete", SevWarn);
+				}
+			}
 		}
 
 		struct CompactRangeAction : TypedAction<Writer, CompactRangeAction> {
@@ -1723,10 +2058,78 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		std::shared_ptr<ReadIteratorPool> readIterPool;
 		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
 		int threadIndex;
+		std::unordered_map<std::string, StagedSstFile> stagedSstFiles;
 
 		// ThreadReturnPromiseStream pair.first stores the histogram name and
 		// pair.second stores the corresponding measured latency (seconds)
 		ThreadReturnPromiseStream<std::pair<std::string, double>>* metricPromiseStream;
+	};
+
+	// Makes room on the bottom level for a staged batch about to be ingested. The new range lies between keys the store
+	// already has, so a bottom-level file usually spans it and the batch cannot be placed there. This rewrites that one
+	// file into the bottom level while the batch's first key is registered with FetchRangePartitionerFactory, which
+	// cuts it in two at the gap. Runs on its own thread, because CompactFiles blocks the calling thread for the
+	// rewrite.
+	struct BottomLevelSplitter : IThreadPoolReceiver {
+		BottomLevelSplitter(DB& db, CF& cf, UID id, std::shared_ptr<SharedRocksDBState> sharedState)
+		  : db(db), cf(cf), id(id), sharedState(sharedState) {}
+
+		void init() override {}
+
+		struct SplitAction : TypedAction<BottomLevelSplitter, SplitAction> {
+			// Copies the range into an arena owned by the action, because the action is destroyed on this thread.
+			explicit SplitAction(KeyRangeRef range) : range(range) {}
+
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
+			const KeyRange range; // From the batch's first key to the key after its last key
+			ThreadReturnPromise<std::string> done; // What was done, for tracing
+		};
+
+		void action(SplitAction& a) {
+			rocksdb::ColumnFamilyMetaData metaData;
+			db->GetColumnFamilyMetaData(cf, &metaData);
+			if (metaData.levels.empty()) {
+				a.done.send(std::string("NotNeeded"));
+				return;
+			}
+			const rocksdb::LevelMetaData& bottom = metaData.levels.back();
+			const std::string begin = a.range.begin.toString();
+			const std::string end = a.range.end.toString();
+			for (const auto& file : bottom.files) {
+				// Files on a level do not overlap each other, so at most one overlaps the range.
+				if (file.largestkey < begin || file.smallestkey >= end) {
+					continue;
+				}
+				if (file.smallestkey >= begin || file.largestkey < end) {
+					// The file has keys inside the range, which a split cannot move out of the way.
+					a.done.send(std::string("KeysInRange"));
+					return;
+				}
+				if (file.being_compacted) {
+					a.done.send(std::string("FileBusy"));
+					return;
+				}
+				const rocksdb::ColumnFamilyOptions cfOptions = sharedState->getCfOptions();
+				rocksdb::CompactionOptions options;
+				options.compression = bottommostCompression(cfOptions);
+				options.output_file_size_limit = cfOptions.target_file_size_base;
+				rocksdb::Status status = db->CompactFiles(options, cf, { file.name }, bottom.level);
+				if (!status.ok()) {
+					logRocksDBError(id, status, "SplitBottomLevelFile", SevWarn);
+					a.done.send(std::string("Failed"));
+					return;
+				}
+				a.done.send(std::string("Split"));
+				return;
+			}
+			a.done.send(std::string("NotNeeded"));
+		}
+
+		DB& db;
+		CF& cf;
+		UID id;
+		std::shared_ptr<SharedRocksDBState> sharedState;
 	};
 
 	struct Reader : IThreadPoolReceiver {
@@ -2104,9 +2507,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (g_network->isSimulated()) {
 			writeThread = CoroThreadPool::createThreadPool();
 			readThreads = CoroThreadPool::createThreadPool();
+			splitterThread = CoroThreadPool::createThreadPool();
 		} else {
 			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
 			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
+			splitterThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
 		}
 		if (SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0) {
 			collection = actorCollection(addActor.getFuture());
@@ -2145,6 +2550,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			               SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0 ? metricPromiseStreams[i].get() : nullptr),
 			    "fdb-rocksdb-re");
 		}
+		splitterThread->addThread(new BottomLevelSplitter(db, defaultFdbCF, id, this->sharedState), "fdb-rocksdb-sp");
 	}
 
 	ACTOR Future<Void> errorListenActor(Future<Void> collection) {
@@ -2255,6 +2661,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		// The metrics future retains a reference to the DB, so stop it before we delete it.
 		self->metrics.reset();
 
+		wait(self->splitterThread->stop());
 		wait(self->readThreads->stop());
 		self->readIterPool.reset();
 		auto a = new Writer::CloseAction(self->path, deleteOnClose);
@@ -2388,6 +2795,38 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				++deleteRangesPerCommit;
 			}
 		}
+	}
+
+	// clear() writes a range deletion even for an empty range once the batch's single-key delete budget is used up,
+	// so check for keys before clearing.
+	bool clearIfNotEmpty(KeyRangeRef range) override {
+		if (!rangeHasKeys(range)) {
+			return false;
+		}
+		clear(range, nullptr);
+		return true;
+	}
+
+	static bool containsKeyIn(const std::set<Key>& keys, KeyRangeRef range) {
+		auto it = keys.lower_bound(range.begin);
+		return it != keys.end() && *it < range.end;
+	}
+
+	// Returns true if `range` holds a key set in the current batch, in the previous batch (whose commit may still be in
+	// flight), or already in the database. An iterator error counts as non-empty, so callers fall back to a clear.
+	bool rangeHasKeys(KeyRangeRef range) {
+		if (containsKeyIn(keysSet, range) || containsKeyIn(previousCommitKeysSet, range)) {
+			return true;
+		}
+		rocksdb::ReadOptions readOptions = sharedState->getReadOptions();
+		readOptions.fill_cache = false;
+		auto beginSlice = toSlice(range.begin);
+		auto endSlice = toSlice(range.end);
+		readOptions.iterate_lower_bound = &beginSlice;
+		readOptions.iterate_upper_bound = &endSlice;
+		auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions, defaultFdbCF));
+		cursor->Seek(beginSlice);
+		return cursor->Valid() || !cursor->status().ok();
 	}
 
 	static bool overloaded(const uint64_t estPendCompactBytes, const uint64_t numImmutableMemtables) {
@@ -2663,6 +3102,183 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
+	bool supportsStagedSstIngestion() const override { return true; }
+
+	Future<Void> appendToStagedSstFile(std::string path, Standalone<VectorRef<KeyValueRef>> kvs) override {
+		if (!kvs.empty()) {
+			auto [it, inserted] = stagedSstKeyRanges.try_emplace(path, kvs.front().key, kvs.back().key);
+			if (!inserted) {
+				it->second.second = kvs.back().key;
+			}
+		}
+		auto a = new Writer::AppendToStagedSstAction(std::move(path), kvs);
+		auto res = a->done.getFuture();
+		writeThread->post(a);
+		return res;
+	}
+
+	Future<Void> ingestStagedSstFile(std::string path) override { return ingestStagedSstFileImpl(this, path); }
+
+	// Ingests a staged batch. It first makes room on the bottom level (see BottomLevelSplitter) and tries to ingest the
+	// batch there, which adds nothing to level 0. What usually keeps a batch off the bottom level is a compaction that
+	// is writing to it over the batch's range, which ends soon, so it tries again with a growing delay for up to
+	// FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_SECONDS. A batch that still does not fit can land in level 0. Those
+	// ingestions take turns on the store and first let compaction bring level 0 below
+	// FETCH_KEYS_SST_INGEST_L0_FILE_LIMIT, so that several of them cannot push level 0 to RocksDB's write slowdown or
+	// stop triggers and stall the store's commits; the wait slows data movement into the store instead. Then it tries
+	// the bottom level once more, since the compactions that drained level 0 may have cleared the way, and finally
+	// lets RocksDB place the files as usual.
+	ACTOR static Future<Void> ingestStagedSstFileImpl(RocksDBKeyValueStore* self, std::string path) {
+		// Held so this can stop, and remove the cut, without touching `self` if the store is closed while it waits.
+		state std::shared_ptr<SharedRocksDBState> sharedState = self->sharedState;
+		state std::shared_ptr<FetchRangePartitionerFactory> partitioner = sharedState->getPartitionerFactory();
+		state Reference<FlowLock> fallbackLock = self->fallbackIngestionLock;
+		state FlowLock::Releaser fallbackTurn;
+		state Writer::StagedSstIngestDetails details;
+		state bool tryBottommost = false;
+		state KeyRange range;
+		state double splitStart = 0;
+		state double gateStart = 0;
+		state bool ingested = false;
+
+		auto it = self->stagedSstKeyRanges.find(path);
+		if (SERVER_KNOBS->FETCH_KEYS_SST_INGEST_BOTTOMMOST && it != self->stagedSstKeyRanges.end()) {
+			tryBottommost = true;
+			range = KeyRangeRef(it->second.first, keyAfter(it->second.second));
+			partitioner->addCut(range.begin.toString());
+		}
+		self->stagedSstKeyRanges.erase(path);
+
+		try {
+			if (tryBottommost) {
+				splitStart = now();
+				std::string result = wait(self->splitBottomLevelFile(range));
+				details.splitResult = result;
+				details.splitSeconds = now() - splitStart;
+				throwIfClosing(sharedState);
+				++details.attempts;
+				bool done = wait(self->ingestStagedSstAttempt(path, true, details));
+				ingested = done;
+				// Old keys in the range on the bottom level stay until a compaction removes them, so retrying is
+				// pointless then.
+				if (!ingested && details.splitResult != "KeysInRange") {
+					bool retried = wait(retryBottommostIngestion(self, sharedState, path, &details));
+					ingested = retried;
+				}
+			}
+			if (!ingested) {
+				throwIfClosing(sharedState);
+				gateStart = now();
+				wait(fallbackLock->take());
+				fallbackTurn = FlowLock::Releaser(*fallbackLock);
+				details.gateWaitSeconds = now() - gateStart;
+				throwIfClosing(sharedState);
+				double waited = wait(waitForLevelZeroBelowLimit(self, sharedState));
+				details.levelZeroWaitSeconds = waited;
+				if (tryBottommost) {
+					++details.attempts;
+					bool done = wait(self->ingestStagedSstAttempt(path, true, details));
+					ingested = done;
+				}
+			}
+			if (!ingested) {
+				throwIfClosing(sharedState);
+				bool done = wait(self->ingestStagedSstAttempt(path, false, details));
+				ASSERT(done);
+			}
+		} catch (Error& e) {
+			fallbackTurn.release();
+			if (tryBottommost) {
+				partitioner->removeCut(range.begin.toString());
+			}
+			throw;
+		}
+		fallbackTurn.release();
+		// Keeping the cut registered until now stops compactions from spanning the gap again before the ingestion.
+		if (tryBottommost) {
+			partitioner->removeCut(range.begin.toString());
+		}
+		return Void();
+	}
+
+	// Tries the bottom level again after a delay that starts at FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_DELAY and
+	// doubles, until the batch is ingested or FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_SECONDS have passed. Returns
+	// whether the batch was ingested.
+	ACTOR static Future<bool> retryBottommostIngestion(RocksDBKeyValueStore* self,
+	                                                   std::shared_ptr<SharedRocksDBState> sharedState,
+	                                                   std::string path,
+	                                                   Writer::StagedSstIngestDetails* details) {
+		state double start = now();
+		state double retryDelay = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_DELAY;
+		loop {
+			const double remaining = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_SECONDS - (now() - start);
+			if (remaining <= 0) {
+				return false;
+			}
+			wait(delay(std::min(retryDelay, remaining)));
+			throwIfClosing(sharedState);
+			retryDelay *= 2;
+			++details->attempts;
+			details->retrySeconds = now() - start;
+			bool done = wait(self->ingestStagedSstAttempt(path, true, *details));
+			if (done) {
+				return true;
+			}
+		}
+	}
+
+	// Waits while level 0 has FETCH_KEYS_SST_INGEST_L0_FILE_LIMIT or more files, at most
+	// FETCH_KEYS_SST_INGEST_L0_MAX_WAIT_SECONDS. Returns how long it waited.
+	ACTOR static Future<double> waitForLevelZeroBelowLimit(RocksDBKeyValueStore* self,
+	                                                       std::shared_ptr<SharedRocksDBState> sharedState) {
+		state double start = now();
+		loop {
+			throwIfClosing(sharedState);
+			if (self->levelZeroFileCount() < SERVER_KNOBS->FETCH_KEYS_SST_INGEST_L0_FILE_LIMIT ||
+			    now() - start >= SERVER_KNOBS->FETCH_KEYS_SST_INGEST_L0_MAX_WAIT_SECONDS) {
+				return now() - start;
+			}
+			wait(delay(0.1));
+		}
+	}
+
+	// The store is deleted soon after it starts closing, so stop as an action posted to its threads would.
+	static void throwIfClosing(const std::shared_ptr<SharedRocksDBState>& sharedState) {
+		if (sharedState->isClosing()) {
+			throw broken_promise();
+		}
+	}
+
+	int levelZeroFileCount() {
+		std::string value;
+		if (!db->GetProperty(defaultFdbCF, rocksdb::DB::Properties::kNumFilesAtLevelPrefix + "0", &value)) {
+			return 0;
+		}
+		return std::atoi(value.c_str());
+	}
+
+	Future<std::string> splitBottomLevelFile(KeyRangeRef range) {
+		auto a = new BottomLevelSplitter::SplitAction(range);
+		auto res = a->done.getFuture();
+		splitterThread->post(a);
+		return res;
+	}
+
+	Future<bool> ingestStagedSstAttempt(std::string path, bool bottommostOnly, Writer::StagedSstIngestDetails details) {
+		auto a = new Writer::IngestStagedSstAction(std::move(path), bottommostOnly, std::move(details));
+		auto res = a->done.getFuture();
+		writeThread->post(a);
+		return res;
+	}
+
+	Future<Void> abortStagedSstFile(std::string path) override {
+		stagedSstKeyRanges.erase(path);
+		auto a = new Writer::AbortStagedSstAction(std::move(path));
+		auto res = a->done.getFuture();
+		writeThread->post(a);
+		return res;
+	}
+
 	DB db = nullptr;
 	std::shared_ptr<SharedRocksDBState> sharedState;
 	std::shared_ptr<PerfContextMetrics> perfContextMetrics;
@@ -2671,6 +3287,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	UID id;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
+	Reference<IThreadPool> splitterThread;
+	// First and last key of each staged SST batch, so ingestion knows the range to make room for. Network thread only.
+	std::unordered_map<std::string, std::pair<Key, Key>> stagedSstKeyRanges;
+	// Taken by staged SST ingestions that can land in level 0 (see ingestStagedSstFileImpl). Referenced by the
+	// ingestions too, so it outlives a store that closes while they wait. Network thread only.
+	Reference<FlowLock> fallbackIngestionLock =
+	    makeReference<FlowLock>(SERVER_KNOBS->FETCH_KEYS_SST_INGEST_FALLBACK_PARALLELISM);
 	std::shared_ptr<RocksDBErrorListener> errorListener;
 	std::shared_ptr<RocksDBEventListener> eventListener;
 	Future<Void> errorFuture;
@@ -3180,6 +3803,382 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/IngestSSTFileVisibility") {
 	wait(closed); // Wait for close completion
 	platform::eraseDirectoryRecursive(testDir);
 
+	return Void();
+}
+
+Standalone<VectorRef<KeyValueRef>> stagedSstTestBlock(std::vector<std::pair<std::string, std::string>> kvs) {
+	Standalone<VectorRef<KeyValueRef>> block;
+	for (const auto& [key, value] : kvs) {
+		block.push_back_deep(block.arena(), KeyValueRef(key, value));
+	}
+	return block;
+}
+
+ACTOR Future<Void> closeAndEraseTestStore(RocksDBKeyValueStore* kvStore, std::string testDir) {
+	state Future<Void> closed = kvStore->onClosed();
+	kvStore->dispose();
+	wait(closed);
+	platform::eraseDirectoryRecursive(testDir);
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/StagedSstIngestionReplacesClearedRange") {
+	state std::string testDir = "test_staged_sst_replaces_range";
+	platform::eraseDirectoryRecursive(testDir);
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	// A stale key inside the fetched range, and keys on both sides of it.
+	kvStore->set(KeyValueRef("a"_sr, "outside"_sr), nullptr);
+	kvStore->set(KeyValueRef("b/stale"_sr, "stale"_sr), nullptr);
+	kvStore->set(KeyValueRef("c"_sr, "outside"_sr), nullptr);
+	wait(kvStore->commit(false));
+
+	// As fetchKeys does: the clear is durable before the ingestion.
+	kvStore->clear(KeyRangeRef("b/"_sr, "b0"_sr), nullptr);
+	wait(kvStore->commit(false));
+
+	state std::string sstPath = joinPath(testDir, "staged.sst");
+	wait(kvStore->appendToStagedSstFile(sstPath, stagedSstTestBlock({ { "b/1", "1" }, { "b/2", "2" } })));
+	wait(kvStore->appendToStagedSstFile(sstPath, stagedSstTestBlock({ { "b/3", "3" } })));
+	wait(kvStore->ingestStagedSstFile(sstPath));
+
+	RangeResult result = wait(kvStore->readRange(allKeys, 100, 1 << 20, Optional<ReadOptions>()));
+	std::vector<std::string> keys;
+	for (const auto& kv : result) {
+		keys.push_back(kv.key.toString());
+	}
+	ASSERT(keys == std::vector<std::string>({ "a", "b/1", "b/2", "b/3", "c" }));
+	ASSERT(!fileExists(stagedSstPartPath(sstPath, 0)));
+
+	wait(closeAndEraseTestStore(kvStore, testDir));
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/StagedSstIngestionPendingWritesWin") {
+	state std::string testDir = "test_staged_sst_pending_writes";
+	platform::eraseDirectoryRecursive(testDir);
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	// A write that is still in the uncommitted batch when the file is ingested is committed after it.
+	kvStore->set(KeyValueRef("k"_sr, "pending"_sr), nullptr);
+	state std::string sstPath = joinPath(testDir, "staged.sst");
+	wait(kvStore->appendToStagedSstFile(sstPath, stagedSstTestBlock({ { "k", "ingested" } })));
+	wait(kvStore->ingestStagedSstFile(sstPath));
+	wait(kvStore->commit(false));
+
+	Optional<Value> value = wait(kvStore->readValue("k"_sr, Optional<ReadOptions>()));
+	ASSERT(value.present() && value.get() == "pending"_sr);
+
+	wait(closeAndEraseTestStore(kvStore, testDir));
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/StagedSstAbortRemovesFile") {
+	state std::string testDir = "test_staged_sst_abort";
+	platform::eraseDirectoryRecursive(testDir);
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	state std::string sstPath = joinPath(testDir, "staged.sst");
+	wait(kvStore->appendToStagedSstFile(sstPath, stagedSstTestBlock({ { "k", "v" } })));
+	ASSERT(fileExists(stagedSstPartPath(sstPath, 0)));
+	wait(kvStore->abortStagedSstFile(sstPath));
+	ASSERT(!fileExists(stagedSstPartPath(sstPath, 0)));
+
+	wait(closeAndEraseTestStore(kvStore, testDir));
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/StagedSstIngestionSplitsAtTargetFileSize") {
+	state std::string testDir = "test_staged_sst_split";
+	platform::eraseDirectoryRecursive(testDir);
+	// A small target file size, so a few hundred KB of staged data spans several files.
+	state int oldTargetFileSize = SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_BASE;
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("rocksdb_target_file_size_base",
+	                                                          KnobValueRef::create(int{ 64 << 10 }));
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	state std::string sstPath = joinPath(testDir, "staged.sst");
+	state int block = 0;
+	for (; block < 3; ++block) {
+		std::vector<std::pair<std::string, std::string>> kvs;
+		for (int i = 0; i < 1000; ++i) {
+			kvs.emplace_back(format("k/%06d", block * 1000 + i), deterministicRandom()->randomAlphaNumeric(200));
+		}
+		wait(kvStore->appendToStagedSstFile(sstPath, stagedSstTestBlock(kvs)));
+	}
+	ASSERT(fileExists(stagedSstPartPath(sstPath, 1)));
+	wait(kvStore->ingestStagedSstFile(sstPath));
+
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("k/"_sr, "k0"_sr), 1 << 30, 1 << 30, Optional<ReadOptions>()));
+	ASSERT(result.size() == 3000);
+
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("rocksdb_target_file_size_base",
+	                                                          KnobValueRef::create(int{ oldTargetFileSize }));
+	wait(closeAndEraseTestStore(kvStore, testDir));
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/ClearIfNotEmptySkipsEmptyRangeWhenDeleteBudgetIsUsedUp") {
+	state std::string testDir = "test_clear_if_not_empty_budget";
+	platform::eraseDirectoryRecursive(testDir);
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	// With the batch's single-key delete budget used up, clear() would write a range deletion here.
+	for (int i = 0; i < SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX; ++i) {
+		kvStore->clear(singleKeyRange(StringRef(format("x/%d", i))), nullptr);
+	}
+	ASSERT(!kvStore->clearIfNotEmpty(KeyRangeRef("b/"_sr, "b0"_sr)));
+
+	wait(closeAndEraseTestStore(kvStore, testDir));
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/ClearIfNotEmptyClearsCommittedKeys") {
+	state std::string testDir = "test_clear_if_not_empty_committed";
+	platform::eraseDirectoryRecursive(testDir);
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	kvStore->set(KeyValueRef("b/1"_sr, "1"_sr), nullptr);
+	wait(kvStore->commit(false));
+	// A second commit moves "b/1" out of the store's recent-write sets, so only the database seek can find it.
+	kvStore->set(KeyValueRef("z"_sr, "1"_sr), nullptr);
+	wait(kvStore->commit(false));
+	ASSERT(kvStore->clearIfNotEmpty(KeyRangeRef("b/"_sr, "b0"_sr)));
+
+	wait(closeAndEraseTestStore(kvStore, testDir));
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/ClearIfNotEmptyClearsUncommittedKeys") {
+	state std::string testDir = "test_clear_if_not_empty_uncommitted";
+	platform::eraseDirectoryRecursive(testDir);
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	kvStore->set(KeyValueRef("b/1"_sr, "1"_sr), nullptr);
+	ASSERT(kvStore->clearIfNotEmpty(KeyRangeRef("b/"_sr, "b0"_sr)));
+
+	wait(closeAndEraseTestStore(kvStore, testDir));
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/FetchRangePartitionerCutsAtRegisteredBoundary") {
+	FetchRangePartitionerFactory factory;
+	factory.addCut("b/");
+	std::unique_ptr<rocksdb::SstPartitioner> partitioner =
+	    factory.CreatePartitioner(rocksdb::SstPartitioner::Context());
+	const rocksdb::Slice a1("a/1"), a2("a/2"), a9("a/9"), c0("c/0");
+	ASSERT(partitioner->ShouldPartition(rocksdb::PartitionerRequest(a9, c0, 0)) == rocksdb::kRequired);
+	ASSERT(partitioner->ShouldPartition(rocksdb::PartitionerRequest(a1, a2, 0)) == rocksdb::kNotRequired);
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/StagedSstIngestionLandsOnBottomLevel") {
+	state std::string testDir = "test_staged_sst_bottom_level";
+	platform::eraseDirectoryRecursive(testDir);
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	// Neighbours on both sides of the range, compacted into one bottom-level file that spans the range.
+	for (int i = 0; i < 100; ++i) {
+		kvStore->set(KeyValueRef(StringRef(format("a/%03d", i)), "v"_sr), nullptr);
+		kvStore->set(KeyValueRef(StringRef(format("c/%03d", i)), "v"_sr), nullptr);
+	}
+	wait(kvStore->commit(false));
+	wait(kvStore->compactRange(allKeys));
+
+	state std::string sstPath = joinPath(testDir, "staged.sst");
+	std::vector<std::pair<std::string, std::string>> kvs;
+	for (int i = 0; i < 100; ++i) {
+		kvs.emplace_back(format("b/%03d", i), "v");
+	}
+	wait(kvStore->appendToStagedSstFile(sstPath, stagedSstTestBlock(kvs)));
+	wait(kvStore->ingestStagedSstFile(sstPath));
+
+	rocksdb::ColumnFamilyMetaData metaData;
+	kvStore->db->GetColumnFamilyMetaData(kvStore->defaultFdbCF, &metaData);
+	int ingestedLevel = -1;
+	for (const auto& level : metaData.levels) {
+		for (const auto& file : level.files) {
+			if (file.smallestkey == "b/000") {
+				ingestedLevel = level.level;
+			}
+		}
+	}
+	ASSERT(ingestedLevel == metaData.levels.back().level);
+
+	wait(closeAndEraseTestStore(kvStore, testDir));
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/StagedSstIngestionFallsBackWhenRangeHasKeys") {
+	state std::string testDir = "test_staged_sst_bottom_level_fallback";
+	platform::eraseDirectoryRecursive(testDir);
+	state double oldRetrySeconds = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_SECONDS;
+	state double oldRetryDelay = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_DELAY;
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_bottommost_retry_seconds",
+	                                                          KnobValueRef::create(double{ 0.3 }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_bottommost_retry_delay",
+	                                                          KnobValueRef::create(double{ 0.1 }));
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	// A key already in the range keeps the batch off the bottom level through the retries, so ingestion falls back to
+	// the usual placement.
+	kvStore->set(KeyValueRef("b/050"_sr, "old"_sr), nullptr);
+	wait(kvStore->commit(false));
+	state std::string sstPath = joinPath(testDir, "staged.sst");
+	wait(kvStore->appendToStagedSstFile(sstPath, stagedSstTestBlock({ { "b/050", "new" } })));
+	wait(kvStore->ingestStagedSstFile(sstPath));
+
+	Optional<Value> value = wait(kvStore->readValue("b/050"_sr, Optional<ReadOptions>()));
+	ASSERT(value.present() && value.get() == "new"_sr);
+
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_bottommost_retry_seconds",
+	                                                          KnobValueRef::create(double{ oldRetrySeconds }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_bottommost_retry_delay",
+	                                                          KnobValueRef::create(double{ oldRetryDelay }));
+	wait(closeAndEraseTestStore(kvStore, testDir));
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/StagedSstIngestionWaitsForLevelZero") {
+	state std::string testDir = "test_staged_sst_level_zero_wait";
+	platform::eraseDirectoryRecursive(testDir);
+	state int oldLimit = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_L0_FILE_LIMIT;
+	state double oldMaxWait = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_L0_MAX_WAIT_SECONDS;
+	state double oldRetrySeconds = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_SECONDS;
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_l0_file_limit",
+	                                                          KnobValueRef::create(int{ 1 }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_l0_max_wait_seconds",
+	                                                          KnobValueRef::create(double{ 0.5 }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_bottommost_retry_seconds",
+	                                                          KnobValueRef::create(double{ 0.0 }));
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	// A key in the range keeps the batch off the bottom level, and the flush that the ingestion forces leaves a file
+	// in level 0, which compaction does not pick up by itself. So the ingestion waits the whole maximum.
+	kvStore->set(KeyValueRef("b/050"_sr, "old"_sr), nullptr);
+	wait(kvStore->commit(false));
+	state std::string sstPath = joinPath(testDir, "staged.sst");
+	wait(kvStore->appendToStagedSstFile(sstPath, stagedSstTestBlock({ { "b/050", "new" } })));
+	state double start = now();
+	wait(kvStore->ingestStagedSstFile(sstPath));
+	ASSERT(now() - start >= 0.5);
+
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_l0_file_limit",
+	                                                          KnobValueRef::create(int{ oldLimit }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_l0_max_wait_seconds",
+	                                                          KnobValueRef::create(double{ oldMaxWait }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_bottommost_retry_seconds",
+	                                                          KnobValueRef::create(double{ oldRetrySeconds }));
+	wait(closeAndEraseTestStore(kvStore, testDir));
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/StagedSstIngestionRetriesBottomLevel") {
+	state std::string testDir = "test_staged_sst_bottom_level_retry";
+	platform::eraseDirectoryRecursive(testDir);
+	state double oldRetrySeconds = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_SECONDS;
+	state double oldRetryDelay = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_DELAY;
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_bottommost_retry_seconds",
+	                                                          KnobValueRef::create(double{ 10.0 }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_bottommost_retry_delay",
+	                                                          KnobValueRef::create(double{ 0.1 }));
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	// An old key that the fetch cleared. The flush that the first attempt forces leaves it and its tombstone in level
+	// 0, which keeps the batch off the bottom level until a compaction drops them.
+	kvStore->set(KeyValueRef("b/050"_sr, "old"_sr), nullptr);
+	wait(kvStore->commit(false));
+	kvStore->clear(singleKeyRange("b/050"_sr), nullptr);
+	wait(kvStore->commit(false));
+	state std::string sstPath = joinPath(testDir, "staged.sst");
+	wait(kvStore->appendToStagedSstFile(sstPath, stagedSstTestBlock({ { "b/050", "new" } })));
+	state Future<Void> ingested = kvStore->ingestStagedSstFile(sstPath);
+
+	// Still retrying the bottom level instead of falling back. Then the blocker goes away.
+	wait(delay(0.5));
+	ASSERT(!ingested.isReady());
+	wait(kvStore->compactRange(allKeys));
+	wait(ingested);
+
+	rocksdb::ColumnFamilyMetaData metaData;
+	kvStore->db->GetColumnFamilyMetaData(kvStore->defaultFdbCF, &metaData);
+	int ingestedLevel = -1;
+	for (const auto& level : metaData.levels) {
+		for (const auto& file : level.files) {
+			if (file.smallestkey == "b/050") {
+				ingestedLevel = level.level;
+			}
+		}
+	}
+	ASSERT(ingestedLevel == metaData.levels.back().level);
+	Optional<Value> value = wait(kvStore->readValue("b/050"_sr, Optional<ReadOptions>()));
+	ASSERT(value.present() && value.get() == "new"_sr);
+
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_bottommost_retry_seconds",
+	                                                          KnobValueRef::create(double{ oldRetrySeconds }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_bottommost_retry_delay",
+	                                                          KnobValueRef::create(double{ oldRetryDelay }));
+	wait(closeAndEraseTestStore(kvStore, testDir));
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/StagedSstFallbackIngestionsTakeTurns") {
+	state std::string testDir = "test_staged_sst_fallback_turns";
+	platform::eraseDirectoryRecursive(testDir);
+	state int oldLimit = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_L0_FILE_LIMIT;
+	state double oldMaxWait = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_L0_MAX_WAIT_SECONDS;
+	state double oldRetrySeconds = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_BOTTOMMOST_RETRY_SECONDS;
+	state int oldParallelism = SERVER_KNOBS->FETCH_KEYS_SST_INGEST_FALLBACK_PARALLELISM;
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_l0_file_limit",
+	                                                          KnobValueRef::create(int{ 1 }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_l0_max_wait_seconds",
+	                                                          KnobValueRef::create(double{ 0.5 }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_bottommost_retry_seconds",
+	                                                          KnobValueRef::create(double{ 0.0 }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_fallback_parallelism",
+	                                                          KnobValueRef::create(int{ 1 }));
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	// Two batches that both fall back, and level 0 that does not drain. Taking turns, each waits for level 0 on its
+	// own, so together they take at least twice the maximum wait.
+	kvStore->set(KeyValueRef("b/050"_sr, "old"_sr), nullptr);
+	kvStore->set(KeyValueRef("d/050"_sr, "old"_sr), nullptr);
+	wait(kvStore->commit(false));
+	state std::string firstPath = joinPath(testDir, "first.sst");
+	state std::string secondPath = joinPath(testDir, "second.sst");
+	wait(kvStore->appendToStagedSstFile(firstPath, stagedSstTestBlock({ { "b/050", "new" } })));
+	wait(kvStore->appendToStagedSstFile(secondPath, stagedSstTestBlock({ { "d/050", "new" } })));
+	state double start = now();
+	wait(kvStore->ingestStagedSstFile(firstPath) && kvStore->ingestStagedSstFile(secondPath));
+	ASSERT(now() - start >= 1.0);
+
+	state Optional<Value> first = wait(kvStore->readValue("b/050"_sr, Optional<ReadOptions>()));
+	Optional<Value> second = wait(kvStore->readValue("d/050"_sr, Optional<ReadOptions>()));
+	ASSERT(first.present() && first.get() == "new"_sr);
+	ASSERT(second.present() && second.get() == "new"_sr);
+
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_l0_file_limit",
+	                                                          KnobValueRef::create(int{ oldLimit }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_l0_max_wait_seconds",
+	                                                          KnobValueRef::create(double{ oldMaxWait }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_bottommost_retry_seconds",
+	                                                          KnobValueRef::create(double{ oldRetrySeconds }));
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("fetch_keys_sst_ingest_fallback_parallelism",
+	                                                          KnobValueRef::create(int{ oldParallelism }));
+	wait(closeAndEraseTestStore(kvStore, testDir));
 	return Void();
 }
 
