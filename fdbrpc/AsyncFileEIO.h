@@ -31,6 +31,7 @@
 #include "flow/flow.h"
 #include "flow/ThreadHelper.h"
 #include "flow/IAsyncFile.h"
+#include "flow/ScopeExit.h"
 #include "flow/TDMetric.h"
 
 class AsyncFileEIO : public IAsyncFile, public ReferenceCounted<AsyncFileEIO> {
@@ -200,47 +201,10 @@ public:
 	}
 	std::string getFilename() const override { return filename; }
 
-	static Future<Void> async_fsync_parent(std::string filename, bool asyncMetadata = false) {
-		if (asyncMetadata) {
-			// Keep the descriptor and dispatch alive through close even if the caller cancels.
-			co_await uncancellable(dispatch<Void>([filename]() {
-				std::string folder = parentDirectory(filename);
-				TraceEvent("FSyncParentDir").detail("Folder", folder).detail("File", filename);
-				int folderFD = ::open(folder.c_str(), O_DIRECTORY | O_CLOEXEC, 0);
-				if (folderFD < 0)
-					throw io_error();
-#ifdef __APPLE__
-				int result = fcntl(folderFD, F_FULLFSYNC, 0);
-#else
-				int result = ::fsync(folderFD);
-#endif
-				int syncErrno = errno;
-				::close(folderFD);
-				if (result) {
-					errno = syncErrno;
-					TraceEvent("SyncError")
-					    .error(io_error())
-					    .detail("Fd", folderFD)
-					    .detail("Result", result)
-					    .GetLastError();
-					throw io_error();
-				}
-				return Void();
-			}));
-			co_return;
-		}
-		std::string folder = parentDirectory(filename);
-		TraceEvent("FSyncParentDir").detail("Folder", folder).detail("File", filename);
-		int folderFD = ::open(folder.c_str(), O_DIRECTORY | O_CLOEXEC, 0);
-		if (folderFD < 0)
-			throw io_error();
-		try {
-			co_await async_fsync(folderFD); // not sure if fdatasync on the folder has the same effect
-		} catch (...) {
-			close(folderFD);
-			throw;
-		}
-		close(folderFD);
+	static Future<Void> async_fsync_parent(std::string filename) {
+		int fd = openParentDirectory(filename);
+		ScopeExit closeDirectory([fd] { ::close(fd); });
+		co_await async_fsync(fd);
 	}
 
 	static Future<Void> async_fdatasync(int fd) {
@@ -267,25 +231,49 @@ public:
 				TraceEvent("AsyncFileEIORenameError").error(e).detail("Filename", final_filename);
 				throw io_error();
 			}
-		} else if (rename(part_filename.c_str(), final_filename.c_str())) {
+			co_await syncParentDirectoryOnEIO(final_filename);
+		} else {
 			// Storage disposal must not race a rename that completes after cancellation.
-			TraceEvent("AsyncFileEIORenameError").detail("Filename", final_filename).GetLastError();
-			throw io_error();
+			if (rename(part_filename.c_str(), final_filename.c_str())) {
+				TraceEvent("AsyncFileEIORenameError").detail("Filename", final_filename).GetLastError();
+				throw io_error();
+			}
+			co_await async_fsync_parent(final_filename);
 		}
-
-		// fsync the parent directory to make it durable as well
-		co_await async_fsync_parent(final_filename, asyncRename);
 	}
 
-	// Run the given function on the EIO thread pool and return its result
+	// The worker uses state in the dispatch coroutine until it finishes, even if the caller cancels.
 	template <class R>
-	static Future<R> dispatch(std::function<R()> const& func) {
-		return dispatch_impl(func);
+	static Future<R> dispatch(std::function<R()> func, ExplicitVoid = {}) {
+		co_return co_await dispatch_impl(Uncancellable(), std::move(func));
 	}
 
 	~AsyncFileEIO() override { close_impl(Uncancellable(), fd); }
 
 private:
+	static int openParentDirectory(const std::string& filename) {
+		std::string folder = parentDirectory(filename);
+		TraceEvent("FSyncParentDir").detail("Folder", folder).detail("File", filename);
+		int fd = ::open(folder.c_str(), O_DIRECTORY | O_CLOEXEC, 0);
+		if (fd < 0)
+			throw io_error();
+		return fd;
+	}
+
+	// Keep ownership from open through close if the backup stops waiting.
+	static Future<Void> syncParentDirectoryOnEIO(std::string filename, Uncancellable = {}) {
+		TaskPriority taskID = g_network->getCurrentTask();
+		int fd = co_await dispatch<int>([&filename] { return openParentDirectory(filename); });
+		Future<Void> synced = async_fsync(fd);
+		co_await ready(synced);
+		Future<Void> closed = close_impl(Uncancellable(), fd);
+		co_await ready(closed);
+		// close_impl completes in the EIO poll callback.
+		co_await delay(0, taskID);
+		synced.get();
+		closed.get();
+	}
+
 	template <class P, class... Args>
 	friend Reference<P> makeReference(Args&&... args);
 
@@ -523,12 +511,12 @@ private:
 	}
 
 	template <class R>
-	static Future<R> dispatch_impl(std::function<R()> func, ExplicitVoid = {}) {
+	static Future<R> dispatch_impl(Uncancellable, std::function<R()> func, ExplicitVoid = {}) {
 		// Coroutine parameters can outlive completion while the Future remains referenced.
 		Dispatch<R> data(std::move(func));
 		TaskPriority taskID = g_network->getCurrentTask();
 
-		eio_req* r = eio_custom(
+		eio_custom(
 		    [](eio_req* req) {
 			    // Runs on the eio thread pool
 			    auto data = reinterpret_cast<Dispatch<R>*>(req->data);
@@ -546,22 +534,13 @@ private:
 		    0,
 		    [](eio_req* req) {
 			    // Runs on the main thread, in eio_poll()
-			    if (EIO_CANCELLED(req))
-				    return 0;
 			    auto data = reinterpret_cast<Dispatch<R>*>(req->data);
 			    Promise<Void> p = std::move(data->done);
 			    p.send(Void());
 			    return 0;
 		    },
 		    &data);
-		try {
-			co_await data.done.getFuture();
-		} catch (...) {
-			g_network->setCurrentTask(taskID);
-			eio_cancel(r);
-			throw;
-		}
-
+		co_await data.done.getFuture();
 		co_await delay(0, taskID);
 		if (data.result.isError())
 			throw data.result.getError();

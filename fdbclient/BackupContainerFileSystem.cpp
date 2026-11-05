@@ -2597,25 +2597,27 @@ TEST_CASE("/backup/containers/localdir/encrypted") {
 	                             format("%s/test_encryption_key", params.getDataDir().c_str()));
 }
 
+#ifdef __unixish__
 static Future<Void> testBackupContainerWithAsyncMetadata(std::string dataDir, bool encrypted) {
-	bool saved = CLIENT_KNOBS->BACKUP_LOCAL_FILE_ASYNC_METADATA;
-	ScopeExit restoreKnob(
-	    [saved] { const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_LOCAL_FILE_ASYNC_METADATA = saved; });
-	const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_LOCAL_FILE_ASYNC_METADATA = true;
+	auto& knob = const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_LOCAL_FILE_ASYNC_METADATA;
+	ScopeExit restoreKnob([&knob, saved = knob] { knob = saved; });
+	knob = true;
 	Optional<std::string> keyFile;
 	if (encrypted) {
-		keyFile = format("%s/test_encryption_key_async", dataDir.c_str());
+		keyFile = joinPath(dataDir, "test_encryption_key_async");
 	}
-	co_await testBackupContainer(format("file://%s/fdb_backups/%llx", dataDir.c_str(), timer_int()), {}, keyFile);
+	std::string backupPath = abspath(joinPath(dataDir, fmt::format("fdb_backups/{:x}", timer_int())));
+	co_await testBackupContainer("file://" + backupPath, {}, keyFile);
 }
 
-TEST_CASE("/backup/containers/localdir/asyncMetadata/unencrypted") {
+TEST_CASE("noSim/backup/containers/localdir/asyncMetadata/unencrypted") {
 	co_await testBackupContainerWithAsyncMetadata(params.getDataDir(), false);
 }
 
-TEST_CASE("/backup/containers/localdir/asyncMetadata/encrypted") {
+TEST_CASE("noSim/backup/containers/localdir/asyncMetadata/encrypted") {
 	co_await testBackupContainerWithAsyncMetadata(params.getDataDir(), true);
 }
+#endif
 
 TEST_CASE("/backup/containers/localdir/encryptedDescribeWithoutBlockSize") {
 	std::string url = fmt::format("file://{}/fdb_backups/{:x}", params.getDataDir(), timer_int());
