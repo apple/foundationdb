@@ -1,0 +1,14 @@
+[configuration]
+# Use engines available in both releases, including builds without RocksDB.
+storageEngineExcludeTypes = [3, 4, 5]
+
+[[test]]
+testTitle="StorefrontTest"
+runSetup=false
+
+    [[test.workload]]
+    testName="Storefront"
+    actorsPerClient=10
+    transactionsPerSecond=200
+    itemCount=10000
+    maxOrderSize=4

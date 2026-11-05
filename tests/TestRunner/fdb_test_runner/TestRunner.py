@@ -319,7 +319,7 @@ def process_traces(
 
 
 class RestartTestPolicy:
-    def __init__(self, name, old_binary, new_binary):
+    def __init__(self, name, old_binary, new_binary, required_version=None):
         # Default is to use the same binary for the restart test, unless constraints are satisfied.
         self._first_binary = new_binary
         self._second_binary = new_binary
@@ -329,42 +329,49 @@ class RestartTestPolicy:
             [old_binary, "--version"]
         ).decode("utf-8")
         match = re.match(
-            "FoundationDB.*\(v([0-9]+\.[0-9]+\.[0-9]+)\)", old_binary_version_raw
+            r"FoundationDB.*\(v([0-9]+\.[0-9]+\.[0-9]+)\)", old_binary_version_raw
         )
         assert match, old_binary_version_raw
+        if required_version is not None and match.group(1) != required_version:
+            raise ValueError(
+                f"Expected fdbserver {required_version} at {old_binary}, got {match.group(1)}"
+            )
         old_binary_version = tuple(map(int, match.group(1).split(".")))
-        match = re.match(".*/restarting/from_([0-9]+\.[0-9]+\.[0-9]+)/", name)
-        if match:  # upgrading _from_
-            lower_bound = tuple(map(int, match.group(1).split(".")))
-            if old_binary_version >= lower_bound:
+        match = re.match(
+            r".*/restarting/(from|to)_([0-9]+\.[0-9]+\.[0-9]+)"
+            r"(?:_until_([0-9]+\.[0-9]+\.[0-9]+))?/",
+            name,
+        )
+        if not match:
+            if required_version is not None:
+                raise ValueError(f"Missing restart version range in {name}")
+            return
+        lower_bound = tuple(map(int, match.group(2).split(".")))
+        upper_bound = (
+            tuple(map(int, match.group(3).split("."))) if match.group(3) else None
+        )
+        # Match Joshua's inclusive lower bound and exclusive _until_ bound.
+        eligible = old_binary_version >= lower_bound and (
+            upper_bound is None or old_binary_version < upper_bound
+        )
+        if required_version is not None and not eligible:
+            raise ValueError(
+                f"fdbserver {required_version} is outside the restart range in {name}"
+            )
+        if eligible:
+            if match.group(1) == "from":
                 self._first_binary = old_binary
-                _logger.info(
-                    "Using old binary as first binary: {} >= {}".format(
-                        old_binary_version, lower_bound
-                    )
-                )
             else:
-                _logger.info(
-                    "Using new binary as first binary: {} < {}".format(
-                        old_binary_version, lower_bound
-                    )
-                )
-        match = re.match(".*/restarting/to_([0-9]+\.[0-9]+\.[0-9]+)/", name)
-        if match:  # downgrading _to_
-            lower_bound = tuple(map(int, match.group(1).split(".")))
-            if old_binary_version >= lower_bound:
                 self._second_binary = old_binary
-                _logger.info(
-                    "Using old binary as second binary: {} >= {}".format(
-                        old_binary_version, lower_bound
-                    )
-                )
-            else:
-                _logger.info(
-                    "Using new binary as second binary: {} < {}".format(
-                        old_binary_version, lower_bound
-                    )
-                )
+        _logger.info(
+            "Using %s binary for %s phase: %s %s [%s, %s)",
+            "old" if eligible else "new",
+            "first" if match.group(1) == "from" else "second",
+            old_binary_version,
+            "in" if eligible else "outside",
+            lower_bound,
+            upper_bound if upper_bound is not None else "unbounded",
+        )
 
     def first_binary(self):
         return self._first_binary
@@ -383,6 +390,10 @@ def run_simulation_test(basedir, options):
         os.path.join(basedir, "bin", config, "fdbserver" + binary_ext)
     )
     pargs = [fdbserver, "-r", options.testtype]
+    if options.old_version:
+        # Different releases can use incompatible Boost shared memory layouts
+        # for the host machine ID. Simulation supplies its own cluster topology.
+        pargs.extend(["--machine-id", "1"])
     seed = 0
     if options.seed is not None:
         pargs.append("-s")
@@ -416,8 +427,18 @@ def run_simulation_test(basedir, options):
     first = True
     restart_test_policy = None
     if len(options.testfile) > 1:
+        old_binary = options.old_binary
+        if options.old_version and not old_binary:
+            from .binary_download import FdbBinaryDownloader
+
+            downloader = FdbBinaryDownloader(basedir)
+            old_binary = str(downloader.get_server(options.old_version))
+        if options.old_version and os.path.samefile(old_binary, fdbserver):
+            raise ValueError(
+                f"Expected a historical server, got the current build at {old_binary}"
+            )
         restart_test_policy = RestartTestPolicy(
-            options.testfile[0], options.old_binary, fdbserver
+            options.testfile[0], old_binary, fdbserver, options.old_version
         )
     for testfile in options.testfile:
         tmp = list(pargs)
@@ -549,6 +570,10 @@ def main():
         help="Path to the old binary to use for upgrade tests",
     )
     parser.add_argument(
+        "--old-version",
+        help="Require this historical release. Download fdbserver if --old-binary is omitted.",
+    )
+    parser.add_argument(
         "-S",
         "--symbolicate",
         action="store_true",
@@ -576,6 +601,13 @@ def main():
         "--use-valgrind", action="store_true", default=False, help="Run under valgrind"
     )
     args = parser.parse_args()
+    if args.old_version is not None and (
+        not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.old_version)
+        or len(args.testfile) != 2
+    ):
+        parser.error(
+            "--old-version requires a major.minor.patch version and two restart files"
+        )
     init_logging(args.loglevel, args.logdir)
     basedir = os.getcwd()
     if args.builddir is not None:
@@ -586,4 +618,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
