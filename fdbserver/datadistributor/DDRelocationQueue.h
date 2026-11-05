@@ -109,6 +109,7 @@ struct DDQueueInitParams {
 	MoveKeysLock const& lock;
 	Reference<IDDTxnProcessor> db;
 	std::vector<TeamCollectionInterface> const& teamCollections;
+	KeyRangeMap<ShardTrackedData> const& trackedShards;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
 	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
@@ -242,6 +243,8 @@ public:
 	Reference<IDDTxnProcessor> txnProcessor;
 
 	std::vector<TeamCollectionInterface> teamCollections;
+	// Owned by dataDistribution() for the lifetime of the queue's running actors.
+	KeyRangeMap<ShardTrackedData> const* trackedShards = nullptr;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
 	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
