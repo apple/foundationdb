@@ -153,7 +153,7 @@ public:
 	    NetworkAddress toAddr,
 	    const std::string& hostname,
 	    boost::asio::ip::tcp::socket* existingSocket = nullptr) {
-		// Default implementation ignores hostname - subclasses can override for SNI support
+		// Default implementation ignores hostname
 		return existingSocket ? connect(toAddr, existingSocket) : connectExternal(toAddr);
 	}
 
