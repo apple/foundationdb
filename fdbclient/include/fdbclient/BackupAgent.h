@@ -948,25 +948,36 @@ public:
 
 	struct LogProgress {
 		MutationLogType type;
-		Optional<Version> logEnd;
+		Optional<Version> checkpoint;
+
+		Optional<Version> exclusiveLogEnd() const {
+			// A partitioned worker saves progress through the last version in its file.
+			if (type == MutationLogType::PARTITIONED_LOG && checkpoint.present()) {
+				return checkpoint.get() + 1;
+			}
+			return checkpoint;
+		}
 	};
 
 	Future<LogProgress> getLogProgress(Reference<ReadYourWritesTransaction> tr, ReadLegacyLogMode readLegacy);
 
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
-		return getLatestRestorableVersion(tr, getLogProgress(tr, ReadLegacyLogMode::False));
+		auto logs = getLogProgress(tr, ReadLegacyLogMode::False);
+		// Backup tasks use the checkpoint as stored. Only status normalizes the worker's inclusive checkpoint.
+		return getLatestRestorableVersion(tr,
+		                                  map(logs, [](const LogProgress& progress) { return progress.checkpoint; }));
 	}
 
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr,
-	                                                     Future<LogProgress> logs) {
+	                                                     Future<Optional<Version>> logEnd) {
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
 		auto incrementalBackup = incrementalBackupOnly().get(tr);
 		auto snapMode = snapshotMode().get(tr);
 		auto bulkDumpSnapshot = bulkDumpSnapshotEndVersion().get(tr);
-		return map(success(logs) && success(firstSnapshot) && success(incrementalBackup) && success(snapMode) &&
+		return map(success(logEnd) && success(firstSnapshot) && success(incrementalBackup) && success(snapMode) &&
 		               success(bulkDumpSnapshot),
 		           [=](Void) -> Optional<Version> {
-			           Optional<Version> logVersion = logs.get().logEnd;
+			           Optional<Version> logVersion = logEnd.get();
 
 			           // For mode=BOTH (2), require both rangefile and bulkdump snapshots to be complete
 			           int mode = snapMode.get().present() ? snapMode.get().get() : 0;

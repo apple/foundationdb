@@ -250,6 +250,17 @@ TEST_CASE("/backup/logversion") {
 	return Void();
 }
 
+Future<Void> checkBackupStatus(BackupConfig config,
+                               Reference<ReadYourWritesTransaction> tr,
+                               MutationLogType expectedType,
+                               Optional<Version> expectedEnd,
+                               Optional<Version> expectedRestorable) {
+	auto logs = co_await config.getLogProgress(tr, ReadLegacyLogMode::True);
+	ASSERT(logs.type == expectedType);
+	ASSERT(logs.exclusiveLogEnd() == expectedEnd);
+	ASSERT((co_await config.getLatestRestorableVersion(tr, logs.exclusiveLogEnd())) == expectedRestorable);
+}
+
 TEST_CASE("/backup/status/legacyPartitionedLog") {
 	Database db = DatabaseContext::create(
 	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
@@ -259,38 +270,39 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	config.clear(tr);
 	config.firstSnapshotEndVersion().set(tr, 100);
 	config.latestLogEndVersion().set(tr, 121);
-	config.latestBackupWorkerSavedVersion().set(tr, 301);
-
-	auto checkStatus = [&](MutationLogType expectedType, Version expectedEnd) -> Future<Void> {
-		auto logs = config.getLogProgress(tr, ReadLegacyLogMode::True);
-		auto progress = co_await logs;
-		ASSERT(progress.type == expectedType);
-		ASSERT(progress.logEnd == expectedEnd);
-		ASSERT((co_await config.getLatestRestorableVersion(tr, logs)) == expectedEnd - 1);
-		co_return;
-	};
 
 	Subspace oldConfig(uidPrefixKey("uid->config/"_sr.withPrefix(fileBackupPrefixRange.begin), config.getUid()));
 	Key legacyKey = oldConfig.pack("partitionedLogEnabled"_sr);
-	co_await checkStatus(MutationLogType::DEFAULT, 121);
+	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
 	tr->set(legacyKey, "\x14"_sr); // 7.4 tuple encoding of false
-	co_await checkStatus(MutationLogType::DEFAULT, 121);
+	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
 	tr->set(legacyKey, "\x15\x01"_sr); // 7.4 tuple encoding of true
-	co_await checkStatus(MutationLogType::PARTITIONED_LOG, 301);
-	config.latestBackupWorkerSavedVersion().clear(tr);
-	auto missing = config.getLogProgress(tr, ReadLegacyLogMode::True);
-	ASSERT(!(co_await config.getLatestRestorableVersion(tr, missing)).present());
-	config.latestBackupWorkerSavedVersion().set(tr, 401);
-	co_await checkStatus(MutationLogType::PARTITIONED_LOG, 401);
-	ASSERT((co_await config.getLogProgress(tr, ReadLegacyLogMode::False)).logEnd == 121);
 
+	// Submitted on 7.4, started on 8.0 with ordinary logs.
+	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
+
+	// Started on 7.4 with partitioned workers, still waiting for the first checkpoint.
+	config.allWorkerStarted().set(tr, true);
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, {}, {});
+
+	config.firstSnapshotEndVersion().set(tr, 301);
+	config.latestBackupWorkerSavedVersion().set(tr, 300);
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 301, {});
+	config.latestBackupWorkerSavedVersion().set(tr, 301);
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 302, 301);
+	config.latestBackupWorkerSavedVersion().set(tr, 401);
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 402, 401);
+	ASSERT((co_await config.getLogProgress(tr, ReadLegacyLogMode::False)).checkpoint == 121);
+
+	config.firstSnapshotEndVersion().set(tr, 100);
 	config.mutationLogType().set(tr, MutationLogType::DEFAULT);
-	co_await checkStatus(MutationLogType::DEFAULT, 121);
+	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
 	config.mutationLogType().set(tr, MutationLogType::RANGE_PARTITIONED_LOG);
-	co_await checkStatus(MutationLogType::RANGE_PARTITIONED_LOG, 121);
+	co_await checkBackupStatus(config, tr, MutationLogType::RANGE_PARTITIONED_LOG, 121, 120);
 	tr->set(legacyKey, "\x14"_sr);
 	config.mutationLogType().set(tr, MutationLogType::PARTITIONED_LOG);
-	co_await checkStatus(MutationLogType::PARTITIONED_LOG, 401);
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 402, 401);
+	ASSERT((co_await config.getLatestRestorableVersion(tr)) == 400);
 }
 } // namespace
 
