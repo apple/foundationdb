@@ -4918,6 +4918,11 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	// Trigger recovery when master is degraded.
 	data.degradationInfo.degradedServers.insert(master);
 	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradationInfo.disconnectedServers = { master, tlog };
+	ASSERT_EQ(data.shouldTriggerRecoveryDueToDegradedServers(), SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH >= 2);
+	data.degradationInfo.disconnectedServers.insert(resolver);
+	ASSERT_EQ(data.shouldTriggerRecoveryDueToDegradedServers(), SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH >= 3);
+	data.degradationInfo.disconnectedServers.clear();
 	data.degradationInfo.degradedServers.clear();
 	data.degradationInfo.disconnectedServers.insert(master);
 	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
@@ -5082,6 +5087,9 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	data.degradationInfo.degradedServers.insert(tlog);
 	data.degradationInfo.degradedServers.insert(proxy);
 	data.degradationInfo.degradedServers.insert(proxy2);
+	data.degradationInfo.disconnectedServers.insert(master);
+	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
+	data.degradationInfo.disconnectedServers.clear();
 	data.degradationInfo.degradedServers.insert(resolver);
 	ASSERT(data.shouldTriggerFailoverDueToDegradedServers());
 	data.degradationInfo.degradedServers.clear();
