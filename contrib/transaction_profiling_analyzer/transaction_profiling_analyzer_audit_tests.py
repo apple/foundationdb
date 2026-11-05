@@ -21,12 +21,14 @@
 
 import json
 import os
+import re
 import tempfile
 import unittest
 from types import SimpleNamespace as Obj
 from unittest import mock
 
 from transaction_profiling_analyzer import (
+    AUDIT_LOG_FILE_NAME,
     AuditLog,
     KeyRange,
     Mutation,
@@ -34,6 +36,12 @@ from transaction_profiling_analyzer import (
     cluster_description,
     local_ip,
     printable,
+)
+
+
+TRACE, AUDIT = (
+    "FDB_NETWORK_OPTION_TRACE_ENABLE",
+    "FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE",
 )
 
 
@@ -51,28 +59,73 @@ class AuditLogTest(unittest.TestCase):
         self.assertEqual(printable(b"\xff\x02/a\\b\x00"), "\\xff\\x02/a\\\\b\\x00")
 
     def test_audit_log_path(self):
-        log_dir = os.path.dirname(self.path)
-        with mock.patch.dict(os.environ, {"FDB_NETWORK_OPTION_TRACE_ENABLE": log_dir}):
+        # --audit-log, --audit-log-dir and FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE=<dir>, like fdbcli. The directory
+        # is the env var value if it's set, else --audit-log-dir, and if that's empty, the trace directory, else the
+        # current directory.
+        trace, audit, audit2 = (tempfile.mkdtemp() for _ in range(3))
+        cases = [
+            # --audit-log, --audit-log-dir, env, directory (None for off)
+            (False, None, {}, None),
+            (False, None, {TRACE: trace}, None),
+            (True, None, {}, "."),
+            (True, None, {TRACE: ""}, "."),
+            (True, None, {TRACE: trace}, trace),
+            (False, None, {AUDIT: ""}, "."),
+            (False, None, {AUDIT: "", TRACE: trace}, trace),
+            (False, None, {AUDIT: audit}, audit),
+            (False, None, {AUDIT: audit, TRACE: trace}, audit),
+            (True, None, {AUDIT: audit}, audit),
+            (True, audit, {}, audit),
+            (True, audit, {TRACE: trace}, audit),
+            # the env var wins over --audit-log-dir, even when empty, like FDB_NETWORK_OPTION_TRACE_ENABLE over
+            # fdbcli's --log-dir
+            (True, audit, {AUDIT: audit2}, audit2),
+            (False, audit, {AUDIT: audit2}, audit2),
+            (False, audit, {AUDIT: ""}, "."),
+            (False, audit, {AUDIT: "", TRACE: trace}, trace),
+        ]
+        for audit_log, audit_log_dir, env, expected in cases:
+            with mock.patch.dict(os.environ, env, clear=True):
+                path = audit_log_path(audit_log, audit_log_dir)
+            case = (audit_log, audit_log_dir, env)
             self.assertEqual(
-                audit_log_path(),
-                os.path.join(log_dir, "transaction_profiling_analyzer_audit.json"),
+                path, expected and os.path.join(expected, AUDIT_LOG_FILE_NAME), case
             )
-        # empty means the current directory, same as libfdb_c
-        with mock.patch.dict(os.environ, {"FDB_NETWORK_OPTION_TRACE_ENABLE": ""}):
-            self.assertEqual(
-                audit_log_path(),
-                os.path.join(".", "transaction_profiling_analyzer_audit.json"),
-            )
-        with mock.patch.dict(
-            os.environ, {"FDB_NETWORK_OPTION_TRACE_ENABLE": self.path}
-        ):
-            with self.assertRaisesRegex(SystemExit, "is not a directory"):
-                audit_log_path()
+
+    def test_audit_log_path_errors(self):
+        log_dir, missing = os.path.dirname(self.path), os.path.join(
+            os.path.dirname(self.path), "missing"
+        )
+        open(self.path, "w").close()
+        # unlike --log-dir without --log in fdbcli, so reads don't go unaudited
         with mock.patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(
-                SystemExit, "FDB_NETWORK_OPTION_TRACE_ENABLE is not set"
+                SystemExit, "--audit-log-dir requires audit logging to be enabled"
             ):
-                audit_log_path()
+                audit_log_path(False, log_dir)
+        bad = [
+            (True, missing, {}, missing),
+            (True, self.path, {}, self.path),  # not a directory
+            (False, None, {AUDIT: missing}, missing),
+            (False, None, {AUDIT: "1"}, "1"),  # the value is a directory, not a flag
+            (
+                True,
+                None,
+                {TRACE: missing},
+                missing,
+            ),  # the trace directory it falls back to is checked too
+        ]
+        if os.geteuid() != 0:  # root can write to any directory
+            read_only = tempfile.mkdtemp()
+            os.chmod(read_only, 0o555)
+            bad.append((True, read_only, {}, read_only))
+        for audit_log, audit_log_dir, env, d in bad:
+            with mock.patch.dict(os.environ, env, clear=True):
+                message = (
+                    "audit log directory `%s' does not exist or is not writable" % d
+                )
+                with self.assertRaisesRegex(SystemExit, re.escape(message)):
+                    audit_log_path(audit_log, audit_log_dir)
 
     def test_cluster_description(self):
         with open(self.path, "w") as f:
