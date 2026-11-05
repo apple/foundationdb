@@ -217,6 +217,44 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 				Expect(configurationBytes).To(Equal(out))
 			})
 
+			When("the configuration requests the shared binary", func() {
+				var sharedBinary string
+
+				BeforeEach(func() {
+					sharedBinaryDir = GinkgoT().TempDir()
+					Expect(os.MkdirAll(path.Join(sharedBinaryDir, defaultVersion.String()), 0700)).To(Succeed())
+					sharedBinary = path.Join(sharedBinaryDir, defaultVersion.String(), "fdbserver")
+					Expect(os.WriteFile(sharedBinary, []byte("fdbserver"), 0700)).To(Succeed())
+
+					config := &api.ProcessConfiguration{
+						Version:         &defaultVersion,
+						UseSharedBinary: new(true),
+					}
+
+					var err error
+					out, err = json.Marshal(config)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(os.WriteFile(configurationFilePath, out, 0600)).To(Succeed())
+				})
+
+				It("should use the shared binary even for a protocol compatible version", func() {
+					Expect(readErr).NotTo(HaveOccurred())
+					Expect(configuration).NotTo(BeNil())
+					Expect(configuration.BinaryPath).To(Equal(sharedBinary))
+				})
+
+				When("the shared binary is missing", func() {
+					BeforeEach(func() {
+						Expect(os.Remove(sharedBinary)).To(Succeed())
+					})
+
+					It("should report that the binary is not ready", func() {
+						Expect(configuration).To(BeNil())
+						Expect(readErr).To(MatchError(errBinaryNotReady))
+					})
+				})
+			})
+
 			When("the pod has the isolate annotation set to true", func() {
 				BeforeEach(func() {
 					Expect(mon.podClient.Client.Update(context.Background(), &corev1.Pod{

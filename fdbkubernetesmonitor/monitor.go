@@ -94,6 +94,13 @@ type monitor struct {
 	// the subprocess.
 	processIDs []int
 
+	// processVersions stores the version of the configuration each running subprocess was started from. Processes
+	// that are not running have no entry. Access is guarded by mutex.
+	processVersions map[int]api.Version
+
+	// pruneMutex serializes the pruning of the shared binary directory.
+	pruneMutex sync.Mutex
+
 	// mutex defines a mutex around working with configuration.
 	// This is used to synchronize access to local state like the active
 	// configuration and the process IDs from multiple goroutines.
@@ -268,9 +275,10 @@ func (monitor *monitor) readConfiguration(ctx context.Context) (*api.ProcessConf
 		return nil, nil, nil
 	}
 
-	// If the versions are protocol compatible don't try to point to another binary path. Otherwise, the processes will
-	// cannot restart when a process crashes during a patch upgrade.
-	if monitor.currentContainerVersion.IsProtocolCompatible(*configuration.Version) {
+	// If the versions are protocol compatible don't try to point to another binary path. Otherwise, the processes
+	// cannot restart when a process crashes during a patch upgrade. This is skipped if the configuration explicitly
+	// requests the shared binary.
+	if !configuration.ShouldUseSharedBinary() && monitor.currentContainerVersion.IsProtocolCompatible(*configuration.Version) {
 		configuration.BinaryPath = fdbserverPath
 	} else {
 		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version.String(), "fdbserver")
@@ -529,6 +537,10 @@ func (monitor *monitor) runProcess(processNumber int) {
 		logger.Info("Subprocess started", "PID", pid)
 
 		monitor.updateProcessID(processNumber, pid)
+		monitor.setProcessVersion(processNumber, config.Version)
+		// Once the last process has switched to the desired version no bounce is pending and the binaries of all
+		// other versions are unused.
+		monitor.pruneSharedBinaries()
 
 		if stdout != nil {
 			stdoutScanner := bufio.NewScanner(stdout)
@@ -560,6 +572,7 @@ func (monitor *monitor) runProcess(processNumber int) {
 		processDuration := time.Since(startTime)
 		logger.Info("Subprocess terminated", "exitCode", exitCode, "PID", pid, "lastExecutionDurationSeconds", processDuration.String())
 		monitor.updateProcessID(processNumber, -1)
+		monitor.setProcessVersion(processNumber, nil)
 
 		// Only backoff if the exit code is non-zero.
 		if exitCode != 0 {
