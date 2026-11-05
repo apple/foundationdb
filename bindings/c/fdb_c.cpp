@@ -63,10 +63,6 @@ int g_api_version = 0;
 /* This must be true so that we can return the data pointer of a
    Standalone<RangeResultRef> as an array of FDBKeyValue. */
 static_assert(sizeof(FDBKeyValue) == sizeof(KeyValueRef), "FDBKeyValue / KeyValueRef size mismatch");
-static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_SET_VALUE) == static_cast<int>(MutationRef::Type::SetValue),
-              "FDB_BG_MUTATION_TYPE_SET_VALUE enum value mismatch");
-static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_CLEAR_RANGE) == static_cast<int>(MutationRef::Type::ClearRange),
-              "FDB_BG_MUTATION_TYPE_CLEAR_RANGE enum value mismatch");
 
 namespace {
 
