@@ -143,7 +143,12 @@ ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>*
 ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                               std::map<std::string, StorageServerInterface>* interfaces);
 
-// Set by --audit-log or the FDB_CLI_AUDIT_LOG_ENABLE environment variable. Requires tracing to be enabled.
+// Set by --audit-log or the FDB_CLI_AUDIT_LOG_ENABLE environment variable. Audit events are written to their own
+// trace_audit.* files (see openAuditTraceFile), in the FDB_CLI_AUDIT_LOG_ENABLE value if it's set (like
+// FDB_NETWORK_OPTION_TRACE_ENABLE, it wins over the command line), else --audit-log-dir. If that's empty, they go in
+// the trace directory if tracing is enabled, else the current directory.
+// fdbcli is the only process that writes audit trace files for now. See the "Audit logging" section of
+// command-line-interface.rst.
 extern bool auditLogEnabled;
 // Which returned values are audit logged. Set by --audit-log-values, defaults to kDefaultAuditLogValues.
 enum class AuditLogValues { None, System, All };

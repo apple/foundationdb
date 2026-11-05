@@ -25,6 +25,42 @@ You can invoke ``fdbcli`` at the command line simply by typing it. For example::
 
 This will result in ``fdbcli`` connecting to the :ref:`default cluster file <default-cluster-file>` (``/etc/foundationdb/fdb.cluster`` for Linux.) You can also specify a cluster file as an argument to ``fdbcli`` using the ``-C`` option. For further information, see :ref:`specifying-a-cluster-file`.
 
+.. _cli-audit-logging:
+
+Audit logging
+=============
+
+``fdbcli`` can log every key returned by ``get``, ``getrange``, ``getrangekeys`` and ``getall`` as an ``FdbCliAudit`` trace event. Audit events go to their own ``trace_audit.*`` trace files, separate from the regular ``trace.*`` files. Audit logging is turned on and pointed at a directory the same way tracing is, but separately:
+
+.. list-table::
+   :header-rows: 1
+
+   * -
+     - Tracing
+     - Audit logging
+   * - Turn on
+     - ``--log``
+     - ``--audit-log``
+   * - Directory
+     - ``--log-dir PATH``
+     - ``--audit-log-dir PATH``
+   * - Environment variable (set = on, value = directory)
+     - ``FDB_NETWORK_OPTION_TRACE_ENABLE``
+     - ``FDB_CLI_AUDIT_LOG_ENABLE``
+
+Audit logging doesn't require tracing. The audit directory is the ``FDB_CLI_AUDIT_LOG_ENABLE`` value if it's set, otherwise ``--audit-log-dir``. If that's empty, audit files go next to the trace files if tracing is on, otherwise in the current directory. Like ``FDB_NETWORK_OPTION_TRACE_ENABLE`` over ``--log-dir``, the environment variable wins over ``--audit-log-dir``, even when it's set to an empty value. ``--trace-format``, ``--log-group`` and the ``FDB_NETWORK_OPTION_TRACE_*`` environment variables (roll size, max logs size, file identifier, partial file suffix) apply to audit files too. Audit files roll and get deleted on their own size budget.
+
+``--audit-log-values none|system|all`` picks which returned values are logged. The default is ``system``: only values of system keys (``\xff`` prefix). Keys are always logged.
+
+Each ``FdbCliAudit`` event has ``Command``, ``AuditID`` (the same for every key returned by one command), ``Cluster`` (the cluster file's description), ``IPAddress`` (the client's IP), ``Key``, ``Value`` (per ``--audit-log-values``) and ``StorageServer`` (``getall`` only), plus the usual ``Machine`` and ``LogGroup``. Missing keys, empty ranges and failed reads log nothing.
+
+So reads can't silently go unaudited:
+
+* ``--audit-log-dir`` without ``--audit-log`` or ``FDB_CLI_AUDIT_LOG_ENABLE`` is an error (unlike ``--log-dir`` without ``--log``, which is ignored).
+* If the audit directory doesn't exist or isn't writable, ``fdbcli`` aborts before running any command. ``FDB_CLI_AUDIT_LOG_ENABLE=1`` means a directory named ``1``.
+
+For now, ``fdbcli`` is the only process that writes audit trace files. Other processes and clients using ``libfdb_c`` through the C API or a language binding have no way to turn them on.
+
 Commands within ``fdbcli``
 ==========================
 
