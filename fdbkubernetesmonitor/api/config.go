@@ -145,8 +145,7 @@ func (argument Argument) LookupEnv(env map[string]string) (string, error) {
 	}
 
 	if argument.ArgumentType == IPListArgumentType {
-		ips := strings.SplitSeq(value, ",")
-		for ipString := range ips {
+		for ipString := range strings.SplitSeq(value, ",") {
 			ip := net.ParseIP(ipString)
 			if ip == nil {
 				continue
