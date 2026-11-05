@@ -1489,17 +1489,45 @@ concept JoinInput = std::is_move_constructible_v<typename Input::Element> &&
                      (std::same_as<Input, Future<typename Input::Element>> &&
                       std::constructible_from<typename Input::Element, const typename Input::Element&>));
 
-template <std::size_t I, JoinInput Input, class Slots>
-Future<Void> collectJoinInput(Input arg, Reference<ReferencedObject<Slots>> resultSlots, ExplicitVoid = {}) {
-	// Constructing a payload can synchronously fail a sibling and unwind joinImpl while emplace is still running.
-	auto input = std::move(arg);
-	auto slots = std::move(resultSlots);
-	std::get<I>(slots->mutate()).template emplace<1>(co_await std::move(input));
-	co_return Void();
-}
+template <class... Values>
+class JoinResults : public ReferenceCounted<JoinResults<Values...>> {
+	// The occupied alternative can hold any payload, including std::optional's reserved tag types.
+	std::tuple<std::variant<std::monostate, Values>...> slots;
+	Error firstError;
+
+	Error recordError(Error error) {
+		// Several collectors can fail before quorum registers its callbacks. Preserve their observation order.
+		if (!firstError.isValid()) {
+			firstError = error;
+		}
+		return firstError;
+	}
+
+public:
+	template <std::size_t I, JoinInput Input>
+	static Future<Void> collect(Input arg, Reference<JoinResults> results, ExplicitVoid = {}) {
+		// A payload constructor can synchronously fail a sibling and unwind joinImpl while emplace is running.
+		auto input = std::move(arg);
+		auto self = std::move(results);
+		try {
+			std::get<I>(self->slots).template emplace<1>(co_await std::move(input));
+		} catch (Error& e) {
+			throw self->recordError(e);
+		} catch (...) {
+			throw self->recordError(unknown_error());
+		}
+		co_return Void();
+	}
+
+	template <std::size_t... I>
+	std::tuple<Values...> take(std::index_sequence<I...>) {
+		return std::tuple<Values...>{ std::get<1>(std::get<I>(std::move(slots)))... };
+	}
+};
 
 template <class... Inputs, std::size_t... I>
-Future<std::tuple<typename Inputs::Element...>> joinImpl(std::tuple<Inputs...> args, std::index_sequence<I...>) {
+Future<std::tuple<typename Inputs::Element...>> joinImpl(std::tuple<Inputs...> args,
+                                                         std::index_sequence<I...> indices) {
 	using Result = std::tuple<typename Inputs::Element...>;
 	// Coroutine parameters can outlive completion. Release our input handles before notifying the caller.
 	auto inputs = std::move(args);
@@ -1507,12 +1535,11 @@ Future<std::tuple<typename Inputs::Element...>> joinImpl(std::tuple<Inputs...> a
 		co_return Result{ std::get<I>(std::move(inputs)).get()... };
 	}
 
-	// The occupied alternative can hold any payload, including std::optional's reserved tag types.
-	using Slots = std::tuple<std::variant<std::monostate, typename Inputs::Element>...>;
-	auto slots = makeReference<ReferencedObject<Slots>>();
-	Future<Void> collectors[] = { collectJoinInput<I>(std::get<I>(std::move(inputs)), slots)... };
+	using Results = JoinResults<typename Inputs::Element...>;
+	auto results = makeReference<Results>();
+	Future<Void> collectors[] = { Results::template collect<I>(std::get<I>(std::move(inputs)), results)... };
 	co_await quorum(collectors, sizeof...(Inputs), sizeof...(Inputs));
-	co_return Result{ std::get<1>(std::get<I>(std::move(slots->mutate())))... };
+	co_return results->take(indices);
 }
 } // namespace coro
 

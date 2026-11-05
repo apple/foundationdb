@@ -91,9 +91,10 @@ Use `AsyncResult<T>` for move-only values, and pass a named `AsyncResult` with `
 auto [status, destUid] = co_await join(backupAgent->getStateValue(tr, logUid), backupAgent->getDestUid(tr, logUid));
 ```
 
-An error in any input fails the joined future immediately, even if an earlier argument is still pending. On failure
-or cancellation, `join` releases pending inputs. Outstanding work can be cancelled when that releases its last
-reference. If copying or moving a value triggers the failure, that collector keeps its input and storage alive
+An error in any input fails the joined future immediately, even if an earlier argument is still pending.
+If several inputs fail during setup, the first error a collector observes wins. On failure or cancellation,
+`join` releases pending inputs. Outstanding work can be cancelled when that releases its last reference.
+If copying or moving a value triggers the failure, that collector keeps its input and storage alive
 until construction unwinds. For a tuple containing move-only values, keep the returned future alive and bind
 its result by const reference. As with `race`, start the operations in separate statements if launch order matters.
 

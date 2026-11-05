@@ -3435,6 +3435,23 @@ TEST_CASE("/flow/coro/join/readyError") {
 	return Void();
 }
 
+TEST_CASE("/flow/coro/join/errorOrderDuringSetup") {
+	Promise<Void> first;
+	Promise<Void> second;
+	auto failInReverseOrder = [&] {
+		if (second.canBeSet()) {
+			second.sendError(io_error());
+			first.sendError(broken_promise());
+		}
+	};
+	auto joined = join(first.getFuture(), second.getFuture(), Future<OnCopy>(OnCopy(failInReverseOrder)));
+	// Also deliver the errors if join defers copying the payload until all inputs succeed.
+	failInReverseOrder();
+	ASSERT(joined.isError());
+	ASSERT_EQ(joined.getError().code(), error_code_io_error);
+	return Void();
+}
+
 TEST_CASE("/flow/coro/join/asyncError") {
 	Promise<Void> sharedSignal;
 	auto shared = oneWaitActor(sharedSignal.getFuture());
