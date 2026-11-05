@@ -20,13 +20,49 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
+
+var _ = Describe("Restoring deleted files", func() {
+	It("should copy a removed binary directory again", func() {
+		inputDir := GinkgoT().TempDir()
+		outputDir := GinkgoT().TempDir()
+		inputPath := path.Join(inputDir, "fdbserver")
+		Expect(os.WriteFile(inputPath, []byte("fdbserver"), 0700)).To(Succeed())
+		copyDetails := map[string]string{inputPath: path.Join("bin", "7.3.10", "fdbserver")}
+		Expect(copyFiles(GinkgoLogr, outputDir, copyDetails, nil)).To(Succeed())
+
+		oldDelay := restoreDelay
+		restoreDelay = 50 * time.Millisecond
+		DeferCleanup(func() { restoreDelay = oldDelay })
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- restoreDeletedFiles(ctx, GinkgoLogr, outputDir, copyDetails, nil) }()
+
+		binaryPath := path.Join(outputDir, "bin", "7.3.10", "fdbserver")
+		// Remove twice to make sure the watch is re-established after the directory was restored.
+		for range 2 {
+			Expect(os.RemoveAll(path.Join(outputDir, "bin", "7.3.10"))).To(Succeed())
+			Eventually(func() error {
+				_, err := os.Stat(binaryPath)
+				return err
+			}).WithTimeout(10 * time.Second).Should(Succeed())
+			// Give the watcher the chance to add the watch again.
+			time.Sleep(200 * time.Millisecond)
+		}
+
+		cancel()
+		Eventually(done).Should(Receive(BeNil()))
+	})
+})
 
 var _ = Describe("Testing the copy methods", func() {
 	When("getting the copy details", func() {
