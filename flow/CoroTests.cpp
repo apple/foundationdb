@@ -34,6 +34,7 @@
 #include <optional>
 #include <ranges>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
@@ -3347,16 +3348,26 @@ TEST_CASE("/flow/coro/raceStreamThrowDuringCopy") {
 	Promise<Void> loser;
 	auto raced = race(winner.getFuture(), loser.getFuture());
 	const RaceStreamItem item(1, [] { throw io_error(); });
-	try {
-		winner.send(item);
-		ASSERT(false);
-	} catch (Error& e) {
-		ASSERT_EQ(e.code(), error_code_io_error);
-	}
+	winner.send(item);
 	ASSERT(raced.isError());
 	ASSERT_EQ(raced.getError().code(), error_code_io_error);
 	ASSERT_EQ(winner.getFutureReferenceCount(), 0);
 	ASSERT_EQ(loser.getFutureReferenceCount(), 0);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceFutureThrowDuringCopyPreservesOtherWaiters") {
+	Promise<RaceStreamItem> winner;
+	auto source = winner.getFuture();
+	int observed = 0;
+	auto otherWaiter = Choose().When(source, [&](const RaceStreamItem& item) { observed = item.value; }).run();
+	// The most recently registered Future callback runs first.
+	auto raced = race(source);
+	winner.send(RaceStreamItem(17, [] { throw io_error(); }));
+	ASSERT(raced.isError());
+	ASSERT_EQ(raced.getError().code(), error_code_io_error);
+	ASSERT(otherWaiter.canGet());
+	ASSERT_EQ(observed, 17);
 	return Void();
 }
 
@@ -3409,6 +3420,71 @@ TEST_CASE("/flow/coro/raceAsyncResultSuccess") {
 	ASSERT_EQ(result.index(), 0);
 	ASSERT_EQ(std::get<0>(result), 19);
 	co_return;
+}
+
+TEST_CASE("/flow/coro/raceAsyncResultThrowDuringMove") {
+	struct ThrowOnMove {
+		ThrowOnMove() = default;
+		ThrowOnMove(const ThrowOnMove&) = default;
+		ThrowOnMove(ThrowOnMove&&) { throw std::runtime_error("move failed"); }
+	};
+	auto producer = [](Future<Void> start) -> AsyncResult<ThrowOnMove> {
+		co_await start;
+		const ThrowOnMove item;
+		co_return item; // Copy into producer storage. Moving into the race is the operation that throws.
+	};
+	Promise<Void> start;
+	auto raced = race(producer(start.getFuture()));
+	start.send(Void());
+	ASSERT(raced.isError());
+	ASSERT_EQ(raced.getError().code(), error_code_unknown_error);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceAsyncResultLoserCleanup") {
+	Promise<Void> pending;
+	PromiseStream<int> cleanupStream;
+	Promise<Void> winner;
+	auto sendOnExit = [](Future<Void> signal, PromiseStream<int> stream) -> AsyncResult<Void> {
+		ScopeExit cleanup([&] { stream.send(17); });
+		co_await signal;
+	};
+
+	auto raced = race(sendOnExit(pending.getFuture(), cleanupStream), cleanupStream.getFuture(), winner.getFuture());
+	winner.send(Void());
+	ASSERT(raced.canGet());
+	ASSERT_EQ(raced.get().index(), 2);
+	ASSERT_EQ(pending.getFutureReferenceCount(), 0);
+	ASSERT_EQ(cleanupStream.getFuture().pop(), 17);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceRunningNoThrowOnCancelAsyncResultLoses") {
+	bool producerCleanedAfterSend = false;
+	Promise<Void> resumeProducer;
+	Promise<Void> winner;
+	Promise<Void> pending;
+	auto producer = [](Future<Void> start,
+	                   Promise<Void> other,
+	                   Future<Void> next,
+	                   bool& cleanedAfterSend,
+	                   NoThrowOnCancel) -> AsyncResult<Void> {
+		bool sendReturned = false;
+		ScopeExit cleanup([&] { cleanedAfterSend = sendReturned; });
+		co_await start;
+		other.send(Void());
+		sendReturned = true;
+		co_await next;
+	};
+
+	auto loser = producer(resumeProducer.getFuture(), winner, pending.getFuture(), producerCleanedAfterSend, {});
+	auto raced = race(std::move(loser), winner.getFuture());
+	resumeProducer.send(Void());
+	ASSERT(raced.canGet());
+	ASSERT_EQ(raced.get().index(), 1);
+	ASSERT(producerCleanedAfterSend);
+	ASSERT_EQ(pending.getFutureReferenceCount(), 0);
+	return Void();
 }
 
 TEST_CASE("/flow/coro/raceAsyncResultError") {

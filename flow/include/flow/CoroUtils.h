@@ -31,13 +31,17 @@ template <class Parent, int Idx, class ValueType>
 struct ActorAsyncResultCallback : AsyncResultCallback<ValueType> {
 	AsyncResultState<ValueType>* state = nullptr;
 
-	void bind(AsyncResult<ValueType>& result) { state = result.resultState; }
+	void registerCallback(const AsyncResult<ValueType>& result) {
+		// The input tuple owns the consumer until every callback has been detached.
+		state = result.resultState;
+		ASSERT(state);
+		state->registerCallback(this);
+	}
 
 	void remove() {
 		if (state) {
 			state->clearCallback(this);
-			// addCallbackAndClear transferred the consumer reference. The producer holds its own during delivery.
-			std::exchange(state, nullptr)->delRef();
+			state = nullptr;
 		}
 	}
 
@@ -305,8 +309,7 @@ struct RaceImplCallback<Parent, Idx, AwaitableType, Futures...>
 			auto sf = std::get<Idx>(getParent()->futures);
 			sf.addCallbackAndClear(static_cast<ThisCallback*>(this));
 		} else {
-			ThisCallback::bind(std::get<Idx>(getParent()->futures));
-			std::move(std::get<Idx>(getParent()->futures)).addCallbackAndClear(static_cast<ThisCallback*>(this));
+			ThisCallback::registerCallback(std::get<Idx>(getParent()->futures));
 		}
 		if constexpr (sizeof...(Futures) > 0) {
 			RaceImplCallback<Parent, Idx + 1, Futures...>::registerCallbacks();
@@ -357,11 +360,9 @@ struct RaceImplActor final : Actor<Result>,
 			auto inputs = std::move(futures);
 			new (&this->value()) Result(std::in_place_index<Idx>, std::forward<T>(value));
 		} catch (Error& e) {
-			finishConstructionError(e);
-			throw;
+			return finishConstructionError(e);
 		} catch (...) {
-			finishConstructionError(unknown_error());
-			throw;
+			return finishConstructionError(unknown_error());
 		}
 		if (actorWaitStateIsCancelled(this->actor_wait_state)) {
 			destruct(this->value());
@@ -422,11 +423,12 @@ Future<T> timeoutChoose(Future<T> what, Future<Void> end, T timedoutValue) {
 	}
 }
 
-// Waits for the first input Future/FutureStream/ThreadFutureStream to become ready and returns its value in a
-// variant whose index matches the winning argument. If multiple inputs are already ready, the lowest-index argument
-// wins; for streams, the next queued element is consumed. Errors and explicit cancellation propagate to the returned
-// Future, while non-winning inputs are only detached from the race. They are not actively cancelled here, but may
-// still cancel if dropping the race also drops their last reference.
+// Waits for the first Future, FutureStream, ThreadFutureStream, or AsyncResult to become ready and returns its value
+// in a variant whose index matches the winning argument. If multiple inputs are already ready, the lowest index wins.
+// For streams, the next item is consumed. A pending race detaches all callbacks before releasing its inputs. Releasing
+// the last observer of a cancellable producer cancels it. Input errors and explicit cancellation reach the returned
+// Future. If constructing a pending race's winning value throws, the Future reports the error (or a cancellation
+// requested during construction) and control returns normally to the producer.
 template <class... Futures>
 [[nodiscard]] auto race(Futures&&... futures) -> Future<coro::RaceResult<std::decay_t<Futures>...>> {
 	static_assert(sizeof...(Futures) > 0, "race requires at least one Future argument");
