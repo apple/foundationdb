@@ -49,6 +49,7 @@ FDB_BOOLEAN_PARAM(DeleteData);
 FDB_BOOLEAN_PARAM(SetValidation);
 FDB_BOOLEAN_PARAM(PartialBackup);
 FDB_BOOLEAN_PARAM(ReadLowPriority);
+FDB_BOOLEAN_PARAM(ReadLegacyLogMode);
 
 extern Optional<std::string> fileBackupAgentProxy;
 
@@ -966,24 +967,38 @@ public:
 
 	KeyBackedProperty<Key> destUidValue() { return configSpace.pack(__FUNCTION__sr); }
 
+	struct LogProgress {
+		MutationLogType type;
+		Optional<Version> checkpoint;
+
+		Optional<Version> exclusiveLogEnd() const {
+			// A partitioned worker saves progress through the last version in its file.
+			if (type == MutationLogType::PARTITIONED_LOG && checkpoint.present()) {
+				return checkpoint.get() + 1;
+			}
+			return checkpoint;
+		}
+	};
+
+	Future<LogProgress> getLogProgress(Reference<ReadYourWritesTransaction> tr, ReadLegacyLogMode readLegacy);
+
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-		auto lastLog = latestLogEndVersion().get(tr);
+		auto logs = getLogProgress(tr, ReadLegacyLogMode::False);
+		// Backup tasks use the checkpoint as stored. Only status normalizes the worker's inclusive checkpoint.
+		return getLatestRestorableVersion(tr,
+		                                  map(logs, [](const LogProgress& progress) { return progress.checkpoint; }));
+	}
+
+	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr,
+	                                                     Future<Optional<Version>> logEnd) {
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
-		auto mutLogType = mutationLogType().get(tr);
-		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
 		auto incrementalBackup = incrementalBackupOnly().get(tr);
 		auto snapMode = snapshotMode().get(tr);
 		auto bulkDumpSnapshot = bulkDumpSnapshotEndVersion().get(tr);
-		return map(success(lastLog) && success(firstSnapshot) && success(mutLogType) && success(workerVersion) &&
-		               success(incrementalBackup) && success(snapMode) && success(bulkDumpSnapshot),
+		return map(success(logEnd) && success(firstSnapshot) && success(incrementalBackup) && success(snapMode) &&
+		               success(bulkDumpSnapshot),
 		           [=](Void) -> Optional<Version> {
-			           MutationLogType mutationLogType =
-			               mutLogType.get().present() ? mutLogType.get().get() : MutationLogType::DEFAULT;
-			           // The latest log greater than the oldest snapshot is the restorable version
-			           Optional<Version> logVersion =
-			               mutationLogType == MutationLogType::PARTITIONED_LOG ? workerVersion.get() : lastLog.get();
+			           Optional<Version> logVersion = logEnd.get();
 
 			           // For mode=BOTH (2), require both rangefile and bulkdump snapshots to be complete
 			           int mode = snapMode.get().present() ? snapMode.get().get() : 0;

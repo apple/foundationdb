@@ -352,6 +352,31 @@ KeyBackedTag::KeyBackedTag(std::string tagName, StringRef tagMapPrefix)
   : KeyBackedProperty<UidAndAbortedFlagT>(TagUidMap(tagMapPrefix).getProperty(tagName)), tagName(tagName),
     tagMapPrefix(tagMapPrefix) {}
 
+Future<BackupConfig::LogProgress> BackupConfig::getLogProgress(Reference<ReadYourWritesTransaction> tr,
+                                                               ReadLegacyLogMode readLegacy) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	auto logEnd = latestLogEndVersion().get(tr);
+	auto workerEnd = latestBackupWorkerSavedVersion().get(tr);
+	KeyBackedProperty<bool> legacyPartitioned = configSpace.pack("partitionedLogEnabled"_sr);
+	auto workersStarted = allWorkerStarted();
+	auto logsOnly = incrementalBackupOnly();
+	Optional<MutationLogType> type = co_await mutationLogType().get(tr);
+	if (readLegacy && !type.present()) {
+		bool partitioned, started, incremental;
+		co_await (store(partitioned, legacyPartitioned.getD(tr)) && store(started, workersStarted.getD(tr)) &&
+		          store(incremental, logsOnly.getD(tr)));
+		// A backup queued on 7.4 can start ordinary logging on 8.0. For a logs-only
+		// backup, even registered workers can publish a shared checkpoint before its first file.
+		if (partitioned && started && !incremental) {
+			type = MutationLogType::PARTITIONED_LOG;
+		}
+	}
+	co_await (success(logEnd) && success(workerEnd));
+	co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT),
+		                   type == MutationLogType::PARTITIONED_LOG ? workerEnd.get() : logEnd.get() };
+}
+
 // Lists all backups and find if any partitioned backup is running.
 Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -8382,18 +8407,18 @@ public:
 					statusDoc.setKey("Running", BackupAgentBase::isRunnable(backupState));
 					doc.setKey("Status", statusDoc);
 
-					Future<Void> done = Void();
+					Future<Optional<Version>> logEnd;
 
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						Reference<IBackupContainer> bc;
 						TimestampedVersion latestRestorable;
-						MutationLogType mutationLogType;
+						auto logs =
+						    config.getLogProgress(tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
+						logEnd = map(logs, [](const BackupConfig::LogProgress& p) { return p.exclusiveLogEnd(); });
 
-						co_await (
-						    store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))) &&
-						    store(bc, config.backupContainer().getOrThrow(tr)) &&
-						    store(mutationLogType,
-						          config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT)));
+						co_await (store(latestRestorable,
+						                getTimestampedVersion(tr, config.getLatestRestorableVersion(tr, logEnd))) &&
+						          store(bc, config.backupContainer().getOrThrow(tr)));
 						bc = fileBackup::getBackupContainerWithProxy(bc);
 
 						doc.setKey("Restorable", latestRestorable.present());
@@ -8408,7 +8433,7 @@ public:
 							doc.setKey("LatestRestorablePoint", o);
 						}
 						doc.setKey("DestinationURL", bc->getURL());
-						doc.setKey("MutationLogType", mutationLogTypeToString(mutationLogType));
+						doc.setKey("MutationLogType", mutationLogTypeToString(logs.get().type));
 					}
 
 					if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
@@ -8432,7 +8457,7 @@ public:
 						    store(snapshotBegin, getTimestampedVersion(tr, config.snapshotBeginVersion().get(tr))) &&
 						    store(snapshotTargetEnd,
 						          getTimestampedVersion(tr, config.snapshotTargetEndVersion().get(tr))) &&
-						    store(latestLogEnd, getTimestampedVersion(tr, config.latestLogEndVersion().get(tr))) &&
+						    store(latestLogEnd, getTimestampedVersion(tr, logEnd)) &&
 						    store(latestSnapshotEnd,
 						          getTimestampedVersion(tr, config.latestSnapshotEndVersion().get(tr))) &&
 						    store(snapshotLastDispatch,
@@ -8603,8 +8628,10 @@ public:
 					Reference<IBackupContainer> bc;
 					Optional<Version> latestRestorableVersion;
 					Version recentReadVersion{ 0 };
+					auto logs = config.getLogProgress(tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
+					auto logEnd = map(logs, [](const BackupConfig::LogProgress& p) { return p.exclusiveLogEnd(); });
 
-					co_await (store(latestRestorableVersion, config.getLatestRestorableVersion(tr)) &&
+					co_await (store(latestRestorableVersion, config.getLatestRestorableVersion(tr, logEnd)) &&
 					          store(bc, config.backupContainer().getOrThrow(tr)) &&
 					          store(recentReadVersion, tr->getReadVersion()));
 					bc = fileBackup::getBackupContainerWithProxy(bc);
@@ -8661,9 +8688,7 @@ public:
 					}
 					statusText += format("Snapshot Mode: %s\n", snapshotModeText.c_str());
 
-					MutationLogType mutationLogType =
-					    co_await config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
-					statusText += format("Mutation Log Type: %s\n", mutationLogTypeToString(mutationLogType).c_str());
+					statusText += format("Mutation Log Type: %s\n", mutationLogTypeToString(logs.get().type).c_str());
 
 					// Check if backup is BulkLoad compatible (has bulkdump_data/).
 					// In rangefile mode no bulkdump task ever runs, so the answer is
@@ -8682,7 +8707,7 @@ public:
 						Version snapshotBeginVersion{ 0 };
 						Version snapshotTargetEndVersion{ 0 };
 						Optional<Version> latestSnapshotEndVersion;
-						Optional<Version> latestLogEndVersion;
+						Optional<Version> latestLogEndVersion = logEnd.get();
 						Optional<int64_t> logBytesWritten;
 						Optional<int64_t> rangeBytesWritten;
 						Optional<int64_t> latestSnapshotEndVersionTimestamp;
@@ -8696,7 +8721,6 @@ public:
 						          store(snapshotInterval, config.snapshotIntervalSeconds().getOrThrow(tr)) &&
 						          store(logBytesWritten, config.logBytesWritten().get(tr)) &&
 						          store(rangeBytesWritten, config.rangeBytesWritten().get(tr)) &&
-						          store(latestLogEndVersion, config.latestLogEndVersion().get(tr)) &&
 						          store(latestSnapshotEndVersion, config.latestSnapshotEndVersion().get(tr)) &&
 						          store(stopWhenDone, config.stopWhenDone().getOrThrow(tr)));
 
@@ -8773,7 +8797,7 @@ public:
 						statusText += format("\nMutation Logs:\n");
 						statusText += format(" Bytes written: %s\n",
 						                     formatBytesHumanReadable(logBytesWritten.orDefault(0)).c_str());
-						statusText += format(" Last complete version: %s (%s)\n",
+						statusText += format(" Log end version (exclusive): %s (%s)\n",
 						                     versionToString(latestLogEndVersion).c_str(),
 						                     timeStampToString(latestLogEndVersionTimestamp).c_str());
 
