@@ -250,6 +250,56 @@ inline Future<Void> endBackupAfterRestorable(Database cx,
 	}
 }
 
+// What a stopped backup still has registered with the cluster. Mutation-log registration makes the commit proxies
+// copy every mutation of the backed-up ranges into the log keyspace, which would double the writes of a restore run
+// beside it.
+struct BackupStopReport {
+	// The backup's own record of how far its mutation log is copied; completing the backup removes it.
+	bool ownRecordLeft = false;
+	// Other backups (or DR) that share this backup's log destination: removing one backup leaves the registration
+	// and the log data of the others in place.
+	int otherBackups = 0;
+	// Entries that still map a backed-up range to the shared mutation log.
+	int logRangesLeft = 0;
+	// Whether any mutation log data of the shared destination remains.
+	bool logDataLeft = false;
+
+	// True when this backup no longer causes mutation logging. The registration and data are judged only when no
+	// other backup shares them.
+	bool stopped() const { return !ownRecordLeft && (otherBackups > 0 || (logRangesLeft == 0 && !logDataLeft)); }
+};
+
+inline Future<BackupStopReport> checkBackupStoppedTx(Reference<ReadYourWritesTransaction> tr, UID backupUid) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	BackupStopReport report;
+	Optional<Key> destUid = co_await BackupConfig(backupUid).destUidValue().get(tr);
+	if (!destUid.present()) {
+		co_return report;
+	}
+	Key ownRecord = BinaryWriter::toValue(backupUid, Unversioned())
+	                    .withPrefix(destUid.get())
+	                    .withPrefix(backupLatestVersionsPrefix);
+	Optional<Value> own = co_await tr->get(ownRecord);
+	report.ownRecordLeft = own.present();
+	RangeResult records =
+	    co_await tr->getRange(prefixRange(destUid.get().withPrefix(backupLatestVersionsPrefix)), 1000);
+	report.otherBackups = records.size() - (report.ownRecordLeft ? 1 : 0);
+	RangeResult registered = co_await tr->getRange(prefixRange(destUid.get().withPrefix(logRangesRange.begin)), 1000);
+	report.logRangesLeft = registered.size();
+	RangeResult data = co_await tr->getRange(prefixRange(destUid.get().withPrefix(backupLogKeys.begin)), 1);
+	report.logDataLeft = !data.empty();
+	co_return report;
+}
+
+// Reads what backup `backupUid` still has registered. Completing a backup (including discontinuing a restorable
+// one) removes its own record in the transaction that sets it COMPLETED, and the registration and log data with it
+// unless another backup shares them.
+inline Future<BackupStopReport> checkBackupStopped(Database cx, UID backupUid) {
+	return runRYWTransaction(
+	    cx, [=](Reference<ReadYourWritesTransaction> tr) { return checkBackupStoppedTx(tr, backupUid); });
+}
+
 // The restorable snapshot with the greatest endVersion, which is the one a restore to the latest restorable version
 // uses.
 inline const KeyspaceSnapshotFile* latestRestorableSnapshot(BackupDescription const& desc) {
