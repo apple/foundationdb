@@ -98,6 +98,11 @@ type monitor struct {
 	// that are not running have no entry. Access is guarded by mutex.
 	processVersions map[int]api.Version
 
+	// stagedVersions is the formatted list of staged versions that was listed last. It is only meaningful if
+	// stagedVersionsKnown is set. Access is guarded by mutex.
+	stagedVersions      string
+	stagedVersionsKnown bool
+
 	// pruneMutex serializes the pruning of the shared binary directory.
 	pruneMutex sync.Mutex
 
@@ -170,6 +175,7 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 	reg.MustRegister(collectors.NewGoCollector())
 	monitorMetrics := registerMetrics(reg)
 	mon.metrics = monitorMetrics
+	go func() { mon.watchStagedVersions(ctx) }()
 	promHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
 
 	// Add Prometheus support

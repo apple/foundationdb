@@ -20,9 +20,13 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path"
+	"slices"
+	"strings"
+	"time"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 )
@@ -119,5 +123,128 @@ func (monitor *monitor) pruneSharedBinaries() {
 		}
 
 		monitor.logger.Info("Pruned unused binary directory", "path", versionDir)
+	}
+}
+
+// stagedVersionsPollInterval defines how often the shared binary directory is scanned for staged versions.
+const stagedVersionsPollInterval = 10 * time.Second
+
+// getStagedVersions returns the sorted versions that have a ready fdbserver binary in the shared binary directory.
+func getStagedVersions() ([]string, error) {
+	entries, err := os.ReadDir(sharedBinaryDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	versions := make([]api.Version, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		version, err := api.ParseFdbVersion(entry.Name())
+		if err != nil {
+			continue
+		}
+
+		if checkOwnerExecutable(path.Join(sharedBinaryDir, entry.Name(), "fdbserver")) != nil {
+			continue
+		}
+
+		versions = append(versions, version)
+	}
+
+	slices.SortFunc(versions, func(a, b api.Version) int {
+		switch {
+		case a.Equal(b):
+			return 0
+		case a.IsAtLeast(b):
+			return 1
+		default:
+			return -1
+		}
+	})
+
+	result := make([]string, 0, len(versions))
+	for _, version := range versions {
+		result = append(result, version.String())
+	}
+
+	return result, nil
+}
+
+// formatStagedVersions returns the representation of the staged versions that is reported in the pod annotation.
+func formatStagedVersions(versions []string) string {
+	return strings.Join(versions, ",")
+}
+
+// setStagedVersions records the formatted staged versions that were listed last.
+func (monitor *monitor) setStagedVersions(formatted string) {
+	monitor.mutex.Lock()
+	defer monitor.mutex.Unlock()
+
+	monitor.stagedVersions = formatted
+	monitor.stagedVersionsKnown = true
+}
+
+// getStagedVersions returns the formatted staged versions that were listed last and whether a listing succeeded yet.
+func (monitor *monitor) getStagedVersions() (string, bool) {
+	monitor.mutex.Lock()
+	defer monitor.mutex.Unlock()
+
+	return monitor.stagedVersions, monitor.stagedVersionsKnown
+}
+
+// reportStagedVersions updates the staged version metric and, if the staged versions changed, the pod annotations.
+func (monitor *monitor) reportStagedVersions(ctx context.Context, previous string) string {
+	versions, err := getStagedVersions()
+	if err != nil {
+		monitor.logger.Error(err, "Could not list staged versions", "sharedBinaryDir", sharedBinaryDir)
+		return previous
+	}
+
+	monitor.metrics.registerStagedVersions(versions)
+	current := formatStagedVersions(versions)
+	if current == previous {
+		return previous
+	}
+
+	monitor.logger.Info("Staged versions changed", "stagedVersions", current)
+	monitor.mutex.Lock()
+	hasConfiguration := monitor.activeConfiguration != nil
+	monitor.mutex.Unlock()
+	// Without a configuration the annotations are written once the first configuration is loaded.
+	if !hasConfiguration {
+		return current
+	}
+
+	err = monitor.podClient.updateAnnotations(ctx, monitor)
+	if err != nil {
+		monitor.logger.Error(err, "Error updating pod annotations with the staged versions")
+		// Report the previous value to retry in the next iteration.
+		return previous
+	}
+
+	return current
+}
+
+// watchStagedVersions periodically reports the staged versions until the context is cancelled.
+func (monitor *monitor) watchStagedVersions(ctx context.Context) {
+	ticker := time.NewTicker(stagedVersionsPollInterval)
+	defer ticker.Stop()
+
+	var reported string
+	for {
+		reported = monitor.reportStagedVersions(ctx, reported)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }
