@@ -8517,12 +8517,8 @@ public:
 							bdDoc.setKey("RunningTasks", bdProgress.runningTasks);
 							bdDoc.setKey("ErrorTasks", bdProgress.errorTasks);
 							bdDoc.setKey("ProgressPercent", bdProgress.progressPercent());
-							bdDoc.setKey("TotalBytes", bdProgress.totalBytes);
 							bdDoc.setKey("CompletedBytes", bdProgress.completedBytes);
 							bdDoc.setKey("AvgBytesPerSecond", bdProgress.avgBytesPerSecond());
-							if (bdProgress.etaSeconds().present()) {
-								bdDoc.setKey("EstimatedSecondsRemaining", bdProgress.etaSeconds().get());
-							}
 							bdDoc.setKey("ElapsedSeconds", bdProgress.elapsedSeconds);
 
 							// Add stalled tasks if any
@@ -8722,9 +8718,8 @@ public:
 								                     bdProgress.completeTasks,
 								                     bdProgress.totalTasks,
 								                     bdProgress.progressPercent());
-								statusText += format(
-								    " Bytes: %s\n",
-								    formatBytesProgress(bdProgress.completedBytes, bdProgress.totalBytes).c_str());
+								statusText +=
+								    format(" Bytes: %s\n", formatBytesProgress(bdProgress.completedBytes, {}).c_str());
 
 								double throughput = bdProgress.avgBytesPerSecond();
 								if (throughput > 0) {
@@ -8735,12 +8730,6 @@ public:
 									statusText +=
 									    format(" Elapsed: %s\n",
 									           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
-								}
-
-								if (bdProgress.etaSeconds().present()) {
-									statusText +=
-									    format(" ETA: %s\n",
-									           formatDurationHumanReadable((int)bdProgress.etaSeconds().get()).c_str());
 								}
 
 								if (!bdProgress.stalledTasks.empty()) {
