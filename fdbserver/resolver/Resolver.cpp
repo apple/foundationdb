@@ -219,7 +219,12 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 		logger = cc.traceCounters("ResolverMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ResolverMetrics");
 	}
-	~Resolver() { destroyConflictSet(conflictSet); }
+	~Resolver() {
+		destroyConflictSet(conflictSet);
+		// close() also deletes logAdapter.
+		if (txnStateStore)
+			txnStateStore->close();
+	}
 };
 } // namespace
 
