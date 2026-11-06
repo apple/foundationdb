@@ -54,6 +54,8 @@ void DatabaseConfiguration::resetInternal() {
 	perpetualStorageWiggleSpeed = 0;
 	perpetualStorageWiggleLocality = "0";
 	storageMigrationType = StorageMigrationType::DEFAULT;
+	shardMetadataFormat = ShardMetadataFormat::UNSET;
+	shardMetadataMigration = ShardMetadataMigration::UNSET;
 	blobGranulesEnabled = false;
 	tenantMode = TenantMode::DISABLED;
 	encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
@@ -228,7 +230,15 @@ bool DatabaseConfiguration::isValid() const {
 	      isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality) &&
 	      storageMigrationType != StorageMigrationType::UNSET && tenantMode >= TenantMode::DISABLED &&
 	      tenantMode < TenantMode::END && encryptionAtRestMode >= EncryptionAtRestMode::DISABLED &&
-	      encryptionAtRestMode < EncryptionAtRestMode::END)) {
+	      encryptionAtRestMode < EncryptionAtRestMode::END &&
+	      // sharded-rocksdb maps shards to physical column families using the
+	      // shardId carried only by new-format (shard-encoded) location
+	      // metadata. Old-format metadata cannot describe those mappings, so
+	      // reject configuring original while the storage engine is
+	      // sharded-rocksdb (this also blocks rolling metadata back to
+	      // original without first migrating off sharded-rocksdb).
+	      !(shardMetadataFormat == ShardMetadataFormat::ORIGINAL &&
+	        storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB))) {
 		return false;
 	}
 	std::set<Key> dcIds;
@@ -388,6 +398,16 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	if (perpetualStoreType.storeType() != KeyValueStoreType::END) {
 		result["perpetual_storage_wiggle_engine"] = perpetualStoreType.toString();
 	}
+	if (shardMetadataFormat != ShardMetadataFormat::UNSET) {
+		result[SHARD_METADATA_FORMAT_KEY] = (shardMetadataFormat == ShardMetadataFormat::ENCODED)
+		                                        ? SHARD_METADATA_FORMAT_ENCODED
+		                                        : SHARD_METADATA_FORMAT_ORIGINAL;
+	}
+	if (shardMetadataMigration != ShardMetadataMigration::UNSET) {
+		result[SHARD_METADATA_MIGRATION_KEY] = (shardMetadataMigration == ShardMetadataMigration::ENABLED)
+		                                           ? SHARD_METADATA_MIGRATION_ENABLED
+		                                           : SHARD_METADATA_MIGRATION_DISABLED;
+	}
 	result["storage_migration_type"] = storageMigrationType.toString();
 	result["blob_granules_enabled"] = (int32_t)blobGranulesEnabled;
 	result["tenant_mode"] = tenantMode.toString();
@@ -414,10 +434,14 @@ std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& j
 		} else if (kv.second.type() == json_spirit::str_type) {
 			// For string values, some properties can set with a "<name>=<value>" syntax in "configure"
 			// Such properties are listed here:
-			static std::set<std::string> directSet = {
-				"storage_migration_type", "tenant_mode", "encryption_at_rest_mode",
-				"storage_engine",         "log_engine",  "perpetual_storage_wiggle_engine"
-			};
+			static std::set<std::string> directSet = { "storage_migration_type",
+				                                       "tenant_mode",
+				                                       "encryption_at_rest_mode",
+				                                       "storage_engine",
+				                                       "log_engine",
+				                                       "perpetual_storage_wiggle_engine",
+				                                       SHARD_METADATA_FORMAT_KEY,
+				                                       SHARD_METADATA_MIGRATION_KEY };
 
 			if (directSet.contains(kv.first)) {
 				result += kv.first + "=" + kv.second.get_str();
@@ -673,6 +697,22 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == "perpetual_storage_wiggle_engine"_sr) {
 		parse((&type), value);
 		perpetualStoreType = (KeyValueStoreType::StoreType)type;
+	} else if (ck == StringRef(SHARD_METADATA_FORMAT_KEY)) {
+		if (value == StringRef(SHARD_METADATA_FORMAT_ORIGINAL)) {
+			shardMetadataFormat = ShardMetadataFormat::ORIGINAL;
+		} else if (value == StringRef(SHARD_METADATA_FORMAT_ENCODED)) {
+			shardMetadataFormat = ShardMetadataFormat::ENCODED;
+		} else {
+			return false;
+		}
+	} else if (ck == StringRef(SHARD_METADATA_MIGRATION_KEY)) {
+		if (value == StringRef(SHARD_METADATA_MIGRATION_DISABLED)) {
+			shardMetadataMigration = ShardMetadataMigration::DISABLED;
+		} else if (value == StringRef(SHARD_METADATA_MIGRATION_ENABLED)) {
+			shardMetadataMigration = ShardMetadataMigration::ENABLED;
+		} else {
+			return false;
+		}
 	} else if (ck == "storage_migration_type"_sr) {
 		parse((&type), value);
 		storageMigrationType = (StorageMigrationType::MigrationType)type;

@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/BulkDumping.h"
@@ -102,9 +104,42 @@ std::set<int> const& normalDDQueueErrors() {
 		                    error_code_broken_promise,
 		                    error_code_data_move_cancelled,
 		                    error_code_data_move_dest_team_not_found,
+		                    error_code_dd_config_changed,
 		                    error_code_finish_move_keys_too_many_retries,
 		                    error_code_start_move_keys_too_many_retries };
 	return s;
+}
+
+struct DataDistributorDcIds {
+	std::vector<Optional<Key>> primary;
+	std::vector<Optional<Key>> remote;
+};
+
+// Selects the active primary DC and the first other configured DC, falling back to configuration order.
+DataDistributorDcIds getDataDistributorDcIds(const std::vector<RegionInfo>& regions, Optional<Key> activePrimaryDcId) {
+	DataDistributorDcIds dcIds;
+	if (regions.empty()) {
+		return dcIds;
+	}
+
+	auto primaryRegion = regions.begin();
+	if (activePrimaryDcId.present()) {
+		auto activeRegion = std::find_if(regions.begin(), regions.end(), [&](const RegionInfo& region) {
+			return region.dcId == activePrimaryDcId.get();
+		});
+		if (activeRegion != regions.end()) {
+			primaryRegion = activeRegion;
+		}
+	}
+
+	dcIds.primary.push_back(primaryRegion->dcId);
+	for (auto region = regions.begin(); region != regions.end(); ++region) {
+		if (region != primaryRegion) {
+			dcIds.remote.push_back(region->dcId);
+			break;
+		}
+	}
+	return dcIds;
 }
 
 } // anonymous namespace
@@ -398,6 +433,9 @@ struct DDBulkLoadJobManager {
 struct DDBulkDumpJobManager {
 	BulkDumpState jobState;
 	std::map<Key, BulkLoadManifest> taskManifestMap;
+	// Limits the "no replica in the target DC" warning to once per job rather than once per
+	// affected range per scheduling cycle. This manager is reconstructed for each job.
+	bool warnedNoServerInTargetDc = false;
 
 	DDBulkDumpJobManager() = default;
 	DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -521,19 +559,28 @@ public:
 		                 lock,
 		                 configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
 		                 context->ddEnabledState.get(),
-		                 SkipDDModeCheck::False));
+		                 SkipDDModeCheck::False,
+		                 configuration));
 	}
 
 	void initDcInfo() {
-		primaryDcId.clear();
-		remoteDcIds.clear();
-		const std::vector<RegionInfo>& regions = configuration.regions;
-		if (configuration.regions.size() > 0) {
-			primaryDcId.push_back(regions[0].dcId);
+		Optional<Key> activePrimaryDcId =
+		    txnProcessor->isMocked() ? Optional<Key>() : dbInfo->get().master.locality.dcId();
+		auto dcIds = getDataDistributorDcIds(configuration.regions, activePrimaryDcId);
+		primaryDcId = std::move(dcIds.primary);
+		remoteDcIds = std::move(dcIds.remote);
+	}
+
+	// The DC whose storage servers perform bulkdump uploads, or empty when the cluster has no
+	// region configuration. Resolved per dispatch rather than cached so it follows a failover.
+	std::string bulkDumpTargetDcId() const {
+		// With usable_regions == 1 the remote DC is configured but holds no storage servers.
+		const bool useRemote = SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION && configuration.usableRegions > 1;
+		const std::vector<Optional<Key>>& dcIds = useRemote ? remoteDcIds : primaryDcId;
+		if (!dcIds.empty() && dcIds[0].present()) {
+			return dcIds[0].get().toString();
 		}
-		if (configuration.regions.size() > 1) {
-			remoteDcIds.push_back(regions[1].dcId);
-		}
+		return std::string();
 	}
 
 	Future<Void> waitDataDistributorEnabled() const {
@@ -674,9 +721,25 @@ public:
 			    .setMaxFieldLength(-1)
 			    .detail("Conf", self->configuration.toString());
 
+			// Resolve the effective shard-location-metadata encoding target for
+			// this DD incarnation: DatabaseConfiguration is authoritative, with
+			// the legacy SHARD_ENCODE_LOCATION_METADATA knob as the fallback
+			// only when shard_metadata_format is UNSET. Publish it on
+			// ddEnabledState so every downstream write/move path reads one
+			// resolved value instead of the raw knob.
+			bool shardEncodeLocationMetadata = self->configuration.shardMetadataFormatIsEncoded().orDefault(
+			    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+			self->context->ddEnabledState->setShardEncodeLocationMetadata(shardEncodeLocationMetadata);
+			TraceEvent("DDInitShardEncodeTarget", self->ddId)
+			    .detail("ShardEncodeLocationMetadata", shardEncodeLocationMetadata)
+			    .detail("ConfigFormatUnset",
+			            self->configuration.shardMetadataFormat == DatabaseConfiguration::ShardMetadataFormat::UNSET)
+			    .detail("Knob", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+
 			if (self->configuration.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
-			    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			    !shardEncodeLocationMetadata) {
 				TraceEvent(SevError, "PhysicalShardNotEnabledForShardedRocks", self->ddId)
+				    .detail("Reason", "sharded-rocksdb requires new-format shard-location metadata")
 				    .detail("EnableServerKnob", "SHARD_ENCODE_LOCATION_METADATA");
 				throw internal_error();
 			}
@@ -809,7 +872,8 @@ public:
 		}
 
 		state std::vector<Key> customBoundaries;
-		if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+		if (bulkLoadIsEnabled(self->initData->bulkLoadMode,
+		                      self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 			// Bulk load does not allow boundary change
 			TraceEvent(SevInfo, "DDInitCustomRangeConfigDisabledByBulkLoadMode", self->ddId);
 		} else {
@@ -943,7 +1007,7 @@ public:
 				    .detail("DataMoveType", dataMoveType)
 				    .detail("DataMove", meta.toString());
 			} else if (it.value()->isCancelled() ||
-			           (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
+			           (it.value()->valid && !self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
@@ -2325,6 +2389,7 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	state int rangeLocationIndex = 0;
 	state std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations;
 	state KeyRange taskRange;
+	state std::string targetDcId;
 	state std::vector<Future<Void>> actors;
 	state Transaction tr(cx);
 	while (beginKey < endKey) {
@@ -2377,6 +2442,23 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					// Spawn task per shard
 					taskRange = rangeLocations[rangeLocationIndex].range;
 					ASSERT(!taskRange.empty());
+					// Skip rather than fall back to another region: the dumping server uploads the
+					// files, so a DC that cannot reach the destination would fail every task.
+					targetDcId = self->bulkDumpTargetDcId();
+					if (!targetDcId.empty()) {
+						const auto& servers = rangeLocations[rangeLocationIndex].servers;
+						auto targetDc = servers.find(targetDcId);
+						if (targetDc == servers.end() || targetDc->second.empty()) {
+							if (!self->bulkDumpJobManager.warnedNoServerInTargetDc) {
+								self->bulkDumpJobManager.warnedNoServerInTargetDc = true;
+								TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDc", self->ddId)
+								    .detail("JobID", jobId)
+								    .detail("TargetDcId", targetDcId)
+								    .detail("FirstSkippedRange", taskRange);
+							}
+							continue;
+						}
+					}
 					// Limit parallelism
 					loop {
 						if (self->bulkDumpParallelismLimitor.canStart()) {
@@ -2385,7 +2467,8 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 						wait(self->bulkDumpParallelismLimitor.waitUntilCounterChanged());
 					}
 					SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
-					                                        bulkDumpState.generateRangeTask(taskRange));
+					                                        bulkDumpState.generateRangeTask(taskRange),
+					                                        targetDcId);
 					// Issue task
 					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobSpawnRange", self->ddId)
 					    .detail("JobID", jobId)
@@ -2722,19 +2805,20 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(self->pollMoveKeysLock());
 
-			self->context->tracker = makeReference<DataDistributionTracker>(
-			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
-			                                       .distributorId = self->ddId,
-			                                       .readyToStart = self->initialized,
-			                                       .output = self->relocationProducer,
-			                                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
-			                                       .physicalShardCollection = self->physicalShardCollection,
-			                                       .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
-			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
-			                                       .shards = &shards,
-			                                       .trackerCancelled = &self->context->trackerCancelled,
-			                                       .ddTenantCache = self->ddTenantCache,
-			                                       .usableRegions = self->configuration.usableRegions });
+			self->context->tracker = makeReference<DataDistributionTracker>(DataDistributionTrackerInitParams{
+			    .db = self->txnProcessor,
+			    .distributorId = self->ddId,
+			    .readyToStart = self->initialized,
+			    .output = self->relocationProducer,
+			    .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			    .physicalShardCollection = self->physicalShardCollection,
+			    .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
+			    .anyZeroHealthyTeams = anyZeroHealthyTeams,
+			    .shards = &shards,
+			    .trackerCancelled = &self->context->trackerCancelled,
+			    .ddTenantCache = self->ddTenantCache,
+			    .usableRegions = self->configuration.usableRegions,
+			    .shardEncodeLocationMetadata = self->context->ddEnabledState->shardEncodeLocationMetadata() });
 			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(self->context->tracker,
 			                                                                 self->initData,
 			                                                                 getShardMetrics.getFuture(),
@@ -2866,7 +2950,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(serveBlobMigratorRequests(self, self->context->tracker, self->context->ddQueue));
-			if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+			if (bulkLoadIsEnabled(self->initData->bulkLoadMode,
+			                      self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 				TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
 				    .detail("UsableRegions", self->configuration.usableRegions);
 				self->bulkLoadEnabled = true;
@@ -5388,6 +5473,28 @@ TEST_CASE("/DataDistribution/StorageWiggler/Order") {
 		ASSERT(id == correctOrder[i]);
 	}
 	ASSERT(!wiggler.getNextServerId().present());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Initialization/DcIds") {
+	RegionInfo configuredPrimary;
+	configuredPrimary.dcId = "primary"_sr;
+	RegionInfo configuredRemote;
+	configuredRemote.dcId = "remote"_sr;
+	std::vector<RegionInfo> regions{ configuredPrimary, configuredRemote };
+
+	auto dcIds = getDataDistributorDcIds(regions, Optional<Key>("primary"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+
+	dcIds = getDataDistributorDcIds(regions, Optional<Key>("remote"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+
+	dcIds = getDataDistributorDcIds(regions, Optional<Key>("unknown"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+
 	return Void();
 }
 

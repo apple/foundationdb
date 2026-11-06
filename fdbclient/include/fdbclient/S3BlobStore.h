@@ -216,11 +216,14 @@ public:
 	                    Optional<std::string> const& proxyPort,
 	                    Optional<Credentials> const& creds,
 	                    BlobKnobs const& knobs = BlobKnobs(),
-	                    HTTP::Headers extraHeaders = HTTP::Headers())
+	                    HTTP::Headers extraHeaders = HTTP::Headers(),
+	                    Optional<std::string> const& serverSideEncryption = Optional<std::string>(),
+	                    Optional<std::string> const& proxyParameter = Optional<std::string>())
 	  : host(host), service(service), region(region), proxyHost(proxyHost), proxyPort(proxyPort),
 	    useProxy(proxyHost.present() && proxyPort.present()), credentials(creds),
 	    lookupKey(creds.present() && creds.get().key.empty()),
 	    lookupSecret(creds.present() && creds.get().secret.empty()), knobs(knobs), extraHeaders(extraHeaders),
+	    serverSideEncryption(serverSideEncryption), proxyParameter(proxyParameter),
 	    requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
 	    requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
@@ -298,6 +301,11 @@ public:
 	bool lookupSecret;
 	BlobKnobs knobs;
 	HTTP::Headers extraHeaders;
+	// From the URL's server_side_encryption (or sse) parameter. Overrides the BLOBSTORE_ENCRYPTION_TYPE knob when
+	// present.
+	Optional<std::string> serverSideEncryption;
+	// The URL's proxy parameter, kept so getResourceURL can write it back. proxyHost and proxyPort already apply it.
+	Optional<std::string> proxyParameter;
 
 	// Speed and concurrency limits
 	Reference<IRateControl> requestRate;
@@ -318,6 +326,11 @@ public:
 
 	// Sets headers needed for Authorization (including Date which will be overwritten if present)
 	void setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers);
+
+	// Sets x-amz-server-side-encryption to the URL's server_side_encryption (or sse) value, or to the
+	// BLOBSTORE_ENCRYPTION_TYPE knob if the URL has none. Sets nothing if that value is empty (the knob's default)
+	// or "none". Used on single-part PUT and multipart-upload start.
+	void setServerSideEncryptionHeader(HTTP::Headers& headers) const;
 
 	// Set headers in the AWS V4 authorization format. $date and $datestamp are used for unit testing
 	void setV4AuthHeaders(const std::string& verb,

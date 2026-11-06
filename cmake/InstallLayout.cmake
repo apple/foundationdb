@@ -48,7 +48,11 @@ set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
 # User config
 ################################################################################
 
+# For debug packages, do not strip before handing to RPM or DEB generator, which will split debuginfo.
 set(GENERATE_DEBUG_PACKAGES ON CACHE BOOL "Build debug rpm/deb packages")
+if(NOT GENERATE_DEBUG_PACKAGES)
+  set(CPACK_STRIP_FILES ON)
+endif()
 
 ################################################################################
 # Alternatives config

@@ -504,10 +504,12 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 	state Future<Key> url = restore.sourceContainerURL().getD(tr);
 	state Future<Version> restoreVersion = restore.restoreVersion().getD(tr);
 	state Future<std::string> progress = restore.getProgress(tr);
+	state Future<MutationLogType> mutationLogType =
+	    restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	wait(success(ranges) && success(addPrefix) && success(removePrefix) && success(url) && success(restoreVersion) &&
-	     success(progress));
+	     success(progress) && success(mutationLogType));
 
 	std::string returnStr;
 	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
@@ -518,6 +520,7 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 	                    printable(addPrefix.get()).c_str(),
 	                    printable(removePrefix.get()).c_str(),
 	                    restoreVersion.get());
+	returnStr += format("  Mutation Log Type: %s", mutationLogTypeToString(mutationLogType.get()).c_str());
 	return returnStr;
 }
 
@@ -3697,8 +3700,9 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 
 		state Reference<TaskFuture> logDispatchBatchFuture = futureBucket->future(tr);
 
-		// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag
-		state int priority = latestSnapshotEndVersion.present() ? 1 : 0;
+		// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag.
+		// Priority 2 also puts them ahead of other backups' initial snapshot range tasks (priority 1).
+		state int priority = latestSnapshotEndVersion.present() ? 2 : 0;
 
 		if (!mutationLogType.present() || mutationLogType.get() == MutationLogType::DEFAULT) {
 			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will
@@ -7403,10 +7407,13 @@ public:
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						state Reference<IBackupContainer> bc;
 						state TimestampedVersion latestRestorable;
+						state MutationLogType mutationLogType;
 
 						wait(
 						    store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))) &&
-						    store(bc, config.backupContainer().getOrThrow(tr)));
+						    store(bc, config.backupContainer().getOrThrow(tr)) &&
+						    store(mutationLogType,
+						          config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT)));
 						bc = fileBackup::getBackupContainerWithProxy(bc);
 
 						doc.setKey("Restorable", latestRestorable.present());
@@ -7421,6 +7428,7 @@ public:
 							doc.setKey("LatestRestorablePoint", o);
 						}
 						doc.setKey("DestinationURL", bc->getURL());
+						doc.setKey("MutationLogType", mutationLogTypeToString(mutationLogType));
 					}
 
 					if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
@@ -7547,10 +7555,13 @@ public:
 					state Reference<IBackupContainer> bc;
 					state Optional<Version> latestRestorableVersion;
 					state Version recentReadVersion;
+					state MutationLogType mutationLogType;
 
 					wait(store(latestRestorableVersion, config.getLatestRestorableVersion(tr)) &&
 					     store(bc, config.backupContainer().getOrThrow(tr)) &&
-					     store(recentReadVersion, tr->getReadVersion()));
+					     store(recentReadVersion, tr->getReadVersion()) &&
+					     store(mutationLogType,
+					           config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT)));
 					bc = fileBackup::getBackupContainerWithProxy(bc);
 
 					bool snapshotProgress = false;
@@ -7581,6 +7592,7 @@ public:
 					}
 					statusText += format("BackupUID: %s\n", uidAndAbortedFlag.get().first.toString().c_str());
 					statusText += format("BackupURL: %s\n", bc->getURL().c_str());
+					statusText += format("Mutation Log Type: %s\n", mutationLogTypeToString(mutationLogType).c_str());
 
 					if (snapshotProgress) {
 						state int64_t snapshotInterval;
