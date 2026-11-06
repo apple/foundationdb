@@ -1718,11 +1718,11 @@ void populateBitset(boost::dynamic_bitset<>& bs, const std::vector<uint16_t>& id
 // If ENABLE_VERSION_VECTOR_TLOG_UNICAST is set, one tLog's DV may advance beyond the min(DV) over all tLogs.
 // This function finds the highest recoverable version for each tLog group over all log groups.
 // All prior versions to the chosen RV must also be recoverable.
-// TODO: unit tests to stress UNICAST
 Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
     const std::vector<Reference<LogSet>>& logServers,
     const std::tuple<int, std::vector<TLogLockResult>, bool>& logGroupResults,
-    Version minDV) {
+    Version minDV,
+    int writeAntiQuorum) {
 	std::vector<uint16_t> tLogLocIds;
 	uint16_t maxTLogLocId; // maximum possible id, not maximum of id's of available log servers
 	getTLogLocIds(logServers, logGroupResults, tLogLocIds, maxTLogLocId);
@@ -1733,7 +1733,8 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 	// Summarize the information sent by various tLogs.
 	// A bitset of available tLogs
 	boost::dynamic_bitset<> availableTLogs(bsSize);
-	// version -> tLogs (that are avaiable) that have received the version
+	std::vector<Version> durableEnds(bsSize);
+	// version -> locked tLogs that report receipt of the version
 	std::unordered_map<Version, boost::dynamic_bitset<>> versionAvailableTLogs;
 	// version -> all tLogs that the version was sent to (by the commit proxy)
 	std::map<Version, boost::dynamic_bitset<>> versionAllTLogs;
@@ -1741,10 +1742,13 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 	std::map<Version, Version> prevVersionMap;
 	uint16_t tLogIdx = 0;
 	int replicationFactor = std::get<0>(logGroupResults);
+	Version missingMetadataEnd = invalidVersion;
 	for (auto& tLogResult : std::get<1>(logGroupResults)) {
 		uint16_t tLogLocId = tLogLocIds[tLogIdx++];
 		availableTLogs.set(tLogLocId);
+		durableEnds[tLogLocId] = tLogResult.end;
 		if (tLogResult.unknownCommittedVersions.empty()) {
+			missingMetadataEnd = std::max(missingMetadataEnd, tLogResult.end);
 			continue;
 		}
 		for (auto& unknownCommittedVersion : tLogResult.unknownCommittedVersions) {
@@ -1764,74 +1768,54 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 	}
 	ASSERT(availableTLogs.count() == (std::get<1>(logGroupResults)).size());
 
-	if (versionAllTLogs.empty()) {
+	if (writeAntiQuorum == 0 && versionAllTLogs.empty()) {
 		return std::make_tuple(maxKCV, maxKCV);
 	}
 
-	// Compute recovery version.
-	//
-	// @note we think that the unicast recovery version should always greater than or
-	// equal to "min(DV)" (= "minDV"). To be conservative we use "max(KCV)" (= "maxKCV")
-	// as the default (starting) recovery version and later verify that the computed
-	// recovery version is greater than or equal to "minDV".
-	//
-	// @note we are not using "min(KCV)" as the default recovery version because "known
-	// committed version" can advance even after a log server is locked when unicast is
-	// enabled and so all log servers may not preserve all committed versions, from
-	// "min(KCV)" till the correct recovery version, in "unknownCommittedVersions" and
-	// this may cause the recovery algorithm to not find the correct recovery version.
-	//
-	// @todo modify code to use "minDV" as the default (starting) recovery version.
-	Version RV = maxKCV; // recovery version
-	// @note we currently don't use "RVs", but we may use this information later (maybe for
-	// doing error checking). Commenting out the RVs related code for now.
-	// std::vector<Version> RVs(maxTLogLocId + 1, maxKCV); // recovery versions of various tLogs
+	// A restored TLog can retain batches above maxKCV but lose their in-memory metadata.
+	// At most writeAntiQuorum locked logs end before minDV. Together with the unavailable
+	// logs they cannot contain a whole replica placement, so the prefix through minDV is recoverable.
+	Version RV = missingMetadataEnd > maxKCV && writeAntiQuorum > 0 ? std::max(maxKCV, minDV) : maxKCV;
 	bool nonAvailableTLogsCompletePolicy = std::get<2>(logGroupResults);
-	Version prevVersion = maxKCV;
 	for (auto const& [version, tLogs] : versionAllTLogs) {
-		if (prevVersion != prevVersionMap[version]) {
+		if (version <= RV) {
+			continue;
+		}
+		if (RV != prevVersionMap[version]) {
 			break;
 		}
-		// This version is not recoverable if there is a log server (LS) such that:
-		// - the commit proxy sent this version to LS (i.e., LS is present in "versionAllTLogs[version]")
-		// - LS is available (i.e., LS is present in "availableTLogs")
-		// - LS didn't receive this version (i.e., LS is not present in "versionAvailableTLogs[version]")
-		if (((tLogs & availableTLogs) & ~versionAvailableTLogs[version]).any()) {
+		// A committed push can omit writeAntiQuorum targets. The lock quorum guarantees that
+		// the unavailable logs plus any such set of locked targets cannot contain a whole replica placement.
+		auto& received = versionAvailableTLogs[version];
+		auto missingLockedTargets = (tLogs & availableTLogs) - received;
+		if (writeAntiQuorum > 0) {
+			for (auto id = missingLockedTargets.find_first(); id != missingLockedTargets.npos;
+			     id = missingLockedTargets.find_next(id)) {
+				// A targeted log cannot advance past a batch it missed, even if it later loses its metadata.
+				if (durableEnds[id] >= version) {
+					received.set(id);
+					missingLockedTargets.reset(id);
+				}
+			}
+		}
+		if (missingLockedTargets.count() > static_cast<size_t>(writeAntiQuorum)) {
 			break;
 		}
-		// If the commit proxy sent this version to "N" log servers then at least
-		// (N - replicationFactor + 1) log servers must be available. Otherwise, the
-		// unavailable log servers alone would not be sufficient to satisfy the
-		// replication policy.
-		//
-		// @note This check is intentionally more restrictive than necessary.
-		// Instead of verifying whether the unavailable log servers within the
-		// specific set that received the version satisfy the replication policy,
-		// we check whether the entire set of unavailable log servers meets the
-		// policy.
-		//
-		// This approach is chosen because it is computationally more efficient.
-		// Checking availability on a per-version basis would require constructing
-		// a unique set of unavailable log servers for each version in the unavailable
-		// version list, which would add significant overhead.
-		if (!((versionAvailableTLogs[version].count() >= tLogs.count() - replicationFactor + 1) ||
-		      !nonAvailableTLogsCompletePolicy)) {
+		// Bound the number of targets without a copy, or use the set-wide placement proof from the lock quorum.
+		if (!((received.count() >= tLogs.count() - replicationFactor + 1) || !nonAvailableTLogsCompletePolicy)) {
 			break;
 		}
-		// Update RV.
 		RV = version;
-		/*
-		@note We currently don't use "RVs", but we may use this information later (maybe for doing
-		error checking). Commenting out this code for now.
-		Update recovery version vector.
-		for (boost::dynamic_bitset<>::size_type id = 0; id < versionAvailableTLogs[version].size(); id++) {
-		    if (versionAvailableTLogs[version][id]) {
-		        RVs[id] = version;
-		    }
-		}
-		*/
-		// Update prevVersion.
-		prevVersion = version;
+	}
+	if (writeAntiQuorum > 0 && missingMetadataEnd > RV) {
+		// The missing batch could be an acknowledged sparse push above minDV or a partial transaction.
+		TraceEvent(SevWarnAlways, "UnicastRecoveryMissingBatchMetadata")
+		    .detail("KnownCommittedVersion", maxKCV)
+		    .detail("MinimumDurableVersion", minDV)
+		    .detail("RecoverableThrough", RV)
+		    .detail("MissingMetadataEnd", missingMetadataEnd)
+		    .detail("WriteAntiQuorum", writeAntiQuorum);
+		return {};
 	}
 	ASSERT_WE_THINK(RV >= minDV && RV != std::numeric_limits<Version>::max());
 	ASSERT_WE_THINK(RV >= maxKCV);
@@ -2120,11 +2104,16 @@ Future<Void> LogSystem::epochEnd(Reference<AsyncVar<Reference<LogSystem>>> outLo
 	Optional<Version> lastEnd;
 	Version knownCommittedVersion = 0;
 	std::map<uint8_t, std::vector<uint16_t>> lastKnownLockedTLogIds;
+	std::set<int> ambiguousLogSets;
+	bool hasUnicastAntiQuorum = SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
+	                            std::any_of(logServers.begin(), logServers.end(), [](const auto& log) {
+		                            return log->isLocal && log->tLogWriteAntiQuorum > 0;
+	                            });
 	bool knownLockedTLogIdsChanged = false;
 	while (true) {
 		Version minEnd = std::numeric_limits<Version>::max();
-		Version minDV = std::numeric_limits<Version>::max();
 		Version maxEnd = 0;
+		bool snapshotWithdrawn = lastEnd.present() && !outLogSystem->get();
 		std::vector<Future<Void>> changes;
 		std::vector<std::tuple<int, std::vector<TLogLockResult>, bool>> logGroupResults;
 		std::map<uint8_t, std::vector<uint16_t>> currentKnownLockedTLogIds;
@@ -2132,26 +2121,46 @@ Future<Void> LogSystem::epochEnd(Reference<AsyncVar<Reference<LogSystem>>> outLo
 			if (!logServers[log]->isLocal) {
 				continue;
 			}
-			auto durableVersionInfo = LogSystem::getDurableVersion(dbgid, lockResults[log], logFailed[log], lastEnd);
+			changes.push_back(LogSystem::getDurableVersionChanged(lockResults[log], logFailed[log]));
+			// A fresh certificate can reveal missing unicast metadata even if its durable end did not fall.
+			// Recheck every local set so an unchanged set is still included when the snapshot is replaced.
+			Optional<Version> endToCompare = hasUnicastAntiQuorum ? Optional<Version>() : lastEnd;
+			auto durableVersionInfo =
+			    LogSystem::getDurableVersion(dbgid, lockResults[log], logFailed[log], endToCompare);
 			if (durableVersionInfo.present()) {
 				logGroupResults.emplace_back(logServers[log]->tLogReplicationFactor,
 				                             durableVersionInfo.get().lockResults,
 				                             durableVersionInfo.get().policyResult);
-				currentKnownLockedTLogIds[log] = std::move(durableVersionInfo.get().knownLockedTLogIds);
-				minDV = std::min(minDV, durableVersionInfo.get().minimumDurableVersion);
 				if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 					knownCommittedVersion =
 					    std::max(knownCommittedVersion, durableVersionInfo.get().knownCommittedVersion);
 					maxEnd = std::max(maxEnd, durableVersionInfo.get().minimumDurableVersion);
 					minEnd = std::min(minEnd, durableVersionInfo.get().minimumDurableVersion);
 				} else {
-					auto unicastVersions = getRecoverVersionUnicast(logServers, logGroupResults.back(), minDV);
+					auto unicastVersions = getRecoverVersionUnicast(logServers,
+					                                                logGroupResults.back(),
+					                                                durableVersionInfo.get().minimumDurableVersion,
+					                                                logServers[log]->tLogWriteAntiQuorum);
+					if (!unicastVersions.present()) {
+						ambiguousLogSets.insert(log);
+						continue;
+					}
+					ambiguousLogSets.erase(log);
 					knownCommittedVersion = std::max(knownCommittedVersion, std::get<0>(unicastVersions.get()));
 					maxEnd = std::max(maxEnd, std::get<1>(unicastVersions.get()));
 					minEnd = std::min(minEnd, std::get<1>(unicastVersions.get()));
 				}
+				currentKnownLockedTLogIds[log] = std::move(durableVersionInfo.get().knownLockedTLogIds);
 			}
-			changes.push_back(LogSystem::getDurableVersionChanged(lockResults[log], logFailed[log]));
+		}
+		if (!ambiguousLogSets.empty()) {
+			// Readers can select any local log set. A missing certificate cannot resolve earlier
+			// evidence of an ambiguous suffix in that set.
+			if (outLogSystem->get()) {
+				outLogSystem->set(Reference<LogSystem>());
+			}
+			co_await waitForAny(changes);
+			continue;
 		}
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && maxEnd > 0 && lastEnd.present() &&
 		    maxEnd >= lastEnd.get()) {
@@ -2165,11 +2174,16 @@ Future<Void> LogSystem::epochEnd(Reference<AsyncVar<Reference<LogSystem>>> outLo
 				    .detail("CurrentKnownLockedTLogIdCount", currentKnownLockedTLogIds.size());
 			}
 		}
-		if (maxEnd > 0 && (!lastEnd.present() || maxEnd < lastEnd.get() || knownLockedTLogIdsChanged)) {
+		Version candidateEnd = hasUnicastAntiQuorum ? minEnd : maxEnd;
+		if (maxEnd > 0 &&
+		    (!lastEnd.present() || candidateEnd < lastEnd.get() || knownLockedTLogIdsChanged || snapshotWithdrawn)) {
 			CODE_PROBE(lastEnd.present(), "Restarting recovery at an earlier point");
 
 			auto logSystem = makeReference<LogSystem>(dbgid, locality, prevState.recoveryCount);
 
+			if (hasUnicastAntiQuorum && lastEnd.present()) {
+				minEnd = std::min(minEnd, lastEnd.get());
+			}
 			logSystem->recoverAt = minEnd;
 			lastEnd = minEnd;
 			logSystem->tLogs = logServers;

@@ -1,0 +1,28 @@
+[configuration]
+config = 'triple ssd-2 logs=3 commit_proxies=1 grv_proxies=1 resolvers=1'
+logAntiQuorum = 1
+datacenters = 1
+generateFearless = false
+machineCount = 16
+processesPerMachine = 1
+statelessProcessClassesPerDC = 4
+buggify = false
+faultInjection = false
+
+[[knobs]]
+# A randomized one-second write lifetime can reject the marker before it reaches the TLogs.
+max_write_transaction_life_versions = 5000000
+enable_version_vector = true
+enable_version_vector_tlog_unicast = true
+proxy_use_resolver_private_mutations = true
+enable_version_vector_reply_recovery = true
+
+[[test]]
+testTitle = 'TLogWriteAntiQuorumUnicast'
+runFailureWorkloads = false
+connectionFailuresDisableDuration = 1000000
+timeout = 180
+
+    [[test.workload]]
+    testName = 'TLogWriteAntiQuorum'
+    requireUnicast = true
