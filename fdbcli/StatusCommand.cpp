@@ -103,6 +103,47 @@ int getNumofNonExcludedMachines(StatusObjectReader statusObjCluster) {
 	return numOfNonExcludedMachines;
 }
 
+// Summarizes the remote region's replica state for appending to the primary's missing_data message. Returns one of
+// "No replicas remain of some data", "Healing replicas", "Populating replicas" or "Healthy replicas", or an empty
+// string if the cluster isn't multi-region or the remote state can't be determined.
+std::string getRemoteRegionSummary(StatusObjectReader statusObjCluster, StatusObjectReader statusObjData) {
+	try {
+		int usableRegions = 1;
+		if (!statusObjCluster.get("configuration.usable_regions", usableRegions) || usableRegions <= 1) {
+			return "";
+		}
+		if (!statusObjData.has("team_trackers")) {
+			return "";
+		}
+		for (auto const& value : statusObjData.last().get_array()) {
+			StatusObjectReader tracker(value);
+			bool primary = true;
+			if (!tracker.get("primary", primary) || primary) {
+				continue;
+			}
+			std::string name;
+			bool healthy = false;
+			if (!tracker.get("state.name", name) || !tracker.get("state.healthy", healthy)) {
+				return "";
+			}
+			if (name == "missing_data") {
+				return "No replicas remain of some data";
+			}
+			if (name == "healing") {
+				return "Healing replicas";
+			}
+			// A region being populated reports healthy before it holds a full copy.
+			if (name == "healthy_populating_region") {
+				return "Populating replicas";
+			}
+			return healthy ? "Healthy replicas" : "";
+		}
+	} catch (std::exception&) {
+		// Malformed status JSON counts as unknown.
+	}
+	return "";
+}
+
 bool logEpochsMayBeLosingData(StatusObjectReader statusObjCluster) {
 	if (!statusObjCluster.has("logs")) {
 		return true;
@@ -796,6 +837,10 @@ void printStatus(StatusObjectReader statusObj,
 					outputString += "Healthy" + (!description.empty() ? " (" + description + ")" : "");
 				} else if (dataState == "missing_data") {
 					outputString += "UNHEALTHY" + (!description.empty() ? ": " + description : "");
+					std::string remoteSummary = getRemoteRegionSummary(statusObjCluster, statusObjData);
+					if (!remoteSummary.empty()) {
+						outputString += " (primary); " + remoteSummary + " (remote)";
+					}
 				} else if (dataState == "healing") {
 					outputString += "HEALING" + (!description.empty() ? ": " + description : "");
 				} else if (!description.empty()) {

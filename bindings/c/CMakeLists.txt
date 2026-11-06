@@ -271,6 +271,20 @@ if(NOT WIN32)
     add_fdbclient_test(
       NAME fdb_c_setup_tests
       COMMAND $<TARGET_FILE:fdb_c_setup_tests>)
+    if(NOT USE_SANITIZER)
+      if(APPLE)
+        set(FDB_BLOB_GRANULE_LIBRARY_PATH_ENV "DYLD_LIBRARY_PATH")
+      else()
+        set(FDB_BLOB_GRANULE_LIBRARY_PATH_ENV "LD_LIBRARY_PATH")
+      endif()
+      add_test(NAME fdb_c_blob_granule_fatal_exports
+        COMMAND ${CMAKE_COMMAND} -E env
+        "${FDB_BLOB_GRANULE_LIBRARY_PATH_ENV}=${CMAKE_BINARY_DIR}/lib:$ENV{${FDB_BLOB_GRANULE_LIBRARY_PATH_ENV}}"
+        $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_blob_granule_fatal_exports.py
+        --library $<TARGET_FILE:fdb_c>
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+      set_tests_properties(fdb_c_blob_granule_fatal_exports PROPERTIES TIMEOUT 120)
+    endif()
     add_fdbclient_test(
       NAME fdb_c_unit_tests
       COMMAND $<TARGET_FILE:fdb_c_unit_tests>
@@ -419,6 +433,45 @@ if(NOT WIN32)
         --redundancy double
         )
 
+      # The upgrade tests above, repeated with the previous release's client library as the tester's
+      # primary library. An application still on the previous release's multi-version client must be
+      # able to load and use this build's library as an external client.
+      add_python_venv_test(NAME fdb_c_upgrade_to_future_version_prev_loader
+        COMMAND python -m fdb_test_runner.upgrade_test
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
+        --primary-version "${FDB_PREV_RELEASE_VERSION}"
+        --process-number 3
+        )
+
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev2_gradual_prev_loader
+        COMMAND python -m fdb_test_runner.upgrade_test
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
+        --primary-version "${FDB_PREV_RELEASE_VERSION}"
+        --process-number 3
+        )
+
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev2_direct_prev_loader
+        COMMAND python -m fdb_test_runner.upgrade_test
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
+        --primary-version "${FDB_PREV_RELEASE_VERSION}"
+        --process-number 3
+        )
+
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev_prev_loader
+        COMMAND python -m fdb_test_runner.upgrade_test
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
+        --primary-version "${FDB_PREV_RELEASE_VERSION}"
+        --process-number 3
+        )
+
       # These tests replace every process in a local cluster. Running them with
       # other CTests can starve recovery long enough to trip the progress check.
       # Worst-case budget: cluster startup + exclude/remove (120s) +
@@ -430,6 +483,10 @@ if(NOT WIN32)
         fdb_c_upgrade_from_prev
         fdb_c_wiggle_only
         fdb_c_wiggle_and_upgrade
+        fdb_c_upgrade_to_future_version_prev_loader
+        fdb_c_upgrade_from_prev2_gradual_prev_loader
+        fdb_c_upgrade_from_prev2_direct_prev_loader
+        fdb_c_upgrade_from_prev_prev_loader
         PROPERTIES RUN_SERIAL TRUE TIMEOUT 900)
 
     endif()

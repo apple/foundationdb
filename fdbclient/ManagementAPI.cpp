@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/BulkLoading.h"
@@ -1091,12 +1092,11 @@ Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> ch
 			std::vector<NetworkAddress> oldCoordinators = co_await oldClusterConnectionString.tryResolveHostnames();
 			CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 			if (desiredCoordinators.empty()) {
-				std::vector<NetworkAddress> _desiredCoordinators = co_await change->getDesiredCoordinators(
+				desiredCoordinators = co_await change->getDesiredCoordinators(
 				    &tr,
 				    oldCoordinators,
 				    makeReference<ClusterConnectionMemoryRecord>(oldClusterConnectionString),
 				    result);
-				desiredCoordinators = _desiredCoordinators;
 			}
 
 			if (result == CoordinatorsResult::NOT_ENOUGH_MACHINES && notEnoughMachineResults < 1) {
@@ -1279,8 +1279,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		std::vector<AddressExclusion> excl = co_await getAllExcludedServers(tr);
 		std::set<AddressExclusion> excluded(excl.begin(), excl.end());
 
-		std::vector<ProcessData> _workers = co_await getWorkers(tr);
-		std::vector<ProcessData> workers = _workers;
+		std::vector<ProcessData> workers = co_await getWorkers(tr);
 
 		std::map<NetworkAddress, LocalityData> addr_locality;
 		for (const auto& w : workers)
@@ -2500,6 +2499,105 @@ Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
 	co_return auditId;
 }
 
+namespace {
+// Errors from triggering an audit that come from the cluster controller changing or the data distributor not being
+// able to start it yet.
+bool isTransientAuditTriggerError(const Error& e) {
+	switch (e.code()) {
+	case error_code_timed_out:
+	case error_code_audit_storage_failed:
+	case error_code_broken_promise:
+	case error_code_request_maybe_delivered:
+		return true;
+	default:
+		return false;
+	}
+}
+} // namespace
+
+Future<AuditStorageState> auditStorageAndWait(Database cx,
+                                              KeyRange range,
+                                              AuditType type,
+                                              KeyValueStoreType engineType,
+                                              AuditWaitOptions options) {
+	UID auditId;
+	for (int attempt = 1;; ++attempt) {
+		Error err;
+		try {
+			UID id = co_await timeoutError(
+			    auditStorage(cx->getConnectionRecord(), range, type, engineType, options.roundTripTimeoutSeconds),
+			    options.roundTripTimeoutSeconds);
+			auditId = id;
+			break;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (!isTransientAuditTriggerError(err) || attempt >= options.maxScheduleAttempts) {
+			throw err;
+		}
+		TraceEvent(SevWarn, "AuditStorageAndWaitTriggerRetry")
+		    .error(err)
+		    .detail("Context", options.traceContext)
+		    .detail("AuditType", type)
+		    .detail("Range", range)
+		    .detail("Attempt", attempt);
+		co_await delay(std::min(10.0, 2.0 * attempt));
+	}
+
+	const double startTime = now();
+	double lastReportTime = startTime;
+	TraceEvent("AuditStorageAndWaitScheduled")
+	    .detail("Context", options.traceContext)
+	    .detail("AuditType", type)
+	    .detail("AuditID", auditId)
+	    .detail("Range", range);
+	while (true) {
+		co_await delay(options.pollIntervalSeconds);
+		if (now() - startTime > options.maxWaitSeconds) {
+			TraceEvent(SevError, "AuditStorageAndWaitTimeout")
+			    .detail("Context", options.traceContext)
+			    .detail("AuditType", type)
+			    .detail("AuditID", auditId)
+			    .detail("Range", range);
+			throw timed_out();
+		}
+
+		std::vector<AuditStorageState> states;
+		Error err;
+		try {
+			std::vector<AuditStorageState> result =
+			    co_await timeoutError(getAuditStates(cx, type, /*newFirst=*/true), options.roundTripTimeoutSeconds);
+			states = result;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			if (!isTransientAuditStateReadError(err)) {
+				throw err;
+			}
+			continue;
+		}
+		bool found = false;
+		for (const auto& state : states) {
+			if (state.id == auditId) {
+				found = true;
+				if (state.getPhase() != AuditPhase::Running) {
+					co_return state;
+				}
+			}
+		}
+		if (now() - lastReportTime >= 10.0) {
+			TraceEvent("AuditStorageAndWaitProgress")
+			    .detail("Context", options.traceContext)
+			    .detail("AuditType", type)
+			    .detail("AuditID", auditId)
+			    .detail("AuditFound", found)
+			    .detail("ElapsedTime", now() - startTime);
+			lastReportTime = now();
+		}
+	}
+}
+
 Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                AuditType type,
                                UID auditId,
@@ -3450,8 +3548,6 @@ Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
 			} else if (taskState.getPhase() == BulkDumpPhase::Submitted) {
 				progress.runningTasks++;
 			}
-
-			progress.totalBytes += taskState.getManifest().getTotalBytes();
 		}
 		readBegin = rangeResult.back().key;
 	}

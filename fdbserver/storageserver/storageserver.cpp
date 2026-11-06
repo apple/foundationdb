@@ -45,7 +45,6 @@
 #include "fdbserver/checkpoint/BulkSstFiles.h"
 #include "fdbserver/checkpoint/Checkpoint.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
-#include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/kvstore/FDBExecHelper.h"
@@ -107,6 +106,14 @@
 #include "flow/CoroUtils.h"
 #include "flow/TDMetric.h"
 #include "flow/genericactors.h"
+
+#ifdef WITH_ROCKSDB
+#include "fdbserver/core/FDBRocksDBVersion.h"
+#else
+#define FDB_ROCKSDB_MAJOR 0
+#define FDB_ROCKSDB_MINOR 0
+#define FDB_ROCKSDB_PATCH 0
+#endif
 
 #ifndef __INTEL_COMPILER
 #pragma region Data Structures
@@ -4466,6 +4473,25 @@ static inline Severity auditRestoreVerboseEventSev() {
 	return SERVER_KNOBS->ENABLE_AUDIT_VERBOSE_TRACE ? SevInfo : SevDebug;
 }
 
+// Errors a read of the data an audit compares can fail with because of the timing or load of the read (a lagging
+// replica, an overloaded server or proxy, throttling), not because of the data. Reading again succeeds. Anything
+// else is a finding about the audit and is reported as its result.
+static bool auditReadCanRetry(const Error& e) {
+	switch (e.code()) {
+	case error_code_future_version:
+	case error_code_transaction_too_old:
+	case error_code_server_overloaded:
+	case error_code_process_behind:
+	case error_code_grv_proxy_memory_limit_exceeded:
+	case error_code_tag_throttled:
+	case error_code_batch_transaction_throttled:
+	case error_code_transaction_throttled_hot_shard:
+		return true;
+	default:
+		return false;
+	}
+}
+
 // Adapt the byte budget of one validate_restore comparison batch (AIMD). See
 // AUDIT_RESTORE_BATCH_BYTE_LIMIT for why a fixed size does not work.
 //
@@ -4704,8 +4730,10 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 		errors.push_back(error);
 	}
 
-	// Check for any remaining restored keys that don't have matching source keys
-	if (errors.empty() && restoredIdx < restoredReply.data.size() && !restoredReply.more) {
+	// Check for any remaining restored keys that don't have matching source keys. As with missing source keys
+	// above, this is only conclusive once the source has no more data either: a source read can come back short
+	// with more=true (the storage reply limit ends it) while the restored read is already complete.
+	if (errors.empty() && restoredIdx < restoredReply.data.size() && !sourceReply.more && !restoredReply.more) {
 		// Extra keys found in restored data - treat as validation error
 		std::string error = format("Extra key(s) in restored data, first extra key: %s",
 		                           Traceable<StringRef>::toString(restoredReply.data[restoredIdx].key).c_str());
@@ -4812,8 +4840,15 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 
 					errors.clear();
 
-					// Use current durable version for reading
-					version = data->version.get();
+					// Read at a fresh cluster version rather than this server's own. A server that lags can have a
+					// version older than data committed before the audit started (e.g. the restore being
+					// validated), which would then look missing.
+					{
+						Transaction versionTr(data->cx);
+						versionTr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+						Version readVersion = co_await versionTr.getReadVersion();
+						version = readVersion;
+					}
 
 					// Fetch both source and restored data
 					std::pair<GetKeyValuesReply, GetKeyValuesReply> replyPair =
@@ -4823,6 +4858,11 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 
 					readBytes = sourceReply.data.expectedSize() + restoredReply.data.expectedSize();
 					validatedBytes += readBytes;
+
+					// The restored copy is only kept stable while the audit runs; afterwards the caller may clear or
+					// rewrite it, which a task that arrives late would report as corruption. Checking after the reads
+					// means any difference found below was read while the audit was still running.
+					co_await checkAuditRunning(data->cx, req.getType(), req.id);
 
 					// FAST-PATH: Detect completely empty sides early and fail immediately.
 					// This prevents iterating through millions of keys when one side is empty.
@@ -4935,9 +4975,7 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 				}
 				// Handle errors outside catch — co_await not allowed in handlers
 				if (nonRetryableError.isValid() && nonRetryableError.code() != error_code_success) {
-					if (nonRetryableError.code() == error_code_future_version ||
-					    nonRetryableError.code() == error_code_transaction_too_old ||
-					    nonRetryableError.code() == error_code_server_overloaded) {
+					if (auditReadCanRetry(nonRetryableError)) {
 						// This batch is retried from the same start key, so undo its partial accounting.
 						numValidatedKeys = batchStartValidatedKeys;
 						validatedBytes = batchStartValidatedBytes;
@@ -5173,9 +5211,7 @@ Future<Void> auditRangeDigestQ(StorageServer* data, AuditStorageRequest req) {
 				}
 				// co_await is not allowed inside a catch handler; handle retry here.
 				if (nonRetryableError.isValid() && nonRetryableError.code() != error_code_success) {
-					if (nonRetryableError.code() == error_code_future_version ||
-					    nonRetryableError.code() == error_code_transaction_too_old ||
-					    nonRetryableError.code() == error_code_server_overloaded) {
+					if (auditReadCanRetry(nonRetryableError)) {
 						// This batch is retried from the same start key, so undo its partial fold.
 						digest = batchStartDigest;
 						kvCount = batchStartKvCount;
@@ -7329,97 +7365,95 @@ Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 	}
 }
 
-// Utility function to process sample files during bulk load
+// Stage one whole sample file so a failed read cannot publish partial samples or notify metrics twice.
+static std::vector<KeyValue> readBulkLoadByteSamples(const std::string& path, KeyRangeRef range) {
+	auto reader = newRocksDBSstFileReader();
+	if (!reader) {
+		throw unsupported_operation();
+	}
+	reader->open(abspath(path));
+	std::vector<KeyValue> samples;
+	while (reader->hasNext()) {
+		KeyValue kv = reader->next();
+		if (range.contains(kv.key)) {
+			if (kv.value.size() != sizeof(int64_t)) {
+				throw file_corrupt();
+			}
+			samples.push_back(std::move(kv));
+		}
+	}
+	return samples;
+}
+
+static Future<Void> rebuildBulkLoadByteSamples(StorageServer* data, KeyRange range, ReadOptions options) {
+	Key begin = range.begin;
+	while (begin < range.end) {
+		Optional<RangeResult> page;
+		try {
+			page = co_await data->storage.readRange(KeyRangeRef(begin, range.end),
+			                                        SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE,
+			                                        SERVER_KNOBS->FETCH_BLOCK_BYTES,
+			                                        options);
+		} catch (Error& e) {
+			if (e.code() != error_code_transaction_too_old && e.code() != error_code_server_overloaded) {
+				throw;
+			}
+		}
+		if (!page.present()) {
+			co_await delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			continue;
+		}
+		for (const auto& kv : page.get()) {
+			data->byteSampleApplySet(kv, invalidVersion);
+		}
+		if (!page.get().more) {
+			break;
+		}
+		begin = page.get().getReadThrough();
+	}
+	co_return;
+}
+
 static Future<Void> processSampleFiles(StorageServer* data,
                                        KeyRange maxRange,
-                                       std::string bulkLoadLocalDir,
-                                       std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
-	auto iter = localFileSets->begin();
-	auto end = localFileSets->end();
-	std::vector<KeyValue> rawSamples;
-	std::unique_ptr<IRocksDBSstFileReader> reader;
-
-	while (iter != end) {
-		const auto& [range, fileSet] = *iter;
-		if (fileSet.hasByteSampleFile()) {
-			std::string sampleFilePath = fileSet.getBytesSampleFileFullPath();
-			int retryCount = 0;
-			int maxRetries = 10; // Consider making this a KNOB
-			Error lastError;
-
-			// This outer loop retries reading the entire file if errors occur during opening/reading
-			while (retryCount < maxRetries) {
-				{
-					Error err;
-					try {
-						// Read all samples from the SST file into memory first
-						// Store as KeyValueRef to keep the original encoded size value
-						rawSamples.clear();
-						reader = newRocksDBSstFileReader();
-						if (reader == nullptr) {
-							TraceEvent(SevWarnAlways, "StorageServerNoSstReader", data->thisServerID)
-							    .detail("Reason", "Binary was built without RocksDB and cannot read SST files")
-							    .detail("File", sampleFilePath);
-							throw unsupported_operation();
-						}
-						reader->open(abspath(sampleFilePath));
-
-						TraceEvent(SevInfo, "StorageServerProcessingSampleFile", data->thisServerID)
-						    .detail("File", sampleFilePath);
-
-						// Read all samples
-						while (reader->hasNext()) {
-							// Copy the next kv to rawSamples.
-							rawSamples.push_back(reader->next());
-						}
-
-						// Now apply all read samples to the in-memory set and update metrics
-						for (const auto& kv : rawSamples) {
-							const KeyRef& key = kv.key;
-							if (!maxRange.contains(key)) {
-								// Skip keys outside the maxRange
-								continue;
-							}
-							int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
-							data->metrics.byteSample.sample.insert(key, size);
-							data->metrics.notifyBytes(key, size);
-							data->addMutationToMutationLogOrStorage(
-							    invalidVersion,
-							    MutationRef(
-							        MutationRef::SetValue, key.withPrefix(persistByteSampleKeys.begin), kv.value));
-						}
-
-						// If we get here, processing was successful for this file
-						break; // Exit the retry loop
-
-					} catch (Error& e) {
-						err = e;
-					}
-					lastError = err;
-					retryCount++;
-					TraceEvent(retryCount < maxRetries ? SevWarn : SevError,
-					           "StorageServerSampleFileProcessingError",
-					           data->thisServerID)
-					    .error(err) // Log the actual error 'e'
-					    .detail("File", sampleFilePath)
-					    // REMOVED: .detail("Key", kv.key).detail("Value", kv.value) as 'kv' is out of scope
-					    .detail("RetryCount", retryCount)
-					    .detail("MaxRetries", maxRetries);
-
-					// No need to check/close reader here, unique_ptr handles it.
-
-					if (retryCount < maxRetries) {
-						// Wait before retrying, with exponential backoff
-						co_await delay(0.1 * pow(2, retryCount)); // Consider adding jitter
-						continue; // Retry reading the file
-					}
-					// On final retry failure, throw the last error encountered
-					throw lastError;
-				}
-			} // end retry loop
+                                       std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets,
+                                       ReadOptions options) {
+	for (const auto& [range, fileSet] : *localFileSets) {
+		if (!fileSet.hasByteSampleFile()) {
+			continue;
 		}
-		++iter;
-	} // end file iteration loop
+
+		KeyRange sampleRange = range & maxRange;
+		const std::string path = fileSet.getBytesSampleFileFullPath();
+		Optional<std::vector<KeyValue>> samples;
+		try {
+			samples = readBulkLoadByteSamples(path, sampleRange);
+		} catch (Error& e) {
+			// Only recover errors reading the external input. Errors applying samples to local storage
+			// must still reach the storage server's error handler.
+			if (e.code() != error_code_file_corrupt && e.code() != error_code_io_error &&
+			    e.code() != error_code_transaction_too_old && e.code() != error_code_operation_failed) {
+				throw;
+			}
+			TraceEvent(SevWarnAlways, "BulkLoadRebuildByteSample", data->thisServerID)
+			    .error(e)
+			    .detail("File", path)
+			    .detail("Range", sampleRange);
+		}
+
+		if (!samples.present()) {
+			co_await rebuildBulkLoadByteSamples(data, sampleRange, options);
+			continue;
+		}
+		for (const auto& kv : samples.get()) {
+			int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
+			data->metrics.byteSample.sample.insert(kv.key, size);
+			data->metrics.notifyBytes(kv.key, size);
+			data->addMutationToMutationLogOrStorage(
+			    invalidVersion,
+			    MutationRef(MutationRef::SetValue, kv.key.withPrefix(persistByteSampleKeys.begin), kv.value));
+		}
+	}
 }
 
 // Filter the whole task's file set down to what this fetchKeys owns. The set spans the task, while `keys` is a
@@ -7908,7 +7942,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					co_await data->storage.getKeyValueStore()->compactRange(keys);
 
 					// Process sample files after SST ingestion
-					co_await processSampleFiles(data, keys, bulkLoadLocalDir, ownedBulkLoadFileSets);
+					co_await processSampleFiles(data, keys, ownedBulkLoadFileSets, readOptions);
 
 					// NOTICE: We break the 'fetchKeys' loop here if we successfully ingest the SST files.
 					// EARLY EXIT FROM 'fetchKeys' LOOP!!!
@@ -9236,7 +9270,6 @@ ShardInfo* ShardInfo::newShard(StorageServer* data, const StorageServerShard& sh
 }
 
 void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
-	ASSERT((void*)this);
 	ASSERT(keys.contains(mutation.param1));
 	if (adding) {
 		adding->addMutation(version, fromFetch, mutation);
@@ -12233,6 +12266,7 @@ Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
 	    self->thisServerID.toString() + "/StorageMetrics",
 	    [self = self](TraceEvent& te) {
 		    te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
+		    // if not WITH_ROCKSDB: "0.0.0"
 		    te.detail("RocksDBVersion", format("%d.%d.%d", FDB_ROCKSDB_MAJOR, FDB_ROCKSDB_MINOR, FDB_ROCKSDB_PATCH));
 		    te.detail("Tag", self->tag.toString());
 		    std::vector<int> rpr = self->readPriorityRanks;

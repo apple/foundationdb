@@ -173,6 +173,30 @@ Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
                          AuditType type,
                          KeyValueStoreType engineType,
                          double timeoutSeconds);
+struct AuditWaitOptions {
+	double pollIntervalSeconds = 2.0;
+	// Bound on the time from the audit being scheduled to it finishing. Triggering the audit is bounded separately
+	// by maxScheduleAttempts and roundTripTimeoutSeconds.
+	double maxWaitSeconds = 300.0;
+	// Triggering the audit is retried this many times when the cluster controller is changing or the data
+	// distributor cannot start it.
+	int maxScheduleAttempts = 5;
+	// Bound on one round trip (triggering the audit, reading audit state) so a recovering cluster is noticed.
+	double roundTripTimeoutSeconds = 60.0;
+	// Names the caller in the traces auditStorageAndWait emits, so concurrent waits can be told apart.
+	std::string traceContext;
+};
+
+// Start an audit on range of the specific type and wait for it to finish. Returns the final state, whose phase is
+// Complete, Error (the audit reported a problem) or Failed (the data distributor gave up without a verdict); the
+// caller decides what to do with the latter two. Throws timed_out if the audit cannot be triggered within
+// options.maxScheduleAttempts attempts, or does not finish within options.maxWaitSeconds of being scheduled.
+Future<AuditStorageState> auditStorageAndWait(Database cx,
+                                              KeyRange range,
+                                              AuditType type,
+                                              KeyValueStoreType engineType = KeyValueStoreType::END,
+                                              AuditWaitOptions options = AuditWaitOptions());
+
 // Cancel an audit given type and id
 Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                AuditType type,
@@ -273,7 +297,8 @@ struct BulkLoadStalledTask {
 	    restartCount(restartCount), lastError(lastError) {}
 };
 
-// Aggregated progress for a BulkDump job
+// Aggregated progress for a BulkDump job. There is no byte total: a range's size is known only once its dump task
+// completes and records a manifest.
 struct BulkDumpProgress {
 	UID jobId;
 	KeyRange jobRange;
@@ -281,27 +306,18 @@ struct BulkDumpProgress {
 	int completeTasks;
 	int runningTasks;
 	int errorTasks;
-	int64_t totalBytes;
 	int64_t completedBytes;
 	double elapsedSeconds;
 	double startTime; // For computing current throughput
 	std::vector<BulkLoadStalledTask> stalledTasks;
 
 	BulkDumpProgress()
-	  : totalTasks(0), completeTasks(0), runningTasks(0), errorTasks(0), totalBytes(0), completedBytes(0),
-	    elapsedSeconds(0), startTime(0) {}
+	  : totalTasks(0), completeTasks(0), runningTasks(0), errorTasks(0), completedBytes(0), elapsedSeconds(0),
+	    startTime(0) {}
 
 	double progressPercent() const { return totalTasks > 0 ? 100.0 * completeTasks / totalTasks : 0; }
 
 	double avgBytesPerSecond() const { return elapsedSeconds > 0 ? completedBytes / elapsedSeconds : 0; }
-
-	Optional<double> etaSeconds() const {
-		double rate = avgBytesPerSecond();
-		if (rate > 0 && completedBytes < totalBytes) {
-			return (totalBytes - completedBytes) / rate;
-		}
-		return {};
-	}
 };
 
 // Aggregated progress for a BulkLoad job

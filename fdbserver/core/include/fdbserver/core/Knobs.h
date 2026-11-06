@@ -484,6 +484,9 @@ public:
 	bool DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM; // Set to disable audit storage replica check in the
 	                                                       // simulation.
 	int DD_BULKDUMP_PARALLELISM; // the max number of concurrent bulk dump tasks in DD
+	bool DD_BULKDUMP_USE_REMOTE_REGION; // dump from the remote region instead of the primary. The dumping server
+	                                    // uploads the files, so its region must reach the destination. Ignored
+	                                    // with usable_regions == 1, where the remote holds no storage servers.
 	int SS_SERVE_BULKDUMP_PARALLELISM; // the number of bulk dump tasks that can concurrently happen at a SS
 	int64_t SS_BULKDUMP_BATCH_BYTES; // the max bytes when SS creates a batch to dump
 	int SS_BULKLOAD_GETRANGE_BATCH_SIZE; // the max number of keys to scan before do context switch
@@ -819,6 +822,9 @@ public:
 	int BACKUP_FILE_BLOCK_BYTES;
 	int64_t BACKUP_WORKER_LOCK_BYTES;
 	double BACKUP_UPLOAD_DELAY;
+	int BACKUP_WORKER_UPLOAD_RETRY_LIMIT;
+	double BACKUP_WORKER_UPLOAD_RETRY_DELAY;
+	double BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY;
 
 	// Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;
@@ -1039,6 +1045,7 @@ public:
 	int64_t TLOG_SPILL_THRESHOLD;
 	int64_t TLOG_HARD_LIMIT_BYTES;
 	double TLOG_MIN_AVAILABLE_SPACE_RATIO;
+	double TLOG_DISK_SPACE_CHECK_INTERVAL;
 	int64_t TLOG_RECOVER_MEMORY_LIMIT;
 	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 

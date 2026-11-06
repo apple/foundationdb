@@ -24,6 +24,7 @@
 #include "flow/IRandom.h"
 #include "flow/Net2Packet.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/Knobs.h"
 #include "flow/CodeProbe.h"
 #include "md5/md5.h"
@@ -126,7 +127,7 @@ std::string ResponseBase<T>::getCodeDescription() {
 	}
 }
 
-std::string computeMD5Sum(std::string content) {
+std::string computeMD5Sum(std::string_view content) {
 	MD5_CTX sum;
 	::MD5_Init(&sum);
 	::MD5_Update(&sum, content.data(), content.size());
@@ -301,26 +302,11 @@ Future<Void> read_http_response_headers(Reference<IConnection> conn, Headers* he
 			co_return;
 		}
 
-		int nameEnd = -1, valueStart = -1, valueEnd = -1;
-		int len = -1;
-
-		std::string name, value;
-
-		// Read header of the form "Name: Value\n"
-		// Note that multi line header values are not supported here.
-		// Format string breaks down as follows:
-		//   %*[^:]%n      Some characters other than ':' which are discarded, save the end position
-		//   :%*[ \t]%n    A colon followed by 0 or more spaces or tabs only, save the end position
-		//   %*[^\r]%n     Some characters other than \r which are discarded, save the end position
-		//   %*1[\r]       Exactly one \r
-		//   %*1[\n]       Exactly one \n
-		//   %n            Save final end position
-		if (sscanf(buf->c_str() + *pos, "%*[^:]%n:%*[ \t]%n", &nameEnd, &valueStart) >= 0 && valueStart > 0) {
-			// found a header name
-			name = std::string(buf->substr(*pos, nameEnd));
-			*pos += valueStart;
-		} else {
-			// Malformed header line (at least according to this simple parsing)
+		std::string_view line(buf->data() + *pos, lineLen);
+		const auto colon = line.find(':');
+		if (colon == std::string_view::npos || colon == 0 ||
+		    line.substr(0, colon).find_first_of(" \t") != std::string_view::npos ||
+		    line.find_first_of("\r\n\0", 0, 3) != std::string_view::npos) {
 			TraceEvent(SevError, "HTTPReadHeadersMalformed")
 			    .setMaxFieldLength(495)
 			    .detail("Buffer", *buf)
@@ -328,24 +314,28 @@ Future<Void> read_http_response_headers(Reference<IConnection> conn, Headers* he
 			throw http_bad_response();
 		}
 
-		if (sscanf(buf->c_str() + *pos, "%*[^\r]%n%*1[\r]%*1[\n]%n", &valueEnd, &len) >= 0 && len > 0) {
-			// found a header value
-			value = std::string(buf->substr(*pos, valueEnd));
-			*pos += len;
-		} else if (sscanf(buf->c_str() + *pos, "%*1[\r]%*1[\n]%n", &len) >= 0 && len > 0) {
-			// empty header value
-			*pos += len;
+		auto value = line.substr(colon + 1);
+		const auto first = value.find_first_not_of(" \t");
+		if (first == std::string_view::npos) {
+			value = {};
 		} else {
-			// Malformed header line (at least according to this simple parsing)
-			TraceEvent(SevError, "HTTPReadHeadersMalformed")
-			    .setMaxFieldLength(495)
-			    .detail("Buffer", *buf)
-			    .detail("Pos", *pos);
-			throw http_bad_response();
+			value = value.substr(first, value.find_last_not_of(" \t") - first + 1);
 		}
-
-		(*headers)[name] = value;
+		(*headers)[std::string(line.substr(0, colon))] = std::string(value);
+		*pos += lineLen + 2;
 	}
+}
+
+TEST_CASE("/fdbrpc/HTTP/HeaderWhitespace") {
+	std::string buffer = "Content-Length:0\r\nEmpty:\r\nWhitespace:\t  \r\nPadded:  one: two\t\r\n\r\nbody";
+	Headers headers;
+	size_t pos = 0;
+	co_await read_http_response_headers({}, &headers, &buffer, &pos);
+	ASSERT_EQ(headers.at("Content-Length"), "0");
+	ASSERT(headers.at("Empty").empty());
+	ASSERT(headers.at("Whitespace").empty());
+	ASSERT_EQ(headers.at("Padded"), "one: two");
+	ASSERT_EQ(buffer.substr(pos), "body");
 }
 
 // buf has the http header line in it at *pos offset.
@@ -912,7 +902,8 @@ Future<Reference<IConnection>> proxyConnectImpl(std::string remoteHost,
 	Reference<IConnection> connection = co_await INetworkConnections::net()->connect(proxyHost, proxyService);
 	co_await sendProxyConnectRequest(connection, remoteHost, remoteService);
 	boost::asio::ip::tcp::socket socket = std::move(connection->getSocket());
-	Reference<IConnection> remoteConnection = co_await INetworkConnections::net()->connect(remoteEndpoint, &socket);
+	Reference<IConnection> remoteConnection =
+	    co_await INetworkConnections::net()->connectExternalWithHostname(remoteEndpoint, remoteHost, &socket);
 	co_return remoteConnection;
 }
 

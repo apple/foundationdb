@@ -57,8 +57,11 @@ struct SSBulkDumpTask {
 
 // Used by DD to generate a SSBulkDumpTask and send to SS
 // SS dumps the data based on the configuration of the SSBulkDumpTask
+// The target server is drawn from targetDcId, which must hold a replica of the range.
+// An empty targetDcId selects any DC, for clusters with no region configuration.
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
-                                 const BulkDumpState& bulkDumpState);
+                                 const BulkDumpState& bulkDumpState,
+                                 const std::string& targetDcId);
 
 std::string generateRandomBulkDumpDataFileName(Version version);
 
