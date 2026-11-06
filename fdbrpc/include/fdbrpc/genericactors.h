@@ -406,14 +406,32 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 	}
 }
 
+// Withdraws a reliable packet from retransmission exactly once: on cancel(), or in the destructor.
+class ReliablePacketCanceler : NonCopyable {
+public:
+	explicit ReliablePacketCanceler(ReliablePacket* send) : send(send) {}
+	~ReliablePacketCanceler() { cancel(); }
+	void cancel() {
+		if (send) {
+			FlowTransport::transport().cancelReliable(std::exchange(send, nullptr));
+		}
+	}
+
+private:
+	ReliablePacket* send;
+};
+
 template <class T>
-Future<T> sendCanceler(ReplyPromise<T> reply, ReliablePacket* send, Endpoint endpoint, ExplicitVoid = {}) {
-	bool didCancelReliable = false;
+Future<T> sendCanceler(ReplyPromise<T> reply,
+                       ReliablePacket* send,
+                       Endpoint endpoint,
+                       ExplicitVoid = {},
+                       NoThrowOnCancel = {}) {
+	ReliablePacketCanceler canceler(send);
 	try {
 		while (true) {
 			if (IFailureMonitor::failureMonitor().permanentlyFailed(endpoint)) {
-				FlowTransport::transport().cancelReliable(send);
-				didCancelReliable = true;
+				canceler.cancel();
 				if (IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)) {
 					throw unauthorized_attempt();
 				} else {
@@ -423,16 +441,12 @@ Future<T> sendCanceler(ReplyPromise<T> reply, ReliablePacket* send, Endpoint end
 			auto res = co_await race(reply.getFuture(), IFailureMonitor::failureMonitor().onStateChanged(endpoint));
 			if (res.index() == 0) {
 				T t = std::get<0>(std::move(res));
-
-				FlowTransport::transport().cancelReliable(send);
-				didCancelReliable = true;
+				canceler.cancel();
 				co_return t;
 			}
 		}
 	} catch (Error& e) {
-		if (!didCancelReliable) {
-			FlowTransport::transport().cancelReliable(send);
-		}
+		canceler.cancel();
 		if (e.code() == error_code_broken_promise) {
 			IFailureMonitor::failureMonitor().endpointNotFound(endpoint);
 		}
