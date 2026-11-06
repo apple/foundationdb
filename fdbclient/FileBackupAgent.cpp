@@ -8718,7 +8718,7 @@ public:
 								                     bdProgress.completeTasks,
 								                     bdProgress.totalTasks,
 								                     bdProgress.progressPercent());
-								// Not {}: that converts to int64_t and selects the overload that prints a total.
+								// Empty Optional, not {}: {} picks the int64_t overload and prints a "/ 0" total.
 								statusText +=
 								    format(" Bytes: %s\n",
 								           formatBytesProgress(bdProgress.completedBytes, Optional<int64_t>()).c_str());
