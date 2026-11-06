@@ -231,6 +231,39 @@ TEST_CASE("/flow/IThreadPool/ImplicitStop") {
 	co_await future;
 }
 
+// Under some failure scenarios, a worker thread in IThreadPool can call stop() on
+// the thread pool. Previously, this deleted the thread object while that same
+// thread was still running inside it, causing a crash. Now we detect the reentrant
+// case and let the thread clean itself up instead - see the comment in
+// ThreadPool::stop() for more details. The code below acts as a regression test
+// for this behavior.
+struct ReentrantStopTask final : public ThreadAction {
+	Reference<IThreadPool> pool;
+	ThreadReturnPromise<Void> promise;
+
+	explicit ReentrantStopTask(Reference<IThreadPool> pool) : pool(pool) {}
+
+	void operator()(IThreadPoolReceiver*) final {
+		pool->stop();
+		promise.send(Void());
+		delete this;
+	}
+
+	void cancel() final {}
+
+	double getTimeEstimate() const final { return 0; }
+};
+
+TEST_CASE("/flow/IThreadPool/ReentrantStop") {
+	noUnseed = true;
+
+	Reference<IThreadPool> pool = initTestPool();
+	auto task = new ReentrantStopTask(pool);
+	auto future = task->promise.getFuture();
+	pool->post(task);
+	co_await future;
+}
+
 #else
 void forceLinkIThreadPoolTests() {}
 #endif
