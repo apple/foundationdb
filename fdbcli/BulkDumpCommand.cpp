@@ -42,6 +42,12 @@ static const std::string BULK_DUMP_HELP_MESSAGE =
     std::string(BULK_DUMP_CANCEL_USAGE);
 
 Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
+	// A bare `bulkdump` reaches here with only the command itself, and every branch below reads tokens[1].
+	if (tokens.size() < 2) {
+		printUsage(tokens[0]);
+		printLongDesc(tokens[0]);
+		co_return UID();
+	}
 	BulkDumpState bulkDumpJob;
 	if (tokencmp(tokens[1], "mode")) {
 		if (tokens.size() != 2 && tokens.size() != 3) {
@@ -162,9 +168,9 @@ Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 			             progress.errorTasks > 0 ? fmt::format(", {} error", progress.errorTasks) : "");
 		}
 
-		fmt::println(" Bytes: {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
+		fmt::println(" Bytes: {}", formatBytesProgress(progress.completedBytes, {}));
 
-		printProgressMetrics(progress.avgBytesPerSecond(), progress.etaSeconds(), progress.elapsedSeconds);
+		printProgressMetrics(progress.avgBytesPerSecond(), {}, progress.elapsedSeconds);
 
 		if (progress.errorTasks > 0) {
 			fmt::println("");

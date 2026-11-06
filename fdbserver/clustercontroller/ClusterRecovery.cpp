@@ -531,6 +531,10 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		bool allLogs =
 		    newState.tLogs.size() ==
 		    configuration.expectedLogSets(!self->primaryDcId.empty() ? self->primaryDcId[0] : Optional<Key>());
+		// Anti-quorum permits STORAGE_RECOVERED before remote catch-up, so a lost region can be removed.
+		// Until catch-up or reconfiguration makes old history unnecessary, retain it in coordinator state and
+		// defer FULLY_RECOVERED and old-role retirement; initialization alone does not prove durable catch-up.
+		bool storageRecovered = newState.oldTLogData.empty() || self->logSystem->storageRecovered();
 		bool finalUpdate = newState.oldTLogData.empty() && allLogs;
 		TraceEvent("TrackTLogRecovery")
 		    .detail("FinalUpdate", finalUpdate)
@@ -540,8 +544,6 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		            configuration.expectedLogSets(!self->primaryDcId.empty() ? self->primaryDcId[0] : Optional<Key>()))
 		    .detail("RecoveryCount", newState.recoveryCount);
 		co_await self->cstate.write(newState, finalUpdate);
-		// Keep oldLogData in memory even after the coordinated state drops old generations. ServerDBInfo uses
-		// it to keep old-generation TLogs serving in case this master has to run recovery again.
 		if (self->cstateUpdated.canBeSet()) {
 			self->cstateUpdated.send(Void());
 		}
@@ -554,6 +556,8 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		}
 
 		if (finalUpdate) {
+			oldLogSystems->get()->stopRejoins();
+			self->logSystem->retireOldLogRoles(newState);
 			self->recoveryState = RecoveryState::FULLY_RECOVERED;
 			TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
 			           self->dbgid)
@@ -565,7 +569,7 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			           self->dbgid)
 			    .detail("ActiveGenerations", 1)
 			    .trackLatest(self->clusterRecoveryGenerationsEventHolder->trackingKey);
-		} else if (newState.oldTLogData.empty() && self->recoveryState < RecoveryState::STORAGE_RECOVERED) {
+		} else if (storageRecovered && self->recoveryState < RecoveryState::STORAGE_RECOVERED) {
 			self->recoveryState = RecoveryState::STORAGE_RECOVERED;
 			TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
 			           self->dbgid)
@@ -584,7 +588,6 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		self->registrationTrigger.trigger();
 
 		if (finalUpdate) {
-			oldLogSystems->get()->stopRejoins();
 			rejoinRequests = rejoinRequestHandler(self);
 			co_return;
 		}
@@ -1453,7 +1456,7 @@ Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> self,
 
 	RangeResult rawCdcHistoryTags = co_await self->txnStateStore->readRange(cdcTagHistoryKeys);
 	for (auto& kv : rawCdcHistoryTags) {
-		const CDCTagHistoryEntry tagHistory = decodeCDCTagHistoryKey(kv.key);
+		const CDCTagHistoryEntry tagHistory = decodeCDCTagHistoryEntry(kv.key, kv.value);
 		if (activeCdcStreams.contains(tagHistory.streamId)) {
 			self->allTags.push_back(tagHistory.tag);
 		}
@@ -1897,7 +1900,11 @@ Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	} else {
 		// Recruit and seed initial shard servers
 		// This transaction must be the very first one in the database (version 1)
-		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
+		seedShardServers(
+		    recoveryCommitRequest.arena,
+		    tr,
+		    seedServers,
+		    self->configuration.shardMetadataFormatIsEncoded().orDefault(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA));
 	}
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
 	// this as early as possible in the recovery transaction but see above comments as to why it can't be absolutely

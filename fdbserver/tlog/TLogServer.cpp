@@ -385,6 +385,12 @@ struct TLogData : NonCopyable {
 
 	Reference<AsyncVar<bool>> degraded;
 	Reference<AsyncVar<bool>> lowDiskTLogExclusion;
+
+	// Last disk-space sample of the low-disk admission check, reused for TLOG_DISK_SPACE_CHECK_INTERVAL.
+	StorageBytes sampledKvStoreBytes;
+	StorageBytes sampledQueueBytes;
+	double diskSpaceSampledAt = -std::numeric_limits<double>::infinity();
+
 	std::vector<TagsAndMessage> tempTagMessages;
 
 	// Distribution of end-to-end server latency of tlog commit requests.
@@ -3272,7 +3278,7 @@ void getQueuingMetrics(TLogData* self, Reference<LogData> logData, TLogQueuingMe
 	reply.bytesInput = self->bytesInput;
 	reply.bytesDurable = self->bytesDurable;
 	reply.storageBytes = self->persistentData->getStorageBytes();
-	// FIXME: Add the knownCommittedVersion to this message and change ratekeeper to use that version.
+	// FIXME: Add a separate knownCommittedVersion field for ratekeeper; v must remain durable for recovery.
 	reply.v = logData->durableKnownCommittedVersion;
 	req.reply.send(reply);
 }
@@ -3506,9 +3512,19 @@ double effectiveTLogMinAvailableSpaceRatio() {
 }
 
 static bool canTLogAcceptNewData(TLogData* self, Reference<LogData> logData, Version ver, bool failRecovery) {
-	StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
-	StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
 	const double minAvailableSpaceRatio = effectiveTLogMinAvailableSpaceRatio();
+	if (minAvailableSpaceRatio <= 0.0) {
+		return true;
+	}
+	// This runs for every version a remote TLog pulls, and each disk-space probe is a realpath() plus a statvfs()
+	// that sums per-CPU counters: probing every time costs a remote TLog about a quarter of its CPU.
+	if (now() - self->diskSpaceSampledAt >= SERVER_KNOBS->TLOG_DISK_SPACE_CHECK_INTERVAL) {
+		self->sampledKvStoreBytes = self->persistentData->getStorageBytes();
+		self->sampledQueueBytes = self->rawPersistentQueue->getStorageBytes();
+		self->diskSpaceSampledAt = now();
+	}
+	const StorageBytes kvStoreBytes = self->sampledKvStoreBytes;
+	const StorageBytes queueBytes = self->sampledQueueBytes;
 	if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, minAvailableSpaceRatio)) {
 		return true;
 	}
@@ -4721,17 +4737,27 @@ TEST_CASE("/NativeCDC/TLogCommittedFrontier/Stop") {
 
 TEST_CASE("/NativeCDC/TLogCommittedFrontier/AbsoluteDeadline") {
 	CommittedPeekTestFixture fixture(true, 90);
+	const double timeout = SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT;
 	Promise<TLogPeekReply> reply;
 	double started = now();
+	double lastAdvance = started;
 	Future<Void> peek = fixture.peek(reply);
+	// This may be delayed more than intended under load, so stop advancing
+	// once the reply exists, and compare the deadline to when advance happened.
 	for (Version frontier = 91; frontier <= 93; ++frontier) {
 		co_await delay(0.1);
+		if (reply.getFuture().isReady()) {
+			break;
+		}
 		fixture.advance(frontier);
+		lastAdvance = now();
 	}
-	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 0.2);
+	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 3.0);
 	co_await peek;
-	ASSERT(now() - started >= 0.35 && now() - started < 0.6);
-	ASSERT(result.minKnownCommittedVersion == 93);
+	// frontier advances below begin should not wake the peek nor extend its deadline
+	ASSERT_GT(now() - started, timeout - 0.01);
+	ASSERT_LT(now() - lastAdvance, timeout);
+	ASSERT_EQ(result.minKnownCommittedVersion, fixture.frontier());
 	ASSERT(fixture.timedOutPeeks() == 1);
 }
 

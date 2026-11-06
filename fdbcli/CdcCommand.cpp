@@ -62,6 +62,16 @@ json_spirit::mObject statusJson(const NativeCdcStatus& status) {
 		json_spirit::mObject entry;
 		entry["stream_id"] = std::to_string(stream.info.streamId);
 		entry["name"] = stream.info.name.printable();
+		if (stream.orderedParent.present()) {
+			entry["ordered_parent_stream_id"] = std::to_string(stream.orderedParent.get());
+		}
+		if (!stream.partitions.empty()) {
+			json_spirit::mArray partitions;
+			for (const CDCStreamId partition : stream.partitions) {
+				partitions.push_back(std::to_string(partition));
+			}
+			entry["partitions"] = partitions;
+		}
 		json_spirit::mArray ranges;
 		for (const auto& range : stream.info.ranges) {
 			json_spirit::mObject keys;
@@ -158,25 +168,52 @@ void printCdcStatus(const NativeCdcStatus& status) {
 	fmt::println("Durable retention metadata at version {} ({}):",
 	             versionText(status.readVersion),
 	             status.metadataComplete ? "complete" : "INCOMPLETE");
-	fmt::println(
-	    "  {} active streams; {} tags pending retired cleanup", status.streams.size(), pendingRetiredTags(status));
+	const auto partitionCount = std::count_if(status.streams.begin(), status.streams.end(), [](const auto& stream) {
+		return stream.orderedParent.present();
+	});
+	fmt::println("  {} named streams; {} ordered partitions; {} tags pending retired cleanup",
+	             status.streams.size() - partitionCount,
+	             partitionCount,
+	             pendingRetiredTags(status));
 	if (!status.metadataComplete) {
 		fmt::println("  WARNING: Incomplete metadata; drain completion and retention blockers cannot be certified.");
 	} else if (status.streams.empty() && pendingRetiredTags(status) == 0) {
 		fmt::println("  Retention metadata is drained. Physical TLog disk reclamation is not certified.");
 	}
 	for (const auto& stream : status.streams) {
-		fmt::println("  Stream {}: name=\"{}\"", stream.info.streamId, stream.info.name.printable());
+		if (stream.orderedParent.present()) {
+			fmt::println("  Partition {}: ordered parent={}, name=\"{}\"",
+			             stream.info.streamId,
+			             stream.orderedParent.get(),
+			             stream.info.name.printable());
+			fmt::println("    Removal uses parent stream ID {}.", stream.orderedParent.get());
+		} else if (!stream.partitions.empty()) {
+			fmt::println("  Ordered stream {}: name=\"{}\"", stream.info.streamId, stream.info.name.printable());
+			fmt::print("    partitions:");
+			for (const CDCStreamId partition : stream.partitions) {
+				fmt::print(" {}", partition);
+			}
+			fmt::println("");
+		} else {
+			fmt::println("  Stream {}: name=\"{}\"", stream.info.streamId, stream.info.name.printable());
+		}
 		fmt::print("    ranges:");
 		for (const auto& range : stream.info.ranges) {
 			fmt::print(" {}", range.toString());
 		}
 		fmt::println("");
-		fmt::println("    minimum version={}, acknowledgement lag={} versions, owner={} ({})",
-		             versionText(stream.info.minVersion),
-		             versionText(acknowledgementLag(status, stream)),
-		             stream.owner.present() ? stream.owner.get().toString() : "unknown",
-		             stream.ownerPublished ? "published" : "not published");
+		if (!stream.partitions.empty()) {
+			fmt::println("    minimum version={}, acknowledgement lag={} versions, partition owners={}",
+			             versionText(stream.info.minVersion),
+			             versionText(acknowledgementLag(status, stream)),
+			             stream.ownerPublished ? "all published" : "not all published");
+		} else {
+			fmt::println("    minimum version={}, acknowledgement lag={} versions, owner={} ({})",
+			             versionText(stream.info.minVersion),
+			             versionText(acknowledgementLag(status, stream)),
+			             stream.owner.present() ? stream.owner.get().toString() : "unknown",
+			             stream.ownerPublished ? "published" : "not published");
+		}
 		fmt::print("    tags:");
 		for (const auto& tag : stream.tags) {
 			fmt::print(" {}", tag.toString());
@@ -233,6 +270,10 @@ void printCdcStatus(const NativeCdcStatus& status) {
 			             stream.tooOld,
 			             stream.bufferLimitExceeded);
 		}
+	}
+	if (partitionCount > 0) {
+		fmt::println(
+		    "Ordered parents summarize their partitions. Proxy samples and tag blockers use physical stream IDs.");
 	}
 	fmt::println("Version distances are not elapsed time. Proxy memory is not retained TLog disk.");
 	fmt::println("Allowed pops and completed pop requests do not certify reclaimed disk; shared tags retain history");

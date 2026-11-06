@@ -139,6 +139,8 @@ CharsRef toCharsRef(const std::optional<StringLike<Char>>& s) noexcept {
 
 [[maybe_unused]] constexpr const bool OverflowCheck = false;
 
+// clang-tidy does not recognize size() through intSize(); call-site suppressions mark
+// byte buffers whose lengths are passed explicitly to the C API or KeySelector.
 inline int intSize(size_t size) {
 	if constexpr (OverflowCheck) {
 		if (size > static_cast<size_t>(std::numeric_limits<int>::max()))
@@ -278,6 +280,7 @@ inline int maxApiVersion() {
 namespace network {
 
 inline Error setOptionNothrow(FDBNetworkOption option, BytesRef str) noexcept {
+	// NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
 	return Error(native::fdb_network_set_option(option, str.data(), intSize(str.size())));
 }
 
@@ -345,7 +348,7 @@ class Result {
 	friend class Transaction;
 	std::shared_ptr<native::FDBResult> r;
 
-	Result(native::FDBResult* result) {
+	explicit Result(native::FDBResult* result) {
 		if (result)
 			r = std::shared_ptr<native::FDBResult>(result, &native::fdb_result_destroy);
 	}
@@ -377,7 +380,7 @@ protected:
 	friend std::hash<Future>;
 	std::shared_ptr<native::FDBFuture> f;
 
-	Future(native::FDBFuture* future) {
+	explicit(false) Future(native::FDBFuture* future) {
 		if (future)
 			f = std::shared_ptr<native::FDBFuture>(future, &native::fdb_future_destroy);
 	}
@@ -473,7 +476,7 @@ class TypedFuture : public Future {
 	using Future::get;
 	using Future::getNothrow;
 	using Future::then;
-	TypedFuture(const Future& f) noexcept : Future(f) {}
+	explicit TypedFuture(const Future& f) noexcept : Future(f) {}
 
 public:
 	using ContainedType = typename VarTraits::Type;
@@ -500,18 +503,22 @@ struct KeySelector {
 namespace key_select {
 
 inline KeySelector firstGreaterThan(KeyRef key, int offset = 0) {
+	// NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
 	return KeySelector{ FDB_KEYSEL_FIRST_GREATER_THAN(key.data(), intSize(key.size())) + offset };
 }
 
 inline KeySelector firstGreaterOrEqual(KeyRef key, int offset = 0) {
+	// NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
 	return KeySelector{ FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(key.data(), intSize(key.size())) + offset };
 }
 
 inline KeySelector lastLessThan(KeyRef key, int offset = 0) {
+	// NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
 	return KeySelector{ FDB_KEYSEL_LAST_LESS_THAN(key.data(), intSize(key.size())) + offset };
 }
 
 inline KeySelector lastLessOrEqual(KeyRef key, int offset = 0) {
+	// NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
 	return KeySelector{ FDB_KEYSEL_LAST_LESS_OR_EQUAL(key.data(), intSize(key.size())) + offset };
 }
 
@@ -549,6 +556,7 @@ public:
 	}
 
 	Error setOptionNothrow(FDBTransactionOption option, BytesRef str) noexcept {
+		// NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
 		return Error(native::fdb_transaction_set_option(tr.get(), option, str.data(), intSize(str.size())));
 	}
 
@@ -600,6 +608,7 @@ public:
 	}
 
 	TypedFuture<future_var::ValueRef> get(KeyRef key, bool snapshot) {
+		// NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
 		return native::fdb_transaction_get(tr.get(), key.data(), intSize(key.size()), snapshot);
 	}
 
@@ -631,6 +640,7 @@ public:
 	}
 
 	TypedFuture<future_var::None> watch(KeyRef key) {
+		// NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
 		return native::fdb_transaction_watch(tr.get(), key.data(), intSize(key.size()));
 	}
 
@@ -643,26 +653,36 @@ public:
 	void cancel() { return native::fdb_transaction_cancel(tr.get()); }
 
 	void set(KeyRef key, ValueRef value) {
+		// NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
 		native::fdb_transaction_set(tr.get(), key.data(), intSize(key.size()), value.data(), intSize(value.size()));
 	}
 
 	void atomicOp(KeyRef key, ValueRef param, FDBMutationType operationType) {
+		// NOLINTBEGIN(bugprone-suspicious-stringview-data-usage)
 		native::fdb_transaction_atomic_op(
 		    tr.get(), key.data(), intSize(key.size()), param.data(), intSize(param.size()), operationType);
+		// NOLINTEND(bugprone-suspicious-stringview-data-usage)
 	}
 
-	void clear(KeyRef key) { native::fdb_transaction_clear(tr.get(), key.data(), intSize(key.size())); }
+	void clear(KeyRef key) {
+		// NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
+		native::fdb_transaction_clear(tr.get(), key.data(), intSize(key.size()));
+	}
 
 	void clearRange(KeyRef begin, KeyRef end) {
+		// NOLINTBEGIN(bugprone-suspicious-stringview-data-usage)
 		native::fdb_transaction_clear_range(
 		    tr.get(), begin.data(), intSize(begin.size()), end.data(), intSize(end.size()));
+		// NOLINTEND(bugprone-suspicious-stringview-data-usage)
 	}
 
 	void addConflictRange(KeyRef begin, KeyRef end, FDBConflictRangeType rangeType) {
+		// NOLINTBEGIN(bugprone-suspicious-stringview-data-usage)
 		if (auto err = Error(native::fdb_transaction_add_conflict_range(
 		        tr.get(), begin.data(), intSize(begin.size()), end.data(), intSize(end.size()), rangeType))) {
 			throwError("fdb_transaction_add_conflict_range returned error: ", err);
 		}
+		// NOLINTEND(bugprone-suspicious-stringview-data-usage)
 	}
 
 	void addReadConflictRange(KeyRef begin, KeyRef end) { addConflictRange(begin, end, FDB_CONFLICT_RANGE_TYPE_READ); }
@@ -686,7 +706,7 @@ class Database : public IDatabaseOps {
 public:
 	Database(const Database&) noexcept = default;
 	Database& operator=(const Database&) noexcept = default;
-	Database(const std::string& cluster_file_path) : db(nullptr) {
+	explicit Database(const std::string& cluster_file_path) : db(nullptr) {
 		auto db_raw = static_cast<native::FDBDatabase*>(nullptr);
 		if (auto err = Error(native::fdb_create_database(cluster_file_path.c_str(), &db_raw)))
 			throwError(fmt::format("Failed to create database with '{}': ", cluster_file_path), err);
@@ -708,6 +728,7 @@ public:
 	}
 
 	Error setOptionNothrow(FDBDatabaseOption option, BytesRef str) noexcept {
+		// NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
 		return Error(native::fdb_database_set_option(db.get(), option, str.data(), intSize(str.size())));
 	}
 

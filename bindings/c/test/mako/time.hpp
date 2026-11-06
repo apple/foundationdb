@@ -53,8 +53,8 @@ class Stopwatch {
 
 public:
 	Stopwatch() noexcept : p1(), p2() {}
-	Stopwatch(StartAtCtor) noexcept { start(); }
-	Stopwatch(timepoint_t start_time) noexcept : p1(start_time), p2() {}
+	explicit Stopwatch(StartAtCtor) noexcept { start(); }
+	explicit Stopwatch(timepoint_t start_time) noexcept : p1(start_time), p2() {}
 	Stopwatch(const Stopwatch&) noexcept = default;
 	Stopwatch& operator=(const Stopwatch&) noexcept = default;
 	timepoint_t getStart() const noexcept { return p1; }

@@ -1,6 +1,6 @@
 # FoundationDB TestHarness2
 
-This directory contains TestHarness2, a Python-based test harness for FoundationDB (that supersedes [`../TestHarness`](../TestHarness)). It can be used standalone or invoked by the Joshua testing framework via scripts like [`../Joshua/scripts/correctnessTest.sh`](../Joshua/scripts/correctnessTest.sh).
+This directory contains TestHarness2, a Python-based test harness for FoundationDB (that supersedes the original `TestHarness`, now removed). It can be used standalone or invoked by the Joshua testing framework via scripts like [`../Joshua/scripts/correctnessTest.sh`](../Joshua/scripts/correctnessTest.sh).
 
 ## Quick Start
 

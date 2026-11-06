@@ -83,7 +83,6 @@ target_include_directories(s3client PRIVATE
     "${CMAKE_BINARY_DIR}/fdbrpc/include"
     "${CMAKE_SOURCE_DIR}/contrib/md5/include"
     "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
-    "/opt/boost_1_86_0_clang/include"
 )
 
 target_link_libraries(s3client PRIVATE

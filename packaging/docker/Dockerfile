@@ -61,7 +61,7 @@ WORKDIR /
 
 # Check that glibc version in base image >= glibc in go-build image (unless CGO_ENABLED=0)
 
-FROM golang:1.25.12-bookworm AS go-build
+FROM golang:1.27.3-bookworm AS go-build
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
@@ -147,7 +147,8 @@ FROM foundationdb-base AS fdb-kubernetes-monitor
 COPY --from=go-build /fdb-kubernetes-monitor /usr/bin/
 
 # Runtime Configuration Options
-USER fdb
+# fdb user, specified numerically for Kubernetes runAsNonRoot
+USER 4059
 WORKDIR /var/fdb
 VOLUME /var/fdb/data
 ENTRYPOINT ["/usr/bin/fdb-kubernetes-monitor"]

@@ -575,7 +575,7 @@ private:
 		if (cdcStreamKeys.contains(m.param1)) {
 			cdcRouting->setRanges(decodeCDCStreamKey(m.param1), decodeCDCStreamKeysValue(m.param2));
 		} else if (cdcTagHistoryKeys.contains(m.param1)) {
-			const CDCTagHistoryEntry history = decodeCDCTagHistoryKey(m.param1);
+			const CDCTagHistoryEntry history = decodeCDCTagHistoryEntry(m.param1, m.param2);
 			cdcRouting->setTag(history.streamId, history.version, history.tag);
 		}
 	}
@@ -710,9 +710,7 @@ private:
 	}
 
 	void checkClearRangeLockPrefix(KeyRangeRef range) {
-		if (rangeLock == nullptr) {
-			return;
-		} else if (!rangeLockKeys.intersects(range)) {
+		if (rangeLock == nullptr || !rangeLockKeys.intersects(range)) {
 			return;
 		}
 		ASSERT(!initialCommit);
@@ -1031,7 +1029,7 @@ private:
 		// CDC tags may be shared and acknowledgement minima are stored outside transaction state.
 		// A durable retired-tag watermark lets any CDC proxy finish pops after stream removal.
 		if (!initialCommit) {
-			for (const KeyRangeRef cdcRange :
+			for (const KeyRangeRef& cdcRange :
 			     { cdcStreamNameKeys, cdcStreamKeys, cdcTagHistoryKeys, cdcRetiredTagPopKeys, cdcProxyKeys }) {
 				if (cdcRange.intersects(range)) {
 					txnStateStore->clear(cdcRange & range);

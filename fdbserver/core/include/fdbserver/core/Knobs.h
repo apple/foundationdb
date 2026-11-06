@@ -80,6 +80,21 @@ public:
 	double CDC_PROXY_FAILURE_COALESCE_DELAY; // Disabled by default; simulations can force a multi-failure batch.
 	double CDC_PROXY_POP_MIN_INTERVAL;
 	double CDC_PROXY_POP_SCAN_INTERVAL;
+	bool CDC_PROXY_REBALANCE_ENABLED;
+	double CDC_PROXY_REBALANCE_INTERVAL;
+	double NATIVE_CDC_RETAG_CLEANUP_INTERVAL;
+	bool NATIVE_CDC_TAG_BALANCING_ENABLED;
+	bool NATIVE_CDC_LIVE_RETAGGING_ENABLED;
+	double NATIVE_CDC_TAG_SAMPLE_INTERVAL;
+	double NATIVE_CDC_TAG_SAMPLE_TIMEOUT;
+	double NATIVE_CDC_TAG_SAMPLE_MAX_AGE;
+	double NATIVE_CDC_TAG_MOVE_COOLDOWN;
+	double NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT;
+	int64_t NATIVE_CDC_TAG_MIN_BYTES_PER_SECOND_IMPROVEMENT;
+	int NATIVE_CDC_TAG_MAX_STREAMS;
+	int64_t NATIVE_CDC_TAG_MODEL_MAX_ENTRIES;
+	int NATIVE_CDC_TAG_SAMPLE_CONCURRENCY;
+	int NATIVE_CDC_TAG_SAMPLE_SHARD_LIMIT;
 	int APPLY_MUTATION_BYTES;
 	double BUGGIFY_RECOVER_MEMORY_LIMIT;
 	double BUGGIFY_WORKER_REMOVED_MAX_LAG;
@@ -257,7 +272,17 @@ public:
 	bool ALLOW_LARGE_SHARD;
 	int MAX_LARGE_SHARD_BYTES;
 
-	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
+	// If true, location metadata is written in the shard-encoded (UID+dataMoveId)
+	// "new" format. As of the config-driven rollback work this knob is only a
+	// FALLBACK for the encoding target: DD resolves its effective target from the
+	// DatabaseConfiguration shard_metadata_format option and consults this knob only
+	// when that config is UNSET (see DDEnabledState::shardEncodeLocationMetadata).
+	// This knob still DIRECTLY gates large teams (ddLargeTeamEnabled), which is
+	// mutually exclusive with shard encoding and reads this knob rather than the
+	// config; see the "known limitation" note in
+	// design/shard-encode-location-metadata.md.
+	bool SHARD_ENCODE_LOCATION_METADATA;
+	int SHARD_ENCODE_REWRITE_KS_BATCH_SIZE; // keyServers entries rewritten per DD-init rollback pass (Phase 2).
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
 	double DD_PHYSICAL_SHARD_MOVE_PROBABILITY; // Percentage of physical shard move, in the range of [0, 1].
 	bool ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT;
@@ -463,6 +488,9 @@ public:
 	bool DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM; // Set to disable audit storage replica check in the
 	                                                       // simulation.
 	int DD_BULKDUMP_PARALLELISM; // the max number of concurrent bulk dump tasks in DD
+	bool DD_BULKDUMP_USE_REMOTE_REGION; // dump from the remote region instead of the primary. The dumping server
+	                                    // uploads the files, so its region must reach the destination. Ignored
+	                                    // with usable_regions == 1, where the remote holds no storage servers.
 	int SS_SERVE_BULKDUMP_PARALLELISM; // the number of bulk dump tasks that can concurrently happen at a SS
 	int64_t SS_BULKDUMP_BATCH_BYTES; // the max bytes when SS creates a batch to dump
 	int SS_BULKLOAD_GETRANGE_BATCH_SIZE; // the max number of keys to scan before do context switch
@@ -633,7 +661,6 @@ public:
 	int ROCKSDB_KEEP_LOG_FILE_NUM;
 	int ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL;
 	bool ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
-	bool ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 	bool ROCKSDB_FULLFILE_CHECKSUM; // For validate sst files when compaction and producing backup files. TODO: set
 	                                // verify_file_checksum when ingesting (for physical shard move).
 	                                // This is different from ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE (block-level
@@ -799,6 +826,9 @@ public:
 	int BACKUP_FILE_BLOCK_BYTES;
 	int64_t BACKUP_WORKER_LOCK_BYTES;
 	double BACKUP_UPLOAD_DELAY;
+	int BACKUP_WORKER_UPLOAD_RETRY_LIMIT;
+	double BACKUP_WORKER_UPLOAD_RETRY_DELAY;
+	double BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY;
 
 	// Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;
@@ -1016,6 +1046,7 @@ public:
 	int64_t TLOG_SPILL_THRESHOLD;
 	int64_t TLOG_HARD_LIMIT_BYTES;
 	double TLOG_MIN_AVAILABLE_SPACE_RATIO;
+	double TLOG_DISK_SPACE_CHECK_INTERVAL;
 	int64_t TLOG_RECOVER_MEMORY_LIMIT;
 	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 

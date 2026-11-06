@@ -63,10 +63,6 @@ int g_api_version = 0;
 /* This must be true so that we can return the data pointer of a
    Standalone<RangeResultRef> as an array of FDBKeyValue. */
 static_assert(sizeof(FDBKeyValue) == sizeof(KeyValueRef), "FDBKeyValue / KeyValueRef size mismatch");
-static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_SET_VALUE) == static_cast<int>(MutationRef::Type::SetValue),
-              "FDB_BG_MUTATION_TYPE_SET_VALUE enum value mismatch");
-static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_CLEAR_RANGE) == static_cast<int>(MutationRef::Type::ClearRange),
-              "FDB_BG_MUTATION_TYPE_CLEAR_RANGE enum value mismatch");
 
 namespace {
 
@@ -93,6 +89,23 @@ FDBKeyRange copyNativeCdcKeyRange(Arena& arena, KeyRangeRef source) {
 	StringRef begin(arena, source.begin);
 	StringRef end(arena, source.end);
 	return FDBKeyRange{ begin.begin(), begin.size(), end.begin(), end.size() };
+}
+
+std::vector<Key> copyNativeCdcSplitPoints(FDBKey const* splitPoints, int splitPointCount) {
+	if (splitPointCount < 0 || splitPointCount >= NATIVE_CDC_MAX_ORDERED_PARTITIONS ||
+	    (splitPointCount > 0 && splitPoints == nullptr)) {
+		throw client_invalid_operation();
+	}
+	std::vector<Key> result;
+	result.reserve(splitPointCount);
+	for (int i = 0; i < splitPointCount; ++i) {
+		const auto& splitPoint = splitPoints[i];
+		if (splitPoint.key_length < 0 || (splitPoint.key_length > 0 && splitPoint.key == nullptr)) {
+			throw client_invalid_operation();
+		}
+		result.emplace_back(KeyRef(splitPoint.key, splitPoint.key_length));
+	}
+	return result;
 }
 
 std::vector<KeyRange> copyNativeCdcRanges(FDBKeyRange const* ranges, int rangeCount) {
@@ -584,6 +597,209 @@ extern "C" DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant) {
 	abort();
 }
 
+namespace {
+[[noreturn]] void abortRemovedBlobGranuleFunction(const char* functionName) {
+	fprintf(stderr, "FoundationDB blob granule function %s was removed in 8.0; aborting.\n", functionName);
+	fflush(stderr);
+	abort();
+}
+} // namespace
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+fdb_future_get_granule_summary_array(FDBFuture* f, FDBGranuleSummary const** out_summaries, int* out_count) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_purge_blob_granules(FDBDatabase* db,
+                                                                                    uint8_t const* begin_key_name,
+                                                                                    int begin_key_name_length,
+                                                                                    uint8_t const* end_key_name,
+                                                                                    int end_key_name_length,
+                                                                                    int64_t purge_version,
+                                                                                    fdb_bool_t force) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+fdb_database_wait_purge_granules_complete(FDBDatabase* db, uint8_t const* purge_key_name, int purge_key_name_length) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_blobbify_range(FDBDatabase* db,
+                                                                               uint8_t const* begin_key_name,
+                                                                               int begin_key_name_length,
+                                                                               uint8_t const* end_key_name,
+                                                                               int end_key_name_length) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_blobbify_range_blocking(FDBDatabase* db,
+                                                                                        uint8_t const* begin_key_name,
+                                                                                        int begin_key_name_length,
+                                                                                        uint8_t const* end_key_name,
+                                                                                        int end_key_name_length) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_unblobbify_range(FDBDatabase* db,
+                                                                                 uint8_t const* begin_key_name,
+                                                                                 int begin_key_name_length,
+                                                                                 uint8_t const* end_key_name,
+                                                                                 int end_key_name_length) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_list_blobbified_ranges(FDBDatabase* db,
+                                                                                       uint8_t const* begin_key_name,
+                                                                                       int begin_key_name_length,
+                                                                                       uint8_t const* end_key_name,
+                                                                                       int end_key_name_length,
+                                                                                       int rangeLimit) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_range(FDBDatabase* db,
+                                                                                  uint8_t const* begin_key_name,
+                                                                                  int begin_key_name_length,
+                                                                                  uint8_t const* end_key_name,
+                                                                                  int end_key_name_length,
+                                                                                  int64_t version) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_flush_blob_range(FDBDatabase* db,
+                                                                                 uint8_t const* begin_key_name,
+                                                                                 int begin_key_name_length,
+                                                                                 uint8_t const* end_key_name,
+                                                                                 int end_key_name_length,
+                                                                                 fdb_bool_t compact,
+                                                                                 int64_t version) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_purge_blob_granules(FDBTenant* db,
+                                                                                  uint8_t const* begin_key_name,
+                                                                                  int begin_key_name_length,
+                                                                                  uint8_t const* end_key_name,
+                                                                                  int end_key_name_length,
+                                                                                  int64_t purge_version,
+                                                                                  fdb_bool_t force) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+fdb_tenant_wait_purge_granules_complete(FDBTenant* db, uint8_t const* purge_key_name, int purge_key_name_length) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_blobbify_range(FDBTenant* tenant,
+                                                                             uint8_t const* begin_key_name,
+                                                                             int begin_key_name_length,
+                                                                             uint8_t const* end_key_name,
+                                                                             int end_key_name_length) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_blobbify_range_blocking(FDBTenant* tenant,
+                                                                                      uint8_t const* begin_key_name,
+                                                                                      int begin_key_name_length,
+                                                                                      uint8_t const* end_key_name,
+                                                                                      int end_key_name_length) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_unblobbify_range(FDBTenant* tenant,
+                                                                               uint8_t const* begin_key_name,
+                                                                               int begin_key_name_length,
+                                                                               uint8_t const* end_key_name,
+                                                                               int end_key_name_length) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_list_blobbified_ranges(FDBTenant* tenant,
+                                                                                     uint8_t const* begin_key_name,
+                                                                                     int begin_key_name_length,
+                                                                                     uint8_t const* end_key_name,
+                                                                                     int end_key_name_length,
+                                                                                     int rangeLimit) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(FDBTenant* tenant,
+                                                                                uint8_t const* begin_key_name,
+                                                                                int begin_key_name_length,
+                                                                                uint8_t const* end_key_name,
+                                                                                int end_key_name_length,
+                                                                                int64_t version) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_flush_blob_range(FDBTenant* tenant,
+                                                                               uint8_t const* begin_key_name,
+                                                                               int begin_key_name_length,
+                                                                               uint8_t const* end_key_name,
+                                                                               int end_key_name_length,
+                                                                               fdb_bool_t compact,
+                                                                               int64_t version) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_blob_granule_ranges(
+    FDBTransaction* tr,
+    uint8_t const* begin_key_name,
+    int begin_key_name_length,
+    uint8_t const* end_key_name,
+    int end_key_name_length,
+    int rangeLimit) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_transaction_read_blob_granules(
+    FDBTransaction* tr,
+    uint8_t const* begin_key_name,
+    int begin_key_name_length,
+    uint8_t const* end_key_name,
+    int end_key_name_length,
+    int64_t beginVersion,
+    int64_t readVersion,
+    FDBReadBlobGranuleContext granuleContext) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_summarize_blob_granules(
+    FDBTransaction* tr,
+    uint8_t const* begin_key_name,
+    int begin_key_name_length,
+    uint8_t const* end_key_name,
+    int end_key_name_length,
+    int64_t summaryVersion,
+    int rangeLimit) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_start(FDBTransaction* tr,
+                                                                         uint8_t const* begin_key_name,
+                                                                         int begin_key_name_length,
+                                                                         uint8_t const* end_key_name,
+                                                                         int end_key_name_length,
+                                                                         int64_t beginVersion,
+                                                                         int64_t readVersion,
+                                                                         int64_t* readVersionOut) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
+extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules_finish(FDBTransaction* tr,
+                                                                          FDBFuture* f,
+                                                                          uint8_t const* begin_key_name,
+                                                                          int begin_key_name_length,
+                                                                          uint8_t const* end_key_name,
+                                                                          int end_key_name_length,
+                                                                          int64_t beginVersion,
+                                                                          int64_t readVersion,
+                                                                          FDBReadBlobGranuleContext* granuleContext) {
+	abortRemovedBlobGranuleFunction(__func__);
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_database_create_transaction(FDBDatabase* d, FDBTransaction** out_transaction) {
 	CATCH_AND_RETURN(Reference<ITransaction> tr = DB(d)->createTransaction();
 	                 if (g_api_version <= 15) tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -600,6 +816,23 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* db
 	    if (name_length <= 0 || name == nullptr) { throw client_invalid_operation(); } auto rangesCopy =
 	        copyNativeCdcRanges(ranges, range_count);
 	    return (FDBFuture*)(DB(db)->registerNativeCdcStream(KeyRef(name, name_length), rangesCopy).extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_register_cdc_ordered_stream(FDBDatabase* db,
+                                                                         uint8_t const* name,
+                                                                         int name_length,
+                                                                         FDBKeyRange const* ranges,
+                                                                         int range_count,
+                                                                         FDBKey const* split_points,
+                                                                         int split_point_count) {
+	RETURN_FUTURE_ON_ERROR(
+	    CDCStreamId,
+	    if (name_length <= 0 || name == nullptr) { throw client_invalid_operation(); } auto rangesCopy =
+	        copyNativeCdcRanges(ranges, range_count);
+	    auto splitPointsCopy = copyNativeCdcSplitPoints(split_points, split_point_count);
+	    return (FDBFuture*)(DB(db)
+	                            ->registerNativeCdcOrderedStream(KeyRef(name, name_length), rangesCopy, splitPointsCopy)
+	                            .extractPtr()););
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* db, uint8_t const* name, int name_length) {

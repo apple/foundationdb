@@ -1616,7 +1616,7 @@ Future<T> reportErrorsExcept(Future<T> in,
 		T t = co_await in;
 		co_return t;
 	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled && (!pExceptErrors || !pExceptErrors->count(e.code())))
+		if (e.code() != error_code_actor_cancelled && (!pExceptErrors || !pExceptErrors->contains(e.code())))
 			TraceEvent(SevError, context, id).error(e);
 		throw;
 	}
@@ -2027,7 +2027,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 		FlowLock* lock;
 		int64_t remaining;
 		Releaser() : lock(0), remaining(0) {}
-		explicit(false) Releaser(FlowLock& lock, int64_t amount = 1) : lock(&lock), remaining(amount) {}
+		explicit Releaser(FlowLock& lock, int64_t amount = 1) : lock(&lock), remaining(amount) {}
 		Releaser(Releaser&& r) noexcept : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
 		void operator=(Releaser&& r) {
 			if (remaining)
@@ -2372,25 +2372,42 @@ public:
 		return yieldedFuture(item.change.getFuture());
 	}
 
-	static Future<Void> destroyOnCancelYield(YieldedAsyncMap* self, K key, Future<Void> change) {
+	// Every RPC reply races one of these (FailureMonitor::onStateChanged) and cancels it when the reply wins, so
+	// cancellation destroys the frame instead of throwing; EraseOnCancel does the cleanup a catch block cannot.
+	static Future<Void> destroyOnCancelYield(YieldedAsyncMap* self, K key, Future<Void> change, NoThrowOnCancel = {}) {
+		struct EraseOnCancel {
+			YieldedAsyncMap* self;
+			K const& key;
+			Future<Void>& change;
+			Future<Void>& yielded;
+			bool armed = true;
+			~EraseOnCancel() {
+				if (!armed) {
+					return;
+				}
+				yielded = Future<Void>();
+				if (!self->destructing && change.getFutureReferenceCount() == 1 &&
+				    change.getPromiseReferenceCount() == 1) {
+					if (EXPENSIVE_VALIDATION) {
+						auto& p = self->items[key];
+						ASSERT_ABORT(p.change.getFuture() == change);
+					}
+					self->items.erase(key);
+				}
+			}
+		};
+
 		Future<Void> yielded = yieldedFuture(change);
+		EraseOnCancel eraseOnCancel{ self, key, change, yielded };
 		try {
 			co_await yielded;
-			yielded = Future<Void>();
-			change = Future<Void>();
 		} catch (Error& e) {
-			yielded = Future<Void>();
-			if (e.code() == error_code_actor_cancelled && !self->destructing && change.getFutureReferenceCount() == 1 &&
-			    change.getPromiseReferenceCount() == 1) {
-				if (EXPENSIVE_VALIDATION) {
-					auto& p = self->items[key];
-					ASSERT(p.change.getFuture() == change);
-				}
-				self->items.erase(key);
+			if (e.code() != error_code_actor_cancelled) {
+				eraseOnCancel.armed = false;
 			}
-			change = Future<Void>();
 			throw;
 		}
+		eraseOnCancel.armed = false;
 	}
 };
 
@@ -2402,9 +2419,9 @@ public:
 	AndFuture& operator=(AndFuture const& f) = default;
 	AndFuture& operator=(AndFuture&& f) noexcept = default;
 
-	explicit(false) AndFuture(Future<Void> const& f) : futureCount(1), futures{ f } {}
+	explicit AndFuture(Future<Void> const& f) : futureCount(1), futures{ f } {}
 
-	explicit(false) AndFuture(Error const& e) : futureCount(1), futures{ Future<Void>(e) } {}
+	explicit AndFuture(Error const& e) : futureCount(1), futures{ Future<Void>(e) } {}
 
 	operator Future<Void>() { return getFuture(); }
 

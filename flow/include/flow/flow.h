@@ -407,7 +407,7 @@ public:
 		if constexpr (is_fb_function<Ar>) {
 			// Suppress vtable collection. Save and load are implemented via the specializations below
 		} else {
-			if (Ar::isDeserializing) {
+			if constexpr (Ar::isDeserializing) {
 				cache = Standalone<StringRef>();
 				cacheType = SerializeType::None;
 				serializer(ar, data);
@@ -416,7 +416,7 @@ public:
 					cache = BinaryWriter::toValue(data, AssumeVersion(g_network->protocolVersion()));
 					cacheType = SerializeType::Binary;
 				}
-				ar.serializeBytes(const_cast<uint8_t*>(cache.begin()), cache.size());
+				ar.serializeBytes(cache.begin(), cache.size());
 			}
 		}
 	}
@@ -937,7 +937,7 @@ public:
 	void set(const void* _Nonnull pointerToContinuationInstance, Future<T> f, const void* _Nonnull thisPointer) {
 		// Verify Swift did not make a copy of the `self` value for this method
 		// call.
-		assert(this == thisPointer);
+		ASSERT_ABORT(this == thisPointer);
 
 		// FIXME: Propagate `SwiftCC` to Swift using forward
 		// interop, without relying on passing it via a `void *`

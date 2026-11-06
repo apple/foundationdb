@@ -494,7 +494,7 @@ application writes by using :func:`transactional`.
 Stream management
 -----------------
 
-.. method:: Database.register_cdc_stream(name, begin_key=None, end_key=None, *, ranges=None)
+.. method:: Database.register_cdc_stream(name, begin_key=None, end_key=None, *, ranges=None, split_points=None)
 
     Registers the byte-string ``name`` for a range union in normal user key
     space. Supply either ``begin_key`` and ``end_key`` for one half-open range,
@@ -520,12 +520,58 @@ Stream management
             b"commerce", ranges=[(b"order/", b"order0"), (b"payment/", b"payment0")]
         ).wait()
 
+    Set ``split_points`` to an iterable of byte-string boundaries to register
+    fixed partitions behind one ordered logical stream. Supply at most 63 points
+    in strictly increasing order, strictly inside the union's outer bounds. A
+    point may lie in a gap or at a range boundary, but every resulting partition
+    must contain selected keys. ``split_points=[]`` creates one partition;
+    ``None`` uses ordinary registration. Re-registration must use the same mode,
+    canonical ranges, and split points.
+    The partition count must not exceed the cluster's configured CDC tag-pool
+    size; otherwise registration fails with ``client_invalid_operation``.
+
+    The FDB client reads all partitions and merges their complete version groups.
+    Applications use the same consumer methods and scalar :class:`CdcCursor`;
+    no application-side merge or partition checkpoints are needed. Delivery waits
+    for every partition to be complete through a version, including quiet
+    partitions. A clear crossing a partition boundary can produce multiple
+    clipped mutations within one version group. Partition boundaries remain
+    fixed for the stream's lifetime.
+
+    Client read-ahead and replies are bounded. A complete version group exceeding
+    either its partition's RPC quota or the aggregate reply limit fails with
+    ``server_overloaded``; the client never splits a group to fit the limit.
+
+    Ordered registration requires the additive ordered-stream symbol in the C
+    library. If it is absent, an explicit ``split_points`` argument raises
+    ``FDBError`` with ``unsupported_operation`` (2108); ordinary CDC remains
+    available. All published CDC proxies must advertise ordered-stream support
+    before registration can succeed. Registration is committed atomically by a
+    CDC proxy. Use ordered-capable clients and serving proxies for the stream's
+    entire lifecycle, and drain and remove ordered streams before rolling back
+    to implementations that lack this support.
+
+    For example, register the full user key space in four partitions::
+
+        stream_id = db.register_cdc_stream(
+            b"all-writes", b"", b"\xff", split_points=[b"\x40", b"\x80", b"\xc0"]
+        ).wait()
+        consumer = db.create_cdc_consumer(b"all-writes").wait()
+        result = consumer.consume().wait()
+        # Durably process result and checkpoint consumer.get_position() first.
+        consumer.acknowledge().wait()
+        consumer.close()
+
 .. method:: Database.remove_cdc_stream(name)
 
     Removes the byte-string stream name and relinquishes its unread history.
     Removing a missing name succeeds. Returns a future whose value is
     ``None``. Removal is terminal for existing consumers; registering the
     same name again does not redirect their cursors to the new stream.
+
+    Removing an ordered stream requires a published CDC proxy that supports
+    ordered streams; it atomically removes the logical stream and all partitions
+    while preserving the retention requirements of other streams sharing tags.
 
 .. method:: Database.list_cdc_streams()
 
@@ -640,6 +686,15 @@ Consumer lifecycle
     value is ``None``. Wait for it before starting another consume or
     acknowledgement. This is not atomic with writes to a downstream system
     or an application checkpoint.
+
+    For ordered streams, a canceled or failed consume or acknowledgement
+    invalidates unacknowledged read-ahead. Before the next operation, the handle
+    rereads the common durable acknowledgement and resets its cursor to that
+    frontier. A retry of acknowledgement can therefore acknowledge a reconciled
+    cursor earlier than the previously delivered position; inspect
+    :meth:`CdcConsumer.get_position` and tolerate replay on subsequent
+    consumption. If the interrupted acknowledgement committed, its durable
+    progress is preserved.
 
 .. method:: CdcConsumer.get_position()
 

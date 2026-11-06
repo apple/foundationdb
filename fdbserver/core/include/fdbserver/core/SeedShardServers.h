@@ -27,6 +27,9 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/StorageServerInterface.h"
 
-void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<StorageServerInterface> servers);
+void seedShardServers(Arena& arena,
+                      CommitTransactionRef& tr,
+                      std::vector<StorageServerInterface> servers,
+                      bool shardEncodeLocationMetadata);
 
 #endif

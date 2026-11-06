@@ -112,7 +112,7 @@ private:
 	// Uses S3BlobStoreEndpoint::fromString() for robust URL parsing (similar to
 	// BlobMetadataUtils::getBlobMetadataPartitionedURL)
 	static std::string addFileToUrl(std::string filePath, std::string baseUrl) {
-		std::string basename = ::basename(const_cast<char*>(filePath.c_str()));
+		std::string basename = ::basename(filePath.data());
 
 		try {
 			std::string resource;
@@ -209,8 +209,8 @@ private:
 		setupCredentialsFile();
 
 		// Create a unique object key for S3 (using only the base filename)
-		std::string baseFilename =
-		    ::basename(const_cast<char*>(credentials.c_str())); // Gets filename from the *new* path
+		std::string credentialsPath = credentials;
+		std::string baseFilename = ::basename(credentialsPath.data());
 		// Use deterministic ID based on client ID and test context instead of random UID
 		// This ensures identical behavior across determinism check runs
 		std::string deterministicId = format("%08x_%08x", clientId, deterministicRandom()->randomInt(0, 1000000));

@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/BulkLoading.h"
@@ -184,6 +185,24 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 				return out;
 			}
 			out[p + key] = format("%d", type);
+		}
+
+		if (key == DatabaseConfiguration::SHARD_METADATA_FORMAT_KEY) {
+			if (value != DatabaseConfiguration::SHARD_METADATA_FORMAT_ORIGINAL &&
+			    value != DatabaseConfiguration::SHARD_METADATA_FORMAT_ENCODED) {
+				printf("Error: shard_metadata_format must be `original' or `encoded'.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
+
+		if (key == DatabaseConfiguration::SHARD_METADATA_MIGRATION_KEY) {
+			if (value != DatabaseConfiguration::SHARD_METADATA_MIGRATION_ENABLED &&
+			    value != DatabaseConfiguration::SHARD_METADATA_MIGRATION_DISABLED) {
+				printf("Error: shard_metadata_migration must be `enabled' or `disabled'.\n");
+				return out;
+			}
+			out[p + key] = value;
 		}
 
 		if (key == "exclude") {
@@ -808,24 +827,20 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	return result;
 }
 
-Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
-	Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-	Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
-
-	co_await (success(processClasses) && success(processData));
-	ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
-	ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
+std::vector<ProcessData> ManagementAPI::decodeWorkers(const RangeResult& processClasses,
+                                                      const RangeResult& processData) {
+	ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
+	ASSERT(!processData.more && processData.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
-	for (int i = 0; i < processClasses.get().size(); i++) {
-		id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
-		    decodeProcessClassValue(processClasses.get()[i].value);
+	for (int i = 0; i < processClasses.size(); i++) {
+		id_class[decodeProcessClassKey(processClasses[i].key)] = decodeProcessClassValue(processClasses[i].value);
 	}
 
 	std::vector<ProcessData> results;
 
-	for (int i = 0; i < processData.get().size(); i++) {
-		ProcessData data = decodeWorkerListValue(processData.get()[i].value);
+	for (int i = 0; i < processData.size(); i++) {
+		ProcessData data = decodeWorkerListValue(processData[i].value);
 		ProcessClass processClass = id_class[data.locality.processId()];
 
 		if (processClass.classSource() == ProcessClass::DBSource ||
@@ -836,7 +851,15 @@ Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
 			results.push_back(data);
 	}
 
-	co_return results;
+	return results;
+}
+
+Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
+	Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+	Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+
+	co_await (success(processClasses) && success(processData));
+	co_return ManagementAPI::decodeWorkers(processClasses.get(), processData.get());
 }
 
 Future<std::vector<ProcessData>> getWorkers(Database cx) {
@@ -1033,19 +1056,7 @@ Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	ClientCoordinators coord(makeReference<ClusterConnectionMemoryRecord>(*conn));
 
-	leaderServers.reserve(coord.clientLeaderServers.size());
-	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-		if (coord.clientLeaderServers[i].hostname.present()) {
-			leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
-			                                                  coord.clientLeaderServers[i].hostname.get(),
-			                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
-			                                                  TaskPriority::CoordinationReply));
-		} else {
-			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
-			                                           GetLeaderRequest(coord.clusterKey, UID()),
-			                                           TaskPriority::CoordinationReply));
-		}
-	}
+	leaderServers = coord.getLeaderReplies();
 
 	auto leaderServersResult = co_await timeout(waitForAll(leaderServers), 5.0);
 	if (!leaderServersResult.present()) {
@@ -1081,12 +1092,11 @@ Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> ch
 			std::vector<NetworkAddress> oldCoordinators = co_await oldClusterConnectionString.tryResolveHostnames();
 			CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 			if (desiredCoordinators.empty()) {
-				std::vector<NetworkAddress> _desiredCoordinators = co_await change->getDesiredCoordinators(
+				desiredCoordinators = co_await change->getDesiredCoordinators(
 				    &tr,
 				    oldCoordinators,
 				    makeReference<ClusterConnectionMemoryRecord>(oldClusterConnectionString),
 				    result);
-				desiredCoordinators = _desiredCoordinators;
 			}
 
 			if (result == CoordinatorsResult::NOT_ENOUGH_MACHINES && notEnoughMachineResults < 1) {
@@ -1239,20 +1249,7 @@ struct AutoQuorumChange final : IQuorumChange {
 
 		// Check availability
 		ClientCoordinators coord(ccr);
-		std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-		leaderServers.reserve(coord.clientLeaderServers.size());
-		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-			if (coord.clientLeaderServers[i].hostname.present()) {
-				leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
-				                                                  coord.clientLeaderServers[i].hostname.get(),
-				                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
-				                                                  TaskPriority::CoordinationReply));
-			} else {
-				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
-				                                           GetLeaderRequest(coord.clusterKey, UID()),
-				                                           TaskPriority::CoordinationReply));
-			}
-		}
+		std::vector<Future<Optional<LeaderInfo>>> leaderServers = coord.getLeaderReplies();
 		Optional<std::vector<Optional<LeaderInfo>>> results =
 		    co_await timeout(getAll(leaderServers), CLIENT_KNOBS->IS_ACCEPTABLE_DELAY);
 		if (!results.present()) {
@@ -1282,8 +1279,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		std::vector<AddressExclusion> excl = co_await getAllExcludedServers(tr);
 		std::set<AddressExclusion> excluded(excl.begin(), excl.end());
 
-		std::vector<ProcessData> _workers = co_await getWorkers(tr);
-		std::vector<ProcessData> workers = _workers;
+		std::vector<ProcessData> workers = co_await getWorkers(tr);
 
 		std::map<NetworkAddress, LocalityData> addr_locality;
 		for (const auto& w : workers)
@@ -2503,6 +2499,105 @@ Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
 	co_return auditId;
 }
 
+namespace {
+// Errors from triggering an audit that come from the cluster controller changing or the data distributor not being
+// able to start it yet.
+bool isTransientAuditTriggerError(const Error& e) {
+	switch (e.code()) {
+	case error_code_timed_out:
+	case error_code_audit_storage_failed:
+	case error_code_broken_promise:
+	case error_code_request_maybe_delivered:
+		return true;
+	default:
+		return false;
+	}
+}
+} // namespace
+
+Future<AuditStorageState> auditStorageAndWait(Database cx,
+                                              KeyRange range,
+                                              AuditType type,
+                                              KeyValueStoreType engineType,
+                                              AuditWaitOptions options) {
+	UID auditId;
+	for (int attempt = 1;; ++attempt) {
+		Error err;
+		try {
+			UID id = co_await timeoutError(
+			    auditStorage(cx->getConnectionRecord(), range, type, engineType, options.roundTripTimeoutSeconds),
+			    options.roundTripTimeoutSeconds);
+			auditId = id;
+			break;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (!isTransientAuditTriggerError(err) || attempt >= options.maxScheduleAttempts) {
+			throw err;
+		}
+		TraceEvent(SevWarn, "AuditStorageAndWaitTriggerRetry")
+		    .error(err)
+		    .detail("Context", options.traceContext)
+		    .detail("AuditType", type)
+		    .detail("Range", range)
+		    .detail("Attempt", attempt);
+		co_await delay(std::min(10.0, 2.0 * attempt));
+	}
+
+	const double startTime = now();
+	double lastReportTime = startTime;
+	TraceEvent("AuditStorageAndWaitScheduled")
+	    .detail("Context", options.traceContext)
+	    .detail("AuditType", type)
+	    .detail("AuditID", auditId)
+	    .detail("Range", range);
+	while (true) {
+		co_await delay(options.pollIntervalSeconds);
+		if (now() - startTime > options.maxWaitSeconds) {
+			TraceEvent(SevError, "AuditStorageAndWaitTimeout")
+			    .detail("Context", options.traceContext)
+			    .detail("AuditType", type)
+			    .detail("AuditID", auditId)
+			    .detail("Range", range);
+			throw timed_out();
+		}
+
+		std::vector<AuditStorageState> states;
+		Error err;
+		try {
+			std::vector<AuditStorageState> result =
+			    co_await timeoutError(getAuditStates(cx, type, /*newFirst=*/true), options.roundTripTimeoutSeconds);
+			states = result;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			if (!isTransientAuditStateReadError(err)) {
+				throw err;
+			}
+			continue;
+		}
+		bool found = false;
+		for (const auto& state : states) {
+			if (state.id == auditId) {
+				found = true;
+				if (state.getPhase() != AuditPhase::Running) {
+					co_return state;
+				}
+			}
+		}
+		if (now() - lastReportTime >= 10.0) {
+			TraceEvent("AuditStorageAndWaitProgress")
+			    .detail("Context", options.traceContext)
+			    .detail("AuditType", type)
+			    .detail("AuditID", auditId)
+			    .detail("AuditFound", found)
+			    .detail("ElapsedTime", now() - startTime);
+			lastReportTime = now();
+		}
+	}
+}
+
 Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                AuditType type,
                                UID auditId,
@@ -3453,8 +3548,6 @@ Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
 			} else if (taskState.getPhase() == BulkDumpPhase::Submitted) {
 				progress.runningTasks++;
 			}
-
-			progress.totalBytes += taskState.getManifest().getTotalBytes();
 		}
 		readBegin = rangeResult.back().key;
 	}

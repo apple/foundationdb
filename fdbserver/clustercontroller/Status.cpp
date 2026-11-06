@@ -178,7 +178,7 @@ class StatusCounter {
 public:
 	StatusCounter() : hz(0), roughness(0), counter(0) {}
 	StatusCounter(double hz, double roughness, int64_t counter) : hz(hz), roughness(roughness), counter(counter) {}
-	explicit(false) StatusCounter(const std::string& parsableText) { parseText(parsableText); }
+	explicit StatusCounter(const std::string& parsableText) { parseText(parsableText); }
 
 	StatusCounter& parseText(const std::string& parsableText) {
 		sscanf(parsableText.c_str(), "%lf %lf %" SCNd64 "", &hz, &roughness, &counter);
@@ -570,12 +570,14 @@ struct RolesInfo {
 
 			TraceEventFields const& busiestReadTag = metrics.at("BusiestReadTag");
 			if (busiestReadTag.size()) {
-				int64_t tagCost = busiestReadTag.getInt64("TagCost");
+				double tagCost = busiestReadTag.getDouble("TagCost");
 				if (tagCost > 0) {
 					JsonBuilderObject busiestReadTagObj;
 					busiestReadTagObj["tag"] = busiestReadTag.getValue("Tag");
-					busiestReadTagObj["cost"] = tagCost;
-					busiestReadTagObj["fractional_cost"] = busiestReadTag.getValue("FractionalBusyness");
+					busiestReadTagObj["fractional_cost"] = busiestReadTag.getDouble("FractionalBusyness");
+					JsonBuilderObject estimatedCostObj;
+					estimatedCostObj["hz"] = tagCost;
+					busiestReadTagObj["estimated_cost"] = estimatedCostObj;
 					obj["busiest_read_tag"] = busiestReadTagObj;
 				}
 			}

@@ -1103,7 +1103,7 @@ private:
 			}
 			}
 		}
-		bool checkHash() {
+		bool checkHash() const {
 			switch (diskQueueVersion()) {
 			case DiskQueueVersion::V0: {
 				return hash == checksum_hashlittle2();
@@ -1243,7 +1243,7 @@ private:
 		if (pageFloor(end.lo - 1) == pageFloor(start.lo)) {
 			// start and end are on the same page
 			ASSERT(pagedData.size() == sizeof(Page));
-			Page* data = reinterpret_cast<Page*>(const_cast<uint8_t*>(pagedData.begin()));
+			const Page* data = reinterpret_cast<const Page*>(pagedData.begin());
 			if (ch && !data->checkHash())
 				throw io_error();
 			if (!ch && data->payloadSize > Page::maxPayload)
@@ -1254,7 +1254,7 @@ private:
 			// Reusing pagedData wastes # of pages * sizeof(PageHeader) bytes, but means
 			// we don't have to double allocate in a hot, memory hungry call.
 			uint8_t* buf = mutateString(pagedData);
-			Page* data = reinterpret_cast<Page*>(const_cast<uint8_t*>(pagedData.begin()));
+			const Page* data = reinterpret_cast<const Page*>(pagedData.begin());
 			if (ch && !data->checkHash())
 				throw io_error();
 			if (!ch && data->payloadSize > Page::maxPayload)

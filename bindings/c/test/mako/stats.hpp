@@ -311,7 +311,7 @@ class CPUUtilizationTimer {
 	TimerKind kind;
 
 public:
-	CPUUtilizationTimer(TimerKind kind) : kind(kind) {}
+	explicit CPUUtilizationTimer(TimerKind kind) : kind(kind) {}
 	void start() {
 		timepoint_start = steady_clock::now();
 		cpu_time_start = (kind == THREAD) ? getProcessorTimeThread() : getProcessorTimeProcess();

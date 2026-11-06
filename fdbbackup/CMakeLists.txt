@@ -20,20 +20,8 @@ target_include_directories(fdbdecode PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/includ
 target_link_libraries(fdbdecode PRIVATE fdbclient)
 
 if(NOT OPEN_FOR_IDE)
-  if(GENERATE_DEBUG_PACKAGES)
-    fdb_install(TARGETS fdbbackup DESTINATION bin COMPONENT clients)
-    fdb_install(PROGRAMS $<TARGET_FILE:fdbbackup> DESTINATION bin COMPONENT clients RENAME backup_agent)
-    fdb_install(PROGRAMS $<TARGET_FILE:fdbbackup> DESTINATION bin COMPONENT clients RENAME fdbrestore)
-    fdb_install(PROGRAMS $<TARGET_FILE:fdbbackup> DESTINATION bin COMPONENT clients RENAME dr_agent)
-    fdb_install(PROGRAMS $<TARGET_FILE:fdbbackup> DESTINATION bin COMPONENT clients RENAME fdbdr)
-  else()
-    add_custom_target(prepare_fdbbackup_install ALL DEPENDS strip_only_fdbbackup)
-    fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients)
-    fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients RENAME backup_agent)
-    fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients RENAME fdbrestore)
-    fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients RENAME dr_agent)
-    fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients RENAME fdbdr)
-  endif()
+  add_custom_target(stripped_fdbbackup ALL DEPENDS strip_only_fdbbackup)
+  fdb_install(TARGETS fdbbackup DESTINATION bin COMPONENT clients)
   symlink_files(
     LOCATION packages/bin
     SOURCE fdbbackup
@@ -42,6 +30,10 @@ if(NOT OPEN_FOR_IDE)
     LOCATION bin
     SOURCE fdbbackup
     TARGETS fdbdr dr_agent backup_agent fdbrestore)
+  # Install the relative symlinks created above, so all names share one binary
+  foreach(alias IN ITEMS backup_agent fdbrestore dr_agent fdbdr)
+    fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/bin/${alias} DESTINATION bin COMPONENT clients)
+  endforeach()
 
   # Test version of backup.cpp without main() function
   add_flow_target(EXECUTABLE NAME backup_tests SRCS backup.cpp)

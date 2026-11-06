@@ -929,9 +929,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		}
 
 		if (rd.keys.contains(rrs.keys)) {
-			if (foundActiveFetching)
+			if (foundActiveFetching) {
 				fetchingSourcesQueue.erase(fetchingSourcesItr);
-			else if (foundActiveRelocation) {
+			} else if (foundActiveRelocation) {
 				firstQueue->erase(firstRelocationItr);
 				for (int i = 1; i < rrs.src.size(); i++)
 					queue[rrs.src[i]].erase(rrs);
@@ -1276,7 +1276,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		// which leads to conflicts of moving keys
 
 		Future<Void> fCleanup =
-		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
+		    ddEnabledState->shardEncodeLocationMetadata() ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
 		inFlight.insert(rd.keys, rd);
 		for (int r = 0; r < ranges.size(); r++) {
@@ -1292,14 +1292,14 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			}
 			if (rd.keys == ranges[r] && rd.isRestore()) {
 				ASSERT(rd.dataMove != nullptr);
-				ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+				ASSERT(ddEnabledState->shardEncodeLocationMetadata());
 				rrs.dataMoveId = rd.dataMove->meta.id;
 			} else {
 				// Restored data moves can split ordinary relocations, but not other restored data moves.
 				ASSERT_WE_THINK(!rd.isRestore() || !rrs.isRestore());
 				// TODO(psm): The shard id is determined by DD.
 				rrs.dataMove.reset();
-				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				if (ddEnabledState->shardEncodeLocationMetadata()) {
 					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 						rrs.dataMoveId = UID();
 					} else if (rrs.bulkLoadTask.present()) {
@@ -1631,7 +1631,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			self->suppressIntervals = 0;
 		}
 
-		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		if (ddEnabledState->shardEncodeLocationMetadata()) {
 			auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 			ASSERT(inFlightRange.range() == rd.keys);
 			ASSERT(inFlightRange.value().randomId == rd.randomId);
@@ -1765,7 +1765,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 				bestTeams.clear();
 				// Get team from teamCollections in different DCs and find the best one
 				while (tciIndex < self->teamCollections.size()) {
-					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
+					if (ddEnabledState->shardEncodeLocationMetadata() && rd.isRestore()) {
 						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
 						req.keys = rd.keys;
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
@@ -2239,7 +2239,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			Promise<Void> dataMovementComplete;
 			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
 			std::unique_ptr<MoveKeysParams> params;
-			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			if (ddEnabledState->shardEncodeLocationMetadata()) {
 				params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 				                                          std::vector<KeyRange>{ rd.keys },
 				                                          destIds,
@@ -2271,7 +2271,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                                        : Optional<BulkLoadTaskState>());
 			}
 			Future<Void> doMoveKeys = self->txnProcessor->moveKeys(*params);
-			Future<Void> pollHealth = signalledTransferComplete && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA
+			Future<Void> pollHealth = signalledTransferComplete && !ddEnabledState->shardEncodeLocationMetadata()
 			                              ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
 			try {
@@ -2286,7 +2286,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 							extraIds.clear();
 							ASSERT(totalIds == destIds.size()); // Sanity check the destIDs before we move keys
 							std::unique_ptr<MoveKeysParams> params;
-							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (ddEnabledState->shardEncodeLocationMetadata()) {
 								params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 								                                          std::vector<KeyRange>{ rd.keys },
 								                                          destIds,
@@ -2322,7 +2322,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 							doMoveKeys = self->txnProcessor->moveKeys(*params);
 						} else {
 							self->fetchKeysComplete.insert(rd);
-							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (ddEnabledState->shardEncodeLocationMetadata()) {
 								auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(rd.keys);
 								if (ranges.size() == 1 && static_cast<KeyRange>(ranges[0]) == rd.keys &&
 								    ranges[0].value.id == rd.dataMoveId && !ranges[0].value.cancel.isValid()) {
@@ -2342,7 +2342,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 								self->dataTransferComplete.send(rd);
 								ownsDestBusyness = false;
 							}
-							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (ddEnabledState->shardEncodeLocationMetadata()) {
 								CODE_PROBE(true,
 								           "Cancel shard-encoded data move after destination team becomes unhealthy");
 								TraceEvent(SevWarnAlways, "RelocateShardDestinationTeamUnhealthy", distributorId)
@@ -2362,7 +2362,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 								throw data_move_dest_team_not_found();
 							}
 						}
-						pollHealth = signalledTransferComplete && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA
+						pollHealth = signalledTransferComplete && !ddEnabledState->shardEncodeLocationMetadata()
 						                 ? Never()
 						                 : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
 					} else if (res.index() == 2) {

@@ -36,7 +36,7 @@ enum class FutureRC { OK, RETRY, ABORT };
 
 struct LogContext {
 	static constexpr const bool do_log = true;
-	LogContext(std::string_view step) noexcept : step(step), transaction_timeout_expected(false) {}
+	explicit LogContext(std::string_view step) noexcept : step(step), transaction_timeout_expected(false) {}
 	LogContext(std::string_view step, bool transaction_timeout_expected) noexcept
 	  : step(step), transaction_timeout_expected(transaction_timeout_expected) {}
 	std::string_view step;

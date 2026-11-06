@@ -229,7 +229,10 @@ int main(int argc, char** argv) {
 			case OPT_SERVER_CHAIN_LEN:
 				try {
 					serverArgs.length = std::stoul(args.OptionArg());
-					assert(serverArgs.length > 0);
+					if (serverArgs.length == 0) {
+						fmt::print(stderr, "ERROR: Certificate chain length must be positive\n");
+						return FDB_EXIT_ERROR;
+					}
 				} catch (std::exception const& ex) {
 					fmt::print(stderr, "ERROR: Invalid chain length ({})\n", ex.what());
 					return FDB_EXIT_ERROR;
@@ -238,7 +241,6 @@ int main(int argc, char** argv) {
 			case OPT_CLIENT_CHAIN_LEN:
 				try {
 					clientArgs.length = std::stoul(args.OptionArg());
-					assert(clientArgs.length > 0);
 				} catch (std::exception const& ex) {
 					fmt::print(stderr, "ERROR: Invalid chain length ({})\n", ex.what());
 					return FDB_EXIT_ERROR;

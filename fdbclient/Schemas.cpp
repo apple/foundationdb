@@ -1008,6 +1008,16 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "disabled",
              "aggressive",
              "gradual"
+         ]},
+         "shard_metadata_format": {
+             "$enum":[
+             "original",
+             "encoded"
+         ]},
+         "shard_metadata_migration": {
+             "$enum":[
+             "enabled",
+             "disabled"
          ]}
       },
       "consistency_scan" : {

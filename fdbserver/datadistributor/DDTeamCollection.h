@@ -234,6 +234,8 @@ protected:
 	std::vector<UID> allServers;
 	int64_t unhealthyServers;
 	std::map<int, int> priority_teams;
+	// Across all team collections; -1 until each collection has initialized its team health.
+	int getHighestTeamPriority() const;
 	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
 	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a
 	                                                            // read-only concatenation of 2 data structures?

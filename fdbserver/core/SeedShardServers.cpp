@@ -29,7 +29,10 @@
 #include "fdbserver/core/SeedShardServers.h"
 #include "flow/Trace.h"
 
-void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<StorageServerInterface> servers) {
+void seedShardServers(Arena& arena,
+                      CommitTransactionRef& tr,
+                      std::vector<StorageServerInterface> servers,
+                      bool shardEncodeLocationMetadata) {
 	std::map<Optional<Value>, Tag> dcIdLocality;
 	std::map<UID, Tag> serverTag;
 	int8_t nextLocality = 0;
@@ -75,7 +78,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 
 	auto keyServers = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
 	                                                       : keyServersValue(RangeResult(), serverSrcIds);
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (shardEncodeLocationMetadata) {
 		const UID shardId = newDataMoveId(deterministicRandom()->randomUInt64(),
 		                                  AssignEmptyRange(false),
 		                                  DataMoveType::LOGICAL,

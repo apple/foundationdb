@@ -52,12 +52,37 @@ class DDEnabledState {
 	UID ddEnabledStatusUID;
 	Value stateValue = ENABLED;
 
+	// Effective shard-location-metadata encoding target for this DD
+	// incarnation. Resolved once at DD init from DatabaseConfiguration
+	// (shard_metadata_format), falling back to the legacy
+	// SHARD_ENCODE_LOCATION_METADATA knob when the config is UNSET. Like the
+	// rest of DDEnabledState this is transient: it is re-resolved on every DD
+	// (re-)init, so a config-change recovery re-elects a DD that reads the new
+	// value. All DD write/move paths read this instead of the raw knob so the
+	// config is the single source of truth for the encoding.
+	//
+	// Defaulted from the knob by the constructor so any DDEnabledState created
+	// outside the DD bootstrap (e.g. sim workloads) matches legacy behavior
+	// until/unless the owner overrides it.
+	bool shardMetadataFormatIsNew_;
+
 public:
+	DDEnabledState();
+
 	bool sameId(const UID&) const;
 
 	bool isEnabled() const;
 
 	bool isBlobRestorePreparing() const;
+
+	// True when this DD incarnation encodes shard-location metadata in the new
+	// (shard-encoded) format. Replaces direct reads of the
+	// SHARD_ENCODE_LOCATION_METADATA server knob in the DD write/move paths.
+	bool shardEncodeLocationMetadata() const;
+
+	// Set the effective encoding target. Called once by the DD bootstrap after
+	// loading DatabaseConfiguration.
+	void setShardEncodeLocationMetadata(bool isNewFormat);
 
 	// All tryXXX() methods return true if the in-memory state change succeed.
 	bool trySetEnabled(UID requesterId);

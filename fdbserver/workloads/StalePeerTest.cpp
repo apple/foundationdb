@@ -1,5 +1,5 @@
 /*
- * StalePeerTest.actor.cpp
+ * StalePeerTest.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -71,7 +71,7 @@ struct StalePeerTestWorkload : TestWorkload {
 	// tracker -- diagnostic Delta dump is skipped).
 	std::string trackedDstRole;
 
-	StalePeerTestWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), testPassed(true) {
+	explicit StalePeerTestWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), testPassed(true) {
 		waitAfterKill = getOption(options, "waitAfterKill"_sr, 60.0);
 		dstKillRole = getOption(options, "dstKillRole"_sr, "clientFacing"_sr).toString();
 		srcCheckRole = getOption(options, "srcCheckRole"_sr, "any"_sr).toString();

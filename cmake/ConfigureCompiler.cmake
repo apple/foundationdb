@@ -75,7 +75,7 @@ if(USE_GPERFTOOLS)
 endif()
 
 add_compile_options(-DCMAKE_BUILD)
-add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED)
+add_compile_definitions(BOOST_SYSTEM_NO_DEPRECATED)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
@@ -86,11 +86,6 @@ if(WIN32)
   add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
   add_definitions(-DNOGDI) # WinGDI.h defines macro ERROR
   add_definitions(-D_USE_MATH_DEFINES) # Math constants
-endif()
-
-if(APPLE)
-# Remove this after boost 1.81 or above is used
-add_definitions(-D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION)
 endif()
 
 if (USE_CCACHE)
@@ -174,6 +169,35 @@ else()
     # This is not a very good test. However, as we do not really support many architectures
     # this is good enough for now
     set(GCC YES)
+  endif()
+
+  set(RHEL9_BASED NO)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING)
+    cmake_host_system_information(RESULT _distrib_id QUERY DISTRIB_ID)
+    cmake_host_system_information(RESULT _distrib_id_like QUERY DISTRIB_ID_LIKE)
+    cmake_host_system_information(RESULT _distrib_version_id QUERY DISTRIB_VERSION_ID)
+    if((_distrib_id STREQUAL "rhel" OR _distrib_id_like MATCHES "(^| )rhel( |$)") AND _distrib_version_id MATCHES "^9(\\.|$)")
+      set(RHEL9_BASED YES)
+    endif()
+  endif()
+
+  # Since RHEL 9.7, the system GCC 11 (gcc >= 11.5.0-10) libgcc_eh.a unwinder calls _dl_find_object@GLIBC_2.35
+  # (backported to the RHEL 9.7 glibc 2.34). Clang selects the system GCC installation by default, so with
+  # -static-libgcc our binaries would fail to start on RHEL 9.6 and older. The gcc-toolset-13 libgcc_eh.a
+  # does not have this dependency (but newer gcc-toolsets do). The glibc_symbol_versions test checks this.
+  set(_clang_gcc_install_dir "")
+  if(CLANG AND RHEL9_BASED)
+    set(_clang_gcc_install_dir "/opt/rh/gcc-toolset-13/root/usr/lib/gcc/${CMAKE_SYSTEM_PROCESSOR}-redhat-linux/13")
+  endif()
+  env_set(CLANG_GCC_INSTALL_DIR "${_clang_gcc_install_dir}" PATH "GCC installation for clang to use (passed as --gcc-install-dir), empty for the clang default")
+  if(CLANG_GCC_INSTALL_DIR)
+    if(NOT IS_DIRECTORY "${CLANG_GCC_INSTALL_DIR}")
+      message(FATAL_ERROR "CLANG_GCC_INSTALL_DIR=${CLANG_GCC_INSTALL_DIR} does not exist. On RHEL 9 based distros, "
+                          "install gcc-toolset-13-gcc-c++, or set CLANG_GCC_INSTALL_DIR to empty to use clang's default.")
+    endif()
+    message(STATUS "Using GCC installation for clang: ${CLANG_GCC_INSTALL_DIR}")
+    add_compile_options("$<${is_cxx_compile}:--gcc-install-dir=${CLANG_GCC_INSTALL_DIR}>")
+    add_link_options("$<${is_cxx_link}:--gcc-install-dir=${CLANG_GCC_INSTALL_DIR}>")
   endif()
 
   # check linker flags.
@@ -471,35 +495,15 @@ else()
       $<${is_cxx_compile}:-Wno-delete-non-abstract-non-virtual-dtor>
       $<${is_cxx_compile}:-Wno-range-loop-construct>
       $<${is_cxx_compile}:-Wno-reorder-ctor>
-      # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
-      # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
-      $<${is_cxx_compile}:-Wno-unused-command-line-argument>
+      $<${is_cxx_compile}:-Wno-unused-function>
+      # Needed for clang 13 ?
+      $<${is_cxx_compile}:-Wno-unused-private-field>
+      $<${is_cxx_compile}:-Wno-nullability-completeness>
       # Disable C++ 20 warning for ambiguous operator.
       $<${is_cxx_compile}:-Wno-ambiguous-reversed-operator>
       # Disable for clang 19
       $<${is_cxx_compile}:-Wno-vla-cxx-extension>
       )
-    # These need to be disabled for FDB's RocksDB storage server implementation
-    add_compile_options(
-      $<${is_cxx_compile}:-Wno-deprecated-copy>
-      $<${is_cxx_compile}:-Wno-delete-non-abstract-non-virtual-dtor>
-      $<${is_cxx_compile}:-Wno-range-loop-construct>
-      $<${is_cxx_compile}:-Wno-reorder-ctor>
-      $<${is_cxx_compile}:-Wno-unused-function>
-    )
-    # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
-    # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
-    add_compile_options(
-      $<${is_cxx_compile}:-Wno-unused-command-line-argument>
-      $<${is_cxx_compile}:-Wno-unused-private-field>
-      $<${is_cxx_compile}:-Wno-nullability-completeness>
-      $<${is_cxx_compile}:-Wno-macro-redefined>
-    )
-    if (USE_CCACHE)
-      add_compile_options(
-        $<${is_cxx_compile}:-Wno-register>
-      )
-    endif()
     if (PROFILE_INSTR_GENERATE)
       add_compile_options($<${is_cxx_compile}:-fprofile-instr-generate>)
       add_link_options($<${is_cxx_link}:-fprofile-instr-generate>)
@@ -520,14 +524,24 @@ else()
     add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-Werror>)
   endif()
   if (GCC)
-    add_compile_options(-Wno-pragmas)
-    # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
-    # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
-    add_compile_options(-Wno-attributes)
-    # Needed for gcc 13
-    #add_compile_options($<${is_cxx_compile}:-Wno-missing-template-keyword>)
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-missing-template-keyword>)
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-free-nonheap-object>)
+    # TODO consolidate common GCC and Clang warning options, for now GCC is minimal
+    add_compile_options(
+      $<${is_cxx_compile}:-Wall>
+      $<${is_cxx_compile}:-Wno-sign-compare>
+      $<${is_cxx_compile}:-Wno-unused-function>
+      $<${is_cxx_compile}:-Wno-pragmas>           # rapidjson "unknown option after '#pragma GCC diagnostic' kind"
+      $<${is_cxx_compile}:-Wno-unknown-pragmas>   # "ignoring '#pragma clang diagnostic'"
+      $<${is_cxx_compile}:-Wno-attributes>        # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
+      $<${is_cxx_compile}:-Wno-comment>           # multi-line c++ style comment (trailing '\', usually benign)
+      # Needed for gcc 13
+      $<${is_cxx_compile}:-Wno-array-compare>     # comparison between two arrays is deprecated in C++20
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-reorder>     # "X will be initialized after Y"
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-catch-value> # "catching polymorphic type XX by value"
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-maybe-uninitialized> # false positives that vary with inlining and gcc version
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-delete-non-virtual-dtor>
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-missing-template-keyword>
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-free-nonheap-object>
+    )
   endif()
   add_compile_options(
     $<${is_cxx_compile}:-Wno-error=format>

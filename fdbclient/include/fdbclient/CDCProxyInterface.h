@@ -86,6 +86,25 @@ struct CDCRegisterStreamRequest {
 	}
 };
 
+struct CDCRegisterOrderedStreamRequest {
+	constexpr static FileIdentifier file_identifier = 9186703;
+	Key name;
+	std::vector<KeyRange> ranges;
+	std::vector<Key> splitPoints;
+	ReplyPromise<CDCRegisterStreamReply> reply;
+
+	CDCRegisterOrderedStreamRequest() = default;
+	CDCRegisterOrderedStreamRequest(Key name, std::vector<KeyRange> ranges, std::vector<Key> splitPoints)
+	  : name(name), ranges(std::move(ranges)), splitPoints(std::move(splitPoints)) {}
+
+	bool verify() const { return true; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, name, ranges, splitPoints, reply);
+	}
+};
+
 struct CDCRemoveStreamRequest {
 	constexpr static FileIdentifier file_identifier = 3683857;
 	Key name;
@@ -121,16 +140,19 @@ struct CDCConsumeRequest {
 	ReplyPromise<CDCConsumeReply> reply;
 	// Stable across one consumer's RPC retries; absent for legacy or direct callers.
 	Optional<UID> consumerId;
+	// Zero uses the server limit. A positive quota also fails with server_overloaded when retained proxy
+	// buffers block the read, since ordered partitions cannot independently acknowledge to free capacity.
+	int64_t replyByteLimit = 0;
 
 	CDCConsumeRequest() = default;
-	explicit CDCConsumeRequest(CDCCursor cursor, Optional<UID> consumerId = {})
-	  : cursor(cursor), consumerId(consumerId) {}
+	explicit CDCConsumeRequest(CDCCursor cursor, Optional<UID> consumerId = {}, int64_t replyByteLimit = 0)
+	  : cursor(cursor), consumerId(consumerId), replyByteLimit(replyByteLimit) {}
 
 	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, cursor, reply, consumerId);
+		serializer(ar, cursor, reply, consumerId, replyByteLimit);
 	}
 };
 
@@ -321,6 +343,8 @@ struct CDCProxyInterface {
 	RequestStream<GetCDCProxyBufferStatusRequest> getBufferStatusForTesting;
 	RequestStream<SetCDCProxyPopsPausedRequest> setPopsPausedForTesting;
 	RequestStream<GetCDCProxyStatusRequest> getStatus;
+	PublicRequestStream<CDCRegisterOrderedStreamRequest> registerOrderedStream;
+	bool supportsOrderedStreams = false;
 
 	UID id() const { return consume.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -331,7 +355,7 @@ struct CDCProxyInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, processId, consume);
+		serializer(ar, processId, consume, supportsOrderedStreams);
 		if (Ar::isDeserializing) {
 			registerStream =
 			    PublicRequestStream<CDCRegisterStreamRequest>(consume.getEndpoint().getAdjustedEndpoint(1));
@@ -344,10 +368,13 @@ struct CDCProxyInterface {
 			setPopsPausedForTesting =
 			    RequestStream<SetCDCProxyPopsPausedRequest>(consume.getEndpoint().getAdjustedEndpoint(7));
 			getStatus = RequestStream<GetCDCProxyStatusRequest>(consume.getEndpoint().getAdjustedEndpoint(8));
+			registerOrderedStream =
+			    PublicRequestStream<CDCRegisterOrderedStreamRequest>(consume.getEndpoint().getAdjustedEndpoint(9));
 		}
 	}
 
 	void initEndpoints() {
+		supportsOrderedStreams = true;
 		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
 		streams.push_back(consume.getReceiver(TaskPriority::ReadSocket));
 		streams.push_back(registerStream.getReceiver(TaskPriority::ReadSocket));
@@ -358,6 +385,7 @@ struct CDCProxyInterface {
 		streams.push_back(getBufferStatusForTesting.getReceiver());
 		streams.push_back(setPopsPausedForTesting.getReceiver());
 		streams.push_back(getStatus.getReceiver());
+		streams.push_back(registerOrderedStream.getReceiver(TaskPriority::ReadSocket));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };

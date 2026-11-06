@@ -586,7 +586,7 @@ struct CommitBatchContext {
 
 	IdempotencyIdKVBuilder idempotencyKVBuilder;
 
-	CommitBatchContext(ProxyCommitData*, const std::vector<CommitTransactionRequest>*, const int);
+	CommitBatchContext(ProxyCommitData*, std::vector<CommitTransactionRequest>, const int);
 
 	Optional<UID> getDebugID() const;
 
@@ -743,11 +743,11 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 }
 
 CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
-                                       const std::vector<CommitTransactionRequest>* trs_,
+                                       std::vector<CommitTransactionRequest> trs_,
                                        const int currentBatchMemBytesCount)
-  : pProxyCommitData(pProxyCommitData_), trs(std::move(*const_cast<std::vector<CommitTransactionRequest>*>(trs_))),
-    currentBatchMemBytesCount(currentBatchMemBytesCount), startTime(g_network->now()),
-    timerStartTime(g_network->timer()), localBatchNumber(++pProxyCommitData->localCommitBatchesStarted),
+  : pProxyCommitData(pProxyCommitData_), trs(std::move(trs_)), currentBatchMemBytesCount(currentBatchMemBytesCount),
+    startTime(g_network->now()), timerStartTime(g_network->timer()),
+    localBatchNumber(++pProxyCommitData->localCommitBatchesStarted),
     toCommit(pProxyCommitData->logSystem, pProxyCommitData->localTLogCount), span("MP:commitBatch"_loc),
     committed(trs.size()), lastShardMove(invalidVersion) {
 
@@ -2197,10 +2197,10 @@ Future<Void> commitBatchImpl(CommitBatchContext* pContext) {
 } // namespace CommitBatch
 
 Future<Void> commitBatch(ProxyCommitData* pCommitData,
-                         std::vector<CommitTransactionRequest>* trs,
+                         std::vector<CommitTransactionRequest> trs,
                          int currentBatchMemBytesCount) {
 
-	CommitBatch::CommitBatchContext context(pCommitData, trs, currentBatchMemBytesCount);
+	CommitBatch::CommitBatchContext context(pCommitData, std::move(trs), currentBatchMemBytesCount);
 	Future<Void> commit = CommitBatch::commitBatchImpl(&context);
 
 	try {
@@ -2209,9 +2209,7 @@ Future<Void> commitBatch(ProxyCommitData* pCommitData,
 		if (err.code() == error_code_actor_cancelled) {
 			throw;
 		}
-		TraceEvent(SevInfo, "CommitBatchFailed", pCommitData->dbgid)
-		    .detail("Stage", context.stage)
-		    .detail("ErrorCode", err.code());
+		TraceEvent(SevInfo, "CommitBatchFailed", pCommitData->dbgid).error(err).detail("Stage", context.stage);
 		throw failed_to_progress();
 	}
 }
@@ -2305,10 +2303,9 @@ static Future<Void> readRequestServer(CommitProxyInterface proxy,
 	while (true) {
 		GetKeyServerLocationsRequest req = co_await proxy.getKeyServersLocations.getFuture();
 		// WARNING: this code is run at a high priority, so it needs to do as little work as possible
-		if (req.limit != CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && // Always do data distribution requests
-		    (commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
-		         SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE ||
-		     (g_network->isSimulated() && buggify(0.001)))) {
+		if (commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
+		        SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE ||
+		    (g_network->isSimulated() && buggify(0.001))) {
 			++commitData->stats.keyServerLocationErrors;
 			req.reply.sendError(commit_proxy_memory_limit_exceeded());
 			TraceEvent(SevWarnAlways, "ProxyLocationRequestThresholdExceeded").suppressFor(60);
@@ -3091,16 +3088,12 @@ class CommitProxyServerCore {
 			    .detail("RecoveryState", commitData.db->get().recoveryState)
 			    .detail("CCInf", commitData.db->get().clusterInterface.id().toString());
 			*/
-			const std::vector<CommitTransactionRequest>& trs = batchedRequests.first;
 			const int batchBytes = batchedRequests.second;
-			if (!trs.empty() ||
+			if (!batchedRequests.first.empty() ||
 			    (commitData.db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
 			     masterLifetime.isEqual(commitData.db->get().masterLifetime) && lastCommitComplete.isReady())) {
 
-				lastCommitComplete =
-				    commitBatch(&commitData,
-				                const_cast<std::vector<CommitTransactionRequest>*>(&batchedRequests.first),
-				                batchBytes);
+				lastCommitComplete = commitBatch(&commitData, std::move(batchedRequests.first), batchBytes);
 
 				addActor.send(lastCommitComplete);
 			}

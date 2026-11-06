@@ -61,6 +61,7 @@ Future<bool> expensiveDataCheckCommandActor(
 		printf("\n");
 	} else if (tokencmp(tokens[1], "all")) {
 		if (address_interface->empty()) {
+			result = false;
 			fprintf(stderr,
 			        "ERROR: no processes to check. You must run the `expensive_data_check’ "
 			        "command before running `expensive_data_check all’.\n");

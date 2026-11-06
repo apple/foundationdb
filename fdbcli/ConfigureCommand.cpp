@@ -331,6 +331,8 @@ void configureGenerator(const char* text,
 		                   "perpetual_storage_wiggle_locality=",
 		                   "perpetual_storage_wiggle_engine=",
 		                   "storage_migration_type=",
+		                   "shard_metadata_format=",
+		                   "shard_metadata_migration=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
@@ -343,7 +345,9 @@ CommandFactory configureFactory(
         "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|perpetual_storage_wiggle_engine=<ENGINE>|"
-        "storage_migration_type={disabled|gradual|aggressive}"
+        "storage_migration_type={disabled|gradual|aggressive}|"
+        "shard_metadata_format={original|encoded}|"
+        "shard_metadata_migration={enabled|disabled}"
         "|exclude=<ADDRESS...>",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
@@ -375,6 +379,15 @@ CommandFactory configureFactory(
         "perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>: Set the process filter for wiggling. "
         "The processes that match the given locality key and locality value are only wiggled. The value 0 will disable "
         "the locality filter and matches all the processes for wiggling.\n\n"
+        "shard_metadata_format={original|encoded}: Target encoding for the cluster's shard-location metadata "
+        "(\\xff/keyServers/ and \\xff/serverKeys/). `encoded' is the shard-encoded (UID+dataMoveId) format, "
+        "`original' the legacy tag-based format. Paired with shard_metadata_migration below; mirrors the "
+        "storage_engine + perpetual_storage_wiggle pattern. When unset, DD falls back to the legacy "
+        "SHARD_ENCODE_LOCATION_METADATA knob (true -> encoded, false -> original).\n\n"
+        "shard_metadata_migration={enabled|disabled}: When enabled, DD at init actively converges existing "
+        "shard metadata entries to shard_metadata_format. When disabled (default), DD does nothing at init "
+        "in either direction; entries drain via natural DD moves or a manual storage wiggle. See the "
+        "SHARD_ENCODE_LOCATION_METADATA design doc for cost model and safety analysis.\n\n"
         "exclude=<ADDRESS...>: Sets the addresses in the format of IP1:port1,IP2:port2 pairs to be excluded during "
         "recruitment. Note this should be only used when the database is unavailable because of the faulty processes "
         "that are blocking the recovery from completion. The number of addresses should be less than the replication "

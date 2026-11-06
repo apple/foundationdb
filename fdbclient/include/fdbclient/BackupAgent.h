@@ -170,6 +170,15 @@ public:
 	static StringRef restoreStateText(ERestoreState id);
 	static Key getPauseKey();
 
+	// Why a bulkload restore cannot honor these arguments, or empty if it can (always empty for rangefile).
+	static Optional<std::string> bulkLoadRestoreRefusal(Key tagName,
+	                                                    Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                                    Key addPrefix,
+	                                                    Key removePrefix,
+	                                                    OnlyApplyMutationLogs onlyApplyMutationLogs,
+	                                                    Optional<std::string> encryptionKeyFileName,
+	                                                    bool useRangeFileRestore);
+
 	// restore() will
 	//   - make sure that url is readable and appears to be a complete backup
 	//   - make sure the requested TargetVersion is valid
@@ -260,6 +269,14 @@ public:
 	Future<std::string> restoreStatus(Database cx, Key tagName) {
 		return runRYWTransaction(cx,
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return restoreStatus(tr, tagName); });
+	}
+
+	// As restoreStatus(), serialized as a JSON document. An empty tagName reports every restore tag, so
+	// the result is always one object with a "Restores" array rather than a document per tag.
+	Future<std::string> restoreStatusJSON(Reference<ReadYourWritesTransaction> tr, Key tagName);
+	Future<std::string> restoreStatusJSON(Database cx, Key tagName) {
+		return runRYWTransaction(
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return restoreStatusJSON(tr, tagName); });
 	}
 
 	/** BACKUP METHODS **/
@@ -476,6 +493,10 @@ public:
 	                         WaitForDestUID = WaitForDestUID::False);
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
+
+	// As getStatus(), serialized as a JSON document. The error list is not capped, since a consumer is
+	// not reading a terminal.
+	Future<std::string> getStatusJSON(Database cx, Key tagName);
 
 	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::False);
 	Future<EnumState> getStateValue(Database cx, UID logUid) {
@@ -976,9 +997,9 @@ public:
 					           }
 					           return {}; // Not restorable until both complete
 				           }
-				           // Use the minimum of both as the effective first snapshot version
+				           // The log must cover either restore method before the backup can stop.
 				           Version effectiveFirstSnapshot =
-				               std::min(firstSnapshot.get().get(), bulkDumpSnapshot.get().get());
+				               std::max(firstSnapshot.get().get(), bulkDumpSnapshot.get().get());
 				           if (logVersion.present() && logVersion.get() > effectiveFirstSnapshot) {
 					           return std::max(logVersion.get() - 1, effectiveFirstSnapshot);
 				           }

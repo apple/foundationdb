@@ -73,7 +73,7 @@ public:
 	// }
 
 protected:
-	Future(FDBFuture* f) : future_(f) {}
+	explicit Future(FDBFuture* f) : future_(f) {}
 	FDBFuture* future_;
 };
 
@@ -86,7 +86,7 @@ public:
 private:
 	friend class Transaction;
 	friend class Database;
-	Int64Future(FDBFuture* f) : Future(f) {}
+	explicit Int64Future(FDBFuture* f) : Future(f) {}
 };
 
 class DoubleFuture : public Future {
@@ -98,7 +98,7 @@ public:
 private:
 	friend class Transaction;
 	friend class Database;
-	DoubleFuture(FDBFuture* f) : Future(f) {}
+	explicit DoubleFuture(FDBFuture* f) : Future(f) {}
 };
 
 class KeyFuture : public Future {
@@ -110,7 +110,7 @@ public:
 private:
 	friend class Transaction;
 	friend class Database;
-	KeyFuture(FDBFuture* f) : Future(f) {}
+	explicit KeyFuture(FDBFuture* f) : Future(f) {}
 };
 
 class ValueFuture : public Future {
@@ -121,7 +121,7 @@ public:
 
 private:
 	friend class Transaction;
-	ValueFuture(FDBFuture* f) : Future(f) {}
+	explicit ValueFuture(FDBFuture* f) : Future(f) {}
 };
 
 class StringArrayFuture : public Future {
@@ -133,7 +133,7 @@ public:
 
 private:
 	friend class Transaction;
-	StringArrayFuture(FDBFuture* f) : Future(f) {}
+	explicit StringArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
 class KeyValueArrayFuture : public Future {
@@ -145,7 +145,7 @@ public:
 
 private:
 	friend class Transaction;
-	KeyValueArrayFuture(FDBFuture* f) : Future(f) {}
+	explicit KeyValueArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
 class MappedKeyValueArrayFuture : public Future {
@@ -157,7 +157,7 @@ public:
 
 private:
 	friend class Transaction;
-	MappedKeyValueArrayFuture(FDBFuture* f) : Future(f) {}
+	explicit MappedKeyValueArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
 class KeyRangeArrayFuture : public Future {
@@ -169,14 +169,14 @@ public:
 
 private:
 	friend class Transaction;
-	KeyRangeArrayFuture(FDBFuture* f) : Future(f) {}
+	explicit KeyRangeArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
 class EmptyFuture : public Future {
 private:
 	friend class Transaction;
 	friend class Database;
-	EmptyFuture(FDBFuture* f) : Future(f) {}
+	explicit EmptyFuture(FDBFuture* f) : Future(f) {}
 };
 
 class Result {
@@ -184,7 +184,7 @@ public:
 	virtual ~Result() = 0;
 
 protected:
-	Result(FDBResult* r) : result_(r) {}
+	explicit Result(FDBResult* r) : result_(r) {}
 	FDBResult* result_;
 };
 
@@ -197,7 +197,7 @@ public:
 
 private:
 	friend class Transaction;
-	KeyValueArrayResult(FDBResult* r) : Result(r) {}
+	explicit KeyValueArrayResult(FDBResult* r) : Result(r) {}
 };
 
 // Wrapper around FDBDatabase, providing database-level API
@@ -222,7 +222,7 @@ public:
 class Transaction final {
 public:
 	// Given an FDBDatabase, initializes a new transaction.
-	Transaction(FDBDatabase* db);
+	explicit Transaction(FDBDatabase* db);
 	~Transaction();
 
 	// Wrapper around fdb_transaction_reset.

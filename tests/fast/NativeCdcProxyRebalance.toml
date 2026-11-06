@@ -1,0 +1,33 @@
+[configuration]
+config = 'single commit_proxies=1 grv_proxies=2'
+singleRegion = true
+datacenters = 1
+machineCount = 12
+statelessProcessClassesPerDC = 3
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 2
+# Invoke the production policy from the workload after all three registrations are published.
+cdc_proxy_rebalance_enabled = false
+
+[[test]]
+testTitle = 'NativeCdcProxyRebalance'
+useDB = true
+waitForQuiescenceEnd = false
+runFailureWorkloads = false
+connectionFailuresDisableDuration = 1000000
+timeout = 180
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 3
+    minStreamCount = 3
+    maxStreamCount = 3
+    keyCount = 4
+    writesPerRound = 1
+    rounds = 0
+    testProxyRebalance = true
+    operationTimeout = 90.0
