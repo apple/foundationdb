@@ -55,6 +55,9 @@ enum FDBSimConsistencyScanState {
 };
 enum FDBSimConsistencyScanCorruptionType { FlipMoreFlag = 0, AddToEmpty = 1, RemoveLastRow = 2, ChangeFirstValue = 3 };
 
+// Above the ports the simulator assigns to processes and to remote flow processes.
+constexpr int SIM_GRPC_PORT_OFFSET = 60000;
+
 struct FDBSimulationPolicyState {
 	int desiredCoordinators = 1;
 	Reference<IReplicationPolicy> storagePolicy;
@@ -101,6 +104,8 @@ struct FDBSimulationPolicyState {
 	double injectSSDelayTime = std::numeric_limits<double>::max();
 	std::map<NetworkAddress, bool> corruptWorkerMap;
 	FDBTSSMode tssMode = FDBTSSMode::Disabled;
+	// Every fdbd process also serves gRPC, on its first port plus SIM_GRPC_PORT_OFFSET.
+	bool grpcEnabled = false;
 
 	bool updateConsistencyScanState(FDBSimConsistencyScanState expectedCurrent, FDBSimConsistencyScanState desired) {
 		if (consistencyScanState == expectedCurrent && desired > consistencyScanState) {

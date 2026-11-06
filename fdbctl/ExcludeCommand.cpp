@@ -238,7 +238,10 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 		try {
 			co_await excludeServersAndLocalities(db, exclusionAddresses, exclusionLocalities, markFailed, force);
 		} catch (Error& e) {
-			co_return grpc::Status(grpc::StatusCode::INTERNAL, fmt::format("error: ", e.name()));
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			co_return grpc::Status(grpc::StatusCode::INTERNAL, fmt::format("error: {}", e.name()));
 		}
 
 		std::set<NetworkAddress> notExcludedServers =
@@ -279,6 +282,9 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 
 		co_return grpc::Status::OK;
 	} catch (const Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		co_return grpc::Status(grpc::StatusCode::INTERNAL,
 		                       fmt::format("Error getting worker information: {}", e.what()));
 	}
@@ -315,6 +321,9 @@ Future<grpc::Status> excludeStatus(Reference<IDatabase> db, const ExcludeStatusR
 
 		co_return grpc::Status::OK;
 	} catch (const Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		co_return grpc::Status(grpc::StatusCode::INTERNAL,
 		                       fmt::format("Error getting worker information: {}", e.what()));
 	}

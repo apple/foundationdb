@@ -298,6 +298,9 @@ public:
 	virtual void destroyProcess(ProcessInfo* p) = 0;
 	virtual void destroyMachine(Optional<Standalone<StringRef>> const& machineId) = 0;
 
+	// Makes `addr`, beyond the addresses the process was created with, listenable by and connectable to `process`.
+	virtual void addProcessListener(ProcessInfo* process, NetworkAddress addr) = 0;
+
 	virtual void addSimHTTPProcess(Reference<HTTP::SimServerContext> serverContext) = 0;
 	virtual void removeSimHTTPProcess() = 0;
 	virtual Future<Void> registerSimHTTPServer(std::string hostname,

@@ -82,20 +82,15 @@ public:
 	                                                                   config->getCertificatePathSync(),
 	                                                                   config->getCAPathSync(),
 	                                                                   FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS)),
-	    server_options_(ge::TlsServerCredentialsOptions(provider_)) {
+	    server_options_(ge::TlsServerCredentialsOptions::Create(provider_).value()) {
 
 		// Required for mTLS.
 		server_options_.set_cert_request_type(GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY);
+		server_options_.set_root_certificate_provider(provider_);
 
-		// Since the files can change, we'll need refetch from provider.
-		server_options_.watch_root_certs();
-		server_options_.watch_identity_key_cert_pairs();
-		client_options_.watch_root_certs();
-		client_options_.watch_identity_key_cert_pairs();
-
-		// Set the provider for client. Server and client channels within same process
-		// share same provider.
-		client_options_.set_certificate_provider(provider_);
+		// Server and client channels within same process share same provider.
+		client_options_.set_root_certificate_provider(provider_);
+		client_options_.set_identity_certificate_provider(provider_);
 	}
 
 	std::shared_ptr<grpc::ServerCredentials> serverCredentials() const override {
@@ -123,24 +118,16 @@ private:
 class GrpcTlsCredentialStaticProvider : public GrpcCredentialProvider {
 public:
 	GrpcTlsCredentialStaticProvider(const std::string& key, const std::string& cert, const std::string& ca)
-	  : provider_(
-	        std::make_shared<ge::StaticDataCertificateProvider>(ca,
-	                                                            std::vector{ ge::IdentityKeyCertPair{ key, cert } })),
-	    server_options_(ge::TlsServerCredentialsOptions(provider_)) {
+	  : provider_(makeProvider(key, cert, ca)),
+	    server_options_(ge::TlsServerCredentialsOptions::Create(provider_).value()) {
 
 		// Required for mTLS
-		server_options_.set_cert_request_type(GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY); // mTLS
+		server_options_.set_cert_request_type(GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY);
+		server_options_.set_root_certificate_provider(provider_);
 
-		// Since the files can change, we'll need refetch from provider. Not sure why static
-		// config needs this, but it won't work without it. (FIXME)
-		server_options_.watch_root_certs();
-		server_options_.watch_identity_key_cert_pairs();
-		client_options_.watch_root_certs();
-		client_options_.watch_identity_key_cert_pairs();
-
-		// Set the provider for client. Server and client channels within same process
-		// share same provider.
-		client_options_.set_certificate_provider(provider_);
+		// Server and client channels within same process share same provider.
+		client_options_.set_root_certificate_provider(provider_);
+		client_options_.set_identity_certificate_provider(provider_);
 	}
 
 	bool validate() const override { return provider_->ValidateCredentials().ok(); }
@@ -154,7 +141,17 @@ public:
 	}
 
 private:
-	std::shared_ptr<ge::StaticDataCertificateProvider> provider_;
+	static std::shared_ptr<ge::InMemoryCertificateProvider> makeProvider(const std::string& key,
+	                                                                     const std::string& cert,
+	                                                                     const std::string& ca) {
+		auto provider = std::make_shared<ge::InMemoryCertificateProvider>();
+		// Invalid PEM data is reported by validate().
+		(void)provider->UpdateRoot(ca);
+		(void)provider->UpdateIdentityKeyCertPair(std::vector{ ge::IdentityKeyOrSignerCertPair{ key, cert } });
+		return provider;
+	}
+
+	std::shared_ptr<ge::InMemoryCertificateProvider> provider_;
 	ge::TlsServerCredentialsOptions server_options_;
 	ge::TlsChannelCredentialsOptions client_options_;
 };
