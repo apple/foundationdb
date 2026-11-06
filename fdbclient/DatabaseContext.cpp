@@ -159,6 +159,8 @@ void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageSe
 		                             TSSEndpointData(tssi.id(), tssi.getKey.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getKeyValues.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.getKeyValues.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getRangeKeys.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getRangeKeys.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getMappedKeyValues.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.getMappedKeyValues.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first(),
@@ -184,6 +186,7 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 		queueModel.removeTssEndpoint(ssi.getValue.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKey.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKeyValues.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getRangeKeys.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getMappedKeyValues.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first());
 

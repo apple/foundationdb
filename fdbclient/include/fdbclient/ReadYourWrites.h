@@ -107,6 +107,32 @@ public:
 		                snapshot,
 		                reverse);
 	}
+	Future<RangeKeysResult> getRangeKeys(const KeySelector& begin,
+	                                     const KeySelector& end,
+	                                     int limit,
+	                                     Snapshot = Snapshot::False,
+	                                     Reverse = Reverse::False);
+	Future<RangeKeysResult> getRangeKeys(KeySelector begin,
+	                                     KeySelector end,
+	                                     GetRangeLimits limits,
+	                                     Snapshot = Snapshot::False,
+	                                     Reverse = Reverse::False);
+	Future<RangeKeysResult> getRangeKeys(const KeyRange& keys,
+	                                     int limit,
+	                                     Snapshot snapshot = Snapshot::False,
+	                                     Reverse reverse = Reverse::False) {
+		return getRangeKeys(keys, GetRangeLimits(limit), snapshot, reverse);
+	}
+	Future<RangeKeysResult> getRangeKeys(const KeyRange& keys,
+	                                     GetRangeLimits limits,
+	                                     Snapshot snapshot = Snapshot::False,
+	                                     Reverse reverse = Reverse::False) {
+		return getRangeKeys(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
+		                    KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
+		                    limits,
+		                    snapshot,
+		                    reverse);
+	}
 	Future<MappedRangeResult> getMappedRange(KeySelector begin,
 	                                         KeySelector end,
 	                                         Key mapper,

@@ -27,6 +27,8 @@ class ProtocolVersion implements Comparable<ProtocolVersion> {
 		new ProtocolVersion(0x0FDB00B074000000L);
 	public static final ProtocolVersion protocolVersionEightZero =
 		new ProtocolVersion(0x0FDB00B080000000L);
+	public static final ProtocolVersion protocolVersionEightZeroDevOne =
+		new ProtocolVersion(0x0FDB00B080010000L);
 
 	public static final List<ProtocolVersion> supportedVersions = Arrays.asList(
 			protocolVersionSixThree,
@@ -37,7 +39,8 @@ class ProtocolVersion implements Comparable<ProtocolVersion> {
 			protocolVersionSevenOne,
 			protocolVersionSevenThree,
 			protocolVersionSevenFour,
-			protocolVersionEightZero);
+			protocolVersionEightZero,
+			protocolVersionEightZeroDevOne);
 
 	private static final long compatibleProtocolVersionMask = 0xFFFFFFFFFFFF0000L;
 	private final long protocolVersion;

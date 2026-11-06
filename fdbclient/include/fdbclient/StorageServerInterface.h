@@ -88,7 +88,7 @@ struct UpdateCommitCostRequest {
 
 struct StorageServerInterface {
 	constexpr static FileIdentifier file_identifier = 15302073;
-	constexpr static int kNumAdjustedEndpoints = 26;
+	constexpr static int kNumAdjustedEndpoints = 27;
 	enum { BUSY_ALLOWED = 0, BUSY_FORCE = 1, BUSY_LOCAL = 2 };
 
 	enum { LocationAwareLoadBalance = 1 };
@@ -130,6 +130,7 @@ struct StorageServerInterface {
 	RequestStream<struct GetHotShardsRequest> getHotShards;
 	RequestStream<struct GetStorageCheckSumRequest> getCheckSum;
 	RequestStream<struct BulkDumpRequest> bulkdump;
+	PublicRequestStream<struct GetRangeKeysRequest> getRangeKeys;
 
 private:
 	void initEndpointsFromGetValue();
@@ -323,9 +324,6 @@ struct GetKeyValuesRequest : TimedRequest {
 	SpanContext spanContext;
 	Arena arena;
 	KeySelectorRef begin, end;
-	// This is a dummy field there has never been used.
-	// TODO: Get rid of this by constexpr or other template magic in getRange
-	KeyRef mapper = KeyRef();
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	Optional<TagSet> tags;
@@ -348,6 +346,61 @@ struct GetKeyValuesRequest : TimedRequest {
 		           version,
 		           limit,
 		           limitBytes,
+		           tags,
+		           reply,
+		           spanContext,
+		           options,
+		           ssLatestCommitVersions,
+		           taskID,
+		           arena);
+	}
+};
+
+struct GetRangeKeysReply : public LoadBalancedReply {
+	constexpr static FileIdentifier file_identifier = 11783066;
+	Arena arena;
+	VectorRef<RangeKeyRef, VecSerStrategy::String> data;
+	Version version; // useful when latestVersion was requested
+	bool more;
+	bool cached = false;
+
+	GetRangeKeysReply() : version(invalidVersion), more(false), cached(false) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, cached, arena);
+	}
+};
+
+struct GetRangeKeysRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 15795746;
+	SpanContext spanContext;
+	Arena arena;
+	KeySelectorRef begin, end;
+	Version version; // or latestVersion
+	int limit, limitBytes;
+	bool deterministicLimits = false;
+	Optional<TagSet> tags;
+	Optional<ReadOptions> options;
+	ReplyPromise<GetRangeKeysReply> reply;
+	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
+	                                      // to this client, of all storage replicas that
+	                                      // serve the given key
+	Optional<TaskPriority> taskID; // includes the information about read purpose
+
+	GetRangeKeysRequest() = default;
+
+	bool verify() const { return true; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           begin,
+		           end,
+		           version,
+		           limit,
+		           limitBytes,
+		           deterministicLimits,
 		           tags,
 		           reply,
 		           spanContext,
