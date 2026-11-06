@@ -860,17 +860,26 @@ def local_ip(cluster_file):
 
 
 AUDIT_LOG_FILE_NAME = "transaction_profiling_analyzer_audit.json"
+AUDIT_LOG_ENV = "FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE"
 
 
-def audit_log_path():
-    """AUDIT_LOG_FILE_NAME in the FDB_NETWORK_OPTION_TRACE_ENABLE directory, next to libfdb_c's trace files.
-    Empty means the current directory, same as libfdb_c. Exits with a message if it's unset or not a directory."""
-    if "FDB_NETWORK_OPTION_TRACE_ENABLE" not in os.environ:
-        sys.exit("ERROR: audit logging is enabled (--audit-log or FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE) but "
-                 "FDB_NETWORK_OPTION_TRACE_ENABLE is not set. Set it to the directory to write the audit log to.")
-    log_dir = os.environ["FDB_NETWORK_OPTION_TRACE_ENABLE"] or "."
-    if not os.path.isdir(log_dir):
-        sys.exit("ERROR: FDB_NETWORK_OPTION_TRACE_ENABLE=%s is not a directory" % log_dir)
+def audit_log_path(audit_log=False, audit_log_dir=None):
+    """AUDIT_LOG_FILE_NAME in the audit log directory, or None if audit logging is off. Set up like fdbcli's audit
+    logging: --audit-log or setting FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE turns it on, like
+    FDB_NETWORK_OPTION_TRACE_ENABLE does for tracing. The directory is the FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE
+    value if it's set, else --audit-log-dir. Like FDB_NETWORK_OPTION_TRACE_ENABLE over fdbcli's --log-dir, the env
+    var wins even when empty. If that's empty, it's the FDB_NETWORK_OPTION_TRACE_ENABLE directory next to libfdb_c's
+    trace files, else the current directory. Exits with a message if --audit-log-dir is given with audit logging off,
+    or if the directory doesn't exist or isn't writable."""
+    if not audit_log and AUDIT_LOG_ENV not in os.environ:
+        if audit_log_dir:
+            # don't silently ignore it, or reads would go unaudited
+            sys.exit("ERROR: --audit-log-dir requires audit logging to be enabled with --audit-log or " + AUDIT_LOG_ENV)
+        return None
+    log_dir = os.environ[AUDIT_LOG_ENV] if AUDIT_LOG_ENV in os.environ else audit_log_dir
+    log_dir = log_dir or os.environ.get("FDB_NETWORK_OPTION_TRACE_ENABLE") or "."
+    if not os.path.isdir(log_dir) or not os.access(log_dir, os.W_OK | os.X_OK):
+        sys.exit("ERROR: audit log directory `%s' does not exist or is not writable" % log_dir)
     return os.path.join(log_dir, AUDIT_LOG_FILE_NAME)
 
 
@@ -965,17 +974,22 @@ def main():
     parser.add_argument("--single-shard-ranges-only", action="store_true",
                         help="Only print range boundaries that exist in a single shard")
     parser.add_argument("--audit-log", action="store_true",
-                        help="Append a JSON line for every key, range or mutation this prints to "
-                             "$FDB_NETWORK_OPTION_TRACE_ENABLE/%s. Also enabled by setting "
-                             "FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE." % AUDIT_LOG_FILE_NAME)
+                        help="Append a JSON line for every key, range or mutation this prints to %s. Also enabled "
+                             "by setting %s, whose value, if not empty, is the audit log directory."
+                             % (AUDIT_LOG_FILE_NAME, AUDIT_LOG_ENV))
+    parser.add_argument("--audit-log-dir", type=str,
+                        help="Directory for %s. Defaults to the FDB_NETWORK_OPTION_TRACE_ENABLE directory, then the "
+                             "current directory. Requires audit logging to be enabled. %s, if set, overrides it, like "
+                             "FDB_NETWORK_OPTION_TRACE_ENABLE does fdbcli's --log-dir." % (AUDIT_LOG_FILE_NAME, AUDIT_LOG_ENV))
     parser.add_argument("-a", "--filter-address", action="append",
                         help="Only print range boundaries that include the given address. This option can used multiple times to include more than one address in the filter, in which case all addresses must match.")
 
     args = parser.parse_args()
 
     audit = None
-    if args.audit_log or "FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE" in os.environ:
-        audit = AuditLog(audit_log_path(), cluster_description(args.cluster_file), local_ip(args.cluster_file))
+    path = audit_log_path(args.audit_log, args.audit_log_dir)
+    if path:
+        audit = AuditLog(path, cluster_description(args.cluster_file), local_ip(args.cluster_file))
 
     type_filter = set()
     if args.filter_get_version:
