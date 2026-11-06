@@ -79,10 +79,10 @@ Reference<const ConfigValue> GlobalConfig::get(KeyRef name) {
 	return it->second;
 }
 
-std::map<KeyRef, Reference<const ConfigValue>> GlobalConfig::get(KeyRangeRef range) {
+std::map<KeyRef, Reference<const ConfigValue>> GlobalConfig::get(KeyRef begin, Optional<KeyRef> end) {
 	std::map<KeyRef, Reference<const ConfigValue>> results;
 	for (const auto& [key, value] : data) {
-		if (range.contains(key)) {
+		if (begin <= key && (!end.present() || key < end.get())) {
 			results[key] = value;
 		}
 	}
@@ -139,11 +139,11 @@ void GlobalConfig::erase(Key key) {
 	erase(KeyRangeRef(key, keyAfter(key)));
 }
 
-void GlobalConfig::erase(KeyRangeRef range) {
+void GlobalConfig::erase(Optional<KeyRangeRef> range) {
 	// TraceEvent(SevInfo, "GlobalConfigErase").detail("Range", range);
 	auto it = data.begin();
 	while (it != data.end()) {
-		if (range.contains(it->first)) {
+		if (!range.present() || range.get().contains(it->first)) {
 			if (callbacks.find(it->first) != callbacks.end()) {
 				callbacks[it->first](std::nullopt);
 			}
@@ -156,7 +156,7 @@ void GlobalConfig::erase(KeyRangeRef range) {
 
 Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
 	// TraceEvent trace(SevInfo, "GlobalConfigRefresh");
-	erase(KeyRangeRef(""_sr, "\xff"_sr));
+	erase(Optional<KeyRangeRef>());
 
 	Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
 	while (true) {

@@ -25,9 +25,11 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/StatusSchema.h"
+#include "fdbclient/Tuple.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
@@ -756,9 +758,46 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return true;
 	}
 
+	static Future<Void> testGlobalConfigRange(Database cx) {
+		const KeyRangeRef module = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG);
+		const KeyRef name = "\xff\xff"_sr;
+		const Key key = GlobalConfig::prefixedKey(name);
+		co_await runRYWTransaction(cx, [key](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr->set(key, Tuple::makeTuple(TupleVersionstamp(0x0102030405060708LL, 0x090a, 0xabcd)).pack());
+			return Void();
+		});
+		while (!cx->globalConfig->get(name)) {
+			co_await cx->globalConfig->onChange();
+		}
+
+		ReadYourWritesTransaction tr(cx);
+		const RangeResult rows = co_await tr.getRange(module, GetRangeLimits::ROW_LIMIT_UNLIMITED);
+		ASSERT(std::any_of(rows.begin(), rows.end(), [&](const KeyValueRef& kv) {
+			return kv.key == key && kv.value == "01 02 03 04 05 06 07 08 09 0a ab cd"_sr;
+		}));
+
+		co_await runRYWTransaction(cx, [key, module](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr->clear(KeyRangeRef(key, module.end));
+			return Void();
+		});
+		const Optional<Value> stored = co_await runRYWTransaction(cx, [name](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			return tr->get(name.withPrefix(globalConfigKeysPrefix));
+		});
+		ASSERT(!stored.present());
+		while (cx->globalConfig->get(name)) {
+			co_await cx->globalConfig->onChange();
+		}
+	}
+
 	Future<Void> managementApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		// All management api related tests that cannot run with failure injections
 		Database cx = cx_->clone();
+		if (cx->apiVersionAtLeast(700)) {
+			co_await testGlobalConfigRange(cx);
+		}
 		auto tx = makeReference<ReadYourWritesTransaction>(cx);
 		// test change coordinators and cluster description
 		// we randomly pick one process(not coordinator) and add it, in this case, it should always succeed

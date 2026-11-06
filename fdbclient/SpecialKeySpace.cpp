@@ -28,6 +28,7 @@
 #include <exception>
 #include <unordered_set>
 
+#include "fdbclient/TupleVersionstamp.h"
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -1610,9 +1611,11 @@ Future<RangeResult> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw,
                                                KeyRangeRef kr,
                                                GetRangeLimits limitsHint) const {
 	RangeResult result;
-	KeyRangeRef modified =
-	    KeyRangeRef(kr.begin.removePrefix(getKeyRange().begin), kr.end.removePrefix(getKeyRange().begin));
-	std::map<KeyRef, Reference<const ConfigValue>> values = ryw->getDatabase()->globalConfig->get(modified);
+	Optional<KeyRef> end;
+	if (kr.end < getKeyRange().end) {
+		end = kr.end.removePrefix(getKeyRange().begin);
+	}
+	auto values = ryw->getDatabase()->globalConfig->get(kr.begin.removePrefix(getKeyRange().begin), end);
 	for (const auto& [key, config] : values) {
 		Key prefixedKey = key.withPrefix(getKeyRange().begin);
 		if (config.isValid() && config->getValue().has_value()) {
@@ -1633,6 +1636,11 @@ Future<RangeResult> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw,
 				result.push_back_deep(
 				    result.arena(),
 				    KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(config->getValue()))));
+			} else if (config->getValue().type() == typeid(TupleVersionstamp)) {
+				const auto& stamp = std::any_cast<const TupleVersionstamp&>(config->getValue());
+				result.push_back_deep(
+				    result.arena(),
+				    KeyValueRef(prefixedKey, StringRef(stamp.begin(), stamp.size()).toFullHexStringPlain()));
 			} else {
 				ASSERT(false);
 			}
@@ -1670,23 +1678,33 @@ Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* globalCo
 	// Transform writes from the special-key-space (\xff\xff/global_config/) to
 	// the system key space (\xff/globalConfig/), and writes mutations to
 	// latest version history.
-	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
-	    ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
-	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
-	while (iter != ranges.end()) {
-		std::pair<bool, Optional<Value>> entry = iter->value();
-		if (entry.first) {
-			if (entry.second.present() && iter->begin().startsWith(globalConfig->getKeyRange().begin)) {
-				Key bareKey = iter->begin().removePrefix(globalConfig->getKeyRange().begin);
-				insertions.push_back_deep(insertions.arena(), KeyValueRef(bareKey, entry.second.get()));
-			} else if (!entry.second.present() && iter->range().begin.startsWith(globalConfig->getKeyRange().begin) &&
-			           iter->range().end.startsWith(globalConfig->getKeyRange().begin)) {
-				KeyRef bareRangeBegin = iter->range().begin.removePrefix(globalConfig->getKeyRange().begin);
-				KeyRef bareRangeEnd = iter->range().end.removePrefix(globalConfig->getKeyRange().begin);
-				clears.push_back_deep(clears.arena(), KeyRangeRef(bareRangeBegin, bareRangeEnd));
-			}
+	Optional<Key> tailBegin;
+	const KeyRangeRef module = globalConfig->getKeyRange();
+	for (auto iter : ryw->getSpecialKeySpaceWriteMap().intersectingRanges(module)) {
+		const auto& [written, value] = iter->value();
+		if (!written) {
+			continue;
 		}
-		++iter;
+		const KeyRangeRef range = iter->range() & module;
+		const KeyRef begin = range.begin.removePrefix(module.begin);
+		if (value.present()) {
+			insertions.push_back_deep(insertions.arena(), KeyValueRef(begin, value.get()));
+		} else if (range.end != module.end) {
+			clears.push_back_deep(clears.arena(), KeyRangeRef(begin, range.end.removePrefix(module.begin)));
+		} else {
+			tailBegin = Key(begin);
+		}
+	}
+	if (tailBegin.present()) {
+		// History stores bare key ranges, which have no unbounded endpoint. The reverse read
+		// supplies a finite upper bound and conflicts with concurrent inserts above it.
+		KeyRange tail(KeyRangeRef(tailBegin.get().withPrefix(globalConfigKeysPrefix), globalConfigDataKeys.end));
+		RangeResult last = co_await tr.getRange(tail, 1, Snapshot::False, Reverse::True);
+		if (!last.empty()) {
+			Key end = keyAfter(last.front().key);
+			clears.push_back_deep(clears.arena(),
+			                      KeyRangeRef(tailBegin.get(), end.removePrefix(globalConfigKeysPrefix)));
+		}
 	}
 	GlobalConfig::applyChanges(tr, insertions, clears);
 
