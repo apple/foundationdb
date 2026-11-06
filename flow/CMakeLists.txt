@@ -7,6 +7,7 @@ list(REMOVE_ITEM FLOW_SRCS LinkTest.cpp)
 list(REMOVE_ITEM FLOW_SRCS TLSTest.cpp)
 list(REMOVE_ITEM FLOW_SRCS MkCertCli.cpp)
 list(REMOVE_ITEM FLOW_SRCS FlowTest.cpp)
+list(REMOVE_ITEM FLOW_SRCS TLSHandshakePoolTest.cpp)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
@@ -99,6 +100,20 @@ target_link_libraries(flowlinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>" 
 add_flow_target(EXECUTABLE NAME flow_test SRCS FlowTest.cpp)
 register_fdb_unit_tests(flow_test)
 target_link_libraries(flow_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>" fdbrpc)
+
+if(NOT WIN32)
+  add_flow_target(EXECUTABLE NAME tls_handshake_pool_test SRCS TLSHandshakePoolTest.cpp)
+  target_link_libraries(tls_handshake_pool_test PRIVATE flow)
+  if(FDB_REGISTER_UNIT_TESTS)
+    add_dependencies(unit_tests tls_handshake_pool_test)
+    add_test(NAME unit/tls_handshake_pool_test/native
+      COMMAND $<TARGET_FILE:tls_handshake_pool_test>)
+    set_tests_properties(unit/tls_handshake_pool_test/native PROPERTIES
+      LABELS "unit;native;tls_handshake_pool_test"
+      TIMEOUT 60
+      ENVIRONMENT "${SANITIZER_OPTIONS}")
+  endif()
+endif()
 
 set(IS_ARM_MAC NO)
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
