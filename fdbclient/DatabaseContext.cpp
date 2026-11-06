@@ -122,9 +122,9 @@ int32_t DatabaseContext::decreaseWatchRefCount(KeyRef key, const Version& versio
 
 		// The metadata might be deleted somewhere else, before calling this decreaseWatchRefCount
 		if (auto metadata = getWatchMetadata(key); metadata.isValid()) {
-			// It is a *must* to cancel the watchFutureSS manually. watchFutureSS waits for watchStorageServerResp, which
-			// holds a reference to the metadata. If the ACTOR is not cancelled, it indirectly holds a Future waiting for
-			// itself.
+			// It is a *must* to cancel the watchFutureSS manually. watchFutureSS waits for watchStorageServerResp,
+			// which holds a reference to the metadata. If the ACTOR is not cancelled, it indirectly holds a Future
+			// waiting for itself.
 			metadata->watchFutureSS.cancel();
 			deleteWatchMetadata(key);
 		}

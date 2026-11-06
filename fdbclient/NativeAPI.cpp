@@ -6516,10 +6516,16 @@ TEST_CASE("/fdbclient/NativeAPI/watchRefCount/deletesMetadataOnlyOnLastRef") {
 	Database cx = Database(new DatabaseContext(unknown_error()));
 	Key k = "k"_sr;
 	Promise<Void> neverSet;
-	auto params = makeReference<WatchParameters>(k, Optional<Value>(), 1, TagSet(), SpanContext(),
-												 TaskPriority::DefaultEndpoint, Optional<UID>(),
-												 UseProvisionalProxies::False);
-	auto md = makeReference<WatchMetadata>(params);
+	auto watchParameters = makeReference<WatchParameters>(k,
+	                                                      Optional<Value>(),
+	                                                      1,
+	                                                      TagSet(),
+	                                                      SpanContext(),
+	                                                      TaskPriority::DefaultEndpoint,
+	                                                      Optional<UID>(),
+	                                                      UseProvisionalProxies::False);
+
+	auto md = makeReference<WatchMetadata>(watchParameters);
 	md->watchFutureSS = neverSet.getFuture();
 
 	cx->setWatchMetadata(md);
