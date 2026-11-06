@@ -57,6 +57,12 @@ transaction. Use the cluster's trusted administrative connection and existing
 network/TLS access controls. ``status`` requires access to system metadata;
 proxy samples use a trusted management endpoint, not the public consume endpoint.
 
+The metadata reads for ``cdc status`` and ``cdc remove`` use system-immediate
+priority. On proxies that support guarded removal at this priority, the removal
+transaction and cleanup of retired tags can also proceed while normal read
+versions are throttled. During a rolling upgrade, an older owner still uses
+normal priority for removal. A client upgrade alone does not change this.
+
 ``cdc status`` joins stream names, ranges, durable minimum required versions,
 owners, and shared-tag retention requirements. It distinguishes admission from
 active streams and pending retired-tag cleanup. ``metadata_drained`` in JSON is
