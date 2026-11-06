@@ -247,6 +247,29 @@ var _ = Describe("Testing FDB Kubernetes Monitor API", func() {
 		})
 	})
 
+	DescribeTable("generating arguments for Sum arguments",
+		func(rawArgument string, expected string, expectedError string) {
+			argument := Argument{}
+			Expect(json.Unmarshal([]byte(rawArgument), &argument)).To(Succeed())
+			result, err := argument.GenerateArgument(3, map[string]string{"FDB_PORT_BLOCK_START": "4530", "FDB_PUBLIC_IP": "10.0.0.1"})
+			if expectedError != "" {
+				Expect(err).To(MatchError(ContainSubstring(expectedError)))
+				return
+			}
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(expected))
+		},
+		Entry("adds positive and negative values",
+			`{"type": "Sum", "values": [{"type": "Environment", "source": "FDB_PORT_BLOCK_START"}, {"type": "ProcessNumber", "multiplier": 2, "offset": -2}, {"value": "-1"}]}`,
+			"4533", ""),
+		Entry("rejects values that are not integers",
+			`{"type": "Sum", "values": [{"type": "Environment", "source": "FDB_PUBLIC_IP"}]}`,
+			"", `value "10.0.0.1" of sum argument is not an integer`),
+		Entry("returns errors of its values",
+			`{"type": "Sum", "values": [{"type": "Environment", "source": "FDB_MISSING"}]}`,
+			"", "missing environment variable FDB_MISSING"),
+	)
+
 	When("marshalling a process configuration", func() {
 		var out string
 
