@@ -238,6 +238,10 @@ def test_range_split_points(db):
         if limit >= 0:
             assert len(split_points) <= limit + 2
 
+    split_points = tr.get_range_split_points(begin, end, 2**31).wait()
+    assert split_points[0] == begin
+    assert split_points[-1] == end
+
 
 def run_unit_tests(db):
     try:
