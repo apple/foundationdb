@@ -65,6 +65,7 @@
 #include "flow/ScopeExit.h"
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
+#include "flow/TLSHandshakeWorker.h"
 
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
@@ -241,6 +242,8 @@ public:
 	ASIOReactor reactor;
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
 	Reference<IThreadPool> sslHandshakerPool;
+	// Non-blocking handshake workers; when present, they run every TLS handshake.
+	std::vector<TLSHandshakeWorker*> sslHandshakeWorkers;
 	int sslHandshakerThreadsStarted;
 	int sslPoolHandshakesInProgress;
 	TLSConfig tlsConfig;
@@ -378,6 +381,7 @@ class BindPromise {
 	std::variant<const char*, AuditedEvent> errContext;
 	UID errID;
 	NetworkAddress peerAddr;
+	boost::system::error_code* errorOut = nullptr;
 
 public:
 	BindPromise(const char* errContext, UID errID, NetworkAddress peerAddr)
@@ -386,15 +390,21 @@ public:
 	  : errContext(auditedEvent), errID(errID), peerAddr(peerAddr) {}
 	BindPromise(BindPromise const& r) = default;
 	BindPromise(BindPromise&& r) noexcept
-	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
+	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr), errorOut(r.errorOut) {}
 
 	Future<Void> getFuture() const { return p.getFuture(); }
 
 	NetworkAddress getPeerAddr() const { return peerAddr; }
 
+	// `*out` receives the error, if any, before the future is set. `out` must outlive the operation.
+	void setErrorOut(boost::system::error_code* out) { errorOut = out; }
+
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
 		try {
 			if (error) {
+				if (errorOut) {
+					*errorOut = error;
+				}
 				// Log the error...
 				{
 					std::optional<TraceEvent> traceEvent;
@@ -858,6 +868,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		ssl_socket::handshake_type type;
 		boost::system::error_code err;
 		NetworkAddress peerAddr;
+		// If set, receives `err` before `done` is set. Owned by the connection, which outlives the handshake.
+		boost::system::error_code* errorOut = nullptr;
 	};
 
 	void action(Handshake& h) {
@@ -865,6 +877,9 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			if (h.socket.next_layer().non_blocking(false, h.err).failed() ||
 			    h.socket.handshake(h.type, h.err).failed() ||
 			    h.socket.next_layer().non_blocking(true, h.err).failed()) {
+				if (h.errorOut) {
+					*h.errorOut = h.err;
+				}
 				TraceEvent(SevWarn,
 				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
 				                                                        : "N2_AcceptHandshakeError"_audit)
@@ -890,6 +905,16 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		}
 	}
 };
+
+// Whether `error` is how a TLS handshake ends when overload on either end makes it time out or the peer give up: a
+// handshake worker's deadline (timed_out), a worker job cancelled by closeSocket() (operation_aborted), or the
+// connection closing.
+static bool isTimeoutOrDisconnect(const boost::system::error_code& error) {
+	return error == boost::asio::error::timed_out || error == boost::asio::error::operation_aborted ||
+	       error == boost::asio::error::eof || error == boost::asio::ssl::error::stream_truncated ||
+	       error == boost::asio::error::connection_reset || error == boost::asio::error::connection_aborted ||
+	       error == boost::asio::error::broken_pipe;
+}
 
 class SSLConnection final : public IConnection, ReferenceCounted<SSLConnection> {
 public:
@@ -973,17 +998,26 @@ public:
 			                   self->peer_address,
 			                   [conn = self.getPtr()](bool verifyOk) { conn->has_trusted_peer = verifyOk; });
 
-			// If the background handshakers are not all busy, use one
-			// FIXME: see comment elsewhere about making this the only path.
-			if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
-			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
-				static SimpleCounter<int64_t>* countServerTLSHandshakesOnSideThreads =
-				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnSideThreads");
+			// Where the handshake runs:
+			// - Non-blocking workers (TLS_HANDSHAKE_NONBLOCKING_WORKERS): each worker thread drives many handshakes,
+			//   so a slow peer never ties up a thread and the network thread never runs handshakes.
+			// - Blocking pool: one handshake per thread. With DISABLE_MAINTHREAD_TLS_HANDSHAKE, handshakes queue for a
+			//   pool thread; otherwise they use one only if a thread is free.
+			// - Network thread: when there are no handshake threads, or every pool thread is busy and
+			//   DISABLE_MAINTHREAD_TLS_HANDSHAKE is off. The handshake's crypto then runs ahead of all other tasks.
+			static SimpleCounter<int64_t>* countServerTLSHandshakesOnSideThreads =
+			    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnSideThreads");
+			if (useHandshakeWorkers()) {
+				countServerTLSHandshakesOnSideThreads->increment(1);
+				onHandshook = self->startWorkerHandshake(boost::asio::ssl::stream_base::server);
+			} else if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
+			           N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				countServerTLSHandshakesOnSideThreads->increment(1);
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
 				handshake->setPeerAddr(self->getPeerAddress());
+				handshake->errorOut = &self->handshakeError;
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -992,13 +1026,16 @@ public:
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnMainThread");
 				countServerTLSHandshakesOnMainThread->increment(1);
 				BindPromise p("N2_AcceptHandshakeError"_audit, self->id, self->getPeerAddress());
+				p.setErrorOut(&self->handshakeError);
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
 			co_await onHandshook;
+			self->endWorkerHandshake();
 			co_await delay(0, TaskPriority::Handshake);
 			connected.send(Void());
 		} catch (...) {
+			self->abandonWorkerHandshake();
 			self->closeSocket();
 			connected.sendError(connection_failed());
 		}
@@ -1035,6 +1072,7 @@ public:
 
 		Promise<Void> connected;
 		doAcceptHandshake(Uncancellable(), self, connected);
+		bool timedOut = false;
 		try {
 			auto res = co_await timeout(connected.getFuture(), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 			if (res.present()) {
@@ -1045,17 +1083,12 @@ public:
 				static SimpleCounter<int64_t>* countServerTLSHandshakesTimedout =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesTimedout");
 				countServerTLSHandshakesTimedout->increment(1);
+				timedOut = true;
 				throw connection_failed();
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
-				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-				if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-					iter->second.first++;
-				} else {
-					g_network->networkInfo.serverTLSConnectionThrottler[peerIP] =
-					    std::make_pair(0, now() + FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT);
-				}
+				self->recordHandshakeFailure(peerIP, FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT, timedOut);
 			}
 			// Either the connection failed, or was cancelled by the caller
 			self->closeSocket();
@@ -1111,24 +1144,20 @@ public:
 				    .detail("Addr", self->peer_address);
 			}
 
-			// If the background handshakers are not all busy, use one
-
-			// FIXME: this should probably be changed never to use the
-			// main thread, as waiting for potentially high-RTT TLS
-			// handshakes can delay execution of everything else that
-			// runs on the main thread.  The cost of that (in terms of
-			// unpredictable system performance and reliability) is
-			// much, much higher than the cost a few hundred or
-			// thousand incremental threads.
-			if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
-			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
-				static SimpleCounter<int64_t>* countClientTLSHandshakesOnSideThreads =
-				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesOnSideThreads");
+			// Where the handshake runs: see doAcceptHandshake().
+			static SimpleCounter<int64_t>* countClientTLSHandshakesOnSideThreads =
+			    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesOnSideThreads");
+			if (useHandshakeWorkers()) {
+				countClientTLSHandshakesOnSideThreads->increment(1);
+				onHandshook = self->startWorkerHandshake(boost::asio::ssl::stream_base::client);
+			} else if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
+			           N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				countClientTLSHandshakesOnSideThreads->increment(1);
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
 				handshake->setPeerAddr(self->getPeerAddress());
+				handshake->errorOut = &self->handshakeError;
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -1137,13 +1166,16 @@ public:
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesOnMainThread");
 				countClientTLSHandshakesOnMainThread->increment(1);
 				BindPromise p("N2_ConnectHandshakeError"_audit, self->id, self->getPeerAddress());
+				p.setErrorOut(&self->handshakeError);
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
 			co_await onHandshook;
+			self->endWorkerHandshake();
 			co_await delay(0, TaskPriority::Handshake);
 			connected.send(Void());
 		} catch (...) {
+			self->abandonWorkerHandshake();
 			self->closeSocket();
 			connected.sendError(connection_failed());
 		}
@@ -1159,6 +1191,7 @@ public:
 
 		Promise<Void> connected;
 		doConnectHandshake(Uncancellable(), self, connected);
+		bool timedOut = false;
 		try {
 			auto res = co_await timeout(connected.getFuture(), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 			if (res.present()) {
@@ -1169,19 +1202,15 @@ public:
 				static SimpleCounter<int64_t>* countClientTLSHandshakesTimedout =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesTimedout");
 				countClientTLSHandshakesTimedout->increment(1);
+				timedOut = true;
 				throw connection_failed();
 			}
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
 			if (e.code() != error_code_actor_cancelled) {
-				std::pair<IPAddress, uint16_t> peerIP = std::make_pair(self->peer_address.ip, self->peer_address.port);
-				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-				if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-					iter->second.first++;
-				} else {
-					g_network->networkInfo.serverTLSConnectionThrottler[peerIP] =
-					    std::make_pair(0, now() + FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT);
-				}
+				self->recordHandshakeFailure(std::make_pair(self->peer_address.ip, self->peer_address.port),
+				                             FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,
+				                             timedOut);
 			}
 			self->closeSocket();
 			throw;
@@ -1288,6 +1317,90 @@ private:
 	Reference<ReferencedObject<boost::asio::ssl::context>> sslContext;
 	bool has_trusted_peer;
 	std::string sni_hostname; // For Server Name Indication
+	// The error the TLS handshake failed with, if any.
+	boost::system::error_code handshakeError;
+
+	// Records a failed handshake toward TLS connection throttling of `peer`, which is throttled for `throttleTimeout`
+	// once its failures reach the limit. With TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS, timeouts and disconnects
+	// are not recorded. Must not be called if the handshake was cancelled, since it may still be running then.
+	void recordHandshakeFailure(std::pair<IPAddress, uint16_t> peer, double throttleTimeout, bool timedOut) {
+		// After a timeout the handshake may still be running on another thread, writing handshakeError, so it is only
+		// read if the handshake finished.
+		const bool timeoutOrDisconnect = timedOut || isTimeoutOrDisconnect(handshakeError);
+		if (FLOW_KNOBS->TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS && timeoutOrDisconnect) {
+			return;
+		}
+		auto& throttler = g_network->networkInfo.serverTLSConnectionThrottler;
+		auto iter = throttler.find(peer);
+		if (iter != throttler.end()) {
+			iter->second.first++;
+		} else {
+			throttler[peer] = std::make_pair(0, now() + throttleTimeout);
+		}
+	}
+	// Set when closeSocket() is called while a handshake worker owns the socket. The handshake coroutine then closes
+	// the socket itself once the worker hands it back, and fails the connection even if the handshake succeeded.
+	bool closeRequested = false;
+
+	// Whether to use non-blocking handshake workers: only if this process created any (never on Windows, nor with zero
+	// handshake threads).
+	static bool useHandshakeWorkers() { return !N2::g_net2->sslHandshakeWorkers.empty(); }
+
+#ifndef _WIN32
+	// Set from startWorkerHandshake() until the worker hands the socket back; while set, only the worker thread may
+	// use the socket.
+	std::shared_ptr<TLSHandshakeJob> handshakeJob;
+
+	// Hands the handshake job to the least loaded worker. The returned future is ready when the worker hands the socket
+	// back, with an error if the handshake failed, timed out or was cancelled. The caller must then call
+	// endWorkerHandshake() (on success) or abandonWorkerHandshake() (on error) before using or closing the socket.
+	Future<Void> startWorkerHandshake(ssl_socket::handshake_type type) {
+		handshakeJob =
+		    std::make_shared<TLSHandshakeJob>(ssl_sock, type, getPeerAddress(), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
+		Future<Void> done = handshakeJob->done.getFuture();
+		const auto& workers = N2::g_net2->sslHandshakeWorkers;
+		auto leastLoaded = std::min_element(
+		    workers.begin(), workers.end(), [](auto* a, auto* b) { return a->activeJobCount() < b->activeJobCount(); });
+		(*leastLoaded)->submitJob(handshakeJob);
+		return done;
+	}
+
+	// Takes the socket back from the worker after it finished (or when no worker was used), keeping its error for
+	// handshakeError.
+	void abandonWorkerHandshake() {
+		if (handshakeJob) {
+			handshakeError = handshakeJob->error;
+		}
+		handshakeJob.reset();
+	}
+
+	// Closing a socket while a worker thread is still using it is unsafe: the descriptor number could be reused by a
+	// new connection under the worker. So if a worker owns the socket, ask it to stop and return true; the socket is
+	// then closed by the handshake coroutine (doAcceptHandshake/doConnectHandshake) when the worker hands it back.
+	bool deferCloseToWorker() {
+		if (!handshakeJob) {
+			return false;
+		}
+		closeRequested = true;
+		handshakeJob->worker->cancelJob(*handshakeJob);
+		return true;
+	}
+#else
+	// Handshake workers need epoll or kqueue; on Windows handshakes keep using the blocking pool.
+	Future<Void> startWorkerHandshake(ssl_socket::handshake_type) { UNREACHABLE(); }
+	void abandonWorkerHandshake() {}
+	bool deferCloseToWorker() { return false; }
+#endif
+
+	// Takes the socket back from the worker after a successful handshake. Throws if closeSocket() was called in the
+	// meantime (e.g. the handshake timed out just as it finished), so the caller closes the connection instead of using
+	// it. No-op unless a worker owned the socket.
+	void endWorkerHandshake() {
+		abandonWorkerHandshake();
+		if (closeRequested) {
+			throw connection_failed();
+		}
+	}
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
@@ -1297,6 +1410,9 @@ private:
 	}
 
 	void closeSocket() {
+		if (deferCloseToWorker()) {
+			return;
+		}
 		boost::system::error_code cancelError;
 		// NOLINTNEXTLINE(bugprone-unused-return-value): Closing the socket below also cancels outstanding operations.
 		socket.cancel(cancelError);
@@ -1464,6 +1580,23 @@ static Future<Void> reloadCertificatesOnChange(
 	}
 }
 
+#ifndef _WIN32
+static bool useNonblockingHandshakeWorkers() {
+	return FLOW_KNOBS->TLS_HANDSHAKE_NONBLOCKING_WORKERS;
+}
+static TLSHandshakeWorker* newHandshakeWorker() {
+	return new TLSHandshakeWorker();
+}
+#else
+// Non-blocking handshake workers need epoll or kqueue; Windows always uses the blocking pool.
+static bool useNonblockingHandshakeWorkers() {
+	return false;
+}
+static TLSHandshakeWorker* newHandshakeWorker() {
+	UNREACHABLE();
+}
+#endif
+
 void Net2::initTLS(ETLSInitState targetState) {
 	if (tlsInitializedState >= targetState) {
 		return;
@@ -1511,6 +1644,9 @@ void Net2::initTLS(ETLSInitState targetState) {
 		threadsToStart -= sslHandshakerThreadsStarted;
 
 		if (threadsToStart > 0) {
+			// Handshake threads are either non-blocking workers (TLS_HANDSHAKE_NONBLOCKING_WORKERS) or a blocking pool;
+			// never both. They serve incoming and outgoing handshakes and live for the rest of the process.
+			const bool useNonBlockingWorkers = useNonblockingHandshakeWorkers();
 			if (sslHandshakerThreadsStarted == 0) {
 #if defined(__linux__)
 				if (mallopt(M_ARENA_MAX, FLOW_KNOBS->TLS_MALLOC_ARENA_MAX) != 1) {
@@ -1518,14 +1654,26 @@ void Net2::initTLS(ETLSInitState targetState) {
 					    .detail("MaxArenas", FLOW_KNOBS->TLS_MALLOC_ARENA_MAX);
 				};
 #endif
-				sslHandshakerPool = createGenericThreadPool(FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE);
+				if (!useNonBlockingWorkers) {
+					sslHandshakerPool = createGenericThreadPool(FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE);
+				}
 			}
 
 			for (int i = 0; i < threadsToStart; ++i) {
 				++sslHandshakerThreadsStarted;
-				sslHandshakerPool->addThread(new SSLHandshakerThread(), "fdb-ssl-connect");
+				if (useNonBlockingWorkers) {
+					sslHandshakeWorkers.push_back(newHandshakeWorker());
+				} else {
+					sslHandshakerPool->addThread(new SSLHandshakerThread(), "fdb-ssl-connect");
+				}
 			}
 		}
+
+		TraceEvent("TLSHandshakeSettings")
+		    .detail("TargetState", targetState == ETLSInitState::LISTEN ? "Listen" : "Connect")
+		    .detail("HandshakeThreads", sslHandshakerThreadsStarted)
+		    .detail("NonblockingWorkers", !sslHandshakeWorkers.empty())
+		    .detail("DisableMainThreadHandshake", FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE);
 	}
 
 	tlsInitializedState = targetState;
