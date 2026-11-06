@@ -3251,6 +3251,14 @@ public:
 		    disconnectedServers; // Similar to the above list, but the servers experiencing connection issue.
 
 		bool degradedSatellite = false; // Indicates that the entire satellite DC is degraded.
+
+		int unhealthyServerCount() const {
+			// A peer can be reported as both degraded and disconnected.
+			return disconnectedServers.size() +
+			       std::count_if(degradedServers.begin(), degradedServers.end(), [this](const NetworkAddress& addr) {
+				       return !disconnectedServers.contains(addr);
+			       });
+		}
 	};
 
 	// Returns true if and only if addr1 and addr2 are located in the same DC
@@ -3480,8 +3488,7 @@ public:
 		    .detail("DisconnectedServersSize", degradationInfo.disconnectedServers.size())
 		    .detail("CCExcluded", ccExcluded);
 
-		if (degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size() >
-		    SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
+		if (degradationInfo.unhealthyServerCount() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
 			return false;
 		}
 
@@ -3518,7 +3525,7 @@ public:
 			return true;
 		}
 
-		int degradedServerSize = degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size();
+		int degradedServerSize = degradationInfo.unhealthyServerCount();
 		if (degradedServerSize < SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION ||
 		    degradedServerSize > SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
 			return false;
