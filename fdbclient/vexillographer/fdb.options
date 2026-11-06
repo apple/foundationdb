@@ -157,6 +157,8 @@ description is not currently required but encouraged.
     <Option name="client_tmp_dir" code="91"
             paramType="String" paramDescription="Client directory for temporary files. "
             description="Sets the directory for storing temporary files created by FDB client, such as temporary copies of client libraries. Defaults to /tmp" />
+    <Option name="symlink_client_library_copies" code="92"
+            description="After unlinking client library copies that are created for enabling multi-threading, replace with symlinks for debuggers/profilers." />
     <Option name="supported_client_versions" code="1000"
             paramType="String" paramDescription="[release version],[source version],[protocol version];..."
             description="This option is set automatically to communicate the list of supported clients to the active client."
