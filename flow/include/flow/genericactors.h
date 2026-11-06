@@ -30,9 +30,12 @@
 #include <functional>
 #include <unordered_set>
 
+#include <concepts>
 #include <list>
 #include <optional>
+#include <tuple>
 #include <type_traits>
+#include <variant>
 
 #include "flow/flow.h"
 #include "flow/CoroUtils.h"
@@ -1478,6 +1481,88 @@ Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
                          double waitMultiplierForSlowFutures = 1.0);
 
 Future<bool> shortCircuitAny(std::vector<Future<bool>> f);
+
+namespace coro {
+template <class Input>
+concept JoinInput = std::is_move_constructible_v<typename Input::Element> &&
+                    (std::same_as<Input, AsyncResult<typename Input::Element>> ||
+                     (std::same_as<Input, Future<typename Input::Element>> &&
+                      std::constructible_from<typename Input::Element, const typename Input::Element&>));
+
+template <class... Values>
+class JoinResults : public ReferenceCounted<JoinResults<Values...>> {
+	// The occupied alternative can hold any payload, including std::optional's reserved tag types.
+	std::tuple<std::variant<std::monostate, Values>...> slots;
+	std::size_t remaining = sizeof...(Values);
+	Promise<Void> completion;
+
+public:
+	Future<Void> onReady() const { return completion.getFuture(); }
+
+	template <std::size_t I, JoinInput Input>
+	static Future<Void> collect(Input input, Reference<JoinResults> results, ExplicitVoid = {}) {
+		// Both handles must survive a sibling failing synchronously during value construction.
+		Error error;
+		try {
+			std::get<I>(results->slots).template emplace<1>(co_await std::move(input));
+		} catch (Error& e) {
+			error = e;
+		} catch (...) {
+			error = unknown_error();
+		}
+
+		// Claim completion before releasing the input, which can synchronously complete another collector.
+		Promise<Void> notify(nullptr);
+		if (error.isValid() || --results->remaining == 0) {
+			notify = std::move(results->completion);
+		}
+		input = Input{};
+		results.clear();
+		if (notify.isValid()) {
+			if (error.isValid()) {
+				notify.sendError(error);
+			} else {
+				notify.send(Void());
+			}
+		}
+		co_return Void();
+	}
+
+	template <std::size_t... I>
+	std::tuple<Values...> take(std::index_sequence<I...>) {
+		return std::tuple<Values...>{ std::get<1>(std::get<I>(std::move(slots)))... };
+	}
+};
+
+template <class... Inputs, std::size_t... I>
+Future<std::tuple<typename Inputs::Element...>> joinImpl(std::tuple<Inputs...> args,
+                                                         std::index_sequence<I...> indices) {
+	using Result = std::tuple<typename Inputs::Element...>;
+	// Coroutine parameters can outlive completion. Release our input handles before notifying the caller.
+	auto inputs = std::move(args);
+	if ((std::get<I>(inputs).canGet() && ...)) {
+		co_return Result{ std::get<I>(std::move(inputs)).get()... };
+	}
+
+	using Results = JoinResults<typename Inputs::Element...>;
+	auto results = makeReference<Results>();
+	auto completion = results->onReady();
+	[[maybe_unused]] Future<Void> collectors[] = {
+		Results::template collect<I>(std::get<I>(std::move(inputs)), results)...,
+	};
+	co_await completion;
+	co_return results->take(indices);
+}
+} // namespace coro
+
+// Collect one value per input in argument order, including Void. Fail on the first observed error.
+// Each payload T must be constructible from T&&. Future payloads are copied from const T&.
+// Move-only payloads require AsyncResult, and named AsyncResults must be moved in.
+template <coro::JoinInput... Inputs>
+    requires(sizeof...(Inputs) > 0)
+[[nodiscard]] auto join(Inputs... inputs) -> Future<std::tuple<typename Inputs::Element...>> {
+	return coro::joinImpl(std::make_tuple(std::move(inputs)...), std::index_sequence_for<Inputs...>{});
+}
 
 template <class T>
 Future<std::vector<T>> getAll(std::vector<Future<T>> input) {

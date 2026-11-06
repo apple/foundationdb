@@ -81,9 +81,28 @@ Losing inputs are detached from the race, not explicitly cancelled, but dropping
 them. All argument expressions are evaluated before `race` is called; use separate statements when their evaluation
 order matters.
 
+Use `join(...)` when the next step needs all the results. It accepts one or more `Future<T>` or `AsyncResult<T>`
+arguments and returns a `Future<std::tuple<...>>`. Each argument contributes one value in argument order, including
+a `Void` value for a completion-only input. Each `T` must be constructible from `T&&` to assemble the tuple.
+A shared `Future<T>` supplies its value by copy from `const T&`.
+Use `AsyncResult<T>` for move-only values, and pass a named `AsyncResult` with `std::move` to transfer ownership.
+
+```c++
+auto [status, destUid] = co_await join(backupAgent->getStateValue(tr, logUid), backupAgent->getDestUid(tr, logUid));
+```
+
+An error in any input fails the joined future immediately, even if an earlier argument is still pending.
+If several inputs fail during setup, the first error a collector observes wins. On failure or cancellation,
+`join` releases pending inputs. Outstanding work can be cancelled when that releases its last reference.
+A producer can still be unwinding after the caller observes the error from `join`. Keep any data the producer
+borrows alive until its cleanup finishes.
+If copying or moving a value triggers the failure, that collector keeps its input and storage alive
+until construction unwinds. For a tuple containing move-only values, keep the returned future alive and bind
+its result by const reference. As with `race`, start the operations in separate statements if launch order matters.
+
 Use helpers such as `quorum`, `waitForAll`, `waitForAllReady`, `timeoutError`, or `operator||` when they express the
 required behavior more directly. `race` and `Choose` are defined in
-[`CoroUtils.h`](../flow/include/flow/CoroUtils.h); the other helpers are in
+[`CoroUtils.h`](../flow/include/flow/CoroUtils.h); `join` and the other helpers are in
 [`genericactors.h`](../flow/include/flow/genericactors.h).
 
 ### Ordered Evaluation with Choose
@@ -279,7 +298,9 @@ Future<Void> waitForSignal(Future<Void> signal, NoThrowOnCancel = {}) {
 }
 ```
 
-Cancellation runs normal RAII cleanup for locals in scope, but it does not enter the coroutine's `catch` handlers.
+If synchronous callbacks request cancellation while the coroutine is running, destruction waits until its next
+Flow await (even an already-ready one) or completion. Cancellation runs normal RAII cleanup for locals in scope,
+but it does not enter the coroutine's `catch` handlers.
 Observers of its returned future still receive `actor_cancelled`. `NoThrowOnCancel` and `Uncancellable` are mutually
 exclusive, and neither marker is supported by `AsyncGenerator`.
 

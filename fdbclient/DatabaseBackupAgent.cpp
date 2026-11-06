@@ -2928,15 +2928,12 @@ public:
 				logUid = _logUid;
 				logUidValue = BinaryWriter::toValue(logUid, Unversioned());
 
-				Future<EBackupState> statusFuture = backupAgent->getStateValue(tr, logUid);
-				Future<UID> destUidFuture = backupAgent->getDestUid(tr, logUid);
-				co_await (success(statusFuture) && success(destUidFuture));
+				auto [status, destUid] =
+				    co_await join(backupAgent->getStateValue(tr, logUid), backupAgent->getDestUid(tr, logUid));
 
-				EBackupState status = statusFuture.get();
 				if (!backupAgent->isRunnable(status)) {
 					throw backup_unneeded();
 				}
-				UID destUid = destUidFuture.get();
 				if (destUid.isValid()) {
 					destUidValue = BinaryWriter::toValue(destUid, Unversioned());
 				} else if (destUidValue.empty() && waitForDestUID) {
