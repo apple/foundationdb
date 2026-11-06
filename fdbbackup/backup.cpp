@@ -1872,6 +1872,23 @@ Future<Void> submitDBBackup(Database src,
 	}
 }
 
+// Fails with backup_error if a backup on a tag other than tagName is running at bc's location.
+static Future<Void> checkBackupLocationNotInUse(Reference<ReadYourWritesTransaction> tr,
+                                                Reference<IBackupContainer> bc,
+                                                std::string tagName) {
+	Optional<std::string> conflictingTag = co_await FileBackupAgent::findRunningBackupAtLocation(tr, bc, tagName);
+	if (conflictingTag.present()) {
+		TraceEvent(SevWarnAlways, "BackupLocationInUse")
+		    .detail("TagName", tagName)
+		    .detail("ConflictingTag", conflictingTag.get())
+		    .detail("Location", bc->getLocation());
+		fprintf(stderr,
+		        "ERROR: The backup location is already in use by the running backup on tag `%s'.\n",
+		        printable(StringRef(conflictingTag.get())).c_str());
+		throw backup_error();
+	}
+}
+
 Future<Void> submitBackup(Database db,
                           std::string url,
                           Optional<std::string> proxy,
@@ -1903,6 +1920,14 @@ Future<Void> submitBackup(Database db,
 				if (BackupAgentBase::isRunnable(backupStatus)) {
 					throw backup_duplicate();
 				}
+			}
+
+			// submitBackup appends a unique directory to file:// URLs, so only blobstore locations can collide.
+			if (url.find("file://") != 0) {
+				Reference<IBackupContainer> bc = IBackupContainer::openContainer(url, proxy, {}, 0);
+				co_await runRYWTransaction(db, [=](Reference<ReadYourWritesTransaction> tr) {
+					return checkBackupLocationNotInUse(tr, bc, tagName);
+				});
 			}
 
 			if (waitForCompletion) {
@@ -2901,6 +2926,7 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 				                         options.proxy,
 				                         options.encryptionKeyFile,
 				                         prevContainer->getEncryptionBlockSize());
+				co_await checkBackupLocationNotInUse(tr, bc, tagName);
 				try {
 					co_await timeoutError(bc->create(), 30);
 				} catch (Error& e) {

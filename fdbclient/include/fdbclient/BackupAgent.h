@@ -329,6 +329,11 @@ public:
 		});
 	}
 
+	// Returns the tag of a runnable backup, other than excludeTag, whose container is at bc's location.
+	static Future<Optional<std::string>> findRunningBackupAtLocation(Reference<ReadYourWritesTransaction> tr,
+	                                                                 Reference<IBackupContainer> bc,
+	                                                                 std::string excludeTag);
+
 	Future<Void> discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> discontinueBackup(Database cx, Key tagName) {
 		return runRYWTransaction(
