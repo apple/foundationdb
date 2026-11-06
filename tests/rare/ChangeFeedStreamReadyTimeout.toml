@@ -1,0 +1,19 @@
+[configuration]
+testClass = 'ChangeFeeds'
+buggify = false
+minimumReplication = 2
+tenantModes = ['disabled']
+disableTss = true
+
+[[knobs]]
+change_feed_stream_ready_timeout = 3.0
+
+[[test]]
+testTitle = 'ChangeFeedStreamReadyTimeout'
+runFailureWorkloads = false
+connectionFailuresDisableDuration = 100000
+
+    [[test.workload]]
+    testName = 'ChangeFeeds'
+    testStreamReadyTimeout = true
+    testDuration = 60.0
