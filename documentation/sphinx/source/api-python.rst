@@ -108,7 +108,7 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(800)
+    fdb.api_version(900)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, event_model=None )
@@ -718,7 +718,7 @@ the reply::
 
     import fdb
 
-    fdb.api_version(800)
+    fdb.api_version(900)
     db = fdb.open()
     db.register_cdc_stream(b"orders", b"order/", b"order0").wait()
 
