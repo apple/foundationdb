@@ -458,7 +458,6 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				    .detail("TotalTasks", progress.totalTasks)
 				    .detail("CompleteTasks", progress.completeTasks)
 				    .detail("ProgressPercent", progress.progressPercent())
-				    .detail("TotalBytes", progress.totalBytes)
 				    .detail("CompletedBytes", progress.completedBytes);
 
 				Optional<BulkDumpOwnerInfo> ownerInfo = co_await getBulkDumpOwner(cx, progress.jobId);
