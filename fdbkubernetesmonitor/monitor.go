@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/rand/v2"
 	"net/http"
 	"net/http/pprof"
@@ -388,9 +389,7 @@ func (monitor *monitor) runProcess(processNumber int) {
 		monitor.mutex.Lock()
 		config := monitor.activeConfiguration
 		customEnv := make(map[string]string, len(monitor.customEnvironment))
-		for k, v := range monitor.customEnvironment {
-			customEnv[k] = v
-		}
+		maps.Copy(customEnv, monitor.customEnvironment)
 		monitor.mutex.Unlock()
 
 		arguments, err := config.GenerateArguments(processNumber, customEnv)
