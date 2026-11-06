@@ -10,7 +10,6 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
-import sphinx_bootstrap_theme
 import sys
 import os
 
@@ -33,7 +32,6 @@ extensions = [
     "brokenrole",
     "relativelink",
     "rubydomain",
-    "sphinxcontrib.jquery",  # for bootstrap theme
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -92,23 +90,38 @@ todo_include_todos = False
 
 # -- Options for HTML output ---------------------------------------------------
 
+html_logo = "../FDB_logo.svg"
+
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
-html_theme = "bootstrap"
+html_theme = "shibuya"
 
 # Add any paths that contain custom themes here, relative to this directory.
-html_theme_path = sphinx_bootstrap_theme.get_html_theme_path()
+# html_theme_path = []
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
 html_theme_options = {
-    "globaltoc_depth": 2,
-    "globaltoc_includehidden": "true",
-    "navbar_links": [
-        ("Site Map", "contents"),
+    "accent_color": "blue",
+    "discussion_url": "https://forums.foundationdb.org/",
+    "github_url": "https://github.com/apple/foundationdb",
+    "nav_links": [
+        {
+            "title": "Site Map",
+            "url": "contents"
+        },
     ],
-    "source_link_position": "footer",
+}
+
+# A dictionary of values to pass into the template engine's context for all pages.
+html_context = {
+    # Edit this page
+    "source_type": "github",
+    "source_user": "apple",
+    "source_repo": "foundationdb",
+    "source_version": "main",
+    "source_docs_path": "/documentation/sphinx/source/",
 }
 
 # Create table of contents entries for domain objects
@@ -140,10 +153,7 @@ html_last_updated_fmt = "%b %d, %Y"
 # html_use_smartypants = True
 
 # Custom sidebar templates, maps document names to template names.
-html_sidebars = {
-    "**": ["localtoc.html"],
-    "contents": [],
-}
+# html_sidebars = {}
 
 # Additional templates that should be rendered to pages, maps page names to
 # template names.
