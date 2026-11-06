@@ -54,6 +54,7 @@ struct RestoreBackupWorkload : TestWorkload {
 	// The extra describeBackup() call is skipped in simulation so existing seeds are unaffected.
 	bool reportBackupMetrics;
 	std::vector<PerfMetric> backupMetrics;
+	BackupSteps::BackupVersion version;
 	Optional<double> restoreDuration;
 	Optional<double> snapshotMB;
 
@@ -61,6 +62,7 @@ struct RestoreBackupWorkload : TestWorkload {
 		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
 		tag = getOption(options, "tag"_sr, "default"_sr);
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
+		version = BackupSteps::parseBackupVersion(getOption(options, "version"_sr, "v1"_sr));
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, false));
 		restoreRanges = BackupRangeSpec::readOptionalRanges(options, "restoreRanges"_sr, "restoreRangePrefix"_sr);
 		addPrefix = BackupRangeSpec::readKeyOption(options, "addPrefix"_sr);
@@ -208,23 +210,15 @@ struct RestoreBackupWorkload : TestWorkload {
 
 		LockDB lockDB(inPlace);
 		double restoreStart = now();
-		co_await backupAgent.restore(cx,
-		                             cx,
-		                             tag,
-		                             Key(backupContainer->getURL()),
-		                             backupContainer->getProxy(),
-		                             ranges,
-		                             WaitForComplete::True,
-		                             ::invalidVersion,
-		                             Verbose::True,
-		                             addPrefix,
-		                             removePrefix,
-		                             lockDB,
-		                             UnlockDB(lockDB),
-		                             OnlyApplyMutationLogs::False,
-		                             InconsistentSnapshotOnly::False,
-		                             ::invalidVersion,
-		                             encryptionKeyFileName);
+		BackupSteps::RestoreSpec spec;
+		spec.tag = tag;
+		spec.container = backupContainer;
+		spec.ranges = ranges;
+		spec.addPrefix = addPrefix;
+		spec.removePrefix = removePrefix;
+		spec.lockDB = lockDB;
+		spec.encryptionKeyFileName = encryptionKeyFileName;
+		co_await BackupSteps::restoreBackup(cx, &backupAgent, version, spec);
 		restoreDuration = now() - restoreStart;
 	}
 

@@ -136,6 +136,8 @@ struct ValidationTraceOptions {
 	// RestoreValidationGate so that no other validation can start writing the prefix in between. The copy is kept
 	// when an audit fails.
 	bool clearWhenDone = false;
+	// The backup system the validated backup was made with.
+	BackupSteps::BackupVersion version = BackupSteps::BackupVersion::V1;
 };
 
 // Clears the validation prefix, the destination of validation restores.
@@ -190,23 +192,13 @@ inline Future<Void> validateAgainstPrefixedRestore(Database cx,
 		maxRestorable = desc.maxRestorableVersion.present() ? desc.maxRestorableVersion.get() : -1;
 	}
 	double restoreStart = now();
-	Version restoredVersion = co_await backupAgent->restore(cx,
-	                                                        cx,
-	                                                        validationTag,
-	                                                        KeyRef(container->getURL()),
-	                                                        container->getProxy(),
-	                                                        backupRanges,
-	                                                        WaitForComplete::True,
-	                                                        ::invalidVersion,
-	                                                        Verbose::True,
-	                                                        prefix,
-	                                                        Key(),
-	                                                        LockDB::False,
-	                                                        UnlockDB::False,
-	                                                        OnlyApplyMutationLogs::False,
-	                                                        InconsistentSnapshotOnly::False,
-	                                                        ::invalidVersion,
-	                                                        container->getEncryptionKeyFileName());
+	BackupSteps::RestoreSpec spec;
+	spec.tag = validationTag;
+	spec.container = container;
+	spec.ranges = backupRanges;
+	spec.addPrefix = prefix;
+	spec.encryptionKeyFileName = container->getEncryptionKeyFileName();
+	Version restoredVersion = co_await BackupSteps::restoreBackup(cx, backupAgent, trace.version, spec);
 	if (trace.traceRestorableVersions) {
 		TraceEvent(versionsEvent.c_str(), trace.id)
 		    .detail("Tag", printable(backupTag))
@@ -350,10 +342,13 @@ struct QuiescentValidation {
 
 	// Lets the differential backup `tag` catch up with the quiescent version, so that discontinuing it keeps all the
 	// data. Does nothing when validation is off.
-	Future<Void> waitForBackupToCover(Database cx, FileBackupAgent* agent, std::string tag) {
+	Future<Void> waitForBackupToCover(Database cx,
+	                                  FileBackupAgent* agent,
+	                                  std::string tag,
+	                                  double maxWaitSeconds = 600.0) {
 		if (enabled) {
 			Version target = co_await quiescentVersion;
-			co_await waitForRestorableVersion(cx, agent, tag, target);
+			co_await waitForRestorableVersion(cx, agent, tag, target, maxWaitSeconds);
 		}
 	}
 };
