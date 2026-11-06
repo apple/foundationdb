@@ -1435,7 +1435,7 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		std::vector<KeyBackedTag> backupTags = co_await getAllBackupTags(tr, snapshot);
 		std::vector<Future<Optional<Version>>> tagLastRestorableVersions;
 		std::vector<Future<EBackupState>> tagStates;
-		std::vector<Future<Reference<IBackupContainer>>> tagContainers;
+		std::vector<Future<Optional<Value>>> tagContainerValues;
 		std::vector<Future<int64_t>> tagRangeBytes;
 		std::vector<Future<int64_t>> tagLogBytes;
 		std::vector<Future<MutationLogType>> tagMutationLogTypes;
@@ -1454,21 +1454,42 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, snapshot, 0));
 			tagLogBytes.push_back(config.logBytesWritten().getD(tr, snapshot, 0));
 			tagMutationLogTypes.push_back(config.mutationLogType().getD(tr, snapshot, MutationLogType::DEFAULT));
-			tagContainers.push_back(config.backupContainer().getOrThrow(tr, snapshot));
+			tagContainerValues.push_back(tr->get(config.backupContainer().key, snapshot));
 			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName), snapshot));
 		}
 
-		co_await (waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) &&
+		co_await (waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainerValues) &&
 		          waitForAll(tagRangeBytes) && waitForAll(tagLogBytes) && waitForAll(tagMutationLogTypes) &&
 		          success(fBackupPaused));
 
+		// A backup whose container can't be unpacked or opened (e.g. its URL doesn't parse under this agent's knobs)
+		// reports the error in its own entry, so it can't hide the status of the other backups. Status only needs the
+		// saved URL and key file name, so a container is opened only to report a running backup's bad URL or to check
+		// an encryption key file.
+		std::vector<SavedBackupContainer> tagSavedContainers(backupTags.size());
+		std::vector<Error> tagErrors(backupTags.size());
 		std::vector<Future<Void>> encryptionSetupResults;
 		std::vector<int> encryptionContainerIndices;
 
-		for (int i = 0; i < tagContainers.size(); i++) {
-			if (tagContainers[i].get()->getEncryptionKeyFileName().present()) {
-				encryptionSetupResults.push_back(tagContainers[i].get()->encryptionSetupComplete());
-				encryptionContainerIndices.push_back(i);
+		for (int i = 0; i < backupTags.size(); i++) {
+			try {
+				if (!tagContainerValues[i].get().present()) {
+					throw key_not_found();
+				}
+				tagSavedContainers[i] = SavedBackupContainer::unpack(tagContainerValues[i].get().get());
+				const Optional<std::string>& keyFileName = tagSavedContainers[i].encryptionKeyFileName;
+				if (keyFileName.present() || FileBackupAgent::isRunnable(tagStates[i].get())) {
+					Reference<IBackupContainer> bc = tagSavedContainers[i].open();
+					if (keyFileName.present()) {
+						encryptionSetupResults.push_back(bc->encryptionSetupComplete());
+						encryptionContainerIndices.push_back(i);
+					}
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				tagErrors[i] = e;
 			}
 		}
 		co_await waitForAllReady(encryptionSetupResults);
@@ -1476,12 +1497,12 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		std::unordered_set<std::string> seenKeyPaths;
 		for (int j = 0; j < encryptionContainerIndices.size() && j < 1e6; j++) {
 			int i = encryptionContainerIndices[j];
-			std::string keyPath = tagContainers[i].get()->getEncryptionKeyFileName().get();
+			std::string keyPath = tagSavedContainers[i].encryptionKeyFileName.get();
 
 			if (!seenKeyPaths.contains(keyPath)) {
 				seenKeyPaths.insert(keyPath);
 				json_spirit::mObject keyObj;
-				keyObj["path"] = tagContainers[i].get()->getEncryptionKeyFileName().get();
+				keyObj["path"] = keyPath;
 				keyObj["success"] = !encryptionSetupResults[j].isError();
 				keysArr.push_back(keyObj);
 			}
@@ -1498,11 +1519,15 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		for (const KeyBackedTag& eachTag : backupTags) {
 			EBackupState status = tagStates[j].get();
 			const char* statusText = fba.getStateText(status);
+			const SavedBackupContainer& savedContainer = tagSavedContainers[j];
 
 			// The object for this backup tag inside this instance's subdocument
 			JSONDoc tagRoot = tagsRoot.subDoc(eachTag.tagName).subDoc("$latest");
-			tagRoot.create("current_container") = tagContainers[j].get()->getURL();
+			tagRoot.create("current_container") = savedContainer.url;
 			tagRoot.create("current_status") = statusText;
+			if (tagErrors[j].isValid()) {
+				tagRoot.create("error") = tagErrors[j].what();
+			}
 			if (tagLastRestorableVersions[j].get().present()) {
 				Version last_restorable_version = tagLastRestorableVersions[j].get().get();
 				double last_restorable_seconds_behind =
@@ -1517,10 +1542,9 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytes[j].get();
 			tagRoot.create("mutation_log_type") = mutationLogTypeToString(tagMutationLogTypes[j].get());
 			tagRoot.create("mutation_stream_id") = backupTagUids[j].toString();
-			tagRoot.create("file_level_encryption") =
-			    tagContainers[j].get()->getEncryptionKeyFileName().present() ? true : false;
-			if (tagContainers[j].get()->getEncryptionKeyFileName().present()) {
-				tagRoot.create("encryption_key_file") = tagContainers[j].get()->getEncryptionKeyFileName().get();
+			tagRoot.create("file_level_encryption") = savedContainer.encryptionKeyFileName.present();
+			if (savedContainer.encryptionKeyFileName.present()) {
+				tagRoot.create("encryption_key_file") = savedContainer.encryptionKeyFileName.get();
 			}
 			j++;
 		}
