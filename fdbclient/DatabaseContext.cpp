@@ -115,13 +115,19 @@ int32_t DatabaseContext::decreaseWatchRefCount(KeyRef key, const Version& versio
 	versionSet.erase(versionIter);
 
 	const auto count = versionSet.size();
-	// The metadata might be deleted somewhere else, before calling this decreaseWatchRefCount
-	if (auto metadata = getWatchMetadata(key); metadata.isValid() && versionSet.empty()) {
-		// It is a *must* to cancel the watchFutureSS manually. watchFutureSS waits for watchStorageServerResp, which
-		// holds a reference to the metadata. If the ACTOR is not cancelled, it indirectly holds a Future waiting for
-		// itself.
-		metadata->watchFutureSS.cancel();
-		deleteWatchMetadata(key);
+
+	if (count == 0) {
+		// The entry is now empty, so remove it from the counter map entirely
+		watchCounterMap.erase(mapKeyIter);
+
+		// The metadata might be deleted somewhere else, before calling this decreaseWatchRefCount
+		if (auto metadata = getWatchMetadata(key); metadata.isValid()) {
+			// It is a *must* to cancel the watchFutureSS manually. watchFutureSS waits for watchStorageServerResp, which
+			// holds a reference to the metadata. If the ACTOR is not cancelled, it indirectly holds a Future waiting for
+			// itself.
+			metadata->watchFutureSS.cancel();
+			deleteWatchMetadata(key);
+		}
 	}
 
 	return count;

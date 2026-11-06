@@ -276,6 +276,9 @@ public:
 	// Increases reference count to the given watch. Returns the number of references to the watch.
 	int32_t increaseWatchRefCount(KeyRef key, const Version& version);
 
+	// Gets the number of entries in the watch reference count map
+	size_t getWatchRefCountEntryCount() const { return watchCounterMap.size(); }
+
 	// Decreases reference count to the given watch. If the reference count is dropped to 0, the watch metadata will be
 	// removed. Returns the number of references to the watch.
 	int32_t decreaseWatchRefCount(KeyRef key, const Version& version);
