@@ -145,6 +145,35 @@ else()
     set(GCC YES)
   endif()
 
+  set(RHEL9_BASED NO)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING)
+    cmake_host_system_information(RESULT _distrib_id QUERY DISTRIB_ID)
+    cmake_host_system_information(RESULT _distrib_id_like QUERY DISTRIB_ID_LIKE)
+    cmake_host_system_information(RESULT _distrib_version_id QUERY DISTRIB_VERSION_ID)
+    if((_distrib_id STREQUAL "rhel" OR _distrib_id_like MATCHES "(^| )rhel( |$)") AND _distrib_version_id MATCHES "^9(\\.|$)")
+      set(RHEL9_BASED YES)
+    endif()
+  endif()
+
+  # Since RHEL 9.7, the system GCC 11 (gcc >= 11.5.0-10) libgcc_eh.a unwinder calls _dl_find_object@GLIBC_2.35
+  # (backported to the RHEL 9.7 glibc 2.34). Clang selects the system GCC installation by default, so with
+  # -static-libgcc our binaries would fail to start on RHEL 9.6 and older. The gcc-toolset-13 libgcc_eh.a
+  # does not have this dependency (but newer gcc-toolsets do). The glibc_symbol_versions test checks this.
+  set(_clang_gcc_install_dir "")
+  if(CLANG AND RHEL9_BASED)
+    set(_clang_gcc_install_dir "/opt/rh/gcc-toolset-13/root/usr/lib/gcc/${CMAKE_SYSTEM_PROCESSOR}-redhat-linux/13")
+  endif()
+  env_set(CLANG_GCC_INSTALL_DIR "${_clang_gcc_install_dir}" PATH "GCC installation for clang to use (passed as --gcc-install-dir), empty for the clang default")
+  if(CLANG_GCC_INSTALL_DIR)
+    if(NOT IS_DIRECTORY "${CLANG_GCC_INSTALL_DIR}")
+      message(FATAL_ERROR "CLANG_GCC_INSTALL_DIR=${CLANG_GCC_INSTALL_DIR} does not exist. On RHEL 9 based distros, "
+                          "install gcc-toolset-13-gcc-c++, or set CLANG_GCC_INSTALL_DIR to empty to use clang's default.")
+    endif()
+    message(STATUS "Using GCC installation for clang: ${CLANG_GCC_INSTALL_DIR}")
+    add_compile_options("$<${is_cxx_compile}:--gcc-install-dir=${CLANG_GCC_INSTALL_DIR}>")
+    add_link_options("$<${is_cxx_link}:--gcc-install-dir=${CLANG_GCC_INSTALL_DIR}>")
+  endif()
+
   # check linker flags.
   if (USE_LD STREQUAL "DEFAULT")
     set(USE_LD "LD")

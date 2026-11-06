@@ -1231,7 +1231,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		// which leads to conflicts of moving keys
 
 		Future<Void> fCleanup =
-		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
+		    ddEnabledState->shardEncodeLocationMetadata() ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
 		inFlight.insert(rd.keys, rd);
 		for (int r = 0; r < ranges.size(); r++) {
@@ -1247,13 +1247,13 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			}
 			if (rd.keys == ranges[r] && rd.isRestore()) {
 				ASSERT(rd.dataMove != nullptr);
-				ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+				ASSERT(ddEnabledState->shardEncodeLocationMetadata());
 				rrs.dataMoveId = rd.dataMove->meta.id;
 			} else {
 				ASSERT_WE_THINK(!rd.isRestore()); // Restored data move should not overlap.
 				// TODO(psm): The shard id is determined by DD.
 				rrs.dataMove.reset();
-				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				if (ddEnabledState->shardEncodeLocationMetadata()) {
 					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 						rrs.dataMoveId = UID();
 					} else if (rrs.bulkLoadTask.present()) {
@@ -1585,7 +1585,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			self->suppressIntervals = 0;
 		}
 
-		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		if (ddEnabledState->shardEncodeLocationMetadata()) {
 			auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 			ASSERT(inFlightRange.range() == rd.keys);
 			ASSERT(inFlightRange.value().randomId == rd.randomId);
@@ -1713,7 +1713,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				bestTeams.clear();
 				// Get team from teamCollections in different DCs and find the best one
 				while (tciIndex < self->teamCollections.size()) {
-					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
+					if (ddEnabledState->shardEncodeLocationMetadata() && rd.isRestore()) {
 						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
 						req.keys = rd.keys;
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
@@ -2177,7 +2177,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			state Promise<Void> dataMovementComplete;
 			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
 			std::unique_ptr<MoveKeysParams> params;
-			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			if (ddEnabledState->shardEncodeLocationMetadata()) {
 				params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 				                                          std::vector<KeyRange>{ rd.keys },
 				                                          destIds,
@@ -2222,7 +2222,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								extraIds.clear();
 								ASSERT(totalIds == destIds.size()); // Sanity check the destIDs before we move keys
 								std::unique_ptr<MoveKeysParams> params;
-								if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+								if (ddEnabledState->shardEncodeLocationMetadata()) {
 									params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 									                                          std::vector<KeyRange>{ rd.keys },
 									                                          destIds,
@@ -2258,7 +2258,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								doMoveKeys = self->txnProcessor->moveKeys(*params);
 							} else {
 								self->fetchKeysComplete.insert(rd);
-								if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+								if (ddEnabledState->shardEncodeLocationMetadata()) {
 									auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(rd.keys);
 									if (ranges.size() == 1 && static_cast<KeyRange>(ranges[0]) == rd.keys &&
 									    ranges[0].value.id == rd.dataMoveId && !ranges[0].value.cancel.isValid()) {
@@ -3000,9 +3000,26 @@ struct DDQueueImpl {
 
 						auto const highestPriorityRelocation = self->getHighestPriorityRelocation();
 
+						// InFlight and InQueue are counters and have been seen diverging from the work
+						// actually present by an order of magnitude, so also report the structures DD's
+						// memory consists of, which cannot drift. fetchKeysComplete is the known driver of
+						// that growth: relocations wait there to be retired, so it is unbounded whenever
+						// completion processing falls behind.
+						int serverQueueEntries = 0;
+						for (auto const& [serverId, serverQueue] : self->queue) {
+							serverQueueEntries += serverQueue.size();
+						}
+
 						TraceEvent("MovingData", self->distributorId)
 						    .detail("InFlight", self->activeRelocations)
 						    .detail("InQueue", self->queuedRelocations)
+						    .detail("FetchKeysComplete", self->fetchKeysComplete.size())
+						    .detail("FetchingSourcesQueue", self->fetchingSourcesQueue.size())
+						    .detail("ServerQueues", self->queue.size())
+						    .detail("ServerQueueEntries", serverQueueEntries)
+						    .detail("BusySourceServers", self->busymap.size())
+						    .detail("BusyDestServers", self->destBusymap.size())
+						    .detail("LastAsSourceEntries", self->lastAsSource.size())
 						    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
 						    .detail("UnhealthyRelocations", self->unhealthyRelocations)
 						    .detail("HighestPriority", highestPriorityRelocation)
@@ -3117,7 +3134,7 @@ struct DDQueueImpl {
 			if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time
 			                                             // we are killed by the master dying
 			    e.code() != error_code_movekeys_conflict && e.code() != error_code_data_move_cancelled &&
-			    e.code() != error_code_data_move_dest_team_not_found)
+			    e.code() != error_code_data_move_dest_team_not_found && e.code() != error_code_dd_config_changed)
 				TraceEvent(SevError, "DataDistributionQueueError", self->distributorId).error(e);
 			throw e;
 		}

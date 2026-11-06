@@ -326,6 +326,8 @@ void configureGenerator(const char* text,
 		                   "tenant_mode=",
 		                   "blob_granules_enabled=",
 		                   "encryption_at_rest_mode=",
+		                   "shard_metadata_format=",
+		                   "shard_metadata_migration=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
@@ -340,6 +342,8 @@ CommandFactory configureFactory(
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
         "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}"
         "|encryption_at_rest_mode={disabled|domain_aware|cluster_aware}"
+        "|shard_metadata_format={original|encoded}"
+        "|shard_metadata_migration={enabled|disabled}"
         "|exclude=<ADDRESS...>",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
@@ -378,6 +382,15 @@ CommandFactory configureFactory(
         "support for the "
         "database. The configuration can be updated ONLY at the time of database creation and once set can't be "
         "updated for the lifetime of the database.\n\n"
+        "shard_metadata_format={original|encoded}: Target encoding for the cluster's shard-location metadata "
+        "(\\xff/keyServers/ and \\xff/serverKeys/). `encoded' is the shard-encoded (UID+dataMoveId) format, "
+        "`original' the legacy tag-based format. Paired with shard_metadata_migration below; mirrors the "
+        "storage_engine + perpetual_storage_wiggle pattern. When unset, DD falls back to the legacy "
+        "SHARD_ENCODE_LOCATION_METADATA knob (true -> encoded, false -> original).\n\n"
+        "shard_metadata_migration={enabled|disabled}: When enabled, DD at init actively converges existing "
+        "shard metadata entries to shard_metadata_format. When disabled (default), DD does nothing at init "
+        "in either direction; entries drain via natural DD moves or a manual storage wiggle. See the "
+        "SHARD_ENCODE_LOCATION_METADATA design doc for cost model and safety analysis.\n\n"
         "exclude=<ADDRESS...>: Sets the addresses in the format of IP1:port1,IP2:port2 pairs to be excluded during "
         "recruitment. Note this should be only used when the database is unavailable because of the faulty processes "
         "that are blocking the recovery from completion. The number of addresses should be less than the replication "
