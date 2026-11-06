@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbrpc/simulator.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
@@ -2343,9 +2342,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		                                ReadLowPriority(CLIENT_KNOBS->BACKUP_READS_USE_LOW_PRIORITY));
 		std::unique_ptr<IRangeFileWriter> rangeFile;
 		BackupConfig backup(task);
-		Arena arena;
-
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but
 		// if bc is false then clearly the backup is no longer in progress
@@ -3718,7 +3714,6 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 	                             Reference<Task> task) {
 		BackupConfig config(task);
 		Reference<IBackupContainer> bc;
-		DatabaseConfiguration dbConfig;
 
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
@@ -3735,7 +3730,6 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				co_await taskBucket->keepRunning(tr, task);
-				dbConfig = co_await getDatabaseConfiguration(cx);
 
 				if (!bc) {
 					// Backup container must be present if we're still here
@@ -4965,8 +4959,6 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			}
 			throw;
 		}
-		Arena arena;
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 
 		// First and last key are the range for this file
 		KeyRange fileRange;
@@ -9015,7 +9007,6 @@ public:
 	                                     Key removePrefix) {
 		auto ryw_tr = makeReference<ReadYourWritesTransaction>(cx);
 		BackupConfig backupConfig;
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		while (true) {
 			Error err;
 			try {

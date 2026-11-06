@@ -2031,6 +2031,13 @@ Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, in
 	}
 }
 
+static void printJsonError(std::string errorMessage) {
+	JsonBuilderObject doc;
+	doc.setKey("SchemaVersion", "1.0.0");
+	doc.setKey("error", errorMessage);
+	printf("%s\n", doc.getJson().c_str());
+}
+
 Future<Void> statusBackup(Database db, std::string tagName, ShowErrors showErrors, bool json) {
 	try {
 		FileBackupAgent backupAgent;
@@ -2041,6 +2048,26 @@ Future<Void> statusBackup(Database db, std::string tagName, ShowErrors showError
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
+		if (json)
+			printJsonError(e.what());
+		fprintf(stderr, "ERROR: %s\n", e.what());
+		throw;
+	}
+}
+
+// Prints `fdbrestore status` for one tag, or for every tag when tag is empty.
+Future<Void> statusRestore(Database db, Key tag, bool json) {
+	try {
+		FileBackupAgent backupAgent;
+
+		std::string statusText =
+		    co_await (json ? backupAgent.restoreStatusJSON(db, tag) : backupAgent.restoreStatus(db, tag));
+		printf("%s\n", statusText.c_str());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		if (json)
+			printJsonError(e.what());
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -2524,6 +2551,8 @@ Future<Void> describeBackup(const char* name,
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
+		if (json)
+			printJsonError(e.what());
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -4168,9 +4197,12 @@ int main(int argc, char* argv[]) {
 		if (restoreUserKeys) {
 			backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
 		} else if (restoreSystemKeys) {
-			for (const auto& r : getSystemBackupRanges()) {
-				backupKeys.push_back_deep(backupKeys.arena(), r);
-			}
+			// The ranges this selected belonged to tenants and blob granules, both since removed (#12583,
+			// #12435), so it can only produce an empty range list and trip the assert in runRestore.
+			fprintf(stderr,
+			        "ERROR: --system-metadata selects no key ranges in this version: the tenant and blob granule "
+			        "system ranges it covered have been removed. Use --user-data, or name ranges with -k.\n");
+			return FDB_EXIT_ERROR;
 		}
 
 		switch (programExe) {
@@ -4404,12 +4436,7 @@ int main(int argc, char* argv[]) {
 				// If no tag is specifically provided then print all tag status, don't just use "default"
 				if (tagProvided)
 					tag = tagName;
-				f = stopAfter(
-				    map(jsonOutput ? ba.restoreStatusJSON(db, KeyRef(tag)) : ba.restoreStatus(db, KeyRef(tag)),
-				        [](std::string s) -> Void {
-					        printf("%s\n", s.c_str());
-					        return Void();
-				        }));
+				f = stopAfter(statusRestore(db, tag, jsonOutput));
 				break;
 			default:
 				throw restore_error();

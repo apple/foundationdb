@@ -20,9 +20,7 @@
 
 #include <algorithm>
 
-#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
@@ -226,7 +224,6 @@ struct RestoreBackupWorkload : TestWorkload {
 	}
 
 	Future<Void> _start(Database cx) {
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		co_await delay(delayFor);
 		co_await waitOnBackup(cx);
 		if (reportBackupMetrics) {

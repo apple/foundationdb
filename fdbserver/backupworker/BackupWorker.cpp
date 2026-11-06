@@ -88,20 +88,8 @@ struct VersionedMessage {
 		if (!isThisMessageMutation(m))
 			return false;
 
-		// Return true if the mutation intersects any legal backup ranges
-		if (normalKeys.contains(m->param1) || m->param1 == metadataVersionKey) {
-			return true;
-		} else if (m->type != MutationRef::Type::ClearRange) {
-			return systemBackupMutationMask().rangeContaining(m->param1).value();
-		} else {
-			for (auto& r : systemBackupMutationMask().intersectingRanges(KeyRangeRef(m->param1, m->param2))) {
-				if (r->value()) {
-					return true;
-				}
-			}
-
-			return false;
-		}
+		// Only normalKeys and the metadata version key are legal backup ranges.
+		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
 	}
 };
 
