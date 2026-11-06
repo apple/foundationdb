@@ -117,55 +117,6 @@ Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 	addInterfacesFromKVs(kvs, address_interface);
 }
 
-Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers) {
-	Reference<ITransaction> tr = db->createTransaction();
-	while (true) {
-		Error err;
-		try {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			ThreadFuture<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-			ThreadFuture<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
-
-			co_await (success(safeThreadFutureToFuture(processClasses)) &&
-			          success(safeThreadFutureToFuture(processData)));
-			ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
-			ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
-
-			std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
-			int i{ 0 };
-			for (i = 0; i < processClasses.get().size(); i++) {
-				try {
-					id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
-					    decodeProcessClassValue(processClasses.get()[i].value);
-				} catch (Error& e) {
-					fprintf(stderr, "Error: %s; Client version is too old, please use a newer version\n", e.what());
-					co_return false;
-				}
-			}
-
-			for (i = 0; i < processData.get().size(); i++) {
-				ProcessData data = decodeWorkerListValue(processData.get()[i].value);
-				ProcessClass processClass = id_class[data.locality.processId()];
-
-				if (processClass.classSource() == ProcessClass::DBSource ||
-				    data.processClass.classType() == ProcessClass::UnsetClass)
-					data.processClass = processClass;
-
-				if (data.processClass.classType() != ProcessClass::TesterClass)
-					workers->push_back(data);
-			}
-
-			co_return true;
-		} catch (Error& e) {
-			err = e;
-		}
-		TraceEvent(SevWarn, "GetWorkersError").error(err);
-		co_await safeThreadFutureToFuture(tr->onError(err));
-	}
-}
-
 Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                         std::map<std::string, StorageServerInterface>* interfaces) {
 	Reference<ITransaction> tr = db->createTransaction();

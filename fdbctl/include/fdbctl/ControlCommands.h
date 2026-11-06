@@ -69,7 +69,6 @@ Future<std::set<NetworkAddress>> getInProgressExclusion(Reference<ITransaction> 
 
 Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                         std::map<std::string, StorageServerInterface>* interfaces);
-Future<bool> getWorkersProcessData(Reference<IDatabase> db, std::vector<ProcessData>* workers);
 } // namespace utils
 
 namespace special_keys {
