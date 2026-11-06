@@ -520,8 +520,14 @@ RYWMutation WriteMap::coalesce(RYWMutation existingEntry, RYWMutation newEntry, 
 void WriteMap::coalesceOver(OperationStack& stack, RYWMutation newEntry, Arena& arena) {
 	RYWMutation existingEntry = stack.top();
 	if (existingEntry.type == newEntry.type && newEntry.type != MutationRef::CompareAndClear) {
-		if (isNonAssociativeOp(existingEntry.type) && existingEntry.value.present() &&
-		    existingEntry.value.get().size() != newEntry.value.get().size()) {
+		// AppendIfFits is not associative under truncation: merging operands before the
+		// base value is known can reject appends that would succeed if applied one at a
+		// time (e.g. 70KB base + 20KB + 20KB should yield 90KB when VALUE_SIZE_LIMIT is
+		// 100KB, but a coalesced 40KB operand is rejected against the 70KB base).
+		if (newEntry.type == MutationRef::AppendIfFits) {
+			stack.push(newEntry);
+		} else if (isNonAssociativeOp(existingEntry.type) && existingEntry.value.present() &&
+		           existingEntry.value.get().size() != newEntry.value.get().size()) {
 			stack.push(newEntry);
 		} else {
 			stack.poppush(coalesce(existingEntry, newEntry, arena));

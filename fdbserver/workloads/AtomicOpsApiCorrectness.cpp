@@ -131,6 +131,27 @@ public:
 		    });
 		ASSERT(visible.present());
 		ASSERT(visible.get() == full);
+
+		// Regression for #13828: two AppendIfFits against a committed base must be applied
+		// sequentially. Coalescing the operands first truncates incorrectly when each append
+		// alone would fit but the concatenated operand would not.
+		const Value largeBase(std::string(70000, 'a'));
+		const Value chunk(std::string(20000, 'b'));
+		ASSERT(largeBase.size() + chunk.size() <= CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+		ASSERT(largeBase.size() + 2 * chunk.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+
+		co_await runRYWTransactionVoid(cx, [key, largeBase](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->set(key, largeBase);
+			return Void();
+		});
+		Optional<Value> sequential = co_await runRYWTransaction(
+		    cx, [key, chunk](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+			    tr->atomicOp(key, chunk, MutationRef::AppendIfFits);
+			    tr->atomicOp(key, chunk, MutationRef::AppendIfFits);
+			    return tr->get(key);
+		    });
+		ASSERT(sequential.present());
+		ASSERT(sequential.get().size() == largeBase.size() + chunk.size());
 	}
 
 	// Test Atomic ops on non existing keys that results in a set
