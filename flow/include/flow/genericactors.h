@@ -2316,6 +2316,7 @@ struct YieldedFutureActor final : SAV<Void>,
 		} else {
 			// We hit this case when and only when the delay() created by a previous doYield() fires.  Then we want to
 			// get at least one task done, regardless of what check_yield() would say.
+			ASSERT(int16_t(in_error_state.code()) == SET_ERROR_CODE);
 			finish();
 		}
 	}
@@ -2328,6 +2329,7 @@ struct YieldedFutureActor final : SAV<Void>,
 				finish();
 		} else {
 			// The delayed error created by a previous doYield() fired.
+			ASSERT(int16_t(in_error_state.code()) > SET_ERROR_CODE);
 			finish();
 		}
 	}
@@ -2358,7 +2360,7 @@ struct YieldedFutureActor final : SAV<Void>,
 		TaskPriority taskID = g_network->getCurrentTask();
 		Future<Void> refire = int16_t(in_error_state.code()) == SET_ERROR_CODE
 		                          ? delay(0, taskID)
-		                          : delayed(Future<Void>(in_error_state), 0.0, taskID);
+		                          : tagError<Void>(delay(0, taskID), in_error_state);
 		refire.addCallbackChainAndClear(static_cast<CB1*>(this));
 	}
 };
