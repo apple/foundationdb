@@ -600,7 +600,6 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	BACKUP_QUIET_OPTIONS,
 	{ OPT_DRYRUN, "-n", SO_NONE },
 	{ OPT_DRYRUN, "--dryrun", SO_NONE },
-	{ OPT_FORCE, "-f", SO_NONE },
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	BACKUP_MEMORY_OPTIONS,
 	BACKUP_HELP_OPTIONS,
