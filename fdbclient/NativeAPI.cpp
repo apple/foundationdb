@@ -6526,7 +6526,7 @@ TEST_CASE("/fdbclient/NativeAPI/watchRefCount/deletesMetadataOnlyOnLastRef") {
 	                                                      UseProvisionalProxies::False);
 
 	auto md = makeReference<WatchMetadata>(watchParameters);
-	md->watchFutureSS = neverSet.getFuture();
+	md->watchFutureSS = success(neverSet.getFuture());
 
 	cx->setWatchMetadata(md);
 	cx->increaseWatchRefCount(k, 1);
@@ -6536,7 +6536,8 @@ TEST_CASE("/fdbclient/NativeAPI/watchRefCount/deletesMetadataOnlyOnLastRef") {
 
 	cx->decreaseWatchRefCount(k, 2);
 	ASSERT(!cx->getWatchMetadata(k).isValid());
-	ASSERT(md->watchFutureSS.isError()); // cancelled
+	ASSERT(md->watchFutureSS.isError());
+	ASSERT(md->watchFutureSS.getError().code() == error_code_actor_cancelled);
 
 	return Void();
 }
