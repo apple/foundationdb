@@ -44,4 +44,8 @@ const (
 	// process groups will shutdown the fdbserver instance but keep the Pod and other Kubernetes resources running
 	// for debugging purpose.
 	IsolateProcessGroupAnnotation = "foundationdb.org/isolate-process-group"
+
+	// StagedVersionsKey is the key in the environment annotation that lists the versions with a ready fdbserver
+	// binary in the shared binary directory as a sorted, comma separated list.
+	StagedVersionsKey = "STAGED_VERSIONS"
 )

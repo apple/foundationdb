@@ -51,6 +51,47 @@ var _ = Describe("Testing monitor metrics", func() {
 			})
 		})
 
+		When("staged versions are registered", func() {
+			BeforeEach(func() {
+				monitorMetrics.registerStagedVersions([]string{sevenOneVersion, sevenThreeVersion})
+			})
+
+			getStagedVersions := func() []string {
+				families, err := registry.Gather()
+				Expect(err).NotTo(HaveOccurred())
+
+				var versions []string
+				for _, family := range families {
+					if !strings.HasSuffix(pointer.StringDeref(family.Name, ""), stagedVersionMetricName) {
+						continue
+					}
+
+					for _, metric := range family.Metric {
+						Expect(*metric.Gauge.Value).To(BeNumerically("==", 1))
+						Expect(metric.Label).To(HaveLen(1))
+						Expect(*metric.Label[0].Name).To(Equal(versionLabel))
+						versions = append(versions, *metric.Label[0].Value)
+					}
+				}
+
+				return versions
+			}
+
+			It("should report all staged versions", func() {
+				Expect(getStagedVersions()).To(ConsistOf(sevenOneVersion, sevenThreeVersion))
+			})
+
+			When("a version is no longer staged", func() {
+				BeforeEach(func() {
+					monitorMetrics.registerStagedVersions([]string{sevenThreeVersion})
+				})
+
+				It("should remove the series of the version", func() {
+					Expect(getStagedVersions()).To(ConsistOf(sevenThreeVersion))
+				})
+			})
+		})
+
 		When("a configuration change is registered", func() {
 			BeforeEach(func() {
 				monitorMetrics.registerConfigurationChange(sevenOneVersion)

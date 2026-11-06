@@ -20,6 +20,7 @@ package main
 
 import (
 	"strconv"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -43,6 +44,8 @@ const (
 	runningVersionMetricName = "running_version"
 	// desiredVersionMetricName represents the desired_version metric.
 	desiredVersionMetricName = "desired_version"
+	// stagedVersionMetricName represents the staged_version metric.
+	stagedVersionMetricName = "staged_version"
 )
 
 // metrics represents the custom prometheus metrics for the monitor.
@@ -59,6 +62,12 @@ type metrics struct {
 	runningVersion *prometheus.GaugeVec
 	// desiredVersion represents the desired running version of the binaries.
 	desiredVersion *prometheus.GaugeVec
+	// stagedVersion represents the versions with a ready binary in the shared binary directory.
+	stagedVersion *prometheus.GaugeVec
+	// stagedVersionMutex guards previousStagedVersions.
+	stagedVersionMutex sync.Mutex
+	// previousStagedVersions keeps the staged versions that were reported last.
+	previousStagedVersions map[string]struct{}
 	// previousDesiredVersion keeps the previous seen desired version.
 	previousDesiredVersion string
 	// previousRunningVersion keeps the prvious seen running version.
@@ -91,6 +100,27 @@ func (metrics *metrics) registerProcessStartup(processNumber int, version string
 		metrics.runningVersion.With(prometheus.Labels{versionLabel: metrics.previousRunningVersion}).Set(0.0)
 	}
 	metrics.previousRunningVersion = version
+}
+
+// registerStagedVersions sets the staged_version metric for the provided versions and removes the series of versions
+// that are no longer staged.
+func (metrics *metrics) registerStagedVersions(versions []string) {
+	metrics.stagedVersionMutex.Lock()
+	defer metrics.stagedVersionMutex.Unlock()
+
+	current := make(map[string]struct{}, len(versions))
+	for _, version := range versions {
+		current[version] = struct{}{}
+		metrics.stagedVersion.With(prometheus.Labels{versionLabel: version}).Set(1.0)
+	}
+
+	for version := range metrics.previousStagedVersions {
+		if _, present := current[version]; !present {
+			metrics.stagedVersion.DeleteLabelValues(version)
+		}
+	}
+
+	metrics.previousStagedVersions = current
 }
 
 // registerMetrics will register the monitor metrics and returns a metrics struct to update the current metrics.
@@ -127,6 +157,11 @@ func registerMetrics(reg prometheus.Registerer) *metrics {
 			Name:      desiredVersionMetricName,
 			Help:      "The desired running version of the fdbserver processes started by this monitor.",
 		}, []string{versionLabel}),
+		stagedVersion: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: prometheusNamespace,
+			Name:      stagedVersionMetricName,
+			Help:      "The versions with a ready fdbserver binary in the shared binary directory.",
+		}, []string{versionLabel}),
 	}
 
 	reg.MustRegister(monitorMetrics.restartCount)
@@ -135,6 +170,7 @@ func registerMetrics(reg prometheus.Registerer) *metrics {
 	reg.MustRegister(monitorMetrics.startTimestamp)
 	reg.MustRegister(monitorMetrics.runningVersion)
 	reg.MustRegister(monitorMetrics.desiredVersion)
+	reg.MustRegister(monitorMetrics.stagedVersion)
 
 	return monitorMetrics
 }
