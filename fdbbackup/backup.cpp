@@ -2032,10 +2032,6 @@ Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, in
 	}
 }
 
-// Emit a machine-readable failure on stdout for the --json commands. Without this a failing --json
-// invocation writes nothing to stdout, leaving a consumer unable to tell a failure from an empty
-// result. The "error" key matches what fdbbackup query already emits rather than introducing a
-// second spelling for the same concept.
 static void printJsonError(std::string errorMessage) {
 	JsonBuilderObject doc;
 	doc.setKey("SchemaVersion", "1.0.0");
