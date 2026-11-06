@@ -59,7 +59,11 @@ public:
 		OPEN_NO_AIO =
 		    0x200000, // Don't use AsyncFileKAIO or similar implementations that rely on filesystem support for AIO
 		OPEN_CACHED_READ_ONLY = 0x400000, // AsyncFileCached opens files read/write even if you specify read only
-		OPEN_ENCRYPTED = 0x800000 // File is encrypted using AES-256-GCM (must be either read-only or write-only)
+		OPEN_ENCRYPTED = 0x800000, // File is encrypted using AES-256-GCM (must be either read-only or write-only)
+		// EIO-only: offload atomic rename and parent-directory sync. Requires OPEN_ATOMIC_WRITE_AND_CREATE,
+		// OPEN_NO_AIO and OPEN_UNCACHED. Only use unique temporary filenames: cancellation may return before
+		// rename finishes, so storage files whose names can be deleted or reused must not enable this flag.
+		OPEN_ASYNC_ATOMIC_RENAME = 0x1000000
 	};
 
 	virtual void addref() = 0;
