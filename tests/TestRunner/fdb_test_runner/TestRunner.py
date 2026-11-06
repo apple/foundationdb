@@ -325,46 +325,44 @@ class RestartTestPolicy:
         self._second_binary = new_binary
         if old_binary is None:
             _logger.info("No old binary provided")
+            return
         old_binary_version_raw = subprocess.check_output(
             [old_binary, "--version"]
         ).decode("utf-8")
         match = re.match(
-            "FoundationDB.*\(v([0-9]+\.[0-9]+\.[0-9]+)\)", old_binary_version_raw
+            r"FoundationDB.*\(v([0-9]+\.[0-9]+\.[0-9]+)\)", old_binary_version_raw
         )
         assert match, old_binary_version_raw
         old_binary_version = tuple(map(int, match.group(1).split(".")))
-        match = re.match(".*/restarting/from_([0-9]+\.[0-9]+\.[0-9]+)/", name)
-        if match:  # upgrading _from_
-            lower_bound = tuple(map(int, match.group(1).split(".")))
-            if old_binary_version >= lower_bound:
+        match = re.match(
+            r".*/restarting/(from|to)_([0-9]+\.[0-9]+\.[0-9]+)"
+            r"(?:_until_([0-9]+\.[0-9]+\.[0-9]+))?/",
+            name,
+        )
+        if not match:
+            return
+        lower_bound = tuple(map(int, match.group(2).split(".")))
+        upper_bound = (
+            tuple(map(int, match.group(3).split("."))) if match.group(3) else None
+        )
+        # Match Joshua's inclusive lower bound and exclusive _until_ bound.
+        eligible = old_binary_version >= lower_bound and (
+            upper_bound is None or old_binary_version < upper_bound
+        )
+        if eligible:
+            if match.group(1) == "from":
                 self._first_binary = old_binary
-                _logger.info(
-                    "Using old binary as first binary: {} >= {}".format(
-                        old_binary_version, lower_bound
-                    )
-                )
             else:
-                _logger.info(
-                    "Using new binary as first binary: {} < {}".format(
-                        old_binary_version, lower_bound
-                    )
-                )
-        match = re.match(".*/restarting/to_([0-9]+\.[0-9]+\.[0-9]+)/", name)
-        if match:  # downgrading _to_
-            lower_bound = tuple(map(int, match.group(1).split(".")))
-            if old_binary_version >= lower_bound:
                 self._second_binary = old_binary
-                _logger.info(
-                    "Using old binary as second binary: {} >= {}".format(
-                        old_binary_version, lower_bound
-                    )
-                )
-            else:
-                _logger.info(
-                    "Using new binary as second binary: {} < {}".format(
-                        old_binary_version, lower_bound
-                    )
-                )
+        _logger.info(
+            "Using %s binary for %s phase: %s %s [%s, %s)",
+            "old" if eligible else "new",
+            "first" if match.group(1) == "from" else "second",
+            old_binary_version,
+            "in" if eligible else "outside",
+            lower_bound,
+            upper_bound if upper_bound is not None else "unbounded",
+        )
 
     def first_binary(self):
         return self._first_binary
@@ -586,4 +584,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
