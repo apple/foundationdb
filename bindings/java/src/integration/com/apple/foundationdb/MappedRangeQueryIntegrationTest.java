@@ -88,6 +88,61 @@ class MappedRangeQueryIntegrationTest {
 		test.comparePerformance();
 	}
 
+	// Records keyed by UUIDs. The storage server parses the whole index entry
+	// key when substituting {K[i]}, so it has to understand UUID elements.
+	static private final String PREFIX_UUID = "mapped-range-query-uuid-" + UUID.randomUUID();
+	static byte[] MAPPER_UUID = Tuple.from(PREFIX_UUID, RECORD, "{K[3]}", "{...}").pack();
+	static private UUID uuidPrimaryKey(int i) {
+		// The last byte must never be 0xff, since the expected range end below
+		// is computed by incrementing it.
+		return new UUID(0x0102030405060700L, 0x1122334455660000L + i);
+	}
+	static private byte[] uuidIndexEntryKey(final int i) {
+		return Tuple.from(PREFIX_UUID, INDEX, indexKey(i), uuidPrimaryKey(i)).pack();
+	}
+	static private byte[] uuidRecordKeyPrefix(final int i) {
+		return Tuple.from(PREFIX_UUID, RECORD, uuidPrimaryKey(i)).pack();
+	}
+	static private byte[] uuidRecordKey(final int i) {
+		return Tuple.from(PREFIX_UUID, RECORD, uuidPrimaryKey(i), 0).pack();
+	}
+
+	@Test
+	void mappedRangeQueryOverUuidPrimaryKeys() {
+		int records = 100;
+		try (Database db = openFDB()) {
+			db.run(tr -> {
+				for (int i = 0; i < records; i++) {
+					tr.set(uuidIndexEntryKey(i), EMPTY);
+					tr.set(uuidRecordKey(i), recordValue(i, 0));
+				}
+				return null;
+			});
+			db.run(tr -> {
+				List<MappedKeyValue> kvs =
+				    tr.getMappedRange(KeySelector.firstGreaterOrEqual(uuidIndexEntryKey(0)),
+				                      KeySelector.firstGreaterOrEqual(uuidIndexEntryKey(records)), MAPPER_UUID,
+				                      ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+				        .asList()
+				        .join();
+				Assertions.assertEquals(records, kvs.size());
+				for (int i = 0; i < records; i++) {
+					MappedKeyValue mappedKeyValue = kvs.get(i);
+					assertByteArrayEquals(uuidIndexEntryKey(i), mappedKeyValue.getKey());
+					byte[] prefix = uuidRecordKeyPrefix(i);
+					assertByteArrayEquals(prefix, mappedKeyValue.getRangeBegin());
+					prefix[prefix.length - 1]++;
+					assertByteArrayEquals(prefix, mappedKeyValue.getRangeEnd());
+					List<KeyValue> rangeResult = mappedKeyValue.getRangeResult();
+					Assertions.assertEquals(1, rangeResult.size());
+					assertByteArrayEquals(uuidRecordKey(i), rangeResult.get(0).getKey());
+					assertByteArrayEquals(recordValue(i, 0), rangeResult.get(0).getValue());
+				}
+				return null;
+			});
+		}
+	}
+
 	// Keep numRecords modest so transactions complete within the 5s timeout
 	// even on heavily loaded CI infrastructure (e.g., CodeBuild running
 	// compilation and tests concurrently on the same instance).
