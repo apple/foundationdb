@@ -4965,6 +4965,9 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		std::vector<KeyRange> originalFileRanges;
 		// If fileRange doesn't intersect restore range then we're done.
 		int index{ 0 };
+		int64_t keysSet = 0;
+		int64_t bytesSet = 0;
+		int64_t commits = 0;
 		for (index = 0; index < restoreRanges.get().size(); index++) {
 			auto& restoreRange = restoreRanges.get()[index];
 			fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
@@ -5015,6 +5018,11 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					// With RYW the clear below is split into one clear per gap between the sets, doubling the
+					// storage mutations. Without it the clear stays one mutation, applied before the sets.
+					if (CLIENT_KNOBS->RESTORE_RANGE_DISABLE_RYW) {
+						tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+					}
 
 					int i = start;
 					int txBytes = 0;
@@ -5071,6 +5079,10 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 					    .detail("Bytes", txBytes)
 					    .detail("OriginalFileRange", originalFileRange);
 
+					keysSet += i - start;
+					bytesSet += txBytes;
+					++commits;
+
 					// Commit succeeded, so advance starting point
 					start = i;
 
@@ -5089,6 +5101,13 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				}
 			}
 		}
+		TraceEvent("FileRestoreRangeTaskMetrics")
+		    .detail("RestoreUID", restore.getUid())
+		    .detail("FileName", rangeFile.fileName)
+		    .detail("Commits", commits)
+		    .detail("KeysSet", keysSet)
+		    .detail("Bytes", bytesSet)
+		    .detail("RywDisabled", CLIENT_KNOBS->RESTORE_RANGE_DISABLE_RYW);
 		if (!originalFileRanges.empty()) {
 			if (buggify() && restoreRanges.get().size() == 1) {
 				Params.originalFileRange().set(task, originalFileRanges[0]);
