@@ -791,28 +791,40 @@ inline Standalone<StringRef> TupleCodec<Reference<IBackupContainer>>::pack(Refer
 	tuple.append((int64_t)bc->getEncryptionBlockSize());
 	return tuple.pack();
 }
+// The fields a backup container is saved as. Unpacking them does not open the container, so it does not validate
+// the URL.
+struct SavedBackupContainer {
+	std::string url;
+	Optional<std::string> encryptionKeyFileName;
+	Optional<std::string> proxy;
+	int encryptionBlockSize = 0;
+
+	static SavedBackupContainer unpack(StringRef val) {
+		Tuple t = Tuple::unpack(val);
+		ASSERT(t.size() >= 1);
+
+		SavedBackupContainer saved;
+		saved.url = t.getString(0).toString();
+		if (t.size() > 1 && !t.getString(1).empty()) {
+			saved.encryptionKeyFileName = t.getString(1).toString();
+		}
+		if (t.size() > 2 && !t.getString(2).empty()) {
+			saved.proxy = t.getString(2).toString();
+		}
+		if (t.size() > 3) {
+			saved.encryptionBlockSize = (int)t.getInt(3);
+		}
+		return saved;
+	}
+
+	Reference<IBackupContainer> open() const {
+		return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName, encryptionBlockSize);
+	}
+};
+
 template <>
 inline Reference<IBackupContainer> TupleCodec<Reference<IBackupContainer>>::unpack(Standalone<StringRef> const& val) {
-	Tuple t = Tuple::unpack(val);
-	ASSERT(t.size() >= 1);
-
-	auto url = t.getString(0).toString();
-
-	Optional<std::string> encryptionKeyFileName;
-	if (t.size() > 1 && !t.getString(1).empty()) {
-		encryptionKeyFileName = t.getString(1).toString();
-	}
-
-	Optional<std::string> proxy;
-	if (t.size() > 2 && !t.getString(2).empty()) {
-		proxy = t.getString(2).toString();
-	}
-
-	int blockSize = 0;
-	if (t.size() > 3) {
-		blockSize = (int)t.getInt(3);
-	}
-	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName, blockSize);
+	return SavedBackupContainer::unpack(val).open();
 }
 
 class BackupConfig : public KeyBackedTaskConfig {
