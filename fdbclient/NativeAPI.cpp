@@ -6488,7 +6488,7 @@ TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/multipleShards") {
 }
 
 TEST_CASE("/fdbclient/NativeAPI/watchRefCount/removesEmptyEntries") {
-	Database database = Database(new DatabaseContext(unknown_error()));
+	Database database = Database(new DatabaseContext(operation_failed()));
 	Key k = "k"_sr;
 
 	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
@@ -6513,7 +6513,7 @@ TEST_CASE("/fdbclient/NativeAPI/watchRefCount/removesEmptyEntries") {
 }
 
 TEST_CASE("/fdbclient/NativeAPI/watchRefCount/deletesMetadataOnlyOnLastRef") {
-	Database cx = Database(new DatabaseContext(unknown_error()));
+	Database database = Database(new DatabaseContext(operation_failed()));
 	Key k = "k"_sr;
 	Promise<Void> neverSet;
 	auto watchParameters = makeReference<WatchParameters>(k,
@@ -6528,14 +6528,14 @@ TEST_CASE("/fdbclient/NativeAPI/watchRefCount/deletesMetadataOnlyOnLastRef") {
 	auto md = makeReference<WatchMetadata>(watchParameters);
 	md->watchFutureSS = success(neverSet.getFuture());
 
-	cx->setWatchMetadata(md);
-	cx->increaseWatchRefCount(k, 1);
-	cx->increaseWatchRefCount(k, 2);
-	cx->decreaseWatchRefCount(k, 1);
-	ASSERT(cx->getWatchMetadata(k).isValid());
+	database->setWatchMetadata(md);
+	database->increaseWatchRefCount(k, 1);
+	database->increaseWatchRefCount(k, 2);
+	database->decreaseWatchRefCount(k, 1);
+	ASSERT(database->getWatchMetadata(k).isValid());
 
-	cx->decreaseWatchRefCount(k, 2);
-	ASSERT(!cx->getWatchMetadata(k).isValid());
+	database->decreaseWatchRefCount(k, 2);
+	ASSERT(!database->getWatchMetadata(k).isValid());
 	ASSERT(md->watchFutureSS.isError());
 	ASSERT(md->watchFutureSS.getError().code() == error_code_actor_cancelled);
 
