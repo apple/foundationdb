@@ -130,6 +130,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	sdk_auth = false;
 	enable_object_integrity_check = CLIENT_KNOBS->BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK;
 	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
+	aws_v4_header = CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER;
 }
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
@@ -173,6 +174,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(sdk_auth, sa);
 	TRY_PARAM(enable_object_integrity_check, eoic);
 	TRY_PARAM(global_connection_pool, gcp);
+	TRY_PARAM(aws_v4_header, v4);
 #undef TRY_PARAM
 	return false;
 }
@@ -215,6 +217,7 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(global_connection_pool, gcp);
 	_CHECK_PARAM(max_delay_retryable_error, dre);
 	_CHECK_PARAM(max_delay_connection_failed, dcf);
+	_CHECK_PARAM(aws_v4_header, v4);
 #undef _CHECK_PARAM
 	return r;
 }
@@ -422,7 +425,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 			creds = S3BlobStoreEndpoint::Credentials{ key.toString(), secret.toString(), securityToken.toString() };
 		}
 
-		if (region.empty() && CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
+		if (region.empty() && knobs.aws_v4_header) {
 			throw std::string(
 			    "Failed to get region from host or parameter in url, region is required for aws v4 signature");
 		}
@@ -1020,7 +1023,7 @@ void setHeaders(Reference<S3BlobStoreEndpoint> bstore, Reference<HTTP::OutgoingR
 	// refreshed when a new connection is established and setAuthHeaders() would need the updated secret.
 	if (bstore->credentials.present() && !bstore->credentials.get().securityToken.empty())
 		req->data.headers["x-amz-security-token"] = bstore->credentials.get().securityToken;
-	if (CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
+	if (bstore->knobs.aws_v4_header) {
 		bstore->setV4AuthHeaders(req->verb, req->resource, req->data.headers);
 	} else {
 		bstore->setAuthHeaders(req->verb, req->resource, req->data.headers);
@@ -1029,8 +1032,7 @@ void setHeaders(Reference<S3BlobStoreEndpoint> bstore, Reference<HTTP::OutgoingR
 
 std::string getCanonicalURI(Reference<S3BlobStoreEndpoint> bstore, Reference<HTTP::OutgoingRequest> req) {
 	std::vector<std::string> queryParameters;
-	std::string canonicalURI =
-	    awsCanonicalURI(req->resource, queryParameters, CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER);
+	std::string canonicalURI = awsCanonicalURI(req->resource, queryParameters, bstore->knobs.aws_v4_header);
 	if (!queryParameters.empty()) {
 		canonicalURI += "?";
 		// Use raw ampersands when joining query parameters
@@ -1205,7 +1207,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 					    .detail("OriginalResource", resource)
 					    .detail("DryrunResource", dryrunRequest->resource)
 					    .detail("Bucket", bucket)
-					    .detail("V4", CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER)
+					    .detail("V4", bstore->knobs.aws_v4_header)
 					    .log();
 					wait(bstore->requestRate->getAllowance(1));
 					Future<Reference<HTTP::IncomingResponse>> dryrunResponse = HTTP::doRequest(
@@ -2823,5 +2825,26 @@ TEST_CASE("/backup/s3/proxy/invalidValueRejected") {
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
 	}
+	return Void();
+}
+
+// The URL's v4 parameter, not the HTTP_REQUEST_AWS_V4_HEADER knob, decides how requests are signed.
+TEST_CASE("/backup/s3/v4/urlOverridesKnob") {
+	const bool v4 = !CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER;
+	std::string resource;
+	std::string error;
+	S3BlobStoreEndpoint::ParametersT parameters;
+	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(
+	    format("blobstore://key:secret@127.0.0.1:9000/resource_name?bucket=bucket_name&region=test_region&v4=%d", v4),
+	    {},
+	    &resource,
+	    &error,
+	    &parameters);
+	Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+	req->verb = "GET";
+	req->resource = "/bucket_name/object";
+	req->data.headers["Host"] = "127.0.0.1";
+	setHeaders(s3, req);
+	ASSERT(req->data.headers["Authorization"].starts_with(v4 ? "AWS4-HMAC-SHA256 " : "AWS key:"));
 	return Void();
 }
