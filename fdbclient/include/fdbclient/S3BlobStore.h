@@ -147,7 +147,8 @@ public:
 		    concurrent_uploads, concurrent_lists, concurrent_reads_per_file, concurrent_writes_per_file,
 		    enable_read_cache, read_block_size, read_ahead_blocks, read_cache_blocks_per_file,
 		    max_send_bytes_per_second, max_recv_bytes_per_second, sdk_auth, enable_object_integrity_check,
-		    global_connection_pool, max_delay_retryable_error, max_delay_connection_failed, multipart_retry_delay_ms;
+		    global_connection_pool, max_delay_retryable_error, max_delay_connection_failed, multipart_retry_delay_ms,
+		    aws_v4_header;
 
 		bool set(StringRef name, int value);
 		std::string getURLParameters() const;
@@ -189,7 +190,9 @@ public:
 				"sdk_auth (or sa)                      Use AWS SDK to resolve credentials. Only valid if "
 				"BUILD_AWS_BACKUP is enabled.",
 				"enable_object_integrity_check (or eoic) Enable integrity check on GET requests (Default: false).",
-				"global_connection_pool (or gcp)       Enable shared connection pool between all blobstore instances."
+				"global_connection_pool (or gcp)       Enable shared connection pool between all blobstore instances.",
+				"aws_v4_header (or v4)                 Set 1 to sign requests with AWS V4 or 0 for V2. Defaults to the "
+				"HTTP_REQUEST_AWS_V4_HEADER knob."
 			};
 		}
 
@@ -216,11 +219,14 @@ public:
 	                    Optional<std::string> const& proxyPort,
 	                    Optional<Credentials> const& creds,
 	                    BlobKnobs const& knobs = BlobKnobs(),
-	                    HTTP::Headers extraHeaders = HTTP::Headers())
+	                    HTTP::Headers extraHeaders = HTTP::Headers(),
+	                    Optional<std::string> const& serverSideEncryption = Optional<std::string>(),
+	                    Optional<std::string> const& proxyParameter = Optional<std::string>())
 	  : host(host), service(service), region(region), proxyHost(proxyHost), proxyPort(proxyPort),
 	    useProxy(proxyHost.present() && proxyPort.present()), credentials(creds),
 	    lookupKey(creds.present() && creds.get().key.empty()),
 	    lookupSecret(creds.present() && creds.get().secret.empty()), knobs(knobs), extraHeaders(extraHeaders),
+	    serverSideEncryption(serverSideEncryption), proxyParameter(proxyParameter),
 	    requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
 	    requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
@@ -298,6 +304,11 @@ public:
 	bool lookupSecret;
 	BlobKnobs knobs;
 	HTTP::Headers extraHeaders;
+	// From the URL's server_side_encryption (or sse) parameter. Overrides the BLOBSTORE_ENCRYPTION_TYPE knob when
+	// present.
+	Optional<std::string> serverSideEncryption;
+	// The URL's proxy parameter, kept so getResourceURL can write it back. proxyHost and proxyPort already apply it.
+	Optional<std::string> proxyParameter;
 
 	// Speed and concurrency limits
 	Reference<IRateControl> requestRate;
@@ -318,6 +329,11 @@ public:
 
 	// Sets headers needed for Authorization (including Date which will be overwritten if present)
 	void setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers);
+
+	// Sets x-amz-server-side-encryption to the URL's server_side_encryption (or sse) value, or to the
+	// BLOBSTORE_ENCRYPTION_TYPE knob if the URL has none. Sets nothing if that value is empty (the knob's default)
+	// or "none". Used on single-part PUT and multipart-upload start.
+	void setServerSideEncryptionHeader(HTTP::Headers& headers) const;
 
 	// Set headers in the AWS V4 authorization format. $date and $datestamp are used for unit testing
 	void setV4AuthHeaders(const std::string& verb,
