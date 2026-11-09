@@ -21,6 +21,7 @@
 // Unit tests for the Flow runtime and libraries
 
 #include <chrono>
+#include <memory>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -551,7 +552,21 @@ TEST_CASE("/fdbrpc/ReplyPromise/reentrantReplacement") {
 		reply.send(Void());
 		ASSERT(afterReset.canGet());
 	}
-	return Void();
+
+	ReplyPromise<Void> requester, reply, moved;
+	onReady(
+	    reply.getFuture(),
+	    [](Void) { ASSERT_ABORT(false); },
+	    [&](Error error) {
+		    ASSERT_EQ(error.code(), error_code_broken_promise);
+		    moved = std::move(reply);
+	    });
+	auto response = requester.getFuture();
+	Endpoint endpoint(FlowTransport::transport().getLocalAddresses(), requester.getEndpoint().token);
+	reply.loadRemoteEndpoint(endpoint);
+	ASSERT(!reply.isValid());
+	moved.send(Void());
+	co_await timeoutError(response, 5.0);
 }
 
 TEST_CASE("/fdbrpc/ReplyPromise/reuse state on deserialize") {
@@ -679,6 +694,30 @@ TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/networkSenderKnownErrors") {
 		co_return;
 	}
 	co_await flow_tests_details::checkNetworkSenderKnownErrors();
+}
+
+namespace {
+struct TestStreamReply : ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 1449985;
+
+	size_t expectedSize() const { return sizeof(sequence); }
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, acknowledgeToken, sequence);
+	}
+};
+} // namespace
+
+TEST_CASE("/fdbrpc/ReplyPromiseStream/destroySenderDuringErrorDelivery") {
+	auto sender = std::make_unique<ReplyPromiseStream<TestStreamReply>>();
+	auto disconnectError = ReplyPromiseStream<TestStreamReply>(*sender).getErrorFutureAndDelPromiseRef();
+	onReady(sender->onError(), [](Void) { ASSERT_ABORT(false); }, [&](Error) { sender.reset(); });
+
+	sender->sendError(io_error());
+	ASSERT(!sender);
+	ASSERT(disconnectError.isError());
+	ASSERT_EQ(disconnectError.getError().code(), error_code_io_error);
+	return Void();
 }
 
 TEST_CASE("/flow/flow/quorum") {

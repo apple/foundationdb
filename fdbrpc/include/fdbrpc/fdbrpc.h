@@ -185,6 +185,7 @@ public:
 		return sav->getEndpoint(taskID);
 	}
 	void loadRemoteEndpoint(const Endpoint& endpoint) {
+		ReplyPromise<T> previous(nullptr);
 		// Request deserialization first creates an unused local reply state. Reuse it when it has no observers,
 		// aliases, endpoint, or compatibility policy; all other states retain the original replacement semantics.
 		if (sav != nullptr && sav->canBeSet() && sav->getFutureReferenceCount() == 0 &&
@@ -192,7 +193,9 @@ public:
 		    !sav->hasPeerCompatibilityPolicy()) {
 			sav->setRemoteEndpoint(endpoint, false);
 		} else {
-			*this = ReplyPromise<T>(endpoint);
+			// An old waiter can move or reset this handle. Keep its state alive until the sender is attached.
+			previous = ReplyPromise<T>(endpoint);
+			swap(previous);
 		}
 		networkSender(Uncancellable(), getFuture(), &sav->getRawEndpoint());
 	}
@@ -522,9 +525,12 @@ public:
 				    SerializeSource<ErrorOr<EnsureTable<T>>>(exc), getEndpoint(), false);
 			}
 		} else {
-			queue->sendError(exc);
-			if (errors && errors->canBeSet()) {
-				errors->sendError(exc);
+			// An onError observer can destroy the sending handle before the queue finishes notifying waiters.
+			ReplyPromiseStream sender(*this);
+			const Error error = exc;
+			sender.queue->sendError(error);
+			if (sender.errors && sender.errors->canBeSet()) {
+				sender.errors->sendError(error);
 			}
 		}
 	}

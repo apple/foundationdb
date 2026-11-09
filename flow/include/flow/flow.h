@@ -1029,16 +1029,11 @@ public:
 	void operator=(const Future<T>& rhs) {
 		if (rhs.sav)
 			rhs.sav->addFutureRef();
-		if (sav)
-			sav->delFutureRef();
-		sav = rhs.sav;
+		replaceState(rhs.sav);
 	}
 	void operator=(Future<T>&& rhs) noexcept {
 		if (sav != rhs.sav) {
-			if (sav)
-				sav->delFutureRef();
-			sav = rhs.sav;
-			rhs.sav = nullptr;
+			replaceState(std::exchange(rhs.sav, nullptr));
 		}
 	}
 	bool operator==(const Future& rhs) { return rhs.sav == sav; }
@@ -1070,6 +1065,13 @@ public:
 	explicit Future(SAV<T>* sav) : sav(sav) {}
 
 private:
+	// Dropping the last future can cancel a producer whose cleanup reenters this handle.
+	void replaceState(SAV<T>* next) {
+		if (auto* old = std::exchange(sav, next)) {
+			old->delFutureRef();
+		}
+	}
+
 	SAV<T>* sav;
 	friend class Promise<T>;
 };
@@ -1479,17 +1481,13 @@ public:
 	// Acquiring the incoming reference first keeps the shared state alive during self-assignment.
 	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const PromiseStream& rhs) {
-		rhs.queue->addPromiseRef();
-		if (queue)
-			queue->delPromiseRef();
-		queue = rhs.queue;
+		if (rhs.queue)
+			rhs.queue->addPromiseRef();
+		replaceState(rhs.queue);
 	}
 	void operator=(PromiseStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
-			if (queue)
-				queue->delPromiseRef();
-			queue = rhs.queue;
-			rhs.queue = 0;
+			replaceState(std::exchange(rhs.queue, nullptr));
 		}
 	}
 	~PromiseStream() {
@@ -1516,6 +1514,13 @@ public:
 	int getPromiseReferenceCount() const { return queue->getPromiseReferenceCount(); }
 
 private:
+	// Dropping the last sender can synchronously deliver broken_promise to the reader.
+	void replaceState(NotifiedQueue<T>* next) {
+		if (auto* old = std::exchange(queue, next)) {
+			old->delPromiseRef();
+		}
+	}
+
 	NotifiedQueue<T>* queue;
 };
 

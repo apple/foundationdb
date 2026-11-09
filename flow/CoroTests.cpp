@@ -3501,6 +3501,56 @@ TEST_CASE("/flow/coro/raceAsyncResultLoserCleanup") {
 	return Void();
 }
 
+namespace {
+template <class Handle>
+AsyncResult<Void> takeReplacementOnCancel(Handle& handle, const Handle& expected, Handle& saved) {
+	ScopeExit cleanup([&] {
+		// Only move a live reference. The old state's last reference is already being released.
+		if (handle == expected) {
+			saved = std::move(handle);
+		}
+	});
+	co_await Future<Void>(Never());
+}
+} // namespace
+
+TEST_CASE("/flow/coro/raceReplaceLastObserverDuringLoserCleanup") {
+	for (bool move : { false, true }) {
+		Future<std::variant<Void>> raced, saved;
+		Future<std::variant<Void>> expected = Never();
+		auto replacement = expected;
+		raced = race(takeReplacementOnCancel(raced, expected, saved));
+		if (move) {
+			raced = std::move(replacement);
+		} else {
+			raced = replacement;
+		}
+		ASSERT(saved == expected);
+		ASSERT(!raced.isValid());
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceReplaceStreamSenderDuringLoserCleanup") {
+	for (bool move : { false, true }) {
+		PromiseStream<int> sender, expected, saved;
+		auto replacement = expected;
+		auto original = sender.getFuture();
+		auto raced = race(original, takeReplacementOnCancel(sender, expected, saved));
+		if (move) {
+			sender = std::move(replacement);
+		} else {
+			sender = replacement;
+		}
+		ASSERT(raced.isError());
+		ASSERT_EQ(raced.getError().code(), error_code_broken_promise);
+		ASSERT(saved == expected);
+		saved.send(17);
+		ASSERT_EQ(expected.getFuture().pop(), 17);
+	}
+	return Void();
+}
+
 TEST_CASE("/flow/coro/raceRunningNoThrowOnCancelAsyncResultLoses") {
 	bool producerCleanedAfterSend = false;
 	Promise<Void> resumeProducer;
