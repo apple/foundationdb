@@ -6488,6 +6488,8 @@ TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/multipleShards") {
 }
 
 TEST_CASE("/fdbclient/NativeAPI/watchRefCount/removesEmptyEntries") {
+	// Default error "operation_failed()" avoids "internal" range (4xxx),
+	// which causes simulation tests with --crash enabled to abort/fail.
 	Database database = Database(new DatabaseContext(operation_failed()));
 	Key k = "k"_sr;
 
@@ -6513,6 +6515,8 @@ TEST_CASE("/fdbclient/NativeAPI/watchRefCount/removesEmptyEntries") {
 }
 
 TEST_CASE("/fdbclient/NativeAPI/watchRefCount/deletesMetadataOnlyOnLastRef") {
+	// Default error "operation_failed()" avoids "internal" range (4xxx),
+	// which causes simulation tests with --crash enabled to abort/fail.
 	Database database = Database(new DatabaseContext(operation_failed()));
 	Key k = "k"_sr;
 	Promise<Void> neverSet;
