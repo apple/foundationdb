@@ -262,27 +262,32 @@ template <class... Futures>
 using RaceResult = std::variant<FutureReturnTypeT<std::decay_t<Futures>>...>;
 
 template <std::size_t Idx, class Result, class AwaitableType>
-Future<Result> raceReadyResult(AwaitableType&& future) {
+Future<Result> raceReadyResult(const AwaitableType& future) {
 	if (future.isError()) {
 		return future.getError();
 	}
-	if constexpr (GetFutureTypeV<std::remove_cvref_t<AwaitableType>> == FutureType::Future) {
-		return Result(std::in_place_index<Idx>, future.get());
-	} else if constexpr (GetFutureTypeV<std::remove_cvref_t<AwaitableType>> == FutureType::FutureStream) {
+	// A winning value's constructor can release the caller's last handle to the value being copied.
+	if constexpr (GetFutureTypeV<AwaitableType> == FutureType::Future) {
+		auto source = future;
+		return Result(std::in_place_index<Idx>, source.get());
+	} else if constexpr (GetFutureTypeV<AwaitableType> == FutureType::FutureStream) {
 		auto fs = future;
 		return Result(std::in_place_index<Idx>, fs.pop());
 	} else {
-		return Result(std::in_place_index<Idx>, std::forward<AwaitableType>(future).get());
+		auto* state = future.resultState;
+		state->addRef();
+		AwaitableType source(state);
+		return Result(std::in_place_index<Idx>, source.get());
 	}
 }
 
 template <std::size_t Idx, class Result, class First, class... Rest>
-Future<Result> raceReady(First&& first, Rest&&... rest) {
+Future<Result> raceReady(const First& first, const Rest&... rest) {
 	if (first.isReady()) {
-		return raceReadyResult<Idx, Result>(std::forward<First>(first));
+		return raceReadyResult<Idx, Result>(first);
 	}
 	if constexpr (sizeof...(Rest) > 0) {
-		return raceReady<Idx + 1, Result>(std::forward<Rest>(rest)...);
+		return raceReady<Idx + 1, Result>(rest...);
 	}
 	return Future<Result>();
 }
@@ -425,7 +430,9 @@ Future<T> timeoutChoose(Future<T> what, Future<Void> end, T timedoutValue) {
 
 // Waits for the first Future, FutureStream, ThreadFutureStream, or AsyncResult to become ready and returns its value
 // in a variant whose index matches the winning argument. If multiple inputs are already ready, the lowest index wins.
-// For streams, the next item is consumed. A pending race detaches all callbacks before releasing its inputs. Releasing
+// An already-ready Future or AsyncResult is copied from while its state is held alive. Construction errors on this
+// path propagate to the caller. For streams, the next item is consumed.
+// A pending race detaches all callbacks before releasing its inputs. Releasing
 // the last observer of a cancellable producer cancels it. Input errors and explicit cancellation reach the returned
 // Future. If constructing a pending race's winning value throws, the Future reports the error (or a cancellation
 // requested during construction) and control returns normally to the producer.

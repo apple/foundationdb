@@ -708,6 +708,39 @@ struct TestStreamReply : ReplyPromiseStreamReply {
 	}
 };
 
+struct TestStreamRequest {
+	constexpr static FileIdentifier file_identifier = 1449986;
+	ReplyPromiseStream<TestStreamReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+template <class Request, class Stream = RequestStream<Request>, class Dispatch>
+auto destroyCallerDuringLocalDispatch(Dispatch dispatch) {
+	auto sender = std::make_unique<Stream>();
+	auto request = std::make_unique<Request>();
+	auto dropCaller = [](auto& sender, auto& request) -> AsyncResult<Void> {
+		ScopeExit cleanup([&] {
+			if constexpr (requires { sender->getReceiver(); }) {
+				ASSERT(!sender->getReceiver().first->getRawEndpoint().isValid());
+				sender->getEndpoint(TaskPriority::ReadSocket);
+			}
+			request.reset();
+			sender.reset();
+		});
+		co_await Future<Void>(Never());
+	};
+
+	auto delivered = race(sender->getFuture(), dropCaller(sender, request));
+	auto response = dispatch(*sender, *request);
+	ASSERT(!sender && !request);
+	ASSERT(delivered.canGet() && delivered.get().index() == 0);
+	return std::pair{ std::get<0>(delivered.get()), std::move(response) };
+}
+
 template <class Stream>
 Stream takeReplacementDuringRaceCleanup(const Stream& expected, bool move) {
 	Stream sender, saved;
@@ -739,6 +772,38 @@ TEST_CASE("/fdbrpc/RequestStream/reentrantReplacement") {
 		saved.send(flow_tests_details::Int(17));
 		ASSERT_EQ(expected.getFuture().pop().value, 17);
 	}
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/RequestStream/destroyCallerDuringLocalDispatch") {
+	using flow_tests_details::Int;
+	auto check = [](auto dispatch) {
+		auto [request, response] = destroyCallerDuringLocalDispatch<ReplyPromise<Int>>(dispatch);
+		request.send(Int(17));
+		ASSERT(response.canGet() && response.get().present());
+		ASSERT_EQ(response.get().get().value, 17);
+	};
+	check([](auto& stream, auto& req) { return errorOr(stream.getReply(req)); });
+	check([](auto& stream, auto& req) { return stream.tryGetReply(req); });
+	check([](auto& stream, auto& req) { return stream.tryGetReply(req, TaskPriority::DefaultEndpoint); });
+	check([](auto& stream, auto& req) { return stream.getReplyUnlessFailedFor(req, 60.0, 0.0); });
+	check([](auto& stream, auto& req) {
+		return stream.getReplyUnlessFailedFor(req, 60.0, 0.0, TaskPriority::DefaultEndpoint);
+	});
+
+	auto [request, response] = destroyCallerDuringLocalDispatch<TestStreamRequest>(
+	    [](auto& stream, auto& req) { return stream.getReplyStream(req); });
+	request.reply.sendError(end_of_stream());
+	ASSERT_EQ(response.getFuture().getError().code(), error_code_end_of_stream);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/PromiseStream/destroyCallerDuringLocalDispatch") {
+	using Request = flow_tests_details::ReplyPromiseReuseRequest;
+	auto [received, response] = destroyCallerDuringLocalDispatch<Request, PromiseStream<Request>>(
+	    [](auto& stream, auto& request) { return stream.getReply(request); });
+	received.reply.send(flow_tests_details::Int(17));
+	ASSERT(response.canGet() && response.get().value == 17);
 	return Void();
 }
 

@@ -1015,8 +1015,9 @@ public:
 			sav->addFutureRef();
 	}
 	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = nullptr; }
-	Future(const T& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(presentValue); }
-	Future(T&& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(std::move(presentValue)); }
+	// Own the SAV before constructing T so a throwing copy or move releases the allocation.
+	Future(const T& presentValue) : Future(new SAV<T>(1, 0)) { sav->send(presentValue); }
+	Future(T&& presentValue) : Future(new SAV<T>(1, 0)) { sav->send(std::move(presentValue)); }
 	Future(Never) : sav(new SAV<T>(1, 0)) { sav->send(Never()); }
 	Future(const Error& error) : sav(new SAV<T>(1, 0)) { sav->sendError(error); }
 
@@ -1334,10 +1335,12 @@ public:
 		m_futureRefTrackingId = -1;
 	}
 	FutureStream() : queue(nullptr), m_futureRefTrackingId(-1) {}
-	FutureStream(const FutureStream& rhs) : queue(rhs.queue), m_futureRefTrackingId(-1) {
-		queue->addFutureRef();
-		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.m_futureRefTrackingId >= 0 && g_futureRefCopiedCallback) {
-			m_futureRefTrackingId = g_futureRefCopiedCallback(rhs.m_futureRefTrackingId);
+	FutureStream(const FutureStream& rhs) : FutureStream(rhs.queue) {
+		if (queue) {
+			queue->addFutureRef();
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.m_futureRefTrackingId >= 0 && g_futureRefCopiedCallback) {
+				m_futureRefTrackingId = g_futureRefCopiedCallback(rhs.m_futureRefTrackingId);
+			}
 		}
 	}
 	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue), m_futureRefTrackingId(rhs.m_futureRefTrackingId) {
@@ -1352,32 +1355,13 @@ public:
 		}
 	}
 	void operator=(const FutureStream& rhs) {
-		if (this == &rhs) {
-			return;
-		}
-		rhs.queue->addFutureRef();
-		if (queue)
-			queue->delFutureRef();
-		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback) {
-			g_futureRefReleasedCallback(m_futureRefTrackingId);
-		}
-		queue = rhs.queue;
-		m_futureRefTrackingId = -1;
-		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.m_futureRefTrackingId >= 0 && g_futureRefCopiedCallback) {
-			m_futureRefTrackingId = g_futureRefCopiedCallback(rhs.m_futureRefTrackingId);
+		if (this != &rhs) {
+			replaceState(rhs);
 		}
 	}
 	void operator=(FutureStream&& rhs) noexcept {
 		if (rhs.queue != queue) {
-			if (queue)
-				queue->delFutureRef();
-			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback) {
-				g_futureRefReleasedCallback(m_futureRefTrackingId);
-			}
-			queue = rhs.queue;
-			m_futureRefTrackingId = rhs.m_futureRefTrackingId;
-			rhs.queue = nullptr;
-			rhs.m_futureRefTrackingId = -1;
+			replaceState(std::move(rhs));
 		}
 	}
 	bool operator==(const FutureStream& rhs) { return rhs.queue == queue; }
@@ -1396,6 +1380,12 @@ public:
 	int64_t getFutureRefTrackingId() const { return m_futureRefTrackingId; }
 
 private:
+	// Dropping the last reader can break the old queue's onEmpty promise and reenter this handle.
+	void replaceState(FutureStream replacement) noexcept {
+		std::swap(queue, replacement.queue);
+		std::swap(m_futureRefTrackingId, replacement.m_futureRefTrackingId);
+	}
+
 	NotifiedQueue<T>* queue;
 	int64_t m_futureRefTrackingId;
 };
@@ -1449,8 +1439,9 @@ public:
 	//   If cancelled, request was or will be delivered zero or more times.
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value) {
+		auto reply = getReplyPromise(value).getFuture();
 		send(value);
-		return getReplyPromise(value).getFuture();
+		return reply;
 	}
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) {

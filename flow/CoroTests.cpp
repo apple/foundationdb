@@ -3423,6 +3423,25 @@ TEST_CASE("/flow/coro/raceAsyncResultReady") {
 	return Void();
 }
 
+TEST_CASE("/flow/coro/raceReadyKeepsSourceAliveDuringCopy") {
+	auto check = [](auto source) {
+		using Source = decltype(source);
+		auto ready = [](RaceStreamItem item) -> Source { co_return item; };
+		source = ready(RaceStreamItem(17, [&source, lifetime = Future<Void>(Never())] {
+			// Each copy of the payload holds one reference, including the source the race is copying from.
+			const int live = lifetime.getFutureReferenceCount();
+			ASSERT(source.isValid());
+			source = Source{};
+			ASSERT_EQ(lifetime.getFutureReferenceCount(), live);
+		}));
+		auto raced = race(std::move(source));
+		ASSERT_EQ(std::get<0>(raced.get()).value, 17);
+	};
+	check(Future<RaceStreamItem>{});
+	check(AsyncResult<RaceStreamItem>{});
+	return Void();
+}
+
 TEST_CASE("/flow/coro/raceAsyncResultSuccess") {
 	Promise<Void> signal;
 	Promise<std::string> stringPromise;
@@ -3436,16 +3455,17 @@ TEST_CASE("/flow/coro/raceAsyncResultSuccess") {
 }
 
 namespace {
+struct ThrowOnRaceMove {
+	void (*throwError)();
+	explicit ThrowOnRaceMove(void (*throwError)()) : throwError(throwError) {}
+	ThrowOnRaceMove(const ThrowOnRaceMove&) = default;
+	ThrowOnRaceMove(ThrowOnRaceMove&& other) { other.throwError(); }
+};
+
 void checkRaceAsyncResultThrowDuringMove(void (*throwError)(), int expectedCode) {
-	struct ThrowOnMove {
-		void (*throwError)();
-		explicit ThrowOnMove(void (*throwError)()) : throwError(throwError) {}
-		ThrowOnMove(const ThrowOnMove&) = default;
-		ThrowOnMove(ThrowOnMove&& other) { other.throwError(); }
-	};
-	auto producer = [](Future<Void> start, void (*throwError)()) -> AsyncResult<ThrowOnMove> {
+	auto producer = [](Future<Void> start, void (*throwError)()) -> AsyncResult<ThrowOnRaceMove> {
 		co_await start;
-		const ThrowOnMove item(throwError);
+		const ThrowOnRaceMove item(throwError);
 		co_return item; // Copy into producer storage. Moving into the race is the operation that throws.
 	};
 	Promise<Void> start;
@@ -3455,6 +3475,19 @@ void checkRaceAsyncResultThrowDuringMove(void (*throwError)(), int expectedCode)
 	ASSERT_EQ(raced.getError().code(), expectedCode);
 }
 } // namespace
+
+TEST_CASE("/flow/coro/raceReadyThrowDuringMove") {
+	const ThrowOnRaceMove item([] { throw io_error(); });
+	Future<ThrowOnRaceMove> source(item);
+	try {
+		(void)race(source); // Copies into the variant, then throws while moving it into the result Future.
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+	ASSERT(source.canGet());
+	return Void();
+}
 
 TEST_CASE("/flow/coro/raceAsyncResultThrowDuringMove") {
 	checkRaceAsyncResultThrowDuringMove([] { throw io_error(); }, error_code_io_error);
@@ -3574,6 +3607,33 @@ TEST_CASE("/flow/coro/raceReplaceStreamSenderDuringLoserCleanup") {
 		ASSERT(saved == expected);
 		saved.send(17);
 		ASSERT_EQ(expected.getFuture().pop(), 17);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceReplaceStreamReaderDuringLoserCleanup") {
+	for (bool move : { false, true }) {
+		PromiseStream<int> oldSender, newSender;
+		auto reader = oldSender.getFuture();
+		auto expected = newSender.getFuture();
+		auto replacement = expected;
+		FutureStream<int> saved;
+		oldSender.send(1);
+		auto raced = race(oldSender.onEmpty(), takeReplacementOnCancel(reader, expected, saved));
+		oldSender = {};
+		// The last reader now owns the buffered queue. Releasing it breaks onEmpty and cancels the loser.
+		ASSERT(!raced.isReady());
+		if (move) {
+			reader = std::move(replacement);
+		} else {
+			reader = replacement;
+		}
+		ASSERT(raced.isError());
+		ASSERT_EQ(raced.getError().code(), error_code_broken_promise);
+		ASSERT(saved == expected);
+		ASSERT(!reader.isValid());
+		newSender.send(17);
+		ASSERT_EQ(saved.pop(), 17);
 	}
 	return Void();
 }

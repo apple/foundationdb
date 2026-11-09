@@ -95,6 +95,9 @@ struct AsyncResultAwaiter;
 template <class Parent, int Idx, class ValueType>
 struct ActorAsyncResultCallback;
 
+template <std::size_t Idx, class Result, class AwaitableType>
+Future<Result> raceReadyResult(const AwaitableType& future);
+
 template <class ValueType>
 struct QuorumAsyncResultCallback;
 
@@ -195,6 +198,8 @@ private:
 	friend struct coro::AsyncResultAwaiter;
 	template <class Parent, int Idx, class ValueType>
 	friend struct coro::ActorAsyncResultCallback;
+	template <std::size_t Idx, class Result, class AwaitableType>
+	friend Future<Result> coro::raceReadyResult(const AwaitableType& future);
 	template <class ValueType>
 	friend struct coro::QuorumAsyncResultCallback;
 	template <class ValueType>
