@@ -724,6 +724,9 @@ struct LocalLineage {
 	}
 };
 
+template <class T>
+class Promise;
+
 // SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
@@ -732,6 +735,16 @@ struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
 
 private:
 	typename std::aligned_storage<sizeof(T), __alignof(T)>::type value_storage;
+
+	// A value constructor or callback can release the sending Promise and every observer before send returns.
+	Promise<T> holdForSend() {
+		if (!promises) {
+			// A Future constructed already ready owns its unpublished SAV directly.
+			return Promise<T>(nullptr);
+		}
+		addPromiseRef();
+		return Promise<T>(this);
+	}
 
 public:
 	Error error_state;
@@ -763,6 +776,7 @@ public:
 	template <class U>
 	void send(U&& value) {
 		ASSERT(canBeSet());
+		auto sender = holdForSend();
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
 
@@ -778,6 +792,7 @@ public:
 
 	void sendError(Error err) {
 		ASSERT(canBeSet() && int16_t(err.code()) > 0);
+		auto sender = holdForSend();
 		this->error_state = err;
 		while (Callback<T>::next != this) {
 			Callback<T>::next->error(err);
@@ -910,9 +925,6 @@ public:
 	void unwait() override { delFutureRef(); }
 	void fire(T const&) override { ASSERT(false); }
 };
-
-template <class T>
-class Promise;
 
 #ifdef WITH_SWIFT
 #ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
@@ -1124,16 +1136,11 @@ public:
 	void operator=(const Promise& rhs) {
 		if (rhs.sav)
 			rhs.sav->addPromiseRef();
-		if (sav)
-			sav->delPromiseRef();
-		sav = rhs.sav;
+		replaceState(rhs.sav);
 	}
 	void operator=(Promise&& rhs) noexcept {
 		if (sav != rhs.sav) {
-			if (sav)
-				sav->delPromiseRef();
-			sav = rhs.sav;
-			rhs.sav = 0;
+			replaceState(std::exchange(rhs.sav, nullptr));
 		}
 	}
 	void reset() { *this = Promise<T>(); }
@@ -1151,6 +1158,13 @@ public:
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
 
 private:
+	// Dropping the last promise can deliver broken_promise and reenter this handle.
+	void replaceState(SAV<T>* next) {
+		if (auto* old = std::exchange(sav, next)) {
+			old->delPromiseRef();
+		}
+	}
+
 	SAV<T>* sav;
 };
 

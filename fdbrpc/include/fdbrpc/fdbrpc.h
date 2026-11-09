@@ -29,6 +29,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.h"
 #include "fdbrpc/simulator.h"
+#include <utility>
 #ifdef WITH_SWIFT
 #include <swift/bridging>
 #endif /* WITH_SWIFT */
@@ -201,16 +202,11 @@ public:
 	void operator=(const ReplyPromise& rhs) {
 		if (rhs.sav)
 			rhs.sav->addPromiseRef();
-		if (sav)
-			sav->delPromiseRef();
-		sav = rhs.sav;
+		replaceState(rhs.sav);
 	}
 	void operator=(ReplyPromise&& rhs) noexcept {
 		if (sav != rhs.sav) {
-			if (sav)
-				sav->delPromiseRef();
-			sav = rhs.sav;
-			rhs.sav = 0;
+			replaceState(std::exchange(rhs.sav, nullptr));
 		}
 	}
 	void reset() { *this = ReplyPromise<T>(); }
@@ -228,6 +224,13 @@ public:
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
 
 private:
+	// Dropping the last promise can deliver broken_promise and reenter this handle.
+	void replaceState(NetSAV<T>* next) {
+		if (auto* old = std::exchange(sav, next)) {
+			old->delPromiseRef();
+		}
+	}
+
 	NetSAV<T>* sav;
 };
 

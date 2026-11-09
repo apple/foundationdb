@@ -282,8 +282,10 @@ Future<Void> waitForSignal(Future<Void> signal, NoThrowOnCancel = {}) {
 If synchronous callbacks request cancellation while the coroutine is running, destruction waits until its next
 Flow await (even an already-ready one) or completion. Cancellation runs normal RAII cleanup for locals in scope,
 but it does not enter the coroutine's `catch` handlers.
-Observers of its returned future still receive `actor_cancelled`. `NoThrowOnCancel` and `Uncancellable` are mutually
-exclusive, and neither marker is supported by `AsyncGenerator`.
+Cancellation takes effect while the result is pending. A `Future` becomes ready when `co_return` stores its value,
+before local destructors run. An `AsyncResult` becomes ready after those destructors run, so cancellation from a
+destructor can still replace its return value with `actor_cancelled`. `NoThrowOnCancel` and `Uncancellable` are
+mutually exclusive, and neither marker is supported by `AsyncGenerator`.
 
 ## Lifetime and Ownership
 

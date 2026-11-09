@@ -3371,6 +3371,16 @@ TEST_CASE("/flow/coro/raceFutureThrowDuringCopyPreservesOtherWaiters") {
 	return Void();
 }
 
+TEST_CASE("/flow/coro/raceFutureResetPromiseDuringValueConstruction") {
+	Promise<RaceStreamItem> winner;
+	auto raced = race(winner.getFuture());
+	const RaceStreamItem item(17, [&] { winner.reset(); });
+	winner.send(item);
+	ASSERT(raced.canGet());
+	ASSERT_EQ(std::get<0>(raced.get()).value, 17);
+	return Void();
+}
+
 TEST_CASE("/flow/coro/raceThreadFutureStreamSuccess") {
 	ThreadReturnPromiseStream<int> intStream;
 	Promise<std::string> stringPromise;
@@ -3422,40 +3432,72 @@ TEST_CASE("/flow/coro/raceAsyncResultSuccess") {
 	co_return;
 }
 
-TEST_CASE("/flow/coro/raceAsyncResultThrowDuringMove") {
+namespace {
+void checkRaceAsyncResultThrowDuringMove(void (*throwError)(), int expectedCode) {
 	struct ThrowOnMove {
-		ThrowOnMove() = default;
+		void (*throwError)();
+		explicit ThrowOnMove(void (*throwError)()) : throwError(throwError) {}
 		ThrowOnMove(const ThrowOnMove&) = default;
-		ThrowOnMove(ThrowOnMove&&) { throw std::runtime_error("move failed"); }
+		ThrowOnMove(ThrowOnMove&& other) { other.throwError(); }
 	};
-	auto producer = [](Future<Void> start) -> AsyncResult<ThrowOnMove> {
+	auto producer = [](Future<Void> start, void (*throwError)()) -> AsyncResult<ThrowOnMove> {
 		co_await start;
-		const ThrowOnMove item;
+		const ThrowOnMove item(throwError);
 		co_return item; // Copy into producer storage. Moving into the race is the operation that throws.
 	};
 	Promise<Void> start;
-	auto raced = race(producer(start.getFuture()));
+	auto raced = race(producer(start.getFuture(), throwError));
 	start.send(Void());
 	ASSERT(raced.isError());
-	ASSERT_EQ(raced.getError().code(), error_code_unknown_error);
+	ASSERT_EQ(raced.getError().code(), expectedCode);
+}
+} // namespace
+
+TEST_CASE("/flow/coro/raceAsyncResultThrowDuringMove") {
+	checkRaceAsyncResultThrowDuringMove([] { throw io_error(); }, error_code_io_error);
+	return Void();
+}
+
+// Both the simulated (/) and real-cluster (noSim/) workloads treat SystemError as a failure.
+TEST_CASE("standalone/flow/coro/raceAsyncResultThrowDuringMove") {
+	checkRaceAsyncResultThrowDuringMove([] { throw std::runtime_error("move failed"); }, error_code_unknown_error);
 	return Void();
 }
 
 TEST_CASE("/flow/coro/raceAsyncResultLoserCleanup") {
-	Promise<Void> pending;
-	PromiseStream<int> cleanupStream;
-	Promise<Void> winner;
-	auto sendOnExit = [](Future<Void> signal, PromiseStream<int> stream) -> AsyncResult<Void> {
-		ScopeExit cleanup([&] { stream.send(17); });
+	auto sendOnExit = [](Future<Void> signal, PromiseStream<int> stream, Promise<Void>& winner) -> AsyncResult<Void> {
+		ScopeExit cleanup([&] {
+			winner.reset();
+			stream.send(17);
+		});
 		co_await signal;
 	};
 
-	auto raced = race(sendOnExit(pending.getFuture(), cleanupStream), cleanupStream.getFuture(), winner.getFuture());
-	winner.send(Void());
-	ASSERT(raced.canGet());
-	ASSERT_EQ(raced.get().index(), 2);
-	ASSERT_EQ(pending.getFutureReferenceCount(), 0);
-	ASSERT_EQ(cleanupStream.getFuture().pop(), 17);
+	for (Error outcome : { Error(), io_error(), broken_promise() }) {
+		Promise<Void> pending;
+		PromiseStream<int> cleanupStream;
+		Promise<Void> winner;
+		auto loser = sendOnExit(pending.getFuture(), cleanupStream, winner);
+		// The race owns the only winning Future. Loser cleanup resets its only Promise during dispatch.
+		auto raced = race(std::move(loser), cleanupStream.getFuture(), winner.getFuture());
+		if (outcome.code() == error_code_broken_promise) {
+			winner.reset();
+		} else if (outcome.isValid()) {
+			winner.sendError(outcome);
+		} else {
+			winner.send(Void());
+		}
+		if (outcome.isValid()) {
+			ASSERT(raced.isError());
+			ASSERT_EQ(raced.getError().code(), outcome.code());
+		} else {
+			ASSERT(raced.canGet());
+			ASSERT_EQ(raced.get().index(), 2);
+		}
+		ASSERT(winner.canBeSet());
+		ASSERT_EQ(pending.getFutureReferenceCount(), 0);
+		ASSERT_EQ(cleanupStream.getFuture().pop(), 17);
+	}
 	return Void();
 }
 

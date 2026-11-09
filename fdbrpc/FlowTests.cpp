@@ -527,6 +527,33 @@ TEST_CASE("/flow/flow/networked futures") {
 	return Void();
 }
 
+TEST_CASE("/fdbrpc/ReplyPromise/reentrantReplacement") {
+	for (bool move : { false, true }) {
+		ReplyPromise<Void> reply, replacement;
+		auto original = reply.getFuture();
+		auto expected = replacement.getFuture();
+		Future<Void> duringNotification, afterReset;
+		onReady(
+		    reply.getFuture(),
+		    [](Void) { ASSERT_ABORT(false); },
+		    [&](Error) {
+			    duringNotification = reply.getFuture();
+			    reply.reset();
+			    afterReset = reply.getFuture();
+		    });
+		if (move) {
+			reply = std::move(replacement);
+		} else {
+			reply = replacement;
+		}
+		ASSERT(original.isError() && original.getError().code() == error_code_broken_promise);
+		ASSERT(duringNotification == expected);
+		reply.send(Void());
+		ASSERT(afterReset.canGet());
+	}
+	return Void();
+}
+
 TEST_CASE("/fdbrpc/ReplyPromise/reuse state on deserialize") {
 	using flow_tests_details::Int;
 	const Endpoint remote({ NetworkAddress(IPAddress(0x01010101), 1) }, UID(1, 2));
