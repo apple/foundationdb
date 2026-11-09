@@ -432,7 +432,10 @@ resolved the Future (FDB is cooperative single-threaded — there is no
 scheduler). For streams, `fire()` first detaches the callback so a nested
 send or cancellation cannot resume the coroutine during payload construction.
 After construction, it delivers deferred cancellation or resumes with the
-stored value.
+stored value. If construction throws, the awaiter stores the error for the
+consumer and rethrows the original exception to the stream sender. A pending
+`race()` instead reports a construction error through its result future so
+the sender can continue notifying other waiters.
 
 **`resumeImpl()`** detaches a registered callback and resets the wait state.
 For ordinary cancellation it throws `actor_cancelled()`, skipping detachment
@@ -539,8 +542,9 @@ Uses `NoThrowOnCancelCoroActor<T>` instead of `CoroActor`. Key differences:
    detached and its frame destroyed immediately. If the coroutine is executing,
    `cancel()` records the request. The next Flow await forces suspension, even
    for a ready input, so the frame can be destroyed before installing a new
-   waiter. If the coroutine returns or throws first, observers receive
-   `actor_cancelled` and any constructed return value is destroyed.
+   waiter. A cancellation requested before or during return-value construction
+   discards that value. Once `co_return` stores the value in the Future, a
+   later cancellation from a local destructor leaves the value intact.
 
 3. **`final_suspend` returns `false`** from `await_suspend`. After completing
    the SAV and clearing the handle, the frame auto-destructs (the coroutine was

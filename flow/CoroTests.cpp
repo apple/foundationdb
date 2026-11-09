@@ -3363,7 +3363,10 @@ TEST_CASE("/flow/coro/raceFutureThrowDuringCopyPreservesOtherWaiters") {
 	auto otherWaiter = Choose().When(source, [&](const RaceStreamItem& item) { observed = item.value; }).run();
 	// The most recently registered Future callback runs first.
 	auto raced = race(source);
-	winner.send(RaceStreamItem(17, [] { throw io_error(); }));
+	winner.send(RaceStreamItem(17, [&] {
+		ASSERT_EQ(observed, 0);
+		throw io_error();
+	}));
 	ASSERT(raced.isError());
 	ASSERT_EQ(raced.getError().code(), error_code_io_error);
 	ASSERT(otherWaiter.canGet());
@@ -3528,6 +3531,30 @@ TEST_CASE("/flow/coro/raceReplaceLastObserverDuringLoserCleanup") {
 		ASSERT(saved == expected);
 		ASSERT(!raced.isValid());
 	}
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceReplaceAsyncResultDuringLoserCleanup") {
+	std::optional<AsyncResult<int>> outer;
+	AsyncResult<int> saved;
+	auto loser = [](std::optional<AsyncResult<int>>& outer, AsyncResult<int>& saved) -> AsyncResult<Void> {
+		ScopeExit cleanup([&] {
+			if (outer->canGet()) {
+				saved = std::move(*outer);
+				outer.reset();
+			}
+		});
+		co_await Future<Void>(Never());
+	};
+	auto waitForLoser = [](AsyncResult<Void> input) -> AsyncResult<int> {
+		co_await race(std::move(input));
+		co_return 0;
+	};
+	outer.emplace(waitForLoser(loser(outer, saved)));
+	*outer = immediateAsyncResultInt(17);
+	ASSERT(!outer.has_value());
+	ASSERT(saved.canGet());
+	ASSERT_EQ(saved.get(), 17);
 	return Void();
 }
 

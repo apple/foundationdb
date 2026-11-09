@@ -644,37 +644,32 @@ public:
 	// client
 	void setByteLimit(int64_t byteLimit) const { queue->acknowledgements.bytesLimit = byteLimit; }
 
-	// Acquiring each incoming reference before releasing its old reference preserves self-assignment.
-	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const ReplyPromiseStream& rhs) {
-		rhs.queue->addPromiseRef();
-		if (queue)
-			queue->delPromiseRef();
-		queue = rhs.queue;
-		if (rhs.errors)
-			rhs.errors->addPromiseRef();
-		if (errors)
-			errors->delPromiseRef();
-		errors = rhs.errors;
+		if (this != &rhs) {
+			replaceState(rhs);
+		}
 	}
 	void operator=(ReplyPromiseStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
-			if (queue)
-				queue->delPromiseRef();
-			queue = rhs.queue;
-			rhs.queue = 0;
-		}
-		if (errors != rhs.errors) {
-			if (errors)
-				errors->delPromiseRef();
-			errors = rhs.errors;
-			rhs.errors = 0;
+			replaceState(std::move(rhs));
+		} else if (errors != rhs.errors) {
+			// Aliases retain their shared queue. One may have relinquished its disconnect-error reference.
+			auto* previous = errors;
+			errors = std::exchange(rhs.errors, nullptr);
+			if (previous)
+				previous->delPromiseRef();
 		}
 	}
 
 	void reset() { *this = ReplyPromiseStream<T>(); }
 
 private:
+	// Releasing either old sender can synchronously invoke callbacks that move or destroy this handle.
+	void replaceState(ReplyPromiseStream replacement) noexcept {
+		std::swap(queue, replacement.queue);
+		std::swap(errors, replacement.errors);
+	}
+
 	NetNotifiedQueueWithAcknowledgements<T>* queue;
 	SAV<Void>* errors;
 };
@@ -974,40 +969,14 @@ public:
 		// destructor does not release a tracking record now owned by *this (avoids double-release).
 		rhs.m_promiseRefTrackingId = -1;
 	}
-	// Acquiring each incoming reference before releasing its old reference preserves self-assignment.
-	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const RequestStream& rhs) {
-		rhs.queue->addPromiseRef();
-		int64_t newTrackingId = -1;
-		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.queue->isRemoteEndpoint() && g_network &&
-		    g_network->global(INetwork::enFlowTransport)) {
-			const auto& ep = rhs.queue->getEndpoint(TaskPriority::DefaultEndpoint);
-			newTrackingId =
-			    FlowTransport::transport().interfaceTracker.promiseRefAdded(ep.getPrimaryAddress(), ep.token);
+		if (this != &rhs) {
+			replaceState(rhs);
 		}
-		if (queue) {
-			queue->delPromiseRef();
-			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_promiseRefTrackingId >= 0 && g_network &&
-			    g_network->global(INetwork::enFlowTransport)) {
-				FlowTransport::transport().interfaceTracker.promiseRefReleased(m_promiseRefTrackingId);
-			}
-		}
-		queue = rhs.queue;
-		m_promiseRefTrackingId = newTrackingId;
 	}
 	void operator=(RequestStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
-			if (queue) {
-				queue->delPromiseRef();
-				if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_promiseRefTrackingId >= 0 && g_network &&
-				    g_network->global(INetwork::enFlowTransport)) {
-					FlowTransport::transport().interfaceTracker.promiseRefReleased(m_promiseRefTrackingId);
-				}
-			}
-			queue = rhs.queue;
-			m_promiseRefTrackingId = rhs.m_promiseRefTrackingId;
-			rhs.queue = 0;
-			rhs.m_promiseRefTrackingId = -1;
+			replaceState(std::move(rhs));
 		}
 	}
 	~RequestStream() {
@@ -1039,6 +1008,12 @@ public:
 	}
 
 private:
+	// Publish the queue and its tracking ID before the old queue can notify a broken_promise waiter.
+	void replaceState(RequestStream replacement) noexcept {
+		std::swap(queue, replacement.queue);
+		std::swap(m_promiseRefTrackingId, replacement.m_promiseRefTrackingId);
+	}
+
 	NetNotifiedQueue<T, IsPublic>* queue;
 	// InterfaceTracker id for this stream's promise-ref, or -1 when not tracked. It stays -1
 	// whenever STALE_PEER_OBSERVABILITY is off (the gated *RefAdded blocks never run), so the

@@ -51,9 +51,10 @@ bool readyOnCancellation(Promise* promise) {
 	// Destructive cancellation must reach await_suspend, even for an already-ready input.
 	if constexpr (Promise::noThrowOnCancel) {
 		return false;
+	} else {
+		promise->waitState() = ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK;
+		return true;
 	}
-	promise->waitState() = ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK;
-	return true;
 }
 
 template <class Promise>
@@ -665,7 +666,7 @@ public:
 		auto callbackFuture = self->getCallbackFuture();
 		callbackFuture.addCallbackAndClear(self);
 		self->pt->setCancelHandler(this);
-		// Registering a tracked stream can synchronously release a reference.
+		// Registering a tracked stream can release a reference. Finishing cancellation here can destroy the frame.
 		finishCancellationAtSuspend(self->pt);
 	}
 

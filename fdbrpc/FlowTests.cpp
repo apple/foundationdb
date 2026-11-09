@@ -29,6 +29,7 @@
 #include "flow/Error.h"
 #include "flow/ProcessEvents.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
@@ -706,7 +707,54 @@ struct TestStreamReply : ReplyPromiseStreamReply {
 		serializer(ar, acknowledgeToken, sequence);
 	}
 };
+
+template <class Stream>
+Stream takeReplacementDuringRaceCleanup(const Stream& expected, bool move) {
+	Stream sender, saved;
+	Stream replacement(expected);
+	auto takeOnCancel = [](Stream& sender, const Stream& expected, Stream& saved) -> AsyncResult<Void> {
+		ScopeExit cleanup([&] {
+			if (sender == expected) {
+				saved = std::move(sender);
+			}
+		});
+		co_await Future<Void>(Never());
+	};
+	auto raced = race(sender.getFuture(), takeOnCancel(sender, expected, saved));
+	if (move) {
+		sender = std::move(replacement);
+	} else {
+		sender = replacement;
+	}
+	ASSERT(raced.isError() && raced.getError().code() == error_code_broken_promise);
+	ASSERT(saved == expected);
+	return saved;
+}
 } // namespace
+
+TEST_CASE("/fdbrpc/RequestStream/reentrantReplacement") {
+	for (bool move : { false, true }) {
+		RequestStream<flow_tests_details::Int> expected;
+		auto saved = takeReplacementDuringRaceCleanup(expected, move);
+		saved.send(flow_tests_details::Int(17));
+		ASSERT_EQ(expected.getFuture().pop().value, 17);
+	}
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromiseStream/reentrantReplacement") {
+	for (bool move : { false, true }) {
+		ReplyPromiseStream<TestStreamReply> expected;
+		auto alias = expected;
+		auto disconnectError = alias.getErrorFutureAndDelPromiseRef();
+		auto saved = takeReplacementDuringRaceCleanup(expected, move);
+		saved.sendError(io_error());
+		auto reader = expected.getFuture();
+		ASSERT(reader.isError() && reader.getError().code() == error_code_io_error);
+		ASSERT(disconnectError.isError() && disconnectError.getError().code() == error_code_io_error);
+	}
+	return Void();
+}
 
 TEST_CASE("/fdbrpc/ReplyPromiseStream/destroySenderDuringErrorDelivery") {
 	auto sender = std::make_unique<ReplyPromiseStream<TestStreamReply>>();

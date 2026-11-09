@@ -33,6 +33,7 @@ namespace n_coroutine = ::std::experimental;
 #include <concepts>
 #include <array>
 #include <cstring>
+#include <utility>
 
 #include "flow/flow.h"
 #include "flow/Error.h"
@@ -158,14 +159,12 @@ public:
 	AsyncResult& operator=(AsyncResult const&) = delete;
 	AsyncResult(AsyncResult&& rhs) noexcept : resultState(rhs.resultState) { rhs.resultState = nullptr; }
 	AsyncResult& operator=(AsyncResult&& rhs) noexcept {
-		if (this != &rhs) {
-			release();
-			resultState = rhs.resultState;
-			rhs.resultState = nullptr;
-		}
+		// Releasing the old producer can move or destroy this handle. Bind the return reference before cleanup.
+		AsyncResult previous(std::move(rhs));
+		std::swap(resultState, previous.resultState);
 		return *this;
 	}
-	~AsyncResult() { release(); }
+	~AsyncResult();
 
 	bool isValid() const { return resultState != nullptr; }
 	bool isReady() const;
@@ -185,7 +184,6 @@ public:
 
 private:
 	explicit AsyncResult(coro::AsyncResultState<StoredT>* resultState) noexcept : resultState(resultState) {}
-	void release();
 
 	coro::AsyncResultState<StoredT>* resultState;
 
@@ -406,13 +404,12 @@ auto AsyncResult<T>::operator co_await() && {
 }
 
 template <class T>
-void AsyncResult<T>::release() {
-	if (resultState) {
-		if (!resultState->isReady()) {
-			resultState->cancelProducer();
+AsyncResult<T>::~AsyncResult() {
+	if (auto* state = std::exchange(resultState, nullptr)) {
+		if (!state->isReady()) {
+			state->cancelProducer();
 		}
-		resultState->delRef();
-		resultState = nullptr;
+		state->delRef();
 	}
 }
 
