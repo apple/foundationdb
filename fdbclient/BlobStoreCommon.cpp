@@ -688,7 +688,7 @@ Future<IBlobStoreEndpoint::ReusableConnection> connect_impl(Reference<IBlobStore
 			fprintf(stderr, "ERROR: Port can't be empty when using HTTP proxy.\n");
 			throw connection_failed();
 		}
-		service = b->knobs.secure_connection ? "https" : "http";
+		service = b->defaultService();
 	}
 	bool isTLS = b->knobs.isTLS();
 	Reference<IConnection> conn;
