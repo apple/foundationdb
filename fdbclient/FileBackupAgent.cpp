@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbrpc/simulator.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
@@ -352,66 +351,72 @@ KeyBackedTag::KeyBackedTag(std::string tagName, StringRef tagMapPrefix)
   : KeyBackedProperty<UidAndAbortedFlagT>(TagUidMap(tagMapPrefix).getProperty(tagName)), tagName(tagName),
     tagMapPrefix(tagMapPrefix) {}
 
-// Lists all backups and find if any partitioned backup is running.
-Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr) {
+namespace {
+struct RunningBackup {
+	std::string tagName;
+	BackupConfig config;
+};
+} // namespace
+
+// Returns the tag and config of every backup whose state is runnable, read in the caller's transaction.
+static Future<std::vector<RunningBackup>> getRunningBackups(Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
 
-	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
-	futures.reserve(tags.size());
+	std::vector<Future<Optional<UidAndAbortedFlagT>>> uids;
+	uids.reserve(tags.size());
 	for (const auto& tag : tags) {
-		futures.push_back(tag.get(tr));
+		uids.push_back(tag.get(tr));
 	}
+	co_await waitForAll(uids);
 
-	co_await waitForAll(futures);
-	int i = 0;
-	for (i = 0; i < futures.size(); i++) {
-		if (futures[i].get().present()) {
-			Optional<MutationLogType> mutationLogType;
-			EBackupState eState;
-			BackupConfig config(futures[i].get().get().first);
+	std::vector<RunningBackup> backups;
+	std::vector<Future<EBackupState>> states;
+	for (int i = 0; i < uids.size(); i++) {
+		if (uids[i].get().present()) {
+			backups.push_back(RunningBackup{ tags[i].tagName, BackupConfig(uids[i].get().get().first) });
+			states.push_back(backups.back().config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN));
+		}
+	}
+	co_await waitForAll(states);
 
-			co_await (store(eState, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
-			          store(mutationLogType, config.mutationLogType().get(tr)));
-			if (FileBackupAgent::isRunnable(eState) &&
-			    mutationLogType.orDefault(MutationLogType::DEFAULT) == MutationLogType::PARTITIONED_LOG) {
-				co_return true;
-			}
+	std::vector<RunningBackup> running;
+	for (int i = 0; i < backups.size(); i++) {
+		if (FileBackupAgent::isRunnable(states[i].get())) {
+			running.push_back(std::move(backups[i]));
+		}
+	}
+	co_return running;
+}
+
+// Returns true if a runnable backup uses the given mutation log type.
+static Future<bool> anyBackupRunningWithLogType(Reference<ReadYourWritesTransaction> tr, MutationLogType logType) {
+	std::vector<RunningBackup> backups = co_await getRunningBackups(tr);
+	for (auto& backup : backups) {
+		Optional<MutationLogType> mutationLogType = co_await backup.config.mutationLogType().get(tr);
+		if (mutationLogType.orDefault(MutationLogType::DEFAULT) == logType) {
+			co_return true;
 		}
 	}
 	co_return false;
 }
 
-// Lists all backups and find if any range-partitioned backup is running.
-Future<bool> anyRangePartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
-
-	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
-	futures.reserve(tags.size());
-	for (const auto& tag : tags) {
-		futures.push_back(tag.get(tr));
-	}
-
-	co_await waitForAll(futures);
-	int i = 0;
-	for (i = 0; i < futures.size(); i++) {
-		if (futures[i].get().present()) {
-			Optional<MutationLogType> mutationLogType;
-			EBackupState eState;
-			BackupConfig config(futures[i].get().get().first);
-
-			co_await (store(eState, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
-			          store(mutationLogType, config.mutationLogType().get(tr)));
-			if (FileBackupAgent::isRunnable(eState) &&
-			    mutationLogType.orDefault(MutationLogType::DEFAULT) == MutationLogType::RANGE_PARTITIONED_LOG) {
-				co_return true;
-			}
+Future<Optional<std::string>> FileBackupAgent::findRunningBackupAtLocation(Reference<ReadYourWritesTransaction> tr,
+                                                                           Reference<IBackupContainer> bc,
+                                                                           std::string excludeTag) {
+	std::vector<RunningBackup> backups = co_await getRunningBackups(tr);
+	std::string location = bc->getLocation();
+	for (auto& backup : backups) {
+		if (backup.tagName == excludeTag) {
+			continue;
+		}
+		Optional<Reference<IBackupContainer>> other = co_await backup.config.backupContainer().get(tr);
+		if (other.present() && other.get() && other.get()->getLocation() == location) {
+			co_return backup.tagName;
 		}
 	}
-	co_return false;
+	co_return Optional<std::string>();
 }
 
 class RestoreConfig : public KeyBackedTaskConfig {
@@ -2343,9 +2348,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		                                ReadLowPriority(CLIENT_KNOBS->BACKUP_READS_USE_LOW_PRIORITY));
 		std::unique_ptr<IRangeFileWriter> rangeFile;
 		BackupConfig backup(task);
-		Arena arena;
-
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but
 		// if bc is false then clearly the backup is no longer in progress
@@ -3718,7 +3720,6 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 	                             Reference<Task> task) {
 		BackupConfig config(task);
 		Reference<IBackupContainer> bc;
-		DatabaseConfiguration dbConfig;
 
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
@@ -3735,7 +3736,6 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				co_await taskBucket->keepRunning(tr, task);
-				dbConfig = co_await getDatabaseConfiguration(cx);
 
 				if (!bc) {
 					// Backup container must be present if we're still here
@@ -4965,8 +4965,6 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			}
 			throw;
 		}
-		Arena arena;
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 
 		// First and last key are the range for this file
 		KeyRange fileRange;
@@ -7826,7 +7824,7 @@ public:
 		// PARTITIONED_LOG and RANGE_PARTITIONED_LOG backups are mutually exclusive: backup worker
 		// recruitment is determined by the active non-default type, so both cannot run concurrently.
 		if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
-			if (co_await anyRangePartitionedBackupRunning(tr)) {
+			if (co_await anyBackupRunningWithLogType(tr, MutationLogType::RANGE_PARTITIONED_LOG)) {
 				TraceEvent(SevError, "FBA_SubmitBackupMutationLogTypeConflict")
 				    .detail("TagName", tagName)
 				    .detail("RequestedType", mutationLogTypeToString(MutationLogType::PARTITIONED_LOG))
@@ -7837,7 +7835,7 @@ public:
 				throw backup_error();
 			}
 		} else if (mutationLogType == MutationLogType::RANGE_PARTITIONED_LOG) {
-			if (co_await anyPartitionedBackupRunning(tr)) {
+			if (co_await anyBackupRunningWithLogType(tr, MutationLogType::PARTITIONED_LOG)) {
 				TraceEvent(SevError, "FBA_SubmitBackupMutationLogTypeConflict")
 				    .detail("TagName", tagName)
 				    .detail("RequestedType", mutationLogTypeToString(MutationLogType::RANGE_PARTITIONED_LOG))
@@ -7925,6 +7923,22 @@ public:
 
 		Reference<IBackupContainer> bc =
 		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName, encryptionBlockSize);
+
+		// Two backups writing the same files would corrupt each other. The tagName of the backup we are
+		// starting is skipped. It's okay to skip because if it were already running, backup_duplicate
+		// would have been thrown above.
+		Optional<std::string> conflictingTag = co_await FileBackupAgent::findRunningBackupAtLocation(tr, bc, tagName);
+		if (conflictingTag.present()) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupLocationInUse")
+			    .detail("TagName", tagName)
+			    .detail("ConflictingTag", conflictingTag.get())
+			    .detail("Location", bc->getLocation());
+			fprintf(stderr,
+			        "ERROR: The backup location is already in use by the running backup on tag `%s'.\n",
+			        printable(StringRef(conflictingTag.get())).c_str());
+			throw backup_error();
+		}
+
 		try {
 			// Use longer timeout for blobstore:// URLs in simulation to handle slow S3 mock operations
 			double createTimeout = (g_network->isSimulated() && isBlobstoreUrl(backupContainer)) ? 300.0 : 30.0;
@@ -8266,8 +8280,9 @@ public:
 	}
 
 	static Future<Void> checkAndDisableBackupWorkers(Database cx) {
-		bool running = co_await runRYWTransaction(
-		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return anyPartitionedBackupRunning(tr); });
+		bool running = co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			return anyBackupRunningWithLogType(tr, MutationLogType::PARTITIONED_LOG);
+		});
 		if (!running) {
 			co_await disableBackupWorker(cx);
 		}
@@ -8276,7 +8291,7 @@ public:
 
 	static Future<Void> checkAndDisableRangePartitionedBackupWorkers(Database cx) {
 		bool running = co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<bool> {
-			bool r = co_await anyRangePartitionedBackupRunning(tr);
+			bool r = co_await anyBackupRunningWithLogType(tr, MutationLogType::RANGE_PARTITIONED_LOG);
 			if (!r) {
 				// Last range-partitioned backup just finished. Ask DD to clear the partition list.
 				tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(2));
@@ -8517,12 +8532,8 @@ public:
 							bdDoc.setKey("RunningTasks", bdProgress.runningTasks);
 							bdDoc.setKey("ErrorTasks", bdProgress.errorTasks);
 							bdDoc.setKey("ProgressPercent", bdProgress.progressPercent());
-							bdDoc.setKey("TotalBytes", bdProgress.totalBytes);
 							bdDoc.setKey("CompletedBytes", bdProgress.completedBytes);
 							bdDoc.setKey("AvgBytesPerSecond", bdProgress.avgBytesPerSecond());
-							if (bdProgress.etaSeconds().present()) {
-								bdDoc.setKey("EstimatedSecondsRemaining", bdProgress.etaSeconds().get());
-							}
 							bdDoc.setKey("ElapsedSeconds", bdProgress.elapsedSeconds);
 
 							// Add stalled tasks if any
@@ -8722,9 +8733,10 @@ public:
 								                     bdProgress.completeTasks,
 								                     bdProgress.totalTasks,
 								                     bdProgress.progressPercent());
-								statusText += format(
-								    " Bytes: %s\n",
-								    formatBytesProgress(bdProgress.completedBytes, bdProgress.totalBytes).c_str());
+								// Empty Optional, not {}: {} picks the int64_t overload and prints a "/ 0" total.
+								statusText +=
+								    format(" Bytes: %s\n",
+								           formatBytesProgress(bdProgress.completedBytes, Optional<int64_t>()).c_str());
 
 								double throughput = bdProgress.avgBytesPerSecond();
 								if (throughput > 0) {
@@ -8735,12 +8747,6 @@ public:
 									statusText +=
 									    format(" Elapsed: %s\n",
 									           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
-								}
-
-								if (bdProgress.etaSeconds().present()) {
-									statusText +=
-									    format(" ETA: %s\n",
-									           formatDurationHumanReadable((int)bdProgress.etaSeconds().get()).c_str());
 								}
 
 								if (!bdProgress.stalledTasks.empty()) {
@@ -9024,7 +9030,6 @@ public:
 	                                     Key removePrefix) {
 		auto ryw_tr = makeReference<ReadYourWritesTransaction>(cx);
 		BackupConfig backupConfig;
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		while (true) {
 			Error err;
 			try {

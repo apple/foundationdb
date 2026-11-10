@@ -39,7 +39,7 @@ class BackupContainerBlobStore final : public BackupContainerFileSystem, Referen
 	// if not used for backup, don't prefix paths with fdbbackup-specific logic
 	bool isBackup;
 
-	std::string dataPath(const std::string& path);
+	std::string dataPath(const std::string& path) const;
 
 	// Get the path of the backups's index entry
 	std::string indexEntry();
@@ -138,6 +138,8 @@ public:
 	std::string getBucket() const;
 
 	std::string getPrefix() const;
+
+	std::string getLocation() const final;
 };
 
 #endif
