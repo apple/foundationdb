@@ -179,6 +179,99 @@ function verify_backup_key_prefix_layout {
   return 0
 }
 
+# Run fdbbackup and check the outcome. Commands expected to fail log to location_in_use_logs, which
+# grep_for_severity40 skips, because fdbbackup traces any failure at Severity 40.
+# $1 build directory, $2 scratch directory, $3 "ok", or the message the command must fail with,
+# $4+ fdbbackup arguments
+function fdbbackup_expect {
+  local local_build_dir="${1}"
+  local local_scratch_dir="${2}"
+  local expected="${3}"
+  local logdir="${local_scratch_dir}"
+  if [[ "${expected}" != "ok" ]]; then
+    logdir="${local_scratch_dir}/location_in_use_logs"
+    mkdir -p "${logdir}"
+  fi
+  local output
+  local exit_code=0
+  output=$("${local_build_dir}/bin/fdbbackup" "${@:4}" --log "--logdir=${logdir}" 2>&1) || exit_code=$?
+  if [[ "${expected}" == "ok" ]]; then
+    if (( exit_code != 0 )); then
+      err "fdbbackup ${*:4} failed: ${output}"
+      return 1
+    fi
+  elif (( exit_code == 0 )) || ! output_contains "${output}" "${expected}"; then
+    err "fdbbackup ${*:4} did not fail with '${expected}': ${output}"
+    return 1
+  fi
+  return 0
+}
+
+# Abort a backup started by test_backup_location_in_use. abort disables idle backup workers
+# concurrently, which can fail its own commit with commit_unknown_result; the retry then finds the
+# backup already aborted, so "not running" counts as aborted.
+# $1 build directory, $2 scratch directory, $3+ fdbbackup abort arguments
+function abort_in_use_backup {
+  local local_build_dir="${1}"
+  local local_scratch_dir="${2}"
+  local logdir="${local_scratch_dir}/location_in_use_logs"
+  mkdir -p "${logdir}"
+  local output
+  local exit_code=0
+  output=$("${local_build_dir}/bin/fdbbackup" abort "${@:3}" --log "--logdir=${logdir}" 2>&1) || exit_code=$?
+  if (( exit_code != 0 )) && ! output_contains "${output}" "A backup was not running on tag"; then
+    err "fdbbackup abort ${*:3} failed: ${output}"
+    return 1
+  fi
+  return 0
+}
+
+# A backup must not start, or be moved by modify, onto a location that a backup on another tag
+# is running at. Once that backup is aborted, the location can be reused by any tag.
+# $1 build directory, $2 scratch directory, $3 credentials file
+function test_backup_location_in_use {
+  local local_build_dir="${1}"
+  local local_scratch_dir="${2}"
+  local credentials="${3}"
+
+  local params="${query_str}"
+  if [[ -n "${BACKUP_URL_KEY_PREFIX}" ]]; then
+    params="${params}&prefix=${BACKUP_URL_KEY_PREFIX}"
+  fi
+  # Nested under this run's container so the existing cleanup removes it too.
+  local name="${url_path_prefix}/${test}/in_use"
+  local in_use_url="blobstore://${host}/${name}?${params}"
+  # The same location with the parameters reversed and a trailing slash on the name.
+  local respelled_url
+  respelled_url="blobstore://${host}/${name}/?$(awk -F'&' '{ for (i = NF; i > 1; i--) printf "%s&", $i; print $1 }' <<< "${params}")"
+  local other_url="blobstore://${host}/${name}_other?${params}"
+  local tag_a="${TAG}_in_use_a"
+  local tag_b="${TAG}_in_use_b"
+  local in_use="already in use by the running backup on tag \`${tag_a}'"
+  local run=(fdbbackup_expect "${local_build_dir}" "${local_scratch_dir}")
+  local abort=(abort_in_use_backup "${local_build_dir}" "${local_scratch_dir}")
+  # abort does not take --blob-credentials.
+  local cluster=("-C" "${local_scratch_dir}/loopback_cluster/fdb.cluster" "${KNOBS[@]}")
+  local args=("${cluster[@]}" "--blob-credentials" "${credentials}")
+
+  "${run[@]}" ok start -z -t "${tag_a}" -d "${in_use_url}" "${args[@]}" || return 1
+  "${run[@]}" "${in_use}" start -z -t "${tag_b}" -d "${in_use_url}" "${args[@]}" || return 1
+  "${run[@]}" "${in_use}" start -n -t "${tag_b}" -d "${in_use_url}" "${args[@]}" || return 1
+  "${run[@]}" "${in_use}" start -z -t "${tag_b}" -d "${respelled_url}" "${args[@]}" || return 1
+  "${run[@]}" ok start -n -t "${tag_b}" -d "${other_url}" "${args[@]}" || return 1
+  "${run[@]}" ok start -z -t "${tag_b}" -d "${other_url}" "${args[@]}" || return 1
+  "${run[@]}" "${in_use}" modify -t "${tag_b}" -d "${in_use_url}" "${args[@]}" || return 1
+  "${abort[@]}" -t "${tag_b}" "${cluster[@]}" || return 1
+  "${abort[@]}" -t "${tag_a}" "${cluster[@]}" || return 1
+  # Aborted backups no longer hold the location, for the same tag or another one.
+  "${run[@]}" ok start -z -t "${tag_a}" -d "${in_use_url}" "${args[@]}" || return 1
+  "${abort[@]}" -t "${tag_a}" "${cluster[@]}" || return 1
+  "${run[@]}" ok start -z -t "${tag_b}" -d "${in_use_url}" "${args[@]}" || return 1
+  "${abort[@]}" -t "${tag_b}" "${cluster[@]}" || return 1
+  log "Verified a backup location in use by another tag is rejected"
+  return 0
+}
+
 # Run a backup to s3 and then a restore.
 # $1 The url to use
 # $2 the scratch directory
@@ -246,6 +339,12 @@ function test_s3_backup_and_restore {
   log "Verify restore"
   if ! verify_data "${local_build_dir}" "${local_scratch_dir}"; then
     err "Failed verification of data in fdb"
+    return 1
+  fi
+
+  log "Test backup location in use"
+  if ! test_backup_location_in_use "${local_build_dir}" "${local_scratch_dir}" "${credentials}"; then
+    err "Failed backup location in use test"
     return 1
   fi
 

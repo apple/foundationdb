@@ -302,7 +302,8 @@ struct BulkLoadStalledTask {
 	    restartCount(restartCount), lastError(lastError) {}
 };
 
-// Aggregated progress for a BulkDump job
+// Aggregated progress for a BulkDump job. There is no byte total: a range's size is known only once its dump task
+// completes and records a manifest.
 struct BulkDumpProgress {
 	UID jobId;
 	KeyRange jobRange;
@@ -310,27 +311,18 @@ struct BulkDumpProgress {
 	int completeTasks;
 	int runningTasks;
 	int errorTasks;
-	int64_t totalBytes;
 	int64_t completedBytes;
 	double elapsedSeconds;
 	double startTime; // For computing current throughput
 	std::vector<BulkLoadStalledTask> stalledTasks;
 
 	BulkDumpProgress()
-	  : totalTasks(0), completeTasks(0), runningTasks(0), errorTasks(0), totalBytes(0), completedBytes(0),
-	    elapsedSeconds(0), startTime(0) {}
+	  : totalTasks(0), completeTasks(0), runningTasks(0), errorTasks(0), completedBytes(0), elapsedSeconds(0),
+	    startTime(0) {}
 
 	double progressPercent() const { return totalTasks > 0 ? 100.0 * completeTasks / totalTasks : 0; }
 
 	double avgBytesPerSecond() const { return elapsedSeconds > 0 ? completedBytes / elapsedSeconds : 0; }
-
-	Optional<double> etaSeconds() const {
-		double rate = avgBytesPerSecond();
-		if (rate > 0 && completedBytes < totalBytes) {
-			return (totalBytes - completedBytes) / rate;
-		}
-		return {};
-	}
 };
 
 // Aggregated progress for a BulkLoad job

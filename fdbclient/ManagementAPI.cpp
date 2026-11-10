@@ -3552,8 +3552,6 @@ Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
 			} else if (taskState.getPhase() == BulkDumpPhase::Error) {
 				progress.errorTasks++;
 			}
-
-			progress.totalBytes += taskState.getManifest().getTotalBytes();
 		}
 		readBegin = rangeResult.back().key;
 	}
