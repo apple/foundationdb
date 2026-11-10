@@ -23,6 +23,7 @@ import (
 	"context"
 	"os"
 	"path"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -83,6 +84,45 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 				Expect(mon.customEnvironment).To(HaveKeyWithValue("NODE_LABEL_TOPOLOGY_KUBERNETES_IO_ZONE", "us-east-1c"))
 				Expect(mon.customEnvironment).To(HaveKeyWithValue("NODE_LABEL_KUBERNETES_IO_HOSTNAME", "ip-172-20-114-199.ec2.internal"))
 			})
+		})
+	})
+
+	When("the custom environment is updated concurrently", func() {
+		It("should not race with readers", func() {
+			mon := &monitor{
+				logger:            GinkgoLogr,
+				customEnvironment: map[string]string{"testing": "testing"},
+				podClient: &kubernetesClient{
+					nodeName: "test-node",
+					Client: fake.NewFakeClient(&corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:   "test-node",
+							Labels: map[string]string{"topology.kubernetes.io/zone": "us-east-1c"},
+						},
+					}),
+				},
+			}
+
+			var wg sync.WaitGroup
+			for i := 0; i < 4; i++ {
+				wg.Add(2)
+				go func() {
+					defer wg.Done()
+					defer GinkgoRecover()
+					for j := 0; j < 200; j++ {
+						Expect(mon.updateCustomEnvironmentFromNodeMetadata(context.Background())).To(Succeed())
+					}
+				}()
+				go func() {
+					defer wg.Done()
+					defer GinkgoRecover()
+					for j := 0; j < 200; j++ {
+						Expect(mon.copyCustomEnvironment()).To(HaveKeyWithValue("testing", "testing"))
+					}
+				}()
+			}
+			wg.Wait()
+			Expect(mon.copyCustomEnvironment()).To(HaveKeyWithValue("NODE_LABEL_TOPOLOGY_KUBERNETES_IO_ZONE", "us-east-1c"))
 		})
 	})
 
@@ -215,6 +255,44 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 				Expect(configuration.RunServers).To(BeNil())
 				Expect(configuration.Arguments).To(BeEmpty())
 				Expect(configurationBytes).To(Equal(out))
+			})
+
+			When("the configuration requests the shared binary", func() {
+				var sharedBinary string
+
+				BeforeEach(func() {
+					sharedBinaryDir = GinkgoT().TempDir()
+					Expect(os.MkdirAll(path.Join(sharedBinaryDir, defaultVersion.String()), 0700)).To(Succeed())
+					sharedBinary = path.Join(sharedBinaryDir, defaultVersion.String(), "fdbserver")
+					Expect(os.WriteFile(sharedBinary, []byte("fdbserver"), 0700)).To(Succeed())
+
+					config := &api.ProcessConfiguration{
+						Version:         &defaultVersion,
+						UseSharedBinary: new(true),
+					}
+
+					var err error
+					out, err = json.Marshal(config)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(os.WriteFile(configurationFilePath, out, 0600)).To(Succeed())
+				})
+
+				It("should use the shared binary even for a protocol compatible version", func() {
+					Expect(readErr).NotTo(HaveOccurred())
+					Expect(configuration).NotTo(BeNil())
+					Expect(configuration.BinaryPath).To(Equal(sharedBinary))
+				})
+
+				When("the shared binary is missing", func() {
+					BeforeEach(func() {
+						Expect(os.Remove(sharedBinary)).To(Succeed())
+					})
+
+					It("should report that the binary is not ready", func() {
+						Expect(configuration).To(BeNil())
+						Expect(readErr).To(MatchError(errBinaryNotReady))
+					})
+				})
 			})
 
 			When("the pod has the isolate annotation set to true", func() {
@@ -403,6 +481,20 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 				Expect(hasRetry()).To(BeTrue())
 				createBinary()
 				Eventually(activeVersion).Should(Equal(unreadyVersion.String()))
+			})
+		})
+
+		When("a cancelled retry tries to accept a configuration", func() {
+			It("should not apply the configuration", func() {
+				retryCtx, retryCancel := context.WithCancel(ctx)
+				retryCancel()
+
+				version := currentVersion
+				Expect(mon.acceptConfiguration(retryCtx, &api.ProcessConfiguration{Version: &version}, []byte("{}"))).To(BeFalse())
+				Expect(activeVersion()).To(BeEmpty())
+
+				Expect(mon.acceptConfiguration(ctx, &api.ProcessConfiguration{Version: &version}, []byte("{}"))).To(BeTrue())
+				Expect(activeVersion()).To(Equal(currentVersion.String()))
 			})
 		})
 
