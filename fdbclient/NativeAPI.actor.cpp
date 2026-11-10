@@ -7996,10 +7996,24 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 		if (!coordinator->get().present()) {
 			wait(coordinator->onChange());
 		} else {
+			// Created before resolving the hostname and reused for the choose below, so a change that lands between
+			// the resolve finishing and this actor resuming is not missed.
+			state Future<Void> coordinatorChanged = coordinator->onChange();
 			state NetworkAddress coordinatorAddress;
 			if (coordinator->get().get().hostname.present()) {
 				state Hostname h = coordinator->get().get().hostname.get();
-				wait(store(coordinatorAddress, h.resolveWithRetry()));
+				// resolveWithRetry() never gives up, so a hostname that can't be resolved (e.g. a stale coordinator
+				// that was removed from DNS) must not keep us from noticing that the coordinator has changed.
+				choose {
+					when(NetworkAddress resolved = wait(h.resolveWithRetry())) {
+						coordinatorAddress = resolved;
+					}
+					when(wait(coordinatorChanged)) {
+						CODE_PROBE(true, "Coordinator changed while resolving the coordinator hostname");
+						needToConnect = true;
+						continue;
+					}
+				}
 			} else {
 				coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
 			}
@@ -8011,7 +8025,7 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 				needToConnect = false;
 			}
 			choose {
-				when(wait(coordinator->onChange())) {
+				when(wait(coordinatorChanged)) {
 					needToConnect = true;
 				}
 
