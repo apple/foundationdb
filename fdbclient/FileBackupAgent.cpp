@@ -71,7 +71,7 @@ std::atomic<int> g_bulkDumpTaskCompleteCount(0);
 std::atomic<int> g_bulkLoadRestoreTaskCompleteCount(0);
 
 // Helper function to monitor BulkDump job completion
-// Returns true if the job completed, false if it stopped making progress for timeoutDuration.
+// Returns true if the job completed, false if it failed or stopped making progress for timeoutDuration.
 //
 // The budget is a no-progress window, not a total duration. A dump advances one bounded slice per
 // scheduling round (the SS returns after SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST batches and the
@@ -103,9 +103,15 @@ Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeout
 				// A sample that fails carries no information: leave the window running rather than
 				// letting a transient read error either fail the backup or extend its deadline.
 				try {
-					size_t completeCount = co_await getBulkDumpCompleteTaskCount(cx, currentJob.get().getJobRange());
-					if (completeCount > lastCompleteCount) {
-						lastCompleteCount = completeCount;
+					BulkDumpTaskCounts counts = co_await getBulkDumpTaskCounts(cx, currentJob.get().getJobRange());
+					if (counts.error > 0) {
+						TraceEvent(SevWarn, "BulkDumpJobFailed")
+						    .detail("BulkDumpJobId", jobId)
+						    .detail("ErrorTasks", counts.error);
+						co_return false;
+					}
+					if (counts.complete > lastCompleteCount) {
+						lastCompleteCount = counts.complete;
 						lastProgressTime = now();
 					}
 				} catch (Error& e) {
@@ -4061,7 +4067,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
 					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT)
 					    .detail("Reason",
-					            "BulkDump made no progress within the timeout; backup would not be "
+					            "BulkDump failed or made no progress within the timeout; backup would not be "
 					            "bulkload-restorable");
 					Params.timeoutOccurred().set(task, true);
 					throw backup_error();
