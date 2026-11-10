@@ -26,6 +26,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -69,6 +70,10 @@ type kubernetesClient struct {
 	// nodeName defines the node name of the Pod where the fdbkubernetesmonitor instance is running in.
 	// This value is only set if the fdbkubernetesmonitor should watch node events.
 	nodeName string
+
+	// annotationMutex serializes updateAnnotationsOnPod. The update reads the annotations and applies the full set
+	// again, so concurrent updates could otherwise drop the keys of each other.
+	annotationMutex sync.Mutex
 }
 
 func setupCache(namespace string, podName string, nodeName string) (client.WithWatch, cache.Cache, error) {
@@ -273,6 +278,9 @@ func (podClient *kubernetesClient) updateFdbClusterTimestampAnnotation(ctx conte
 // updateAnnotationsOnPod will update the annotations with the provided annotationChanges. If an annotation exists, it
 // will be updated if the annotation is absent it will be added.
 func (podClient *kubernetesClient) updateAnnotationsOnPod(ctx context.Context, annotationChanges map[string]string) error {
+	podClient.annotationMutex.Lock()
+	defer podClient.annotationMutex.Unlock()
+
 	meta, err := podClient.getPodMetadata(ctx)
 	if err != nil {
 		return err

@@ -20,8 +20,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path"
+	"strconv"
+	"sync"
+	"time"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/prometheus/client_golang/prometheus"
@@ -89,8 +93,8 @@ var _ = Describe("Testing the pruning of shared binaries", func() {
 
 	When("all processes run the desired version", func() {
 		BeforeEach(func() {
-			mon.setProcessVersion(1, &newVersion)
-			mon.setProcessVersion(2, &newVersion)
+			mon.setProcessVersion(1, &newVersion, "/bin/fdbserver", time.Time{})
+			mon.setProcessVersion(2, &newVersion, "/bin/fdbserver", time.Time{})
 		})
 
 		It("should only keep the desired version", func() {
@@ -101,8 +105,8 @@ var _ = Describe("Testing the pruning of shared binaries", func() {
 
 	When("a process still runs an older version", func() {
 		BeforeEach(func() {
-			mon.setProcessVersion(1, &newVersion)
-			mon.setProcessVersion(2, &oldVersion)
+			mon.setProcessVersion(1, &newVersion, "/bin/fdbserver", time.Time{})
+			mon.setProcessVersion(2, &oldVersion, "/bin/fdbserver", time.Time{})
 		})
 
 		It("should not prune anything as a bounce is pending", func() {
@@ -112,7 +116,7 @@ var _ = Describe("Testing the pruning of shared binaries", func() {
 
 		When("the process is stopped", func() {
 			BeforeEach(func() {
-				mon.setProcessVersion(2, nil)
+				mon.setProcessVersion(2, nil, "", time.Time{})
 			})
 
 			It("should prune the older versions", func() {
@@ -239,18 +243,19 @@ var _ = Describe("Testing the staged versions", func() {
 				mon.activeConfigurationBytes = []byte("{}")
 			})
 
-			It("should update the annotations only if the versions changed", func() {
+			It("should update the annotations and repair a lost annotation", func() {
 				reported := mon.reportStagedVersions(context.Background(), "")
 				Expect(reported).To(Equal("7.3.10"))
 				Expect(environmentAnnotation()).To(ContainSubstring(`"STAGED_VERSIONS":"7.3.10"`))
 
-				// Nothing changed, the annotation must not be written again.
+				// Nothing changed but the annotation got lost, it must be written again.
 				pod := &corev1.Pod{}
 				Expect(fakeClient.Get(context.Background(), types.NamespacedName{Namespace: "test", Name: "test-pod"}, pod)).To(Succeed())
 				delete(pod.Annotations, api.EnvironmentAnnotation)
 				Expect(fakeClient.Update(context.Background(), pod)).To(Succeed())
-				Expect(mon.reportStagedVersions(context.Background(), reported)).To(Equal(reported))
 				Expect(environmentAnnotation()).To(BeEmpty())
+				Expect(mon.reportStagedVersions(context.Background(), reported)).To(Equal(reported))
+				Expect(environmentAnnotation()).To(ContainSubstring(`"STAGED_VERSIONS":"7.3.10"`))
 
 				writeBinary("7.4.1", []byte("fdbserver"), 0700)
 				reported = mon.reportStagedVersions(context.Background(), reported)
@@ -280,6 +285,127 @@ var _ = Describe("Testing the staged versions", func() {
 					Expect(podClient.updateAnnotations(context.Background(), mon)).To(Succeed())
 					Expect(environmentAnnotation()).To(ContainSubstring(`"STAGED_VERSIONS":"7.3.10"`))
 				})
+			})
+		})
+	})
+})
+
+var _ = Describe("Testing the running binaries", func() {
+	var mon *monitor
+	var podClient *kubernetesClient
+	var fakeClient client.Client
+	oldVersion := api.Version{Major: 7, Minor: 1, Patch: 51}
+	newVersion := api.Version{Major: 7, Minor: 3, Patch: 10}
+
+	runningBinariesAnnotation := func() (string, bool) {
+		pod := &corev1.Pod{}
+		Expect(fakeClient.Get(context.Background(), types.NamespacedName{Namespace: "test", Name: "test-pod"}, pod)).To(Succeed())
+		value, present := pod.Annotations[api.RunningBinariesAnnotation]
+		return value, present
+	}
+
+	BeforeEach(func() {
+		fakeClient = fake.NewFakeClient(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "test"},
+		})
+		podClient = &kubernetesClient{
+			podName:   "test-pod",
+			namespace: "test",
+			Logger:    GinkgoLogr,
+			Client:    fakeClient,
+		}
+		mon = &monitor{logger: GinkgoLogr, podClient: podClient}
+	})
+
+	When("formatting the running binaries", func() {
+		It("should be an empty object if no process is running", func() {
+			Expect(mon.formatRunningBinaries()).To(Equal("{}"))
+		})
+
+		It("should contain the version and binary path of every running process", func() {
+			mon.setProcessVersion(1, &newVersion, "/var/fdb/shared-binaries/bin/7.3.10/fdbserver", time.Unix(1700000100, 0))
+			mon.setProcessVersion(2, &oldVersion, "/usr/bin/fdbserver", time.Unix(1700000200, 0))
+
+			formatted, err := mon.formatRunningBinaries()
+			Expect(err).NotTo(HaveOccurred())
+
+			running := map[string]api.RunningBinary{}
+			Expect(json.Unmarshal([]byte(formatted), &running)).To(Succeed())
+			Expect(running).To(Equal(map[string]api.RunningBinary{
+				"1": {Version: "7.3.10", BinaryPath: "/var/fdb/shared-binaries/bin/7.3.10/fdbserver", StartTimestamp: 1700000100},
+				"2": {Version: "7.1.51", BinaryPath: "/usr/bin/fdbserver", StartTimestamp: 1700000200},
+			}))
+		})
+
+		It("should drop processes that terminated", func() {
+			mon.setProcessVersion(1, &newVersion, "/usr/bin/fdbserver", time.Unix(1700000100, 0))
+			mon.setProcessVersion(1, nil, "", time.Time{})
+			Expect(mon.formatRunningBinaries()).To(Equal("{}"))
+			Expect(mon.processBinaries).To(BeEmpty())
+		})
+	})
+
+	When("annotations are updated concurrently", func() {
+		It("should keep the annotations of all updates", func() {
+			keys := make([]string, 0, 20)
+			var wg sync.WaitGroup
+			for i := 0; i < 20; i++ {
+				key := "foundationdb.org/test-" + strconv.Itoa(i)
+				keys = append(keys, key)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					defer GinkgoRecover()
+					Expect(podClient.updateAnnotationsOnPod(context.Background(), map[string]string{key: "value"})).To(Succeed())
+				}()
+			}
+			wg.Wait()
+
+			pod := &corev1.Pod{}
+			Expect(fakeClient.Get(context.Background(), types.NamespacedName{Namespace: "test", Name: "test-pod"}, pod)).To(Succeed())
+			for _, key := range keys {
+				Expect(pod.Annotations).To(HaveKeyWithValue(key, "value"))
+			}
+		})
+	})
+
+	When("reporting the running binaries", func() {
+		It("should update the annotation and repair a lost annotation", func() {
+			reported := mon.reportRunningBinaries(context.Background(), "")
+			Expect(reported).To(Equal("{}"))
+			value, _ := runningBinariesAnnotation()
+			Expect(value).To(Equal("{}"))
+
+			// Nothing changed but the annotation got lost, it must be written again.
+			pod := &corev1.Pod{}
+			Expect(fakeClient.Get(context.Background(), types.NamespacedName{Namespace: "test", Name: "test-pod"}, pod)).To(Succeed())
+			delete(pod.Annotations, api.RunningBinariesAnnotation)
+			Expect(fakeClient.Update(context.Background(), pod)).To(Succeed())
+			_, present := runningBinariesAnnotation()
+			Expect(present).To(BeFalse())
+			Expect(mon.reportRunningBinaries(context.Background(), reported)).To(Equal(reported))
+			value, _ = runningBinariesAnnotation()
+			Expect(value).To(Equal("{}"))
+
+			mon.setProcessVersion(1, &newVersion, "/usr/bin/fdbserver", time.Unix(1700000100, 0))
+			reported = mon.reportRunningBinaries(context.Background(), reported)
+			Expect(reported).To(Equal(`{"1":{"version":"7.3.10","binaryPath":"/usr/bin/fdbserver","startTimestamp":1700000100}}`))
+
+			// A restart with the same binary changes the start timestamp and must be reported.
+			mon.setProcessVersion(1, &newVersion, "/usr/bin/fdbserver", time.Unix(1700000300, 0))
+			reported = mon.reportRunningBinaries(context.Background(), reported)
+			Expect(reported).To(ContainSubstring(`"startTimestamp":1700000300`))
+			value, _ = runningBinariesAnnotation()
+			Expect(value).To(Equal(reported))
+		})
+
+		When("updating the annotation fails", func() {
+			BeforeEach(func() {
+				podClient.Client = fake.NewFakeClient()
+			})
+
+			It("should report the previous value to retry later", func() {
+				Expect(mon.reportRunningBinaries(context.Background(), "stale")).To(Equal("stale"))
 			})
 		})
 	})
