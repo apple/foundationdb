@@ -5073,6 +5073,11 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					// With RYW the clear below is split into one clear per gap between the sets, doubling the
+					// storage mutations. Without it the clear stays one mutation, applied before the sets.
+					if (CLIENT_KNOBS->RESTORE_RANGE_DISABLE_RYW) {
+						tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+					}
 
 					int i = start;
 					int txBytes = 0;
