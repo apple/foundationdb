@@ -429,6 +429,9 @@ public:
 		// Invariant: it.beginKey() <= keykey && keykey <= it.endKey() && (key.isBackward() ? it.beginKey() != keykey :
 		// it.endKey() != keykey) Maintaining this invariant, we transform the key selector toward firstGreaterOrEqual
 		// form until we reach an unknown range or the result
+
+		// A dependent write can coalesce to an absent value (for example CompareAndClear) while still being typed as
+		// a KV segment. Only segments that actually have a value count as keys.
 		while (key.offset > 1 && !it.is_unreadable() && !it.is_unknown_range() && it.endKey() < maxKey) {
 			if (it.is_kv() && it.kv(arena) != nullptr)
 				--key.offset;
@@ -2760,7 +2763,7 @@ TEST_CASE("/fdbclient/ReadYourWrites/resolveKeySelectorSkipsClearedKey") {
 	values.push_back_deep(values.arena(), KeyValueRef("a"_sr, "v"_sr));
 	cache.insert(KeyRangeRef("a"_sr, allKeys.end), values);
 
-	// CompareAndClear removes b even though it was never present in the snapshot.
+	// CompareAndClear leaves b absent: b must not count as a key when resolving the selector.
 	writes.mutate("b"_sr, MutationRef::CompareAndClear, "x"_sr, true);
 
 	RYWIterator it(&cache, &writes);
@@ -2773,6 +2776,34 @@ TEST_CASE("/fdbclient/ReadYourWrites/resolveKeySelectorSkipsClearedKey") {
 
 	ASSERT(selector.isFirstGreaterOrEqual());
 	ASSERT(selector.getKey() == "a"_sr);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/ReadYourWrites/resolveKeySelectorSkipsClearedKeyForward") {
+	Arena arena;
+	SnapshotCache cache(&arena);
+	WriteMap writes(&arena);
+
+	Standalone<VectorRef<KeyValueRef>> values;
+	values.push_back_deep(values.arena(), KeyValueRef("a"_sr, "v"_sr));
+	values.push_back_deep(values.arena(), KeyValueRef("c"_sr, "v"_sr));
+	values.push_back_deep(values.arena(), KeyValueRef("d"_sr, "v"_sr));
+	cache.insert(KeyRangeRef("a"_sr, allKeys.end), values);
+
+	writes.mutate("b"_sr, MutationRef::CompareAndClear, "x"_sr, true);
+
+	RYWIterator it(&cache, &writes);
+	// The second existing key after a is d: the cleared b must not count.
+	KeySelector selector = firstGreaterThan("a"_sr) + 1;
+	bool readToBegin = false;
+	bool readThroughEnd = false;
+	int actualOffset = selector.offset;
+	RYWImpl::resolveKeySelectorFromCache(
+	    selector, it, allKeys.end, &readToBegin, &readThroughEnd, &actualOffset, arena);
+
+	ASSERT(selector.isFirstGreaterOrEqual());
+	ASSERT(selector.getKey() == "d"_sr);
 
 	return Void();
 }
