@@ -116,8 +116,8 @@ type monitor struct {
 	// metrics represents the prometheus monitor metrics.
 	metrics *metrics
 
-	// binaryRetryCancel cancels the running retry for a configuration whose binary was not ready. It is nil if no
-	// retry is running. Access is guarded by mutex.
+	// binaryRetryCancel cancels the running retry for a configuration whose binary was not ready. It may be
+	// non-nil after the retry has finished, cancelling it is then a no-op. Access is guarded by mutex.
 	binaryRetryCancel context.CancelFunc
 
 	// binaryRetryBackoff returns the wait time before the given retry attempt. If nil getBinaryRetryBackoff is used.
@@ -216,6 +216,10 @@ func (monitor *monitor) updateCustomEnvironmentFromNodeMetadata(ctx context.Cont
 		return nil
 	}
 
+	// The map is read by the process runners and the configuration loaders, so all writes must hold the mutex.
+	monitor.mutex.Lock()
+	defer monitor.mutex.Unlock()
+
 	nodeLabels := nodeMeta.Labels
 	for key, value := range nodeLabels {
 		sanitizedKey := strings.ReplaceAll(key, "/", "_")
@@ -238,6 +242,16 @@ func (monitor *monitor) updateCustomEnvironmentFromNodeMetadata(ctx context.Cont
 	}
 
 	return nil
+}
+
+// copyCustomEnvironment returns a snapshot of the custom environment.
+func (monitor *monitor) copyCustomEnvironment() map[string]string {
+	monitor.mutex.Lock()
+	defer monitor.mutex.Unlock()
+
+	customEnv := make(map[string]string, len(monitor.customEnvironment))
+	maps.Copy(customEnv, monitor.customEnvironment)
+	return customEnv
 }
 
 // errBinaryNotReady is returned if the binary of a configuration is missing, empty or not executable. Unlike other
@@ -295,7 +309,7 @@ func (monitor *monitor) readConfiguration(ctx context.Context) (*api.ProcessConf
 		monitor.logger.Error(err, "Error updating custom environment from node metadata", "configuration", configuration, "binaryPath", configuration.BinaryPath)
 		return nil, nil, nil
 	}
-	_, err = configuration.GenerateArguments(1, monitor.customEnvironment)
+	_, err = configuration.GenerateArguments(1, monitor.copyCustomEnvironment())
 	if err != nil {
 		monitor.logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
 		return nil, nil, nil
@@ -313,7 +327,7 @@ func (monitor *monitor) readConfiguration(ctx context.Context) (*api.ProcessConf
 }
 
 // loadConfiguration loads the latest configuration from the config file. If the binary of the configuration is not
-// ready, the load is retried with an exponential backoff until it succeeds or the next call supersedes it.
+// ready, the load is retried with a quadratic backoff until it succeeds or the next call supersedes it.
 func (monitor *monitor) loadConfiguration(ctx context.Context) {
 	// Any pending retry is stale once a new load is triggered, since the load below reads the latest file anyway.
 	monitor.cancelBinaryRetry()
@@ -332,12 +346,15 @@ func (monitor *monitor) tryLoadConfiguration(ctx context.Context) error {
 		return err
 	}
 
-	// Skip stale work, e.g. a superseded retry that was cancelled while reading.
-	if ctx.Err() != nil || configuration == nil || len(configurationBytes) == 0 {
+	if configuration == nil || len(configurationBytes) == 0 {
 		return nil
 	}
 
-	monitor.acceptConfiguration(configuration, configurationBytes)
+	// acceptConfiguration re-checks ctx under the mutex, which is what makes skipping a superseded retry reliable.
+	if !monitor.acceptConfiguration(ctx, configuration, configurationBytes) {
+		return nil
+	}
+
 	// Always update the annotations if needed to handle cases where the fdb-kubernetes-monitor
 	// has loaded the new configuration but was not able to update the annotations.
 	err = monitor.podClient.updateAnnotations(ctx, monitor)
@@ -423,14 +440,20 @@ func checkOwnerExecutable(path string) error {
 }
 
 // acceptConfiguration is called when the monitor process parses and accepts
-// a configuration from the local config file.
-func (monitor *monitor) acceptConfiguration(configuration *api.ProcessConfiguration, configurationBytes []byte) {
+// a configuration from the local config file. It returns false without applying the configuration if ctx is done.
+// cancelBinaryRetry cancels under the same mutex, so a superseded retry can't apply its configuration after the
+// load that superseded it started.
+func (monitor *monitor) acceptConfiguration(ctx context.Context, configuration *api.ProcessConfiguration, configurationBytes []byte) bool {
 	monitor.mutex.Lock()
 	defer monitor.mutex.Unlock()
 
+	if ctx.Err() != nil {
+		return false
+	}
+
 	// If the configuration hasn't changed ignore those events to prevent noisy logging.
 	if equality.Semantic.DeepEqual(monitor.activeConfiguration, configuration) {
-		return
+		return true
 	}
 
 	monitor.logger.Info("Received new configuration file", "configuration", configuration)
@@ -456,9 +479,11 @@ func (monitor *monitor) acceptConfiguration(configuration *api.ProcessConfigurat
 	if hasRunningProcesses && !monitor.activeConfiguration.ShouldRunServers() {
 		monitor.signalProcesses(syscall.SIGTERM, monitor.processIDs)
 	}
+
+	return true
 }
 
-// getBackoffDuration returns the backoff duration. The backoff time will increase exponential with a maximum of 60 seconds.
+// getBackoffDuration returns the backoff duration. The backoff time will increase quadratically with a maximum of 60 seconds.
 func getBackoffDuration(errorCounter int) time.Duration {
 	return min(time.Duration(errorCounter*errorCounter)*time.Second, maxErrorBackoffDuration)
 }
@@ -486,9 +511,8 @@ func (monitor *monitor) runProcess(processNumber int) {
 
 		monitor.mutex.Lock()
 		config := monitor.activeConfiguration
-		customEnv := make(map[string]string, len(monitor.customEnvironment))
-		maps.Copy(customEnv, monitor.customEnvironment)
 		monitor.mutex.Unlock()
+		customEnv := monitor.copyCustomEnvironment()
 
 		arguments, err := config.GenerateArguments(processNumber, customEnv)
 		if err != nil {
