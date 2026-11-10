@@ -329,6 +329,11 @@ public:
 		});
 	}
 
+	// Returns the tag of a runnable backup, other than excludeTag, whose container is at bc's location.
+	static Future<Optional<std::string>> findRunningBackupAtLocation(Reference<ReadYourWritesTransaction> tr,
+	                                                                 Reference<IBackupContainer> bc,
+	                                                                 std::string excludeTag);
+
 	Future<Void> discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> discontinueBackup(Database cx, Key tagName) {
 		return runRYWTransaction(
@@ -791,28 +796,40 @@ inline Standalone<StringRef> TupleCodec<Reference<IBackupContainer>>::pack(Refer
 	tuple.append((int64_t)bc->getEncryptionBlockSize());
 	return tuple.pack();
 }
+// The fields a backup container is saved as. Unpacking them does not open the container, so it does not validate
+// the URL.
+struct BackupContainerSettings {
+	std::string url;
+	Optional<std::string> encryptionKeyFileName;
+	Optional<std::string> proxy;
+	int encryptionBlockSize = 0;
+
+	static BackupContainerSettings unpack(StringRef val) {
+		Tuple t = Tuple::unpack(val);
+		ASSERT(t.size() >= 1);
+
+		BackupContainerSettings settings;
+		settings.url = t.getString(0).toString();
+		if (t.size() > 1 && !t.getString(1).empty()) {
+			settings.encryptionKeyFileName = t.getString(1).toString();
+		}
+		if (t.size() > 2 && !t.getString(2).empty()) {
+			settings.proxy = t.getString(2).toString();
+		}
+		if (t.size() > 3) {
+			settings.encryptionBlockSize = (int)t.getInt(3);
+		}
+		return settings;
+	}
+
+	Reference<IBackupContainer> open() const {
+		return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName, encryptionBlockSize);
+	}
+};
+
 template <>
 inline Reference<IBackupContainer> TupleCodec<Reference<IBackupContainer>>::unpack(Standalone<StringRef> const& val) {
-	Tuple t = Tuple::unpack(val);
-	ASSERT(t.size() >= 1);
-
-	auto url = t.getString(0).toString();
-
-	Optional<std::string> encryptionKeyFileName;
-	if (t.size() > 1 && !t.getString(1).empty()) {
-		encryptionKeyFileName = t.getString(1).toString();
-	}
-
-	Optional<std::string> proxy;
-	if (t.size() > 2 && !t.getString(2).empty()) {
-		proxy = t.getString(2).toString();
-	}
-
-	int blockSize = 0;
-	if (t.size() > 3) {
-		blockSize = (int)t.getInt(3);
-	}
-	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName, blockSize);
+	return BackupContainerSettings::unpack(val).open();
 }
 
 class BackupConfig : public KeyBackedTaskConfig {
@@ -1067,30 +1084,11 @@ void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys);
 // Return a vector containing the key ranges in system key-space that should be backed up in a default backup.
 VectorRef<KeyRangeRef> const& getSystemBackupRanges();
 
-// Return a key-range map that can be used to check whether a system key is a candidate backup key (i.e. whether it is
-// part of any system backup ranges).
-KeyRangeMap<bool> const& systemBackupMutationMask();
-
 // Returns true if the given set of ranges exactly matches the set of ranges included in a default backup.
 template <class Container>
 bool isDefaultBackup(Container ranges) {
 	std::unordered_set<KeyRangeRef> uniqueRanges(ranges.begin(), ranges.end());
-	auto& systemBackupRanges = getSystemBackupRanges();
-
-	if (uniqueRanges.size() != systemBackupRanges.size() + 1) {
-		return false;
-	}
-
-	if (!uniqueRanges.contains(normalKeys)) {
-		return false;
-	}
-	for (auto range : getSystemBackupRanges()) {
-		if (!uniqueRanges.contains(range)) {
-			return false;
-		}
-	}
-
-	return true;
+	return uniqueRanges.size() == 1 && uniqueRanges.contains(normalKeys);
 }
 
 // Returns a key-range used to denote that a shared mutation stream belongs to the default backup set.

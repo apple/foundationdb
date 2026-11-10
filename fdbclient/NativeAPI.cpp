@@ -5932,29 +5932,38 @@ Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 	}
 
 	Version version = trState.present() ? trState.get()->readVersion() : latestVersion;
-	std::vector<KeyRangeLocationInfo> locations = co_await getKeyRangeLocations(cx,
-	                                                                            keys,
-	                                                                            std::numeric_limits<int>::max(),
-	                                                                            Reverse::False,
-	                                                                            &StorageServerInterface::waitMetrics,
-	                                                                            span.context,
-	                                                                            Optional<UID>(),
-	                                                                            UseProvisionalProxies::False,
-	                                                                            version);
-	int nLocs = locations.size();
-	std::vector<Future<StorageMetrics>> fx(nLocs);
 	StorageMetrics total;
-	KeyRef partBegin, partEnd;
-	for (int i = 0; i < nLocs; i++) {
-		partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
-		partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
-		fx[i] = doGetStorageMetrics(cx, version, KeyRangeRef(partBegin, partEnd), locations[i].locations, trState);
+	// Fetch shard locations in bounded batches: the location reply for an arbitrarily large range can otherwise
+	// exceed the packet limit on the commit proxy.
+	while (true) {
+		std::vector<KeyRangeLocationInfo> locations =
+		    co_await getKeyRangeLocations(cx,
+		                                  keys,
+		                                  CLIENT_KNOBS->STORAGE_METRICS_LARGE_RANGE_SHARD_LIMIT,
+		                                  Reverse::False,
+		                                  &StorageServerInterface::waitMetrics,
+		                                  span.context,
+		                                  Optional<UID>(),
+		                                  UseProvisionalProxies::False,
+		                                  version);
+		int nLocs = locations.size();
+		std::vector<Future<StorageMetrics>> fx(nLocs);
+		KeyRef partBegin, partEnd;
+		for (int i = 0; i < nLocs; i++) {
+			partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
+			partEnd = (i == nLocs - 1) ? std::min(locations[i].range.end, keys.end) : locations[i].range.end;
+			fx[i] = doGetStorageMetrics(cx, version, KeyRangeRef(partBegin, partEnd), locations[i].locations, trState);
+		}
+		co_await waitForAll(fx);
+		for (int i = 0; i < nLocs; i++) {
+			total += fx[i].get();
+		}
+		if (nLocs == 0 || locations.back().range.end >= keys.end) {
+			co_return total;
+		}
+		CODE_PROBE(true, "getStorageMetricsLargeKeyRange fetches shard locations in multiple batches");
+		keys = KeyRangeRef(locations.back().range.end, keys.end);
 	}
-	co_await waitForAll(fx);
-	for (int i = 0; i < nLocs; i++) {
-		total += fx[i].get();
-	}
-	co_return total;
 }
 
 Future<Void> trackBoundedStorageMetrics(Version version,
@@ -6474,6 +6483,65 @@ TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/multipleShards") {
 	ASSERT(unlimitedResults.size() == 8 && unlimitedResults[1] == "A1"_sr && unlimitedResults[2] == "A2"_sr &&
 	       unlimitedResults[3] == "B"_sr && unlimitedResults[4] == "B1"_sr && unlimitedResults[5] == "B2"_sr &&
 	       unlimitedResults[6] == "C"_sr && unlimitedResults[7] == "Z"_sr);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/watchRefCount/removesEmptyEntries") {
+	// Default error "operation_failed()" avoids "internal" range (4xxx),
+	// which causes simulation tests with --crash enabled to abort/fail.
+	Database database = Database(new DatabaseContext(operation_failed()));
+	Key k = "k"_sr;
+
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
+
+	database->increaseWatchRefCount(k, 1);
+	database->increaseWatchRefCount(k, 2);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 1);
+
+	// Reference count entry should remain while version set for k is not empty
+	database->decreaseWatchRefCount(k, 2);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 1);
+
+	// …but should be removed once the reference set is empty
+	database->decreaseWatchRefCount(k, 1);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
+
+	// …and nothing should happen when removing a stale reference
+	ASSERT_EQ(database->decreaseWatchRefCount(k, 1), 0);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/watchRefCount/deletesMetadataOnlyOnLastRef") {
+	// Default error "operation_failed()" avoids "internal" range (4xxx),
+	// which causes simulation tests with --crash enabled to abort/fail.
+	Database database = Database(new DatabaseContext(operation_failed()));
+	Key k = "k"_sr;
+	Promise<Void> neverSet;
+	auto watchParameters = makeReference<WatchParameters>(k,
+	                                                      Optional<Value>(),
+	                                                      1,
+	                                                      TagSet(),
+	                                                      SpanContext(),
+	                                                      TaskPriority::DefaultEndpoint,
+	                                                      Optional<UID>(),
+	                                                      UseProvisionalProxies::False);
+
+	auto md = makeReference<WatchMetadata>(watchParameters);
+	md->watchFutureSS = success(neverSet.getFuture());
+
+	database->setWatchMetadata(md);
+	database->increaseWatchRefCount(k, 1);
+	database->increaseWatchRefCount(k, 2);
+	database->decreaseWatchRefCount(k, 1);
+	ASSERT(database->getWatchMetadata(k).isValid());
+
+	database->decreaseWatchRefCount(k, 2);
+	ASSERT(!database->getWatchMetadata(k).isValid());
+	ASSERT(md->watchFutureSS.isError());
+	ASSERT(md->watchFutureSS.getError().code() == error_code_actor_cancelled);
 
 	return Void();
 }

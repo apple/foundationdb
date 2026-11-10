@@ -600,7 +600,6 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	BACKUP_QUIET_OPTIONS,
 	{ OPT_DRYRUN, "-n", SO_NONE },
 	{ OPT_DRYRUN, "--dryrun", SO_NONE },
-	{ OPT_FORCE, "-f", SO_NONE },
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	BACKUP_MEMORY_OPTIONS,
 	BACKUP_HELP_OPTIONS,
@@ -1436,7 +1435,7 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		std::vector<KeyBackedTag> backupTags = co_await getAllBackupTags(tr, snapshot);
 		std::vector<Future<Optional<Version>>> tagLastRestorableVersions;
 		std::vector<Future<EBackupState>> tagStates;
-		std::vector<Future<Reference<IBackupContainer>>> tagContainers;
+		std::vector<Future<Optional<Value>>> tagContainerValues;
 		std::vector<Future<int64_t>> tagRangeBytes;
 		std::vector<Future<int64_t>> tagLogBytes;
 		std::vector<Future<MutationLogType>> tagMutationLogTypes;
@@ -1455,21 +1454,41 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, snapshot, 0));
 			tagLogBytes.push_back(config.logBytesWritten().getD(tr, snapshot, 0));
 			tagMutationLogTypes.push_back(config.mutationLogType().getD(tr, snapshot, MutationLogType::DEFAULT));
-			tagContainers.push_back(config.backupContainer().getOrThrow(tr, snapshot));
+			tagContainerValues.push_back(tr->get(config.backupContainer().key, snapshot));
 			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName), snapshot));
 		}
 
-		co_await (waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) &&
+		co_await (waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainerValues) &&
 		          waitForAll(tagRangeBytes) && waitForAll(tagLogBytes) && waitForAll(tagMutationLogTypes) &&
 		          success(fBackupPaused));
 
+		// The container settings stored in each backup's config.
+		std::vector<BackupContainerSettings> tagContainerSettings(backupTags.size());
+		// Any error from reading or opening each backup's container.
+		std::vector<Error> tagErrors(backupTags.size());
 		std::vector<Future<Void>> encryptionSetupResults;
 		std::vector<int> encryptionContainerIndices;
 
-		for (int i = 0; i < tagContainers.size(); i++) {
-			if (tagContainers[i].get()->getEncryptionKeyFileName().present()) {
-				encryptionSetupResults.push_back(tagContainers[i].get()->encryptionSetupComplete());
-				encryptionContainerIndices.push_back(i);
+		// Only open containers for running backups. The purpose is to reveal any bad URLs early and check the key file
+		// for encrypted backups.
+		for (int i = 0; i < backupTags.size(); i++) {
+			try {
+				if (!tagContainerValues[i].get().present()) {
+					throw key_not_found();
+				}
+				tagContainerSettings[i] = BackupContainerSettings::unpack(tagContainerValues[i].get().get());
+				if (FileBackupAgent::isRunnable(tagStates[i].get())) {
+					Reference<IBackupContainer> bc = tagContainerSettings[i].open();
+					if (tagContainerSettings[i].encryptionKeyFileName.present()) {
+						encryptionSetupResults.push_back(bc->encryptionSetupComplete());
+						encryptionContainerIndices.push_back(i);
+					}
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				tagErrors[i] = e;
 			}
 		}
 		co_await waitForAllReady(encryptionSetupResults);
@@ -1477,12 +1496,12 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		std::unordered_set<std::string> seenKeyPaths;
 		for (int j = 0; j < encryptionContainerIndices.size() && j < 1e6; j++) {
 			int i = encryptionContainerIndices[j];
-			std::string keyPath = tagContainers[i].get()->getEncryptionKeyFileName().get();
+			std::string keyPath = tagContainerSettings[i].encryptionKeyFileName.get();
 
 			if (!seenKeyPaths.contains(keyPath)) {
 				seenKeyPaths.insert(keyPath);
 				json_spirit::mObject keyObj;
-				keyObj["path"] = tagContainers[i].get()->getEncryptionKeyFileName().get();
+				keyObj["path"] = keyPath;
 				keyObj["success"] = !encryptionSetupResults[j].isError();
 				keysArr.push_back(keyObj);
 			}
@@ -1499,11 +1518,15 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		for (const KeyBackedTag& eachTag : backupTags) {
 			EBackupState status = tagStates[j].get();
 			const char* statusText = fba.getStateText(status);
+			const BackupContainerSettings& containerSettings = tagContainerSettings[j];
 
 			// The object for this backup tag inside this instance's subdocument
 			JSONDoc tagRoot = tagsRoot.subDoc(eachTag.tagName).subDoc("$latest");
-			tagRoot.create("current_container") = tagContainers[j].get()->getURL();
+			tagRoot.create("current_container") = containerSettings.url;
 			tagRoot.create("current_status") = statusText;
+			if (tagErrors[j].isValid()) {
+				tagRoot.create("error") = tagErrors[j].what();
+			}
 			if (tagLastRestorableVersions[j].get().present()) {
 				Version last_restorable_version = tagLastRestorableVersions[j].get().get();
 				double last_restorable_seconds_behind =
@@ -1518,10 +1541,9 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytes[j].get();
 			tagRoot.create("mutation_log_type") = mutationLogTypeToString(tagMutationLogTypes[j].get());
 			tagRoot.create("mutation_stream_id") = backupTagUids[j].toString();
-			tagRoot.create("file_level_encryption") =
-			    tagContainers[j].get()->getEncryptionKeyFileName().present() ? true : false;
-			if (tagContainers[j].get()->getEncryptionKeyFileName().present()) {
-				tagRoot.create("encryption_key_file") = tagContainers[j].get()->getEncryptionKeyFileName().get();
+			tagRoot.create("file_level_encryption") = containerSettings.encryptionKeyFileName.present();
+			if (containerSettings.encryptionKeyFileName.present()) {
+				tagRoot.create("encryption_key_file") = containerSettings.encryptionKeyFileName.get();
 			}
 			j++;
 		}
@@ -1873,6 +1895,23 @@ Future<Void> submitDBBackup(Database src,
 	}
 }
 
+// Fails with backup_error if a backup on a tag other than tagName is running at bc's location.
+static Future<Void> checkBackupLocationNotInUse(Reference<ReadYourWritesTransaction> tr,
+                                                Reference<IBackupContainer> bc,
+                                                std::string tagName) {
+	Optional<std::string> conflictingTag = co_await FileBackupAgent::findRunningBackupAtLocation(tr, bc, tagName);
+	if (conflictingTag.present()) {
+		TraceEvent(SevWarnAlways, "BackupLocationInUse")
+		    .detail("TagName", tagName)
+		    .detail("ConflictingTag", conflictingTag.get())
+		    .detail("Location", bc->getLocation());
+		fprintf(stderr,
+		        "ERROR: The backup location is already in use by the running backup on tag `%s'.\n",
+		        printable(StringRef(conflictingTag.get())).c_str());
+		throw backup_error();
+	}
+}
+
 Future<Void> submitBackup(Database db,
                           std::string url,
                           Optional<std::string> proxy,
@@ -1904,6 +1943,14 @@ Future<Void> submitBackup(Database db,
 				if (BackupAgentBase::isRunnable(backupStatus)) {
 					throw backup_duplicate();
 				}
+			}
+
+			// submitBackup appends a unique directory to file:// URLs, so only blobstore locations can collide.
+			if (url.find("file://") != 0) {
+				Reference<IBackupContainer> bc = IBackupContainer::openContainer(url, proxy, {}, 0);
+				co_await runRYWTransaction(db, [=](Reference<ReadYourWritesTransaction> tr) {
+					return checkBackupLocationNotInUse(tr, bc, tagName);
+				});
 			}
 
 			if (waitForCompletion) {
@@ -2032,6 +2079,13 @@ Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, in
 	}
 }
 
+static void printJsonError(std::string errorMessage) {
+	JsonBuilderObject doc;
+	doc.setKey("SchemaVersion", "1.0.0");
+	doc.setKey("error", errorMessage);
+	printf("%s\n", doc.getJson().c_str());
+}
+
 Future<Void> statusBackup(Database db, std::string tagName, ShowErrors showErrors, bool json) {
 	try {
 		FileBackupAgent backupAgent;
@@ -2042,6 +2096,26 @@ Future<Void> statusBackup(Database db, std::string tagName, ShowErrors showError
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
+		if (json)
+			printJsonError(e.what());
+		fprintf(stderr, "ERROR: %s\n", e.what());
+		throw;
+	}
+}
+
+// Prints `fdbrestore status` for one tag, or for every tag when tag is empty.
+Future<Void> statusRestore(Database db, Key tag, bool json) {
+	try {
+		FileBackupAgent backupAgent;
+
+		std::string statusText =
+		    co_await (json ? backupAgent.restoreStatusJSON(db, tag) : backupAgent.restoreStatus(db, tag));
+		printf("%s\n", statusText.c_str());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		if (json)
+			printJsonError(e.what());
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -2345,7 +2419,7 @@ Future<Void> runRestore(Database db,
 			}
 		} else {
 			Optional<RestorableFileSet> rset = co_await bc->getRestoreSet(
-			    targetVersion, ranges, false, invalidVersion, restoreMode == RestoreMode::BULKLOAD);
+			    targetVersion, ranges, onlyApplyMutationLogs, beginVersion, restoreMode == RestoreMode::BULKLOAD);
 
 			if (!rset.present()) {
 				fmt::print(stderr,
@@ -2525,6 +2599,8 @@ Future<Void> describeBackup(const char* name,
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
+		if (json)
+			printJsonError(e.what());
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -2873,6 +2949,7 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 				                         options.proxy,
 				                         options.encryptionKeyFile,
 				                         prevContainer->getEncryptionBlockSize());
+				co_await checkBackupLocationNotInUse(tr, bc, tagName);
 				try {
 					co_await timeoutError(bc->create(), 30);
 				} catch (Error& e) {
@@ -4169,9 +4246,12 @@ int main(int argc, char* argv[]) {
 		if (restoreUserKeys) {
 			backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
 		} else if (restoreSystemKeys) {
-			for (const auto& r : getSystemBackupRanges()) {
-				backupKeys.push_back_deep(backupKeys.arena(), r);
-			}
+			// The ranges this selected belonged to tenants and blob granules, both since removed (#12583,
+			// #12435), so it can only produce an empty range list and trip the assert in runRestore.
+			fprintf(stderr,
+			        "ERROR: --system-metadata selects no key ranges in this version: the tenant and blob granule "
+			        "system ranges it covered have been removed. Use --user-data, or name ranges with -k.\n");
+			return FDB_EXIT_ERROR;
 		}
 
 		switch (programExe) {
@@ -4405,12 +4485,7 @@ int main(int argc, char* argv[]) {
 				// If no tag is specifically provided then print all tag status, don't just use "default"
 				if (tagProvided)
 					tag = tagName;
-				f = stopAfter(
-				    map(jsonOutput ? ba.restoreStatusJSON(db, KeyRef(tag)) : ba.restoreStatus(db, KeyRef(tag)),
-				        [](std::string s) -> Void {
-					        printf("%s\n", s.c_str());
-					        return Void();
-				        }));
+				f = stopAfter(statusRestore(db, tag, jsonOutput));
 				break;
 			default:
 				throw restore_error();

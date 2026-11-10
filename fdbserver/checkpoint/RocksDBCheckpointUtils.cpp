@@ -178,14 +178,21 @@ void logRocksDBError(const rocksdb::Status& status, const std::string& method, c
 	}
 }
 
-Error statusToError(const rocksdb::Status& s) {
+Error statusToError(const rocksdb::Status& s, int fallbackCode = error_code_unknown_error) {
 	if (s.IsIOError()) {
 		return io_error();
 	} else if (s.IsTimedOut()) {
 		return transaction_too_old();
 	} else {
-		return unknown_error();
+		return Error(fallbackCode);
 	}
+}
+
+Error sstReadError(const rocksdb::Status& status) {
+	if (status.IsCorruption()) {
+		return file_corrupt();
+	}
+	return statusToError(status, error_code_operation_failed);
 }
 
 // Fetch a single sst file from storage server. The progress is checkpointed via cFun.
@@ -875,14 +882,28 @@ void RocksDBSstFileReader::open(const std::string localFile) {
 			iter->SeekToFirst();
 		}
 	} else {
-		TraceEvent(SevError, "RocksDBSstFileReaderWrapperOpenFileError")
+		TraceEvent(SevWarnAlways, "RocksDBSstFileReaderWrapperOpenFileError")
 		    .detail("LocalFile", this->localFile)
 		    .detail("Status", status.ToString());
+		throw sstReadError(status);
 	}
 }
 
 bool RocksDBSstFileReader::hasNext() const {
-	return iter != nullptr && this->iter->Valid();
+	if (!iter) {
+		return false;
+	}
+	if (!iter->Valid()) {
+		const auto status = iter->status();
+		if (!status.ok()) {
+			TraceEvent(SevWarnAlways, "RocksDBSstFileReaderIterationError")
+			    .detail("LocalFile", localFile)
+			    .detail("Status", status.ToString());
+			throw sstReadError(status);
+		}
+		return false;
+	}
+	return true;
 }
 
 KeyValue RocksDBSstFileReader::next() {
@@ -900,11 +921,7 @@ RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
 	size_t keyCount = 0;
 	ASSERT(iter != nullptr);
 	iter->Seek(toSlice(range.begin));
-	if (!iter->Valid() || toStringRef(iter->key()) >= range.end) {
-		rep.more = false;
-		return rep;
-	}
-	while (true) {
+	while (hasNext() && toStringRef(iter->key()) < range.end) {
 		KeyValue kv = KeyValueRef(toStringRef(iter->key()), toStringRef(iter->value()));
 		rep.push_back_deep(rep.arena(), kv);
 		expectedSize = expectedSize + kv.expectedSize();
@@ -917,17 +934,36 @@ RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
 		if ((byteLimit > 0 && expectedSize >= byteLimit) || (rowLimit > 0 && keyCount >= rowLimit)) {
 			break;
 		}
+		iter->Next();
+	}
+	rep.more = hasNext() && toStringRef(iter->key()) < range.end;
+	return rep;
+}
 
-		iter->Next(); // Go to next at first, then decide if the rep has more.
-		if (!iter->Valid()) {
-			break;
-		}
-		if (toStringRef(iter->key()) >= range.end) {
-			break;
+TEST_CASE("/fdbserver/checkpoint/BulkLoadSstReadError") {
+	const std::string path = joinPath(params.getDataDir(), "corrupt-bulk-load.sst");
+	{
+		RocksDBSstFileWriter writer;
+		writer.open(path);
+		writer.write("a"_sr, "value"_sr);
+		ASSERT(writer.finish());
+	}
+	std::string bytes = readFileBytes(path, 1 << 20);
+	ASSERT(!bytes.empty());
+	bytes[0] ^= 1; // Damage the data block but leave the index and footer readable.
+	writeFile(path, bytes);
+	{
+		RocksDBSstFileReader reader;
+		reader.open(path);
+		try {
+			reader.getRange(singleKeyRange("a"_sr));
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_file_corrupt);
 		}
 	}
-	rep.more = iter->Valid() && toStringRef(iter->key()) < range.end;
-	return rep;
+	deleteFile(path);
+	return Void();
 }
 
 class RocksDBCheckpointByteSampleReader : public ICheckpointByteSampleReader {

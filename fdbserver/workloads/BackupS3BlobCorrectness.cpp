@@ -158,6 +158,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	// expectBulkEncryptionRejection: assert --encryption-key-file is refused on a bulkdump backup. Only
 	// the backup side is probed; the comment at the probe records why the restore side cannot be.
 	bool expectBulkEncryptionRejection;
+	// expectSameLocationRejection: assert a second tag cannot start on the same blobstore URL while the
+	// backup runs. The rejection prints to stderr, so the toml must lower StderrSeverity.
+	bool expectSameLocationRejection;
 	// mutationLogType: 0 = classic blog mutation logs, 1 = partitioned logs written by backup workers,
 	// -1 = pick one of the two at random per seed.
 	// Only the real backup uses it; the refusal probes keep passing DEFAULT so they stay independent of it.
@@ -244,6 +247,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		performValidation = getOption(options, "performValidation"_sr, false);
 		expectBulkIncrementalRejection = getOption(options, "expectBulkIncrementalRejection"_sr, false);
 		expectBulkEncryptionRejection = getOption(options, "expectBulkEncryptionRejection"_sr, false);
+		expectSameLocationRejection = getOption(options, "expectSameLocationRejection"_sr, false);
 		mutationLogType = getOption(options, "mutationLogType"_sr, 0);
 		if (mutationLogType < 0) {
 			mutationLogType = deterministicRandom()->coinflip() ? 1 : 0;
@@ -458,7 +462,6 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				    .detail("TotalTasks", progress.totalTasks)
 				    .detail("CompleteTasks", progress.completeTasks)
 				    .detail("ProgressPercent", progress.progressPercent())
-				    .detail("TotalBytes", progress.totalBytes)
 				    .detail("CompletedBytes", progress.completedBytes);
 
 				Optional<BulkDumpOwnerInfo> ownerInfo = co_await getBulkDumpOwner(cx, progress.jobId);
@@ -474,6 +477,67 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			}
 
 			co_await delay(5.0);
+		}
+	}
+
+	// While tag is running, a backup on another tag to the same URL must be refused. Reading tag's state in the
+	// submitting transaction keeps the expectation exact if the backup finishes concurrently.
+	Future<Void> probeSameLocationRejection(FileBackupAgent* backupAgent,
+	                                        Database cx,
+	                                        Key tag,
+	                                        Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                                        UID randomID) {
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
+		while (true) {
+			Error err;
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<UidAndAbortedFlagT> uidFlag = co_await makeBackupTag(tag.toString()).get(tr);
+				EBackupState state = EBackupState::STATE_NEVERRAN;
+				if (uidFlag.present()) {
+					state = co_await BackupConfig(uidFlag.get().first)
+					            .stateEnum()
+					            .getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN);
+				}
+				if (!FileBackupAgent::isRunnable(state)) {
+					TraceEvent("BS3BCW_SameLocationProbeSkipped", randomID)
+					    .detail("Tag", printable(tag))
+					    .detail("State", BackupAgentBase::getStateText(state));
+					co_return;
+				}
+
+				Error rejected;
+				try {
+					co_await backupAgent->submitBackup(tr,
+					                                   StringRef(backupURL),
+					                                   {},
+					                                   initSnapshotInterval,
+					                                   snapshotInterval,
+					                                   tag.toString() + "_urlreject",
+					                                   backupRanges,
+					                                   StopWhenDone::True,
+					                                   MutationLogType::DEFAULT,
+					                                   IncrementalBackupOnly::False,
+					                                   {},
+					                                   0,
+					                                   snapshotMode);
+				} catch (Error& e) {
+					if (e.code() != error_code_backup_error) {
+						throw;
+					}
+					rejected = e;
+				}
+				TraceEvent("BS3BCW_SameLocationRejection", randomID)
+				    .error(rejected)
+				    .detail("Tag", printable(tag))
+				    .detail("Accepted", rejected.code() == error_code_success);
+				ASSERT(rejected.code() == error_code_backup_error);
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr->onError(err);
 		}
 	}
 
@@ -693,6 +757,11 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			TraceEvent("BS3BCW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
+		}
+
+		// A file:// URL gets a unique directory per submit, so only a blobstore URL can be shared.
+		if (expectSameLocationRejection && isBlobstoreUrl(backupContainer)) {
+			co_await probeSameLocationRejection(backupAgent, cx, tag, backupRanges, randomID);
 		}
 
 		submitted.send(Void());

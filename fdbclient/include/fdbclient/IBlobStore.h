@@ -329,6 +329,9 @@ public:
 	                                                ParametersT* ignored_parameters);
 
 	std::string getHost() const { return host; }
+
+	// The service used to connect when the URL has no port.
+	std::string defaultService() const { return knobs.secure_connection ? "https" : "http"; }
 	std::string getRegion() const { return region; }
 
 	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL
