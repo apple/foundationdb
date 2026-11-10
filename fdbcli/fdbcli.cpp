@@ -1593,8 +1593,9 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 							auditLogReturnedKey(
 							    localDb, "get", deterministicRandom()->randomUniqueID(), tokens[1], v.get());
 							printf("`%s' is `%s'\n", printable(tokens[1]).c_str(), printable(v.get()).c_str());
-						} else
+						} else {
 							printf("`%s': not found\n", printable(tokens[1]).c_str());
+						}
 					}
 					continue;
 				}
