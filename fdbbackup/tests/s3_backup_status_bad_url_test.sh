@@ -34,9 +34,10 @@
 # 5. Aborts B and polls until tag A is running and tag B is aborted with no
 #    error, since status doesn't open the containers of finished backups.
 #
-# Always runs against MockS3Server, bound to 127.0.0.2 (Linux routes all of
-# 127/8 to loopback): the client guesses a region for 127.0.0.1, localhost, and
-# real S3 domains, so B's URL would parse there.
+# Runs only against MockS3Server, bound to 127.0.0.2. We use this IP address
+# because we don't want the client correctly guessing the region (which it
+# would for 127.0.0.1, any localhost, and any S3 domains). This is to induce
+# the parsing of the URL failing (missing region= param).
 #
 # Usage:
 #   s3_backup_status_bad_url_test.sh <source_dir> <build_dir> [scratch_dir]
@@ -212,6 +213,13 @@ fi
 if ! source "${cwd}/backup_tests_common.sh"; then
   echo "Failed to source backup_tests_common.sh" >&2
   exit 1
+fi
+
+# macOS only puts 127.0.0.1 on loopback, so MockS3Server can't bind 127.0.0.2.
+# 66 is this test's SKIP_RETURN_CODE in fdbbackup/CMakeLists.txt.
+if [[ "${OSTYPE}" == "darwin"* ]]; then
+  log "Skipping: needs 127.0.0.2 on loopback, which macOS doesn't have"
+  exit 66
 fi
 
 if (( $# < 2 )) || (( $# > 3 )); then
