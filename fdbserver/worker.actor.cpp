@@ -1225,12 +1225,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		// If peer->lastLoggedTime == 0, we just started monitor this peer and haven't logged it once yet.
 		double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
 
-		// .detail() arguments are evaluated by the caller even when the event is filtered out, and
-		// the addressInDbAnd*Dc() predicates each walk ServerDBInfo. This runs once per peer, every
-		// WORKER_HEALTH_MONITOR_INTERVAL, on every process, so guard the whole chain. suppressFor()
-		// does not help: suppression is applied when the event is logged, not when it is built.
-		TraceEvent peerHealthEvent(SevDebug, "PeerHealthMonitor");
-		if (peerHealthEvent.isEnabled()) {
+		if (TraceEvent peerHealthEvent(SevDebug, "PeerHealthMonitor"); peerHealthEvent.isEnabled()) {
 			peerHealthEvent.suppressFor(5.0)
 			    .detail("Peer", address)
 			    .detail("PeerAddress", address)
