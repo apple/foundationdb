@@ -408,6 +408,7 @@ struct DDBulkDumpJobManager {
 	BulkDumpState jobState;
 	std::map<Key, BulkLoadManifest> taskManifestMap;
 	BulkDumpSkipTracker skipTracker;
+	bool failed = false; // set once an Error range is seen or written; stops scheduling
 
 	DDBulkDumpJobManager() = default;
 	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -2835,6 +2836,9 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					    .detail("CurrentJob", bulkDumpState.getJobId());
 					throw bulkdump_task_outdated();
 				}
+				if (bulkDumpState.getPhase() == BulkDumpPhase::Error) {
+					self->bulkDumpJobManager.failed = true;
+				}
 				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete ||
 				    bulkDumpState.getPhase() == BulkDumpPhase::Error) {
 					TraceEvent(SevDebug, "DDBulkDumpJobScheduleJobSeeCompleteTask", self->ddId)
@@ -2921,13 +2925,12 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 		    .detail("SkippedRanges", skippedRanges.size())
 		    .detail("FailAfterSec", SERVER_KNOBS->DD_BULKDUMP_NO_TARGET_REPLICA_FAIL_SEC);
 		co_await markBulkDumpRangesFailed(self, skippedRanges);
+		self->bulkDumpJobManager.failed = true;
 	}
 	TraceEvent(SevInfo, "DDBulkDumpJobScheduleEnd", self->ddId).detail("JobId", jobId).detail("JobRange", jobRange);
 }
 
-enum class BulkDumpJobStatus { Running, Complete, Failed };
-
-Future<BulkDumpJobStatus> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
+Future<bool> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
 	UID jobId = self->bulkDumpJobManager.jobState.getJobId();
 	KeyRange jobRange = self->bulkDumpJobManager.jobState.getJobRange();
 	Database cx = self->txnProcessor->context();
@@ -2936,8 +2939,6 @@ Future<BulkDumpJobStatus> checkBulkDumpJobComplete(Reference<DataDistributor> se
 	RangeResult bulkDumpResult;
 	BulkDumpState bulkDumpState;
 	KeyRange rangeToRead;
-	// An Error range anywhere fails the job, so the scan cannot stop at the first unfinished range.
-	bool anySubmitted = false;
 	Transaction tr(cx);
 	while (beginKey < endKey) {
 		Error err;
@@ -2954,12 +2955,10 @@ Future<BulkDumpJobStatus> checkBulkDumpJobComplete(Reference<DataDistributor> se
 				if (!bulkDumpState.isValid() || bulkDumpState.getJobId() != jobId) {
 					throw bulkdump_task_outdated();
 				}
-				if (bulkDumpState.getPhase() == BulkDumpPhase::Error) {
-					co_return BulkDumpJobStatus::Failed;
-				}
 				if (bulkDumpState.getPhase() != BulkDumpPhase::Complete) {
-					ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
-					anySubmitted = true;
+					ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted ||
+					       bulkDumpState.getPhase() == BulkDumpPhase::Error);
+					co_return false;
 				}
 			}
 			beginKey = bulkDumpResult.back().key;
@@ -2969,7 +2968,7 @@ Future<BulkDumpJobStatus> checkBulkDumpJobComplete(Reference<DataDistributor> se
 		}
 		co_await tr.onError(err);
 	}
-	co_return anySubmitted ? BulkDumpJobStatus::Running : BulkDumpJobStatus::Complete;
+	co_return true;
 }
 
 // Generate the bulkload job manifest file. Here is an example.
@@ -3118,12 +3117,8 @@ Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 	    .detail("Job", job.get().toString());
 	self->bulkDumpJobManager = DDBulkDumpJobManager(job.get());
 	while (true) {
-		BulkDumpJobStatus status = co_await checkBulkDumpJobComplete(self);
-		if (status == BulkDumpJobStatus::Failed) {
-			// Keep the metadata so the failure stays visible. Cancelling the job clears it, which ends this loop
-			// through bulkdump_task_outdated.
-			TraceEvent(SevWarnAlways, "DDBulkDumpJobFailed", self->ddId).suppressFor(60.0).detail("JobId", jobId);
-		} else if (status == BulkDumpJobStatus::Complete) {
+		bool allComplete = co_await checkBulkDumpJobComplete(self);
+		if (allComplete) {
 			TraceEvent(SevInfo, "DDBulkDumpManagerJobAllTaskComplete", self->ddId).detail("JobId", jobId);
 			// Generate the job manifest file for bulkload.
 			// The job manifest file is the global map between ranges and their corresponding manifest file.
@@ -3141,6 +3136,10 @@ Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 			co_await cancelBulkDumpJob(cx, jobId);
 			TraceEvent(SevInfo, "DDBulkDumpManagerMetadataCleared", self->ddId).detail("JobId", jobId);
 			break; // end
+		} else if (self->bulkDumpJobManager.failed) {
+			// Keep the metadata so the failure stays visible. Cancelling the job clears it, which ends this loop
+			// through bulkdump_task_outdated.
+			TraceEvent(SevWarnAlways, "DDBulkDumpJobFailed", self->ddId).suppressFor(60.0).detail("JobId", jobId);
 		} else {
 			// Schedule the job
 			co_await scheduleBulkDumpJob(self);
