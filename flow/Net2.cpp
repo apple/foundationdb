@@ -2385,12 +2385,10 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 	std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
 		                                            QueueTestThreadState(1, 100000),
 		                                            QueueTestThreadState(2, 1000000) };
-	std::vector<Future<Void>> doneProducing;
 
 	int total = 0;
 	for (int t = 0; t < perThread.size(); ++t) {
 		auto& s = perThread[t];
-		doneProducing.push_back(s.doneProducing.getFuture());
 		total += s.toProduce;
 		auto produce = [&queue, &s]() {
 			printf("Thread%d\n", s.threadId);
@@ -2403,7 +2401,6 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 				}
 			}
 			printf("T%dDone\n", s.threadId);
-			s.doneProducing.send(Void());
 		};
 		s.handle = startThreadF(produce);
 	}
@@ -2422,18 +2419,11 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 			queue.canSleep();
 	}
 
-	co_await waitForAll(doneProducing);
-
-	// Make sure we continue on the main thread.
-	Promise<Void> signal;
-	Future<Void> doneConsuming = signal.getFuture();
-	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
-	co_await doneConsuming;
-
 	for (int t = 0; t < perThread.size(); ++t) {
 		waitThread(perThread[t].handle);
 		perThread[t].checkDone();
 	}
+	return Void();
 }
 
 TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
@@ -2457,7 +2447,7 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 				int v = s.nextProduced();
 				onMainThreadVoid([&s, v]() { ASSERT_EQ(v, s.nextConsumed()); });
 			}
-			s.doneProducing.send(Void());
+			onMainThreadVoid([&s]() { s.doneProducing.send(Void()); });
 		});
 	}
 	co_await waitForAll(doneProducing);
