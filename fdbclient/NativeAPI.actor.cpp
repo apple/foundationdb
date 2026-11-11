@@ -2584,6 +2584,31 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 	}
 }
 
+Optional<std::string> getClientTraceDirectory() {
+	return networkOptions.traceDirectory;
+}
+
+void initializeClientAuditTracing(Reference<IClusterConnectionRecord> connRecord, std::string const& directory) {
+	// Network must be created before initializing tracing
+	ASSERT(g_network && !g_network->isSimulated());
+
+	// Same address and options as the client trace file opened by initializeClientTracing.
+	Optional<NetworkAddress> localAddress;
+	if (connRecord) {
+		auto publicIP = connRecord->getConnectionString().determineLocalSourceIP();
+		localAddress = NetworkAddress(publicIP, ::getpid());
+	}
+	openAuditTraceFile(localAddress,
+	                   networkOptions.traceRollSize,
+	                   networkOptions.traceMaxLogsSize,
+	                   directory,
+	                   "trace",
+	                   networkOptions.traceLogGroup,
+	                   networkOptions.traceFileIdentifier,
+	                   networkOptions.tracePartialFileSuffix,
+	                   networkOptions.traceFormat);
+}
+
 // Creates a database object that represents a connection to a cluster
 // This constructor uses a preallocated DatabaseContext that may have been created
 // on another thread
@@ -7996,10 +8021,24 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 		if (!coordinator->get().present()) {
 			wait(coordinator->onChange());
 		} else {
+			// Created before resolving the hostname and reused for the choose below, so a change that lands between
+			// the resolve finishing and this actor resuming is not missed.
+			state Future<Void> coordinatorChanged = coordinator->onChange();
 			state NetworkAddress coordinatorAddress;
 			if (coordinator->get().get().hostname.present()) {
 				state Hostname h = coordinator->get().get().hostname.get();
-				wait(store(coordinatorAddress, h.resolveWithRetry()));
+				// resolveWithRetry() never gives up, so a hostname that can't be resolved (e.g. a stale coordinator
+				// that was removed from DNS) must not keep us from noticing that the coordinator has changed.
+				choose {
+					when(NetworkAddress resolved = wait(h.resolveWithRetry())) {
+						coordinatorAddress = resolved;
+					}
+					when(wait(coordinatorChanged)) {
+						CODE_PROBE(true, "Coordinator changed while resolving the coordinator hostname");
+						needToConnect = true;
+						continue;
+					}
+				}
 			} else {
 				coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
 			}
@@ -8011,7 +8050,7 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 				needToConnect = false;
 			}
 			choose {
-				when(wait(coordinator->onChange())) {
+				when(wait(coordinatorChanged)) {
 					needToConnect = true;
 				}
 
