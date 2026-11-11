@@ -536,12 +536,56 @@ void WriteMap::coalesceOver(OperationStack& stack, RYWMutation newEntry, Arena& 
 	}
 }
 
+// Applies stack[begin, end), all AppendIfFits, to `existing` in order, allocating only the final value.
+static ValueRef applyAppendIfFitsRun(Optional<ValueRef> const& existing,
+                                     OperationStack const& stack,
+                                     int begin,
+                                     int end,
+                                     Arena& arena) {
+	ValueRef base = existing.present() ? existing.get() : StringRef();
+	int totalSize = base.size();
+	for (int i = begin; i < end; ++i) {
+		int operandSize = stack.at(i).value.get().size();
+		if (appendIfFitsApplies(totalSize, operandSize)) {
+			totalSize += operandSize;
+		}
+	}
+	if (totalSize == base.size()) {
+		return base;
+	}
+
+	uint8_t* buf = new (arena) uint8_t[totalSize];
+	int offset = base.size();
+	if (offset > 0) {
+		memcpy(buf, base.begin(), offset);
+	}
+	for (int i = begin; i < end; ++i) {
+		ValueRef operand = stack.at(i).value.get();
+		if (appendIfFitsApplies(offset, operand.size()) && operand.size() > 0) {
+			memcpy(buf + offset, operand.begin(), operand.size());
+			offset += operand.size();
+		}
+	}
+	return StringRef(buf, totalSize);
+}
+
 RYWMutation WriteMap::coalesceUnder(OperationStack const& stack, Optional<ValueRef> const& value, Arena& arena) {
 	if (!stack.isDependent() && stack.size() == 1)
 		return stack.at(0);
 
 	RYWMutation currentEntry = RYWMutation(value, MutationRef::SetValue);
 	for (int i = 0; i < stack.size(); ++i) {
+		if (stack.at(i).type == MutationRef::AppendIfFits) {
+			// Applying a run entry by entry would allocate every intermediate value.
+			int end = i + 1;
+			while (end < stack.size() && stack.at(end).type == MutationRef::AppendIfFits) {
+				++end;
+			}
+			currentEntry =
+			    RYWMutation(applyAppendIfFitsRun(currentEntry.value, stack, i, end, arena), MutationRef::SetValue);
+			i = end - 1;
+			continue;
+		}
 		currentEntry = coalesce(currentEntry, stack.at(i), arena);
 	}
 
