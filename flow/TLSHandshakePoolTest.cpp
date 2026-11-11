@@ -242,7 +242,8 @@ int main(int argc, char** argv) {
 	} catch (Error& e) {
 		std::cerr << "Unexpected error: " << e.name() << " (" << e.code() << ")\n";
 	}
-	// Skip static destruction; the network and its handshake threads are still alive.
+	// Skip static destruction; the network and its handshake threads are still alive. _exit() does not flush stdio.
 	flushTraceFileVoid();
+	std::cout.flush();
 	_exit(rc);
 }

@@ -33,18 +33,27 @@
 namespace {
 
 // Boost's synchronous handshake loses the unsent part of a write that would block, and reports it only as
-// would_block. Flag flights large enough to come close to a new socket's send buffer, so that failure is visible.
+// would_block, so the handshake then stalls until its deadline. This is not specific to the workers: Net2's
+// SSLConnection::write() has the same limitation, with synchronous ssl_sock.write_some() on its non-blocking socket.
+// It is rare here, because a handshake flight (3-6 KB) goes into a new connection's empty send buffer, which is far
+// larger. Flag flights large enough to come close to the send buffer, so that a stall from this cause is visible.
 void warnIfLargeFlight(const TLSHandshakeJob& job) {
-	constexpr int largeFlightBytes = 8 * 1024; // Typical flights are 3-6 KB.
+	constexpr int largeFlightBytes = 8 * 1024;
 	int queued = platform::socketSendQueueBytes(job.fd);
 	if (queued < largeFlightBytes) {
 		return;
 	}
+	// TraceEvent::suppressFor() only works on the network thread, so limit this to once a second per worker thread.
+	thread_local std::chrono::steady_clock::time_point lastWarning;
+	auto now = std::chrono::steady_clock::now();
+	if (now - lastWarning < std::chrono::seconds(1)) {
+		return;
+	}
+	lastWarning = now;
 	int sendBuffer = 0;
 	socklen_t len = sizeof(sendBuffer);
 	::getsockopt(job.fd, SOL_SOCKET, SO_SNDBUF, &sendBuffer, &len);
 	TraceEvent(SevWarnAlways, "TLSHandshakeLargeFlight")
-	    .suppressFor(1.0)
 	    .detail("PeerAddr", job.peerAddr)
 	    .detail("Type", job.type == TLSHandshakeSocket::client ? "Client" : "Server")
 	    .detail("SendQueueBytes", queued)

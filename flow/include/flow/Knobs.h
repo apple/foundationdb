@@ -233,7 +233,8 @@ public:
 	bool DISABLE_MAINTHREAD_TLS_HANDSHAKE;
 	// If true, each TLS handshake thread drives many handshakes concurrently on non-blocking sockets, with a
 	// per-handshake deadline, and handshakes never run on the network thread while handshake threads exist;
-	// DISABLE_MAINTHREAD_TLS_HANDSHAKE then has no effect.
+	// DISABLE_MAINTHREAD_TLS_HANDSHAKE then has no effect. Because each thread then serves many handshakes, fewer
+	// TLS_SERVER_HANDSHAKE_THREADS may suffice; every busy one competes with the network thread for CPU.
 	bool TLS_HANDSHAKE_NONBLOCKING_WORKERS;
 	int TLS_HANDSHAKE_FLOWLOCK_PRIORITY;
 
