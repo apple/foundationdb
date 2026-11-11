@@ -9269,6 +9269,11 @@ ShardInfo* ShardInfo::newShard(StorageServer* data, const StorageServerShard& sh
 	return res;
 }
 
+static bool skipDeliveredToNotAssigned(Version version) {
+	const int64_t skipVersion = SERVER_KNOBS->SS_SKIP_DELIVERED_TO_NOT_ASSIGNED_VERSION;
+	return skipVersion != 0 && skipVersion == version;
+}
+
 void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
 	ASSERT(keys.contains(mutation.param1));
 	if (adding) {
@@ -9278,9 +9283,47 @@ void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& 
 	} else if (readWrite) {
 		readWrite->addMutation(version, fromFetch, mutation, this->keys, readWrite->updateEagerReads);
 	} else if (mutation.type != MutationRef::ClearRange) {
-		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation);
-		ASSERT(false); // Mutation delivered to notAssigned shard!
+		const bool skip = skipDeliveredToNotAssigned(version);
+		// Unbounded fields: when skipping, the hex is the only record from which the mutation can be replayed by hand.
+		TraceEvent(skip ? SevWarnAlways : SevError, "DeliveredToNotAssigned")
+		    .setMaxFieldLength(-1)
+		    .setMaxEventLength(-1)
+		    .detail("Version", version)
+		    .detail("MutationType", mutation.type)
+		    .detail("KeyHex", mutation.param1.toHexString())
+		    .detail("ValueHex", mutation.param2.toHexString())
+		    .detail("Skipping", skip)
+		    .detail("SkipVersion", SERVER_KNOBS->SS_SKIP_DELIVERED_TO_NOT_ASSIGNED_VERSION);
+		ASSERT(skip);
 	}
+}
+
+TEST_CASE("/fdbserver/storageserver/deliveredToNotAssigned") {
+	auto setSkipVersion = [](int64_t version) {
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->SS_SKIP_DELIVERED_TO_NOT_ASSIGNED_VERSION = version;
+	};
+	Reference<ShardInfo> shard(ShardInfo::newNotAssigned(KeyRangeRef("a"_sr, "z"_sr)));
+	MutationRef set(MutationRef::SetValue, "k"_sr, "v"_sr);
+	MutationRef clear(MutationRef::ClearRange, "k"_sr, "l"_sr);
+
+	// Default: nothing is dropped, and clears never assert.
+	ASSERT_EQ(SERVER_KNOBS->SS_SKIP_DELIVERED_TO_NOT_ASSIGNED_VERSION, 0);
+	ASSERT(!skipDeliveredToNotAssigned(1));
+	ASSERT(!skipDeliveredToNotAssigned(100));
+	shard->addMutation(100, false, clear);
+
+	// Only mutations at exactly the knob's version are dropped, however many there are.
+	setSkipVersion(100);
+	ASSERT(!skipDeliveredToNotAssigned(99));
+	ASSERT(!skipDeliveredToNotAssigned(101));
+	ASSERT(skipDeliveredToNotAssigned(100));
+	shard->addMutation(100, false, set);
+	shard->addMutation(100, false, set);
+	shard->addMutation(99, false, clear);
+
+	setSkipVersion(0);
+	ASSERT(!skipDeliveredToNotAssigned(100));
+	return Void();
 }
 
 Future<Void> restoreShards(StorageServer* data,

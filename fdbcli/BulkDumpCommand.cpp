@@ -168,13 +168,15 @@ Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 			             progress.errorTasks > 0 ? fmt::format(", {} error", progress.errorTasks) : "");
 		}
 
-		fmt::println(" Bytes: {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
+		fmt::println(" Bytes: {}", formatBytesProgress(progress.completedBytes, {}));
 
-		printProgressMetrics(progress.avgBytesPerSecond(), progress.etaSeconds(), progress.elapsedSeconds);
+		printProgressMetrics(progress.avgBytesPerSecond(), {}, progress.elapsedSeconds);
 
 		if (progress.errorTasks > 0) {
 			fmt::println("");
-			fmt::println("WARNING: {} tasks in error state", progress.errorTasks);
+			fmt::println(
+			    "WARNING: {} tasks in error state. The job cannot complete; run 'bulkdump cancel' to clear it.",
+			    progress.errorTasks);
 		}
 
 		co_return UID();

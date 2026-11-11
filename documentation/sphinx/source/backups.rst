@@ -288,7 +288,7 @@ The following options apply to most subcommands:
 ``start``
 ---------
 
-The ``start`` subcommand is used to start a backup.  If there is already a backup in progress, the command will fail and the current backup will be unaffected.  Otherwise, a backup is started. If the wait option is used, the command will wait for the backup to complete; otherwise, it returns immediately.
+The ``start`` subcommand is used to start a backup.  If there is already a backup in progress on the tag, or a backup on another tag is running at the same location (for a blob store URL, the same host, port, bucket, prefix, and backup name, regardless of credentials and other URL parameters), the command will fail and the current backup will be unaffected.  Otherwise, a backup is started. If the wait option is used, the command will wait for the backup to complete; otherwise, it returns immediately.
 
 ::
 
@@ -329,7 +329,7 @@ The ``modify`` subcommand is used to modify parameters of a running backup.  All
    user@host$ fdbbackup modify [-t <TAG>] [-d <BACKUP_URL>] [-s <DURATION>] [--active-snapshot-interval <DURATION>] [--verify-uid <UID>]
 
 ``-d <BACKUP_URL>``
-  Sets a new Backup URL for the backup to write to.  This is most likely to be used to change only URL parameters or account information.  However, it can also be used to start writing to a new destination mid-backup.  The new old location will cease gaining any additional restorability, while the new location will not be restorable until a new snapshot begins and completes.  Full restorability would be regained, however, if the contents of the two destinations were to be combined by the user.
+  Sets a new Backup URL for the backup to write to.  This is most likely to be used to change only URL parameters or account information.  However, it can also be used to start writing to a new destination mid-backup.  The new old location will cease gaining any additional restorability, while the new location will not be restorable until a new snapshot begins and completes.  Full restorability would be regained, however, if the contents of the two destinations were to be combined by the user.  The new location cannot be one that a backup on another tag is running at.
 
 ``-s <DURATION>`` or ``--snapshot-interval <DURATION>``  
   Sets a new duration for backup snapshots, in seconds.
@@ -495,7 +495,7 @@ The ``cleanup`` subcommand will list orphaned backups and DRs and optionally rem
 
 .. program:: fdbrestore
 
-The ``fdbrestore`` command line tool is used to control restore tasks.  Note that a restore operation will not clear the target key ranges, for safety reasons, so you must manually clear the ranges to be restored prior to starting the restore.
+The ``fdbrestore`` command line tool is used to control restore tasks.  Note that a restore operation will not clear the target key ranges up front, for safety reasons, so you must manually clear the ranges to be restored prior to starting the restore; starting a restore from range files into a range that already contains keys fails with ``restore_destination_not_empty`` (restores under the validation prefix are exempt). While the restore runs, it clears the key span of each block of a snapshot (range) file in the same transaction that writes the block's keys, so any key inside that span that is not in the backup is removed.
 
 .. warning:: It is your responsibility to ensure that no clients are accessing the database while it is being restored. During the restore process the database is in an inconsistent state, and writes that happen during the restore process might be partially or completely overwritten by restored data.
 

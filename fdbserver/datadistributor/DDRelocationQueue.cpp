@@ -1179,7 +1179,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		RelocateData rd(*it);
 		// A restored move can be held behind the pipeline gate while shard-encoded metadata is disabled.
 		// Restart DD before mutating the queue so the move is cancelled by the rollback path.
-		if (rd.isRestore() && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		if (rd.isRestore() && !ddEnabledState->shardEncodeLocationMetadata()) {
 			throw dd_config_changed();
 		}
 
