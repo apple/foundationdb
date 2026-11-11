@@ -170,6 +170,8 @@ Here is a complete list of valid parameters:
 
  *max_delay_connection_failed (or *dcf*) - Max seconds to delay before retry again when seeing an connection failure.
 
+ *aws_v4_header* (or *v4*) - Set 1 to sign requests with AWS Signature Version 4, or 0 to use Version 2.  Overrides the ``HTTP_REQUEST_AWS_V4_HEADER`` knob for this URL. The URL is saved with the backup, so each backup can use its own value.
+
  *header* - Add an additional HTTP header to each blob store REST API request.  Can be specified multiple times.  Format is *header=<FieldName>:<FieldValue>* where both strings are non-empty.
 
  *sdk_auth* (or *sa*) - Use the AWS SDK to do credentials and authentication. This supports all aws authentication types, including credential-less iam role-based authentication in aws. Experimental, and only works if FDB was compiled with BUILD_AWS_BACKUP=ON. When this parameter is set, all other credential parts of the backup url can be ignored.
