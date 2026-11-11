@@ -71,7 +71,7 @@ std::atomic<int> g_bulkDumpTaskCompleteCount(0);
 std::atomic<int> g_bulkLoadRestoreTaskCompleteCount(0);
 
 // Helper function to monitor BulkDump job completion
-// Returns true if the job completed, false if it stopped making progress for timeoutDuration.
+// Returns true if the job completed, false if it failed or stopped making progress for timeoutDuration.
 //
 // The budget is a no-progress window, not a total duration. A dump advances one bounded slice per
 // scheduling round (the SS returns after SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST batches and the
@@ -103,9 +103,15 @@ Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeout
 				// A sample that fails carries no information: leave the window running rather than
 				// letting a transient read error either fail the backup or extend its deadline.
 				try {
-					size_t completeCount = co_await getBulkDumpCompleteTaskCount(cx, currentJob.get().getJobRange());
-					if (completeCount > lastCompleteCount) {
-						lastCompleteCount = completeCount;
+					BulkDumpTaskCounts counts = co_await getBulkDumpTaskCounts(cx, currentJob.get().getJobRange());
+					if (counts.error > 0) {
+						TraceEvent(SevWarn, "BulkDumpJobFailed")
+						    .detail("BulkDumpJobId", jobId)
+						    .detail("ErrorTasks", counts.error);
+						co_return false;
+					}
+					if (counts.complete > lastCompleteCount) {
+						lastCompleteCount = counts.complete;
 						lastProgressTime = now();
 					}
 				} catch (Error& e) {
@@ -4061,7 +4067,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
 					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT)
 					    .detail("Reason",
-					            "BulkDump made no progress within the timeout; backup would not be "
+					            "BulkDump failed or made no progress within the timeout; backup would not be "
 					            "bulkload-restorable");
 					Params.timeoutOccurred().set(task, true);
 					throw backup_error();
@@ -4276,7 +4282,38 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			}
 		}
 
-		// Get start version after backup worker are enabled
+		// Wait for backupPartitionListKey to appear before reading the backup's start version. Not strictly
+		// required for restore correctness (restore uses snapshotBeginVersion, which is set later in _finish
+		// via initNewSnapshot; by then workers are up via backupStartedKey/allWorkerStarted coordination, so
+		// snapshotBeginVersion >= PartitionMap version). But this keeps Params.beginVersion in backupStartedKey
+		// honest about when workers actually start capturing mutations.
+		if (mutationLogType.get().present() && mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
+			while (true) {
+				Error err;
+				Future<Void> watchFuture;
+				try {
+					tr->reset();
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+					Optional<Value> partitionList = co_await tr->get(backupPartitionListKey);
+					if (partitionList.present()) {
+						break;
+					}
+
+					tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(1));
+					watchFuture = tr->watch(backupPartitionListKey);
+					co_await tr->commit();
+					co_await watchFuture;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr->onError(err);
+			}
+		}
+
+		// Get a start version to pass as backup's start version in UID of backup in backupStartedKey after backup
+		// workers are enabled.
 		while (true) {
 			Error err;
 			try {
@@ -4294,7 +4331,37 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			co_await tr->onError(err);
 		}
 
-		// Set the "backupStartedKey" and wait for all backup worker started
+		// Coordinate between BackupAgent and BackupWorkers using two paired keys, so neither gets stuck if a watch is
+		// silently lost.
+		//
+		//   - backupStartedKey: BackupAgent writes the new UID; BackupWorkers watch this key. Tells workers a new
+		//   backup exists.
+		//   - BackupConfig(uid).allWorkerStarted: workers set this once they've all registered the backup; BackupAgent
+		//   watches it. Tells BackupAgent it's safe to snapshot.
+		//
+		// Why both are needed: each side needs to know the other has acted before proceeding. If only one key existed,
+		// a lost watch on EITHER side would leave one party stuck — BackupAgent snapshotting too early (worker hasn't
+		// registered yet -> gap, backup not restorable) or BackupAgent never snapshotting (worker registered but
+		// BackupAgent has no signal). With both keys, each side has a separate signal it can poll/retry, so a lost
+		// watch only delays progress, never breaks it.
+		//
+		// Watch-loss recovery:
+		//   (1) Worker misses its watch on backupStartedKey:
+		//       Workers never register the backup, so allWorkerStarted is never set.
+		//       BackupAgent's task times out, gets reassigned, re-reads backupStartedKey, keeps
+		//       the original version and waits again.
+		//
+		//   (2) BackupAgent misses its watch on allWorkerStarted:
+		//       Workers already set the key, but BackupAgent stays parked. Task times out and
+		//       retries; the new exec finds allWorkerStarted already true, skips the watch, and
+		//       the snapshot reads at the cluster's current version when it actually runs.
+		//
+		// beginVersion (stored in backupStartedKey) stays the same across retries — it's a
+		// logical marker, not where the snapshot reads. The snapshot task does its own
+		// getReadVersion() when it runs, so the actual snapshot version moves forward across
+		// retries. Restorability depends on the snapshot version: by the time the snapshot
+		// runs, workers have already registered the backup and their mutation logs cover the
+		// snapshot's range, so the backup is restorable.
 		tr->reset();
 		while (true) {
 			Future<Void> watchFuture;
@@ -4318,11 +4385,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 					ids = decodeBackupStartedValue(started.get().get());
 				}
 
-				// First range-partitioned backup on this cluster: ask DD to compute the partition list.
-				if (ids.empty() && mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
-					tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(1));
-				}
-
+				// Add this backup's UID and start version to backupStartedKey.
 				const UID uid = config.getUid();
 				auto it = std::find_if(
 				    ids.begin(), ids.end(), [uid](const std::pair<UID, Version>& p) { return p.first == uid; });
@@ -4331,21 +4394,16 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				} else {
 					Params.beginVersion().set(task, it->second);
 				}
-
 				tr->set(backupStartedKey, encodeBackupStartedValue(ids));
 
-				// Only PartitionedLog workers set BackupConfig.allWorkerStarted, so watch it for that mutation log
-				// type.
-				const bool isPartitionedLog = mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG;
-
 				// The task may be restarted. Set the watch if started key has NOT been set.
-				if (isPartitionedLog && !taskStarted.get().present()) {
+				if (!taskStarted.get().present()) {
 					watchFuture = tr->watch(config.allWorkerStarted().key);
 				}
 
 				co_await keepRunning;
 				co_await tr->commit();
-				if (isPartitionedLog && !taskStarted.get().present()) {
+				if (!taskStarted.get().present()) {
 					co_await watchFuture;
 				}
 				co_return;
@@ -5021,6 +5079,11 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					// With RYW the clear below is split into one clear per gap between the sets, doubling the
+					// storage mutations. Without it the clear stays one mutation, applied before the sets.
+					if (CLIENT_KNOBS->RESTORE_RANGE_DISABLE_RYW) {
+						tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+					}
 
 					int i = start;
 					int txBytes = 0;
