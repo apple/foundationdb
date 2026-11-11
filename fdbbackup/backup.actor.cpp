@@ -1644,8 +1644,6 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state std::vector<Future<Void>> encryptionSetupResults;
 		state std::vector<std::string> encryptionKeyPaths;
 
-		// Only open containers for running backups. The purpose is to reveal any bad URLs early and check the key file
-		// for encrypted backups.
 		state int i;
 		state std::string url;
 		state Optional<std::string> encryptionKeyFileName;
@@ -1665,12 +1663,21 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 				if (t.size() > 1 && !t.getString(1).empty()) {
 					encryptionKeyFileName = t.getString(1).toString();
 				}
-				if (FileBackupAgent::isRunnable(tagStates[i].get())) {
-					Reference<IBackupContainer> bc = TupleCodec<Reference<IBackupContainer>>::unpack(value);
-					if (encryptionKeyFileName.present()) {
-						encryptionSetupResults.push_back(bc->encryptionSetupComplete());
-						encryptionKeyPaths.push_back(encryptionKeyFileName.get());
-					}
+				// This tag's status needs only the URL and key file name parsed above. Opening the container via
+				// unpack() checks that both are usable:
+				//
+				// - The URL must be valid, or we throw here and the tag reports "error". Validity can depend on this
+				//   agent's knobs (e.g. HTTP_REQUEST_AWS_V4_HEADER for aws v4 signing).
+				//
+				// - For an encrypted backup, this attempts to read the key file. The result goes in this agent's
+				//   "encryption_keys".
+				//
+				// Finished backups are opened too: we're not concerned about a saved backup URL being invalid, because
+				// that's something that should never happen.
+				Reference<IBackupContainer> bc = TupleCodec<Reference<IBackupContainer>>::unpack(value);
+				if (encryptionKeyFileName.present()) {
+					encryptionSetupResults.push_back(bc->encryptionSetupComplete());
+					encryptionKeyPaths.push_back(encryptionKeyFileName.get());
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) {
