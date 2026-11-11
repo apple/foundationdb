@@ -345,3 +345,46 @@ TEST_CASE("/bulkload/manifest/checksumRoundTrip") {
 	ASSERT_EQ(BulkLoadManifest(encoded).toString(), encoded);
 	return Void();
 }
+
+// The control record is absent for every job that predates it and for every job no operator has touched,
+// so a default-constructed record has to be indistinguishable from "no control applied". If either
+// default changes, data distribution starts pausing or throttling jobs nobody asked it to.
+TEST_CASE("/bulkjobcontrol/defaultsMeanNoControl") {
+	const BulkJobControlState control;
+	ASSERT(!control.isPaused());
+	ASSERT(!control.hasTargetDuration());
+	ASSERT_EQ(control.targetDurationSeconds, 0);
+
+	// An absent key decodes via this same default path in getBulkJobControl, which reports Optional{} and
+	// leaves the caller to treat it as unpaced and unpaused.
+	const BulkJobControlState decodedDefault = decodeBulkJobControlState(bulkJobControlStateValue(control));
+	ASSERT(!decodedDefault.isPaused());
+	ASSERT(!decodedDefault.hasTargetDuration());
+	return Void();
+}
+
+TEST_CASE("/bulkjobcontrol/roundTrip") {
+	BulkJobControlState control;
+	control.paused = true;
+	control.targetDurationSeconds = 3600.5;
+
+	const BulkJobControlState decoded = decodeBulkJobControlState(bulkJobControlStateValue(control));
+	ASSERT(decoded.isPaused());
+	ASSERT(decoded.hasTargetDuration());
+	ASSERT_EQ(decoded.targetDurationSeconds, 3600.5);
+
+	// Pause and target duration are set by separate commands, so neither may ride on the other: a paused
+	// job with no duration and an unpaused job with one both have to survive a round trip.
+	BulkJobControlState pausedOnly;
+	pausedOnly.paused = true;
+	const BulkJobControlState decodedPausedOnly = decodeBulkJobControlState(bulkJobControlStateValue(pausedOnly));
+	ASSERT(decodedPausedOnly.isPaused());
+	ASSERT(!decodedPausedOnly.hasTargetDuration());
+
+	BulkJobControlState pacedOnly;
+	pacedOnly.targetDurationSeconds = 120;
+	const BulkJobControlState decodedPacedOnly = decodeBulkJobControlState(bulkJobControlStateValue(pacedOnly));
+	ASSERT(!decodedPacedOnly.isPaused());
+	ASSERT(decodedPacedOnly.hasTargetDuration());
+	return Void();
+}

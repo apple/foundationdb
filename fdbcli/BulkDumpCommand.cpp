@@ -36,10 +36,14 @@ static const char* BULK_DUMP_DUMP_USAGE = "To dump a range of key/values: bulkdu
                                           " a local directory OR blobstore url to dump SST files to.\n";
 static const char* BULK_DUMP_STATUS_USAGE = "To get status: bulkdump status\n";
 static const char* BULK_DUMP_CANCEL_USAGE = "To cancel current bulkdump job: bulkdump cancel <JOBID>\n";
+static const char* BULK_DUMP_PAUSE_USAGE = "To pause a bulkdump job: bulkdump pause <JOBID>\n"
+                                           " No further tasks are dispatched. Tasks already dispatched run to\n"
+                                           " completion, so the job quiesces once that work drains.\n";
+static const char* BULK_DUMP_RESUME_USAGE = "To resume a paused bulkdump job: bulkdump resume <JOBID>\n";
 
 static const std::string BULK_DUMP_HELP_MESSAGE =
     std::string(BULK_DUMP_MODE_USAGE) + std::string(BULK_DUMP_DUMP_USAGE) + std::string(BULK_DUMP_STATUS_USAGE) +
-    std::string(BULK_DUMP_CANCEL_USAGE);
+    std::string(BULK_DUMP_CANCEL_USAGE) + std::string(BULK_DUMP_PAUSE_USAGE) + std::string(BULK_DUMP_RESUME_USAGE);
 
 Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 	// A bare `bulkdump` reaches here with only the command itself, and every branch below reads tokens[1].
@@ -118,6 +122,28 @@ Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 		fmt::println("Job {} has been cancelled. No new tasks will be spawned.", jobId.toString());
 		co_return UID();
 
+	} else if (tokencmp(tokens[1], "pause")) {
+		if (tokens.size() != 3) {
+			fmt::println("{}", BULK_DUMP_PAUSE_USAGE);
+			co_return UID();
+		}
+		UID jobId = validateBulkJobId(tokens[2], BULK_DUMP_PAUSE_USAGE);
+		co_await setBulkJobPaused(cx, jobId, /*paused=*/true, /*isBulkDump=*/true);
+		fmt::println("Job {} is paused. Tasks already dispatched will run to completion, so the job keeps "
+		             "making progress until that work drains.",
+		             jobId.toString());
+		co_return UID();
+
+	} else if (tokencmp(tokens[1], "resume")) {
+		if (tokens.size() != 3) {
+			fmt::println("{}", BULK_DUMP_RESUME_USAGE);
+			co_return UID();
+		}
+		UID jobId = validateBulkJobId(tokens[2], BULK_DUMP_RESUME_USAGE);
+		co_await setBulkJobPaused(cx, jobId, /*paused=*/false, /*isBulkDump=*/true);
+		fmt::println("Job {} is resumed.", jobId.toString());
+		co_return UID();
+
 	} else if (tokencmp(tokens[1], "status")) {
 		if (tokens.size() != 2) {
 			fmt::println("{}", BULK_DUMP_STATUS_USAGE);
@@ -189,7 +215,7 @@ Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 }
 
 CommandFactory bulkDumpFactory("bulkdump",
-                               CommandHelp("bulkdump [mode|dump|status|cancel] [ARGs]",
+                               CommandHelp("bulkdump [mode|dump|status|cancel|pause|resume] [ARGs]",
                                            "bulkdump commands",
                                            BULK_DUMP_HELP_MESSAGE.c_str()));
 } // namespace fdb_cli

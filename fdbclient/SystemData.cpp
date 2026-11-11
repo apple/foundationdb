@@ -1534,6 +1534,40 @@ Key bulkLoadOwnerKeyFor(const UID& jobId) {
 	return wr.toValue();
 }
 
+// Operator control for a bulk job, in its own key rather than in BulkDumpState or the owner record.
+// BulkDumpState is stored as a key-range map, so a field added there would be copied into every range
+// entry; and an absent control key reads as "no control applied", so there is nothing to migrate.
+const KeyRangeRef bulkDumpControlKeys = KeyRangeRef("\xff/bulkDumpControl/"_sr, "\xff/bulkDumpControl0"_sr);
+const KeyRef bulkDumpControlPrefix = bulkDumpControlKeys.begin;
+
+const KeyRangeRef bulkLoadControlKeys = KeyRangeRef("\xff/bulkLoadControl/"_sr, "\xff/bulkLoadControl0"_sr);
+const KeyRef bulkLoadControlPrefix = bulkLoadControlKeys.begin;
+
+Key bulkDumpControlKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkDumpControlPrefix);
+	wr << jobId;
+	return wr.toValue();
+}
+
+Key bulkLoadControlKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkLoadControlPrefix);
+	wr << jobId;
+	return wr.toValue();
+}
+
+Value bulkJobControlStateValue(const BulkJobControlState& controlState) {
+	return ObjectWriter::toValue(controlState, IncludeVersion());
+}
+
+BulkJobControlState decodeBulkJobControlState(const ValueRef& value) {
+	BulkJobControlState controlState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(controlState);
+	return controlState;
+}
+
 // Range Lock
 const std::string rangeLockNameForBulkLoad = "BulkLoad";
 

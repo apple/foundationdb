@@ -1640,6 +1640,9 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 	RangeResult result;
 	std::vector<Future<Void>> bulkLoadActors;
 	KeyRange range;
+	// Pause is a property of the owning job, but tasks are walked individually and a task may have been
+	// submitted without a job at all. Resolve each job once per pass rather than once per task.
+	std::map<UID, bool> jobPaused;
 	while (beginKey < endKey) {
 		Error err;
 		try {
@@ -1668,6 +1671,25 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 				if (bulkLoadTaskState.phase == BulkLoadPhase::Submitted ||
 				    bulkLoadTaskState.phase == BulkLoadPhase::Triggered ||
 				    bulkLoadTaskState.phase == BulkLoadPhase::Running) {
+					// While the owning job is paused, admit nothing new. Tasks already handed to the
+					// engine keep running, so the job drains rather than stopping on the spot. A task
+					// with no owning job cannot be paused and is always eligible.
+					UID taskJobId = bulkLoadTaskState.getJobId();
+					if (taskJobId.isValid()) {
+						auto cached = jobPaused.find(taskJobId);
+						if (cached == jobPaused.end()) {
+							Optional<BulkJobControlState> control =
+							    co_await getBulkJobControl(cx, taskJobId, /*isBulkDump=*/false);
+							cached = jobPaused.emplace(taskJobId, control.present() && control.get().isPaused()).first;
+						}
+						if (cached->second) {
+							TraceEvent(SevInfo, "DDBulkLoadTaskJobPaused", self->ddId)
+							    .suppressFor(60.0)
+							    .detail("JobId", taskJobId)
+							    .detail("TaskRange", bulkLoadTaskState.getRange());
+							continue;
+						}
+					}
 					// Limit parallelism
 					while (true) {
 						if (self->bulkLoadEngineParallelismLimitor.canStart()) {
@@ -3142,6 +3164,14 @@ Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 			// through bulkdump_task_outdated.
 			TraceEvent(SevWarnAlways, "DDBulkDumpJobFailed", self->ddId).suppressFor(60.0).detail("JobId", jobId);
 		} else {
+			// An operator pause stops admitting new tasks; tasks already dispatched are left to finish,
+			// so the job quiesces over the drain time of the work in flight rather than at once.
+			Optional<BulkJobControlState> control = co_await getBulkJobControl(cx, jobId, /*isBulkDump=*/true);
+			if (control.present() && control.get().isPaused()) {
+				TraceEvent(SevInfo, "DDBulkDumpManagerJobPaused", self->ddId).suppressFor(60.0).detail("JobId", jobId);
+				co_await delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
+				continue;
+			}
 			// Schedule the job
 			co_await scheduleBulkDumpJob(self);
 		}

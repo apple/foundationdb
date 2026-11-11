@@ -400,6 +400,15 @@ Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId);
 Future<Void> setBulkLoadOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo);
 Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId);
 
+// Operator control over a running bulk job. isBulkDump selects the bulkdump or bulkload namespace.
+// An absent control record is returned as an empty Optional and means no control has been applied.
+Future<Void> setBulkJobControl(Database cx, UID jobId, BulkJobControlState controlState, bool isBulkDump);
+Future<Optional<BulkJobControlState>> getBulkJobControl(Database cx, UID jobId, bool isBulkDump);
+
+// Set one control field without discarding the others.
+Future<Void> setBulkJobPaused(Database cx, UID jobId, bool paused, bool isBulkDump);
+Future<Void> clearBulkJobControl(Database cx, UID jobId, bool isBulkDump);
+
 // ==================== End Progress Tracking ====================
 
 Future<Void> printHealthyZone(Database cx);
