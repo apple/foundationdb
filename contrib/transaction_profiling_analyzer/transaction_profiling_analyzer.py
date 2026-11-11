@@ -36,7 +36,11 @@ from fdb.impl import strinc
 import json
 from json import JSONEncoder
 import logging
+import os
+import socket
 import struct
+import sys
+import uuid
 from bisect import bisect_left
 from bisect import bisect_right
 import time
@@ -931,6 +935,188 @@ class WriteCounter(object):
         return results
 
 
+def printable(b):
+    """Same escaping as fdbcli and trace events: printable ASCII as-is, backslash doubled, other bytes as \\xNN."""
+    if isinstance(b, str):
+        return b
+    return "".join(
+        "\\\\" if c == 92 else chr(c) if 32 <= c < 127 else "\\x%02x" % c for c in b
+    )
+
+
+def connection_string(cluster_file):
+    """The cluster file's connection string, looked up the same way fdb.open finds the file."""
+    for path in [
+        cluster_file,
+        os.environ.get("FDB_CLUSTER_FILE"),
+        "fdb.cluster",
+        "/etc/foundationdb/fdb.cluster",
+        "/usr/local/etc/foundationdb/fdb.cluster",
+    ]:
+        if path and os.path.exists(path):
+            with open(path) as f:
+                lines = [
+                    line.strip()
+                    for line in f
+                    if line.strip() and not line.startswith("#")
+                ]
+            return lines[-1]
+    return ""
+
+
+def cluster_description(cluster_file):
+    """The description part of the connection string, description:id@coordinators."""
+    return connection_string(cluster_file).split(":")[0]
+
+
+def local_ip(cluster_file):
+    """The local IP this client reaches the coordinators from, i.e. what the OS picks for a UDP socket aimed at a
+    coordinator (nothing is sent). Same way fdb picks the IP for client trace files."""
+    coordinators = connection_string(cluster_file).partition("@")[2]
+    for coordinator in coordinators.split(","):
+        address = coordinator.strip()
+        if address.endswith(":tls"):
+            address = address[: -len(":tls")]
+        host, _, port = address.rpartition(":")
+        try:
+            for family, _, _, _, sockaddr in socket.getaddrinfo(
+                host.strip("[]"), int(port), type=socket.SOCK_DGRAM
+            ):
+                with socket.socket(family, socket.SOCK_DGRAM) as s:
+                    s.connect(sockaddr)
+                    return s.getsockname()[0]
+        except (OSError, ValueError):
+            continue
+    return ""
+
+
+AUDIT_LOG_FILE_NAME = "transaction_profiling_analyzer_audit.json"
+AUDIT_LOG_ENV = "FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE"
+
+
+def audit_log_path(audit_log=False, audit_log_dir=None):
+    """AUDIT_LOG_FILE_NAME in the audit log directory, or None if audit logging is off. Set up like fdbcli's audit
+    logging: --audit-log or setting FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE turns it on, like
+    FDB_NETWORK_OPTION_TRACE_ENABLE does for tracing. The directory is the FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE
+    value if it's set, else --audit-log-dir. Like FDB_NETWORK_OPTION_TRACE_ENABLE over fdbcli's --log-dir, the env
+    var wins even when empty. If that's empty, it's the FDB_NETWORK_OPTION_TRACE_ENABLE directory next to libfdb_c's
+    trace files, else the current directory. Exits with a message if --audit-log-dir is given with audit logging off,
+    or if the directory doesn't exist or isn't writable."""
+    if not audit_log and AUDIT_LOG_ENV not in os.environ:
+        if audit_log_dir:
+            # don't silently ignore it, or reads would go unaudited
+            sys.exit(
+                "ERROR: --audit-log-dir requires audit logging to be enabled with --audit-log or "
+                + AUDIT_LOG_ENV
+            )
+        return None
+    log_dir = (
+        os.environ[AUDIT_LOG_ENV] if AUDIT_LOG_ENV in os.environ else audit_log_dir
+    )
+    log_dir = log_dir or os.environ.get("FDB_NETWORK_OPTION_TRACE_ENABLE") or "."
+    if not os.path.isdir(log_dir) or not os.access(log_dir, os.W_OK | os.X_OK):
+        sys.exit(
+            "ERROR: audit log directory `%s' does not exist or is not writable"
+            % log_dir
+        )
+    return os.path.join(log_dir, AUDIT_LOG_FILE_NAME)
+
+
+class AuditLog(object):
+    """Appends one JSON line per output the tool prints. Entries from the same input share a reqid."""
+
+    def __init__(self, path, cluster, ip_address=""):
+        open(
+            path, "a"
+        ).close()  # fail at startup, not mid-run, if the file isn't writable
+        self.path = path
+        self.cluster = cluster
+        self.ip_address = ip_address
+
+    @staticmethod
+    def new_reqid():
+        return uuid.uuid4().hex[:16]
+
+    def log(self, reqid, operation, input, **output):
+        record = {
+            "ts": datetime.datetime.now(datetime.timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            "level": "info",
+            "msg": "TransactionProfilingAnalyzerAudit",
+            "cluster": self.cluster,
+            "ip_address": self.ip_address,
+            "reqid": reqid,
+            "operation": operation,
+            "input": input,
+        }
+        record.update(output)
+        with open(self.path, "a") as f:
+            f.write(
+                json.dumps(
+                    record,
+                    default=lambda o: o.name if isinstance(o, Enum) else printable(o),
+                )
+                + "\n"
+            )
+
+    def log_transaction(self, info):
+        """One entry per key, range or mutation of each decoded operation in a printed transaction."""
+        ops = [("get", op) for op in info.gets] + [
+            ("get_range", op) for op in info.get_ranges
+        ]
+        ops += [("commit", info.commit)] if info.commit else []
+        ops += [("error_get", op) for op in info.error_gets] + [
+            ("error_get_range", op) for op in info.error_get_ranges
+        ]
+        ops += [("error_commit", op) for op in info.error_commits]
+        for operation, op in ops:
+            reqid = self.new_reqid()
+            # the op's own fields, minus what's logged as output and tenant
+            fields = {
+                k: v
+                for k, v in vars(op).items()
+                if k
+                not in (
+                    "key",
+                    "key_range",
+                    "mutations",
+                    "read_conflict_range",
+                    "write_conflict_range",
+                    "tenant",
+                )
+            }
+            if hasattr(op, "key"):
+                self.log(reqid, operation, fields, key=op.key)
+            if hasattr(op, "key_range"):
+                self.log(
+                    reqid,
+                    operation,
+                    fields,
+                    key=op.key_range.start_key,
+                    end_key=op.key_range.end_key,
+                )
+            for m in getattr(op, "mutations", []):
+                self.log(
+                    reqid,
+                    operation,
+                    fields,
+                    mutation_type=m.code,
+                    key=m.param_one,
+                    value=m.param_two,
+                )
+            for kind in ["read_conflict_range", "write_conflict_range"]:
+                for r in getattr(op, kind, []):
+                    self.log(
+                        reqid,
+                        operation,
+                        fields,
+                        conflict_range=kind,
+                        key=r.start_key,
+                        end_key=r.end_key,
+                    )
+
+
 def connect(cluster_file=None):
     db = fdb.open(cluster_file=cluster_file)
     return db
@@ -1029,6 +1215,21 @@ def main():
         help="Only print range boundaries that exist in a single shard",
     )
     parser.add_argument(
+        "--audit-log",
+        action="store_true",
+        help="Append a JSON line for every key, range or mutation this prints to %s. Also enabled "
+        "by setting %s, whose value, if not empty, is the audit log directory."
+        % (AUDIT_LOG_FILE_NAME, AUDIT_LOG_ENV),
+    )
+    parser.add_argument(
+        "--audit-log-dir",
+        type=str,
+        help="Directory for %s. Defaults to the FDB_NETWORK_OPTION_TRACE_ENABLE directory, then the "
+        "current directory. Requires audit logging to be enabled. %s, if set, overrides it, like "
+        "FDB_NETWORK_OPTION_TRACE_ENABLE does fdbcli's --log-dir."
+        % (AUDIT_LOG_FILE_NAME, AUDIT_LOG_ENV),
+    )
+    parser.add_argument(
         "-a",
         "--filter-address",
         action="append",
@@ -1036,6 +1237,13 @@ def main():
     )
 
     args = parser.parse_args()
+
+    audit = None
+    path = audit_log_path(args.audit_log, args.audit_log_dir)
+    if path:
+        audit = AuditLog(
+            path, cluster_description(args.cluster_file), local_ip(args.cluster_file)
+        )
 
     type_filter = set()
     if args.filter_get_version:
@@ -1114,6 +1322,8 @@ def main():
         if info.has_types():
             if not write_counter and not read_counter:
                 print(info.to_json())
+                if audit:
+                    audit.log_transaction(info)
             else:
                 if write_counter:
                     write_counter.process(info)
@@ -1122,6 +1332,13 @@ def main():
 
     def print_top(top, total, context):
         if top:
+            reqid = AuditLog.new_reqid()
+            query = {
+                "top_requests": args.top_requests,
+                "filter_address": args.filter_address,
+                "min_timestamp": min_timestamp,
+                "max_timestamp": max_timestamp,
+            }
             running_count = 0
             for (idx, (start, end, count, addresses)) in enumerate(top):
                 running_count += count
@@ -1142,11 +1359,29 @@ def main():
                     )
                 )
                 print("    shard addresses: %s\n" % ", ".join(addresses))
+                if audit:
+                    audit.log(
+                        reqid,
+                        "top_" + context,
+                        query,
+                        key=start,
+                        end_key=end,
+                        count=count,
+                        shard_addresses=addresses,
+                    )
 
         else:
             print(" No %s found" % context)
 
     def print_range_boundaries(range_boundaries, context):
+        reqid = AuditLog.new_reqid()
+        query = {
+            "num_buckets": args.num_buckets,
+            "single_shard_ranges_only": args.single_shard_ranges_only,
+            "filter_address": args.filter_address,
+            "min_timestamp": min_timestamp,
+            "max_timestamp": max_timestamp,
+        }
         omit_start = None
         for (
             idx,
@@ -1198,6 +1433,18 @@ def main():
                             shard_count,
                             addresses_string,
                         )
+                    )
+                if audit:
+                    audit.log(
+                        reqid,
+                        context[:-1] + "_boundaries",
+                        query,
+                        key=start,
+                        end_key=end,
+                        count=start_count,
+                        total_count=total_count,
+                        shard_count=shard_count,
+                        shard_addresses=addresses,
                     )
             elif omit_start is None:
                 omit_start = idx
