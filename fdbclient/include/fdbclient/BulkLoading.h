@@ -1189,25 +1189,30 @@ struct BulkJobControlState {
 	// completion, so a pause takes effect over the drain time of the work in flight, not immediately.
 	bool paused = false;
 
-	// Wall-clock seconds the job should aim to take, measured from the owner record's submitTime; zero
-	// means unpaced. NOT YET ENFORCED: defined now so the persisted format does not have to change again
-	// when admission pacing lands, but nothing reads it and no command sets it.
-	double targetDurationSeconds = 0;
+	// Wall-clock time by which the job should aim to finish; zero means unpaced. Absolute rather than a
+	// duration because there is no reliable job start time to measure a duration from: only the backup
+	// path writes an owner record carrying submitTime, a job submitted through fdbcli has none, and
+	// BulkDumpState::getSubmitTime() returns now(). Whoever applies the target resolves it against its
+	// own clock instead.
+	//
+	// NOT YET ENFORCED: defined now so the persisted format does not have to change again when admission
+	// pacing lands, but nothing reads it and no command sets it.
+	double targetEndTime = 0;
 
 	BulkJobControlState() = default;
 
 	bool isPaused() const { return paused; }
 
-	bool hasTargetDuration() const { return targetDurationSeconds > 0; }
+	bool hasTargetEndTime() const { return targetEndTime > 0; }
 
 	std::string toString() const {
 		return "BulkJobControlState: [Paused]: " + std::string(paused ? "true" : "false") +
-		       ", [TargetDurationSeconds]: " + std::to_string(targetDurationSeconds);
+		       ", [TargetEndTime]: " + std::to_string(targetEndTime);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, paused, targetDurationSeconds);
+		serializer(ar, paused, targetEndTime);
 	}
 };
 #endif

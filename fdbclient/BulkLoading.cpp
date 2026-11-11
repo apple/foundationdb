@@ -352,37 +352,37 @@ TEST_CASE("/bulkload/manifest/checksumRoundTrip") {
 TEST_CASE("/bulkjobcontrol/defaultsMeanNoControl") {
 	const BulkJobControlState control;
 	ASSERT(!control.isPaused());
-	ASSERT(!control.hasTargetDuration());
-	ASSERT_EQ(control.targetDurationSeconds, 0);
+	ASSERT(!control.hasTargetEndTime());
+	ASSERT_EQ(control.targetEndTime, 0);
 
 	const BulkJobControlState decodedDefault = decodeBulkJobControlState(bulkJobControlStateValue(control));
 	ASSERT(!decodedDefault.isPaused());
-	ASSERT(!decodedDefault.hasTargetDuration());
+	ASSERT(!decodedDefault.hasTargetEndTime());
 	return Void();
 }
 
 TEST_CASE("/bulkjobcontrol/roundTrip") {
 	BulkJobControlState control;
 	control.paused = true;
-	control.targetDurationSeconds = 3600.5;
+	control.targetEndTime = 3600.5;
 
 	const BulkJobControlState decoded = decodeBulkJobControlState(bulkJobControlStateValue(control));
 	ASSERT(decoded.isPaused());
-	ASSERT(decoded.hasTargetDuration());
-	ASSERT_EQ(decoded.targetDurationSeconds, 3600.5);
+	ASSERT(decoded.hasTargetEndTime());
+	ASSERT_EQ(decoded.targetEndTime, 3600.5);
 
-	// Pause and target duration are set by separate commands, so neither may ride on the other: a paused
-	// job with no duration and an unpaused job with one both have to survive a round trip.
+	// Pause and the target end time are set by separate commands, so neither may ride on the other: a
+	// paused job with no target and an unpaused job with one both have to survive a round trip.
 	BulkJobControlState pausedOnly;
 	pausedOnly.paused = true;
 	const BulkJobControlState decodedPausedOnly = decodeBulkJobControlState(bulkJobControlStateValue(pausedOnly));
 	ASSERT(decodedPausedOnly.isPaused());
-	ASSERT(!decodedPausedOnly.hasTargetDuration());
+	ASSERT(!decodedPausedOnly.hasTargetEndTime());
 
 	BulkJobControlState pacedOnly;
-	pacedOnly.targetDurationSeconds = 120;
+	pacedOnly.targetEndTime = 120;
 	const BulkJobControlState decodedPacedOnly = decodeBulkJobControlState(bulkJobControlStateValue(pacedOnly));
 	ASSERT(!decodedPacedOnly.isPaused());
-	ASSERT(decodedPacedOnly.hasTargetDuration());
+	ASSERT(decodedPacedOnly.hasTargetEndTime());
 	return Void();
 }
