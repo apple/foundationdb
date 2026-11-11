@@ -379,6 +379,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/AllSimUnitTests.toml IGNORE)
   add_fdb_test(TEST_FILES rare/StatusBuilderPerf.toml)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
+  add_fdb_test(TEST_FILES rare/YCSB.toml)
 
   if (RESTART_TEST)
     add_fdb_test(
