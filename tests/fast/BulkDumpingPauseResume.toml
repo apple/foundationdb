@@ -1,0 +1,100 @@
+[configuration]
+storageEngineExcludeTypes = ["ssd-sharded-rocksdb"] #FIXME: remove after allowing to do bulkloading with fetchKey and shardedrocksdb
+
+disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
+
+# DD's bulk-load team selection rejects any team that shares a server with the source team
+# (DDTeamCollection.cpp:268-284). Pin redundancy to 'triple' (matching
+# PhysicalShardMove and StorageServerCheckpointRestore which exercise similar bulk-load
+# paths) so the simulator cannot pick three_data_hall or other modes whose tighter
+# topology constraints leave team selection with no disjoint candidate team -- the
+# test would then stall on DDBulkLoadEngineTaskGetTeamFailedToFindValidTeam, the load
+# would produce no data, and the workload's processCheck assertion would fire
+# (BulkDumpingWorkLoadError KVS=N NewKVS=0).
+config = 'triple'
+
+# Pair the pinned redundancy with storage-class capacity for a disjoint team. The
+# simulator adds the extra storage count to machineCount before creating ordinary
+# machines, then adds the dedicated storage machines separately. Start with ten so
+# the result is 15 ordinary machines and five dedicated storage machines.
+machineCount = 10
+extraStorageMachineCountPerDC = 5
+
+# Without datacenters=1 the simulator picks randomInt(1,4) DCs (SimulatedCluster.cpp
+# line ~1610). When it picks 2, the 15 machines get split ~7-8 per DC, the primary
+# DC then has only 4-5 non-source servers under triple replication, and DD's bulk-load
+# team selection can fail to find a disjoint candidate. Pin to a single DC so all
+# 15 machines participate in team formation.
+datacenters = 1
+
+# This test validates bulk-dump mechanics, not multi-region DR. Forcing single-region
+# avoids the same team-diversity stall when machineCount gets split across regions.
+generateFearless = false
+
+[[knobs]]
+# This knob is commented out since the knob override is done *after* the simulation system is set up. However,
+# this is not going to completely work:
+# The purpose of setting the knob to true was to enable the shard rocksdb storage engine
+# The shard rocksdb storage engine is set up before this knob is overridden
+# The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check.
+shard_encode_location_metadata = true
+
+# Rely on RangeLock
+enable_read_lock_on_range = true
+
+# Do not support version vector
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
+
+# Set high enough sample rate to test bytes sampling
+min_byte_sampling_probability = 0.5
+
+# CC can repeatedly re-recruit new DD for the unfit recruitment which can block the test.
+cc_enforce_use_unfit_dd_in_sim = true
+
+# AuditStorage replica check can cause tooManyTraceEvents because both tests are large
+disable_audit_storage_final_replica_check_in_sim = true
+
+# Since the machineCount is large, this test produces more trace events to complete
+max_trace_lines = 5000000
+
+# Force many small shards so the job has many tasks: a pause has to be observable with work still
+# outstanding, and 1000 keys in a handful of shards would leave no mid-flight window to pause in.
+min_shard_bytes = 1000
+
+# Stop DD coalescing the small shards straight back together; paired with min_shard_bytes this is
+# the same recipe DDPipelineSaturation and ShardEncodeRollback use to force many small shards.
+shard_bytes_per_sqrt_bytes = 0
+
+# Serialize dispatch. With parallelism 1 the dispatch pass spends most of its life blocked on the
+# limiter, which is exactly where a pause consulted only once per pass would be ignored -- so this is
+# what makes the regression this test guards against observable rather than lucky.
+dd_bulkdump_parallelism = 1
+
+[[test]]
+testTitle = 'BulkDumpingPauseResumeWorkload'
+useDB = true
+waitForQuiescence = false
+
+    [[test.workload]]
+    testName = 'BulkDumpingWorkload'
+    # 1 is BulkLoadTransportMethod::CP
+    bulkLoadTransportMethod = 1
+    jobSubmitTimeout = 600.0
+
+    # Pause the job mid-flight, require that no further task is admitted while paused, that work
+    # already dispatched still finishes, and that resume restarts admission. See probePauseResume.
+    testPauseResume = true
+    # Enough keys that the range splits into several shards, hence several dump tasks.
+    dataKeyCount = 60000
+    minTasksToProbe = 8
+    pauseProbeTimeout = 900.0
+
+    # The workload otherwise coinflips between the full keyspace and a random subrange. A random
+    # subrange of a 1000-key dataset can hold almost no data and so produce too few tasks for a
+    # mid-flight pause to exist at all; pin the full keyspace so the job always has work to pause.
+    targetFullKeyspace = true
+
+    # The dump is the subject here; the load half would only lengthen the run.
+    runLoad = false
