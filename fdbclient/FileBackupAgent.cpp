@@ -8599,23 +8599,6 @@ public:
 							bdDoc.setKey("AvgBytesPerSecond", bdProgress.avgBytesPerSecond());
 							bdDoc.setKey("ElapsedSeconds", bdProgress.elapsedSeconds);
 
-							// Add stalled tasks if any
-							if (!bdProgress.stalledTasks.empty()) {
-								JsonBuilderArray stalledArray;
-								for (const auto& stalled : bdProgress.stalledTasks) {
-									JsonBuilderObject stalledDoc;
-									stalledDoc.setKey("TaskId", stalled.taskId.toString());
-									stalledDoc.setKey("Range", stalled.range.toString());
-									stalledDoc.setKey("StalledSeconds", stalled.stalledSeconds);
-									stalledDoc.setKey("RestartCount", stalled.restartCount);
-									if (!stalled.lastError.empty()) {
-										stalledDoc.setKey("LastError", stalled.lastError);
-									}
-									stalledArray.push_back(stalledDoc);
-								}
-								bdDoc.setKey("StalledTasks", stalledArray);
-							}
-
 							doc.setKey("BulkDumpProgress", bdDoc);
 						}
 					}
@@ -8810,22 +8793,6 @@ public:
 									statusText +=
 									    format(" Elapsed: %s\n",
 									           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
-								}
-
-								if (!bdProgress.stalledTasks.empty()) {
-									statusText += format("\nWARNING: %zu stalled tasks (no progress > 60s):\n",
-									                     bdProgress.stalledTasks.size());
-									for (const auto& stalled : bdProgress.stalledTasks) {
-										statusText += format(" Task %s: %s, stalled %.0fs, %d restarts\n",
-										                     stalled.taskId.shortString().c_str(),
-										                     stalled.range.toString().c_str(),
-										                     stalled.stalledSeconds,
-										                     stalled.restartCount);
-										if (!stalled.lastError.empty()) {
-											statusText +=
-											    format("           Last error: %s\n", stalled.lastError.c_str());
-										}
-									}
 								}
 							} else {
 								statusText += " Status: pending\n";
