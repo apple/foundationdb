@@ -144,14 +144,20 @@ public:
 			tr->set(key, largeBase);
 			return Void();
 		});
-		Optional<Value> sequential = co_await runRYWTransaction(
+		Optional<Value> inTransaction = co_await runRYWTransaction(
 		    cx, [key, chunk](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 			    tr->atomicOp(key, chunk, MutationRef::AppendIfFits);
 			    tr->atomicOp(key, chunk, MutationRef::AppendIfFits);
 			    return tr->get(key);
 		    });
-		ASSERT(sequential.present());
-		ASSERT(sequential.get().size() == largeBase.size() + chunk.size());
+		ASSERT(inTransaction.present());
+		ASSERT(inTransaction.get().size() == largeBase.size() + chunk.size());
+
+		// The server applies the two appends in order too, so the committed value matches.
+		Optional<Value> committed = co_await runRYWTransaction(
+		    cx, [key](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
+		ASSERT(committed.present());
+		ASSERT(committed.get().size() == largeBase.size() + chunk.size());
 	}
 
 	// Test Atomic ops on non existing keys that results in a set

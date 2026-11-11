@@ -425,9 +425,6 @@ RYWMutation WriteMap::coalesce(RYWMutation existingEntry, RYWMutation newEntry, 
 		switch (existingEntry.type) {
 		case MutationRef::SetValue:
 			return RYWMutation(doAppendIfFits(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
-		case MutationRef::AppendIfFits:
-			return RYWMutation(doAppendIfFits(existingEntry.value, newEntry.value.get(), arena),
-			                   MutationRef::AppendIfFits);
 		default:
 			throw operation_failed();
 		}
@@ -519,15 +516,13 @@ RYWMutation WriteMap::coalesce(RYWMutation existingEntry, RYWMutation newEntry, 
 
 void WriteMap::coalesceOver(OperationStack& stack, RYWMutation newEntry, Arena& arena) {
 	RYWMutation existingEntry = stack.top();
-	if (existingEntry.type == newEntry.type && newEntry.type != MutationRef::CompareAndClear) {
-		// AppendIfFits is not associative under truncation: merging operands before the
-		// base value is known can reject appends that would succeed if applied one at a
-		// time (e.g. 70KB base + 20KB + 20KB should yield 90KB when VALUE_SIZE_LIMIT is
-		// 100KB, but a coalesced 40KB operand is rejected against the 70KB base).
-		if (newEntry.type == MutationRef::AppendIfFits) {
-			stack.push(newEntry);
-		} else if (isNonAssociativeOp(existingEntry.type) && existingEntry.value.present() &&
-		           existingEntry.value.get().size() != newEntry.value.get().size()) {
+	// CompareAndClear and AppendIfFits are never merged with themselves: whether each applies depends on the base
+	// value, which is only known once the operands are replayed on it, so a merged operand can differ from sequential
+	// application.
+	if (existingEntry.type == newEntry.type && newEntry.type != MutationRef::CompareAndClear &&
+	    newEntry.type != MutationRef::AppendIfFits) {
+		if (isNonAssociativeOp(existingEntry.type) && existingEntry.value.present() &&
+		    existingEntry.value.get().size() != newEntry.value.get().size()) {
 			stack.push(newEntry);
 		} else {
 			stack.poppush(coalesce(existingEntry, newEntry, arena));

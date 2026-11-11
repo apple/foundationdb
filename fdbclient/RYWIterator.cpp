@@ -673,6 +673,119 @@ TEST_CASE("/fdbclient/WriteMap/appendIfFitsNonAssociative") {
 	return Void();
 }
 
+// Pending AppendIfFits operands over an unknown base must give the same value as applying them one at a time.
+TEST_CASE("/fdbclient/WriteMap/appendIfFitsSequentialEquivalence") {
+	const int limit = CLIENT_KNOBS->VALUE_SIZE_LIMIT;
+	for (int iter = 0; iter < 200; iter++) {
+		Arena arena;
+		WriteMap writes = WriteMap(&arena);
+		auto randomSize = [&]() {
+			switch (deterministicRandom()->randomInt(0, 4)) {
+			case 0:
+				return 0;
+			case 1:
+				return deterministicRandom()->randomInt(1, 100);
+			case 2:
+				return deterministicRandom()->randomInt(1, limit / 3);
+			default:
+				return deterministicRandom()->randomInt(1, limit + 1);
+			}
+		};
+		Optional<ValueRef> base;
+		if (deterministicRandom()->coinflip()) {
+			base = StringRef(arena, std::string(randomSize(), 'a'));
+		}
+
+		Optional<ValueRef> expected = base;
+		int n = deterministicRandom()->randomInt(1, 12);
+		for (int i = 0; i < n; i++) {
+			ValueRef operand = StringRef(arena, std::string(randomSize(), 'b' + i));
+			writes.mutate("k"_sr, MutationRef::AppendIfFits, operand, true);
+			expected = doAppendIfFits(expected, operand, arena);
+		}
+
+		WriteMap::iterator it(&writes);
+		it.skip("k"_sr);
+		ASSERT(it.op().size() == n);
+		RYWMutation actual = WriteMap::coalesceUnder(it.op(), base, arena);
+		ASSERT(actual.type == MutationRef::SetValue);
+		ASSERT(actual.value.present() && actual.value.get() == expected.get());
+	}
+	return Void();
+}
+
+static Optional<ValueRef> applyAtomicOpSequentially(MutationRef::Type t, Optional<ValueRef> e, ValueRef o, Arena& a) {
+	switch (t) {
+	case MutationRef::AddValue:
+		return doLittleEndianAdd(e, o, a);
+	case MutationRef::And:
+		return doAnd(e, o, a);
+	case MutationRef::AndV2:
+		return doAndV2(e, o, a);
+	case MutationRef::Or:
+		return doOr(e, o, a);
+	case MutationRef::Xor:
+		return doXor(e, o, a);
+	case MutationRef::AppendIfFits:
+		return doAppendIfFits(e, o, a);
+	case MutationRef::Max:
+		return doMax(e, o, a);
+	case MutationRef::Min:
+		return doMin(e, o, a);
+	case MutationRef::MinV2:
+		return doMinV2(e, o, a);
+	case MutationRef::ByteMin:
+		return doByteMin(e, o, a);
+	case MutationRef::ByteMax:
+		return doByteMax(e, o, a);
+	case MutationRef::CompareAndClear:
+		return doCompareAndClear(e, o, a);
+	default:
+		ASSERT(false);
+		return Optional<ValueRef>();
+	}
+}
+
+// Pending atomic ops over an unknown base must read back the same as applying them one at a time against it.
+TEST_CASE("/fdbclient/WriteMap/atomicOpsSequentialEquivalence") {
+	std::vector<MutationRef::Type> types = {
+		MutationRef::AddValue, MutationRef::And,          MutationRef::AndV2,   MutationRef::Or,
+		MutationRef::Xor,      MutationRef::AppendIfFits, MutationRef::Max,     MutationRef::Min,
+		MutationRef::MinV2,    MutationRef::ByteMin,      MutationRef::ByteMax, MutationRef::CompareAndClear
+	};
+	for (int mode = -1; mode < (int)types.size(); mode++) { // -1 = mixed
+		for (int iter = 0; iter < 2000; iter++) {
+			Arena arena;
+			WriteMap writes = WriteMap(&arena);
+			auto rv = [&](bool allowEmpty) {
+				int len = deterministicRandom()->randomInt(allowEmpty ? 0 : 1, 5);
+				std::string str;
+				for (int i = 0; i < len; i++)
+					str.push_back((char)(deterministicRandom()->coinflip() ? deterministicRandom()->randomInt(0, 3)
+					                                                       : deterministicRandom()->randomInt(0, 256)));
+				return StringRef(arena, str);
+			};
+			Optional<ValueRef> base;
+			if (deterministicRandom()->coinflip())
+				base = rv(true);
+			Optional<ValueRef> expected = base;
+			int n = deterministicRandom()->randomInt(2, 7);
+			for (int i = 0; i < n; i++) {
+				MutationRef::Type t = mode < 0 ? deterministicRandom()->randomChoice(types) : types[mode];
+				ValueRef o = rv(true);
+				writes.mutate("k"_sr, t, o, true);
+				expected = applyAtomicOpSequentially(t, expected, o, arena);
+			}
+			WriteMap::iterator it(&writes);
+			it.skip("k"_sr);
+			RYWMutation actual = WriteMap::coalesceUnder(it.op(), base, arena);
+			ASSERT(actual.value.present() == expected.present());
+			ASSERT(!expected.present() || actual.value.get() == expected.get());
+		}
+	}
+	return Void();
+}
+
 TEST_CASE("/fdbclient/WriteMap/random") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
