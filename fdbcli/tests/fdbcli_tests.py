@@ -226,6 +226,43 @@ def lockAndUnlock(logger):
     )
 
 
+@enable_logging()
+def exclude_on_locked_database(logger):
+    lines = run_fdbcli_command("lock").split("\n")
+    assert lines[1] == "Database locked."
+    lock_uid = lines[0][-32:]
+    try:
+        # Listing exclusions only reads, so it must not wait for the lock
+        process = subprocess.run(
+            command_template + ["exclude"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=fdbcli_env,
+            timeout=30,
+        )
+        output = process.stdout.decode("utf-8")
+        assert (
+            "There are currently no servers or localities excluded from the database."
+            in output
+        ), "exit={} stdout={} stderr={}".format(
+            process.returncode, output, process.stderr.decode("utf-8")
+        )
+    finally:
+        process = subprocess.Popen(
+            command_template + ["unlock " + lock_uid],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            env=fdbcli_env,
+        )
+        process.stdout.readline()
+        passphrase = process.stdout.readline()
+        output, _ = process.communicate(input=passphrase, timeout=30)
+        assert output.decode("utf-8").strip() == "Database unlocked."
+    assert not get_value_from_status_json(
+        True, "cluster", "database_lock_state", "locked"
+    )
+
+
 def expensive_data_check_empty_all():
     result = subprocess.run(
         command_template + ["expensive_data_check all; sleep 0"],
@@ -1247,6 +1284,7 @@ if __name__ == "__main__":
         expensive_data_check_empty_all()
         kill()
         lockAndUnlock()
+        exclude_on_locked_database()
         maintenance()
         profile()
         # TODO: re-enable once stable
