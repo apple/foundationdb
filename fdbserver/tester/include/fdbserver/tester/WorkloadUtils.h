@@ -90,7 +90,8 @@ public:
 	bool dumpAfterTest;
 	bool clearAfterTest;
 	bool useDB;
-	bool runFailureWorkloads = true;
+	// Off simulation, failure injection workloads act on real processes (Attrition suspends them indefinitely)
+	bool runFailureWorkloads = g_network->isSimulated();
 	double startDelay;
 	int phases;
 	Standalone<VectorRef<VectorRef<KeyValueRef>>> options;
