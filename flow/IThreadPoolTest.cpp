@@ -18,18 +18,24 @@
  * limitations under the License.
  */
 
-// Thread naming only works on Linux.
-#if defined(__linux__)
+#include <atomic>
+#include <cstdlib>
+#include <iostream>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "flow/IThreadPool.h"
-
-#include <pthread.h>
-#include <iostream>
-
 #include "flow/Coroutines.h"
 #include "flow/UnitTest.h"
 
 void forceLinkIThreadPoolTests() {}
+
+// Thread naming only works on Linux.
+#if defined(__linux__)
+
+#include <pthread.h>
 
 struct ThreadNameReceiver final : IThreadPoolReceiver {
 	void init() override {}
@@ -231,6 +237,201 @@ TEST_CASE("/flow/IThreadPool/ImplicitStop") {
 	co_await future;
 }
 
-#else
-void forceLinkIThreadPoolTests() {}
 #endif
+
+// Generic Dynamic ThreadPool tests
+// will fallback to the standard generic threadpool if jthread is not supported
+namespace details {
+
+static std::mutex threadsMutex;
+static uint32_t maxTemporaryThreads = 0;
+static std::atomic<uint32_t> numTemporaryThreads = 0;
+static std::unordered_set<std::thread::id> temporaryThreads;
+static uint32_t maxThreads = 0;
+static uint32_t numStaticThreads = 0;
+
+static thread_local uint32_t threadTaskCountRunning = 0;
+static thread_local uint32_t threadTaskCountCompleted = 0;
+static thread_local uint32_t threadTaskCountCancelled = 0;
+
+static std::atomic<uint32_t> taskIndex = 0;
+
+void resetThreadPoolTestState() {
+	maxTemporaryThreads = 0;
+	numTemporaryThreads = 0;
+	temporaryThreads.clear();
+	maxThreads = 0;
+	numStaticThreads = 0;
+	threadTaskCountRunning = 0;
+	threadTaskCountCompleted = 0;
+	threadTaskCountCancelled = 0;
+	taskIndex = 0;
+}
+
+class MockTask;
+
+class ThreadLocalContext : public IThreadPoolReceiver {
+	bool isRunningOnStaticThread;
+	bool initCalled = false;
+
+	uint32_t threadTaskCountLocal = 0;
+
+public:
+	ThreadLocalContext() : isRunningOnStaticThread(false) {}
+	explicit ThreadLocalContext(const bool isRunningOnStaticThread_)
+	  : isRunningOnStaticThread(isRunningOnStaticThread_) {}
+
+	void init() final {
+		// init should only be called once per thread
+		ASSERT(!initCalled);
+		initCalled = true;
+		if (!isRunningOnStaticThread) {
+			numTemporaryThreads.fetch_add(1);
+		}
+
+		// init should only run once before every task execution on this thread.
+		std::unique_lock<std::mutex> lock(threadsMutex);
+		if (!isRunningOnStaticThread) {
+			temporaryThreads.insert(std::this_thread::get_id());
+			maxTemporaryThreads = std::max(maxTemporaryThreads, static_cast<uint32_t>(temporaryThreads.size()));
+		} else {
+			++numStaticThreads;
+		}
+		maxThreads = std::max(maxThreads, numStaticThreads + static_cast<uint32_t>(temporaryThreads.size()));
+	}
+
+	void addTaskCount() {
+		++threadTaskCountLocal;
+	}
+
+	uint32_t getTaskCount() const { return threadTaskCountLocal; }
+
+	virtual ~ThreadLocalContext() {
+		if (threadTaskCountRunning != 0 || threadTaskCountCompleted + threadTaskCountCancelled != threadTaskCountLocal) {
+			std::abort();
+		}
+
+		std::unique_lock<std::mutex> lock(threadsMutex);
+		if (!isRunningOnStaticThread) {
+			temporaryThreads.erase(std::this_thread::get_id());
+		} else {
+			--numStaticThreads;
+		}
+	}
+
+	void action(MockTask& task);
+};
+
+class MockTask final : public TypedAction<ThreadLocalContext, MockTask> {
+	uint32_t myTaskIndex;
+
+public:
+	MockTask() { myTaskIndex = taskIndex.fetch_add(1); }
+
+	uint32_t getTaskIndex() const { return myTaskIndex; }
+
+	void cancel() override final;
+	double getTimeEstimate() const override final;
+
+	ThreadReturnPromise<uint32_t> done;
+};
+
+void ThreadLocalContext::action(MockTask& task) {
+	++threadTaskCountRunning;
+
+	int sleepTime = nondeterministicRandom()->randomInt(10, 100);
+	std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
+	std::cout << "Task executed " << task.getTaskIndex() << std::endl;
+	task.done.send(task.getTaskIndex());
+	std::cout << "Task send done message with task index " << task.getTaskIndex() << std::endl;
+
+	--threadTaskCountRunning;
+	++threadTaskCountCompleted;
+	addTaskCount();
+}
+
+void MockTask::cancel() {
+	// Intended to be blank
+	++threadTaskCountCancelled;
+	TypedAction::cancel();
+}
+
+double MockTask::getTimeEstimate() const {
+	return 0.001;
+}
+
+Future<Void> testDynamicThreadPool(ExplicitVoid = {}) {
+	constexpr uint32_t ALLOWED_TEMPORARY_THREADS = 64;
+
+	resetThreadPoolTestState();
+
+	auto pool = createDynamicThreadPool(
+	    ALLOWED_TEMPORARY_THREADS, std::chrono::milliseconds(1000), []() { return new details::ThreadLocalContext(); });
+	// auto pool = createGenericThreadPool();
+
+	// Add static threads
+	const uint16_t numStaticThreads = nondeterministicRandom()->randomInt(8, 16);
+	{
+		std::cout << "Adding static threads..." << std::endl;
+		for (int i = 0; i < numStaticThreads; ++i) {
+			pool->addThread(new details::ThreadLocalContext(true));
+		}
+		std::cout << "Added static threads " << numStaticThreads << std::endl;
+	}
+
+	std::vector<Future<uint32_t>> tasks;
+	std::unordered_set<uint32_t> notCompletedTasks;
+	for (int rep = 0; rep < 4; ++rep) {
+		// Add tasks
+		{
+			const uint16_t numTasks = nondeterministicRandom()->randomInt(256, 1024);
+			for (int i = 0; i < numTasks; ++i) {
+				auto task = new details::MockTask();
+				notCompletedTasks.insert(task->getTaskIndex());
+				tasks.push_back(task->done.getFuture());
+				pool->post(task);
+			}
+			std::cout << "Added tasks = " << numTasks << std::endl;
+		}
+
+		std::cout << "Waiting for all tasks to complete..." << std::endl;
+		// Wait for all tasks to complete
+		for (auto& task : tasks) {
+			co_await task;
+			auto taskIndex = task.get();
+			// ASSERT(notCompletedTasks.count(taskIndex) > 0);
+			notCompletedTasks.erase(taskIndex);
+		}
+		std::cout << "Number of tasks incomplete: " << notCompletedTasks.size() << std::endl;
+		ASSERT(notCompletedTasks.empty());
+
+		std::cout << "Static threads: " << details::numStaticThreads << std::endl;
+		// Temporary threads should be created when needed
+		std::cout << "Extra threads: " << details::numTemporaryThreads.load() << std::endl;
+		std::cout << "Maximum extra threads running concurrently: " << details::maxThreads - details::numStaticThreads
+		          << std::endl;
+		// We do not assert the exact number of extra threads, as it is not always guaranteed to be created.
+		ASSERT(details::maxThreads >= details::numStaticThreads);
+		// And less than the maximum allowed temporary threads
+		ASSERT(details::maxThreads - details::numStaticThreads <= ALLOWED_TEMPORARY_THREADS);
+
+		std::this_thread::sleep_for(std::chrono::seconds(3));
+	}
+
+	pool->stop();
+
+	// All temporary threads should be cleaned up properly.
+	ASSERT(details::temporaryThreads.empty());
+
+	co_return Void();
+}
+
+} // namespace details
+
+TEST_CASE("flow/IThreadPool/DynamicThreadPool/") {
+	// Run multiple times to bring more confidence on the code
+	for (int i = 0; i < 3; ++i) {
+		std::cout << "Test iteration " << i << std::endl;
+		co_await details::testDynamicThreadPool();
+	}
+}

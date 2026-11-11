@@ -210,6 +210,9 @@ public:
 	}
 
 	bool isSimulated() const override { return false; }
+#if defined(__cpp_lib_jthread) && __cpp_lib_jthread >= 201911
+	std::jthread startJThread(std::function<void(std::stop_token)>&& func) override;
+#endif
 	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override;
 
 	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override;
@@ -1969,6 +1972,12 @@ void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) {
 	return ::startThread(func, arg, stackSize, name);
 }
+
+#if defined(__cpp_lib_jthread) && __cpp_lib_jthread >= 201911
+std::jthread Net2::startJThread(std::function<void(std::stop_token)>&& func) {
+	return ::startJThread(std::move(func));
+}
+#endif
 
 Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket* existingSocket) {
 	if (toAddr.isTLS()) {

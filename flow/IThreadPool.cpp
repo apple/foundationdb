@@ -20,8 +20,22 @@
 
 #include "flow/IThreadPool.h"
 
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 // The ifndef's allow us to compile with pre-built boost - depending on what
 // libraries were enabled when it was built, we can get errors about double-defines.
+#ifndef BOOST_SYSTEM_NO_LIB
+#define BOOST_SYSTEM_NO_LIB
+#endif
 #ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #endif
@@ -29,6 +43,332 @@
 #define BOOST_REGEX_NO_LIB
 #endif
 #include <boost/asio.hpp>
+
+#if defined(__cpp_lib_jthread) && __cpp_lib_jthread >= 201911
+namespace dynamic {
+
+static thread_local std::unique_ptr<IThreadPoolReceiver> contextPerThread = nullptr;
+
+struct TaskThreadCounter {
+	std::atomic<uint32_t> numQueuedTasks = 0;
+	std::atomic<uint32_t> numRunning = 0;
+	std::atomic<uint32_t> numThreads = 0;
+};
+
+class Task {
+	PThreadAction callable;
+
+	TaskThreadCounter& taskThreadCounter;
+
+public:
+	Task(PThreadAction callable_, TaskThreadCounter& taskThreadCounter_)
+	  : callable(std::move(callable_)), taskThreadCounter(taskThreadCounter_) {
+		ASSERT(callable);
+	}
+	Task(Task&&) noexcept;
+
+	Task(const Task&) = delete;
+	Task& operator=(const Task&) = delete;
+
+	~Task();
+
+	void operator()();
+};
+
+Task::Task(Task&& other) noexcept : callable(std::move(other.callable)), taskThreadCounter(other.taskThreadCounter) {
+	other.callable = nullptr;
+}
+
+void Task::operator()() {
+	ASSERT(callable != nullptr);
+	try {
+		// The task is now running
+		++taskThreadCounter.numRunning;
+		--taskThreadCounter.numQueuedTasks;
+		(*callable)(contextPerThread.get());
+	} catch (...) {
+		TraceEvent("TaskException").log();
+	}
+	--taskThreadCounter.numRunning;
+	callable = nullptr;
+}
+
+Task::~Task() {
+	if (callable) {
+		// The task is cancelled
+		--taskThreadCounter.numQueuedTasks;
+		callable->cancel();
+	}
+}
+
+bool initializeContextPerThread(IThreadPoolReceiver* threadContext) {
+	ASSERT(threadContext);
+
+	contextPerThread.reset(threadContext);
+	try {
+		contextPerThread->init();
+		return true;
+	} catch (...) {
+		TraceEvent(SevError, "InitializeContextPerThreadException").log();
+		return false;
+	}
+}
+
+void taskExecutor(std::stop_token stopToken,
+                  std::shared_ptr<boost::asio::io_context> ioContext,
+                  IThreadPoolReceiver* threadContext) {
+	static std::chrono::milliseconds interval(100);
+
+	const auto initialized = initializeContextPerThread(threadContext);
+	ASSERT(initialized);
+	do {
+		try {
+			ioContext->run_one_for(interval);
+		} catch (...) {
+			TraceEvent("TaskExecutorException").log();
+		}
+	} while (!ioContext->stopped() && !stopToken.stop_requested());
+}
+
+class TemporaryThreadsContainer {
+	std::mutex temporaryThreadsMutex;
+	std::unordered_map<std::thread::id, std::jthread> temporaryThreads;
+	std::unordered_set<std::thread::id> temporaryThreadsToSweep;
+	const std::thread::id creatorThreadID;
+
+public:
+	TemporaryThreadsContainer() : creatorThreadID(std::this_thread::get_id()) {}
+	~TemporaryThreadsContainer() {
+		assert(std::this_thread::get_id() == creatorThreadID);
+		for (auto& [threadID, thread] : temporaryThreads) {
+			thread.request_stop();
+		}
+		for (auto& [threadID, thread] : temporaryThreads) {
+			if (thread.joinable()) {
+				thread.join();
+			}
+		}
+	}
+
+	void add(std::jthread&& thread);
+	void sweep();
+	void markRemove(const std::thread::id& id);
+	std::size_t size() const noexcept { return temporaryThreads.size(); }
+};
+
+void TemporaryThreadsContainer::sweep() {
+	// The sweep code MUST NOT run by the temporary threads themselves
+	std::unique_lock<std::mutex> lock(temporaryThreadsMutex);
+	ASSERT(std::this_thread::get_id() == creatorThreadID);
+	for (auto threadID : temporaryThreadsToSweep) {
+		if (temporaryThreads.contains(threadID)) {
+			auto& thread = temporaryThreads.at(threadID);
+			if (thread.joinable()) {
+				thread.join();
+			}
+			temporaryThreads.erase(threadID);
+		}
+	}
+	temporaryThreadsToSweep.clear();
+}
+
+void TemporaryThreadsContainer::add(std::jthread&& thread) {
+	std::unique_lock<std::mutex> lock(temporaryThreadsMutex);
+	temporaryThreads.emplace(thread.get_id(), std::move(thread));
+}
+
+void TemporaryThreadsContainer::markRemove(const std::thread::id& id) {
+	std::unique_lock<std::mutex> lock(temporaryThreadsMutex);
+	temporaryThreadsToSweep.insert(id);
+}
+
+class TemporaryTaskExecutor {
+	std::shared_ptr<boost::asio::io_context> ioContext;
+	IThreadPoolReceiver* threadContext;
+	std::chrono::milliseconds maxIdleTime;
+	TemporaryThreadsContainer* temporaryThreadsContainer;
+	TaskThreadCounter& taskThreadCounter;
+
+public:
+	TemporaryTaskExecutor(std::shared_ptr<boost::asio::io_context> ioContext_,
+	                      IThreadPoolReceiver* threadContext_,
+	                      const std::chrono::milliseconds& maxIdleTime_,
+	                      TemporaryThreadsContainer* temporaryThreadsContainer_,
+	                      TaskThreadCounter& taskThreadCounter_);
+
+	void operator()(std::stop_token stopToken);
+};
+
+TemporaryTaskExecutor::TemporaryTaskExecutor(std::shared_ptr<boost::asio::io_context> ioContext_,
+                                             IThreadPoolReceiver* threadContext_,
+                                             const std::chrono::milliseconds& maxIdleTime_,
+                                             TemporaryThreadsContainer* temporaryThreadsContainer_,
+                                             TaskThreadCounter& taskThreadCounter_)
+  : ioContext(ioContext_), threadContext(threadContext_), maxIdleTime(maxIdleTime_),
+    temporaryThreadsContainer(temporaryThreadsContainer_), taskThreadCounter(taskThreadCounter_) {
+	ASSERT(temporaryThreadsContainer_);
+	++taskThreadCounter.numThreads;
+}
+
+void TemporaryTaskExecutor::operator()(std::stop_token stopToken) {
+	std::size_t numTasksDone = 0;
+
+	const auto initialized = initializeContextPerThread(threadContext);
+	ASSERT(initialized);
+	do {
+		try {
+			numTasksDone = ioContext->run_one_for(maxIdleTime);
+		} catch (...) {
+			TraceEvent("TemporaryTaskExecutorException").log();
+		}
+	} while (!ioContext->stopped() && numTasksDone != 0 && !stopToken.stop_requested());
+
+	temporaryThreadsContainer->markRemove(std::this_thread::get_id());
+	--taskThreadCounter.numThreads;
+}
+
+class DynamicThreadPool {
+	TaskThreadCounter taskThreadCounter;
+
+	std::shared_ptr<boost::asio::io_context> ioContext;
+	// The workerGuard ensures the io_context work even no job is available right
+	// now. See:
+	//  https://www.boost.org/doc/libs/latest/doc/html/boost_asio/reference/io_context.html#boost_asio.reference.io_context.stopping_the_io_context_from_running_out_of_work
+	boost::asio::executor_work_guard<boost::asio::io_context::executor_type> workGuard;
+
+	std::vector<std::jthread> staticExecutors;
+
+	TemporaryThreadsContainer temporaryThreadsContainer;
+	const uint32_t maxTemporaryThreads;
+	const std::chrono::milliseconds maxIdleDuration;
+
+	std::function<IThreadPoolReceiver*(void)> threadContextGenerator;
+
+public:
+	DynamicThreadPool(const uint32_t maxTemporaryThreads_,
+	                  const std::chrono::milliseconds maxIdleDuration_,
+	                  std::function<IThreadPoolReceiver*(void)> threadContextGenerator_);
+
+	template <typename F>
+	void post(F&& func);
+
+	void addStaticThread(IThreadPoolReceiver* threadContext = nullptr);
+
+	~DynamicThreadPool();
+};
+
+DynamicThreadPool::DynamicThreadPool(const uint32_t maxTemporaryThreads_,
+                                     const std::chrono::milliseconds maxIdleDuration_,
+                                     std::function<IThreadPoolReceiver*(void)> threadContextGenerator_)
+  : taskThreadCounter(), ioContext(new boost::asio::io_context()), workGuard(boost::asio::make_work_guard(*ioContext)),
+    temporaryThreadsContainer(), maxTemporaryThreads(maxTemporaryThreads_), maxIdleDuration(maxIdleDuration_),
+    threadContextGenerator(threadContextGenerator_) {
+	ASSERT(maxTemporaryThreads > 0);
+}
+
+void DynamicThreadPool::addStaticThread(IThreadPoolReceiver* threadContext) {
+	if (!threadContext) {
+		threadContext = threadContextGenerator();
+	}
+	++taskThreadCounter.numThreads;
+	staticExecutors.emplace_back(
+	    g_network->startJThread(std::bind(taskExecutor, std::placeholders::_1, ioContext, threadContext)));
+}
+
+template <typename F>
+void DynamicThreadPool::post(F&& func) {
+	auto task = Task(std::forward<F>(func), taskThreadCounter);
+	++taskThreadCounter.numQueuedTasks;
+	// post is called by main thread only, so we can safely check and spawn temporary threads without additional locking
+	temporaryThreadsContainer.sweep();
+	const auto numTemporaryThreads = temporaryThreadsContainer.size();
+	if (taskThreadCounter.numRunning + taskThreadCounter.numQueuedTasks > taskThreadCounter.numThreads &&
+	    numTemporaryThreads < maxTemporaryThreads) {
+		// Possibly need to spawn new threads
+		temporaryThreadsContainer.add(g_network->startJThread(TemporaryTaskExecutor(
+		    ioContext, threadContextGenerator(), maxIdleDuration, &temporaryThreadsContainer, taskThreadCounter)));
+		const auto numTotalThreads = staticExecutors.size() + numTemporaryThreads;
+		TraceEvent(SevInfo, "DynamicThreadPool")
+		    .detail("message", "create_new_thread")
+		    .detail("numTotalThreads", numTotalThreads)
+		    .detail("numTemporaryThreads", temporaryThreadsContainer.size())
+		    .detail("queuedTasks", taskThreadCounter.numQueuedTasks.load());
+	}
+	// Wrapping the user-provided function into a Task object allows the func access the thread_local content
+	boost::asio::post(*ioContext, std::move(task));
+}
+
+DynamicThreadPool::~DynamicThreadPool() {
+	ioContext->stop();
+
+	for (auto& staticExecutor : staticExecutors) {
+		staticExecutor.request_stop();
+	}
+	// Calls destructors of each jthread and joins all of them
+	staticExecutors.clear();
+}
+
+class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool> {
+	std::unique_ptr<DynamicThreadPool> dynamicThreadPool;
+
+	const uint32_t maxTemporaryThreads;
+	const std::chrono::milliseconds maxIdleDuration;
+	std::function<IThreadPoolReceiver*(void)> threadContextGenerator;
+
+public:
+	ThreadPool(const uint32_t maxTemporaryThreads_,
+	           const std::chrono::milliseconds maxIdleDuration_,
+	           std::function<IThreadPoolReceiver*(void)> threadContextGenerator_)
+	  : maxTemporaryThreads(maxTemporaryThreads_), maxIdleDuration(maxIdleDuration_),
+	    threadContextGenerator(threadContextGenerator_) {}
+	~ThreadPool() override { stop(); }
+
+	// FIXME: Implement proper error handling for the thread pool. Currently returns a default Void future.
+	Future<Void> getError() const override { return Void(); }
+
+	void addThread(IThreadPoolReceiver* userData, const char* name = nullptr) override;
+
+	void post(PThreadAction action) override;
+
+	Future<Void> stop(Error const& e = success()) override;
+
+	void addref() override { ReferenceCounted<ThreadPool>::addref(); }
+	void delref() override;
+};
+
+void ThreadPool::addThread(IThreadPoolReceiver* userData, const char* name) {
+	// name is ignored as not supported by standard thread pool implementation until c++29
+	if (!dynamicThreadPool) {
+		dynamicThreadPool =
+		    std::make_unique<DynamicThreadPool>(maxTemporaryThreads, maxIdleDuration, threadContextGenerator);
+	}
+	dynamicThreadPool->addStaticThread(userData);
+}
+
+void ThreadPool::post(PThreadAction action) {
+	// This is intended, as ThreadPool will run on only the main thread, so any post after stop should fail
+	ASSERT(dynamicThreadPool);
+
+	dynamicThreadPool->post(std::move(action));
+}
+
+Future<Void> ThreadPool::stop(Error const&) {
+	if (dynamicThreadPool) {
+		dynamicThreadPool.reset();
+	}
+
+	return Void();
+}
+
+void ThreadPool::delref() {
+	if (ReferenceCounted<ThreadPool>::delref_no_destroy()) {
+		delete this;
+	}
+}
+
+} // namespace dynamic
+
+#endif // defined(__cpp_lib_jthread) && __cpp_lib_jthread >= 201911
 
 class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool> {
 	struct Thread {
@@ -132,5 +472,21 @@ public:
 Reference<IThreadPool> createGenericThreadPool(int stackSize, int pri) {
 	return makeReference<ThreadPool>(stackSize, pri);
 }
+
+#if defined(__cpp_lib_jthread) && __cpp_lib_jthread >= 201911
+Reference<IThreadPool> createDynamicThreadPool(const uint32_t maxTemporaryThreads,
+                                               const std::chrono::milliseconds maxIdleDuration,
+                                               std::function<IThreadPoolReceiver*(void)> threadContextGenerator) {
+	return makeReference<dynamic::ThreadPool>(maxTemporaryThreads, maxIdleDuration, threadContextGenerator);
+}
+#else
+Reference<IThreadPool> createDynamicThreadPool(const uint32_t maxTemporaryThreads,
+                                               const std::chrono::milliseconds maxIdleDuration,
+                                               std::function<IThreadPoolReceiver*(void)> threadContextGenerator) {
+	TraceEvent(SevWarn, "DynamicThreadPoolNotSupported");
+	// Using a generic value in this case
+	return makeReference<ThreadPool>(1024 * 1024, 10);
+}
+#endif
 
 thread_local IThreadPoolReceiver* ThreadPool::Thread::threadUserObject;

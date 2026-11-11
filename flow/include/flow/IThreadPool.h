@@ -22,6 +22,7 @@
 #define FLOW_ITHREADPOOL_H
 #pragma once
 
+#include <chrono>
 #include <string_view>
 
 #include "flow/flow.h"
@@ -127,7 +128,12 @@ private:
 };
 
 Reference<IThreadPool> createGenericThreadPool(int stackSize = 0, int pri = 10);
+Reference<IThreadPool> createDynamicThreadPool(const uint32_t maxTemporaryThreads,
+                                               const std::chrono::milliseconds maxIdleDuration,
+                                               std::function<IThreadPoolReceiver*(void)> threadContextGenerator);
 
+// This is a dummy implementation of IThreadPool for testing purposes. It does not create any thread, but just use the
+// current thread to run the actions.
 class DummyThreadPool final : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
 	~DummyThreadPool() override = default;
@@ -156,4 +162,4 @@ private:
 	Promise<Void> errors;
 };
 
-#endif
+#endif // FLOW_INCLUDE_FLOW_ITHREADPOOL_H

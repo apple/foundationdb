@@ -34,6 +34,7 @@
 #include <ranges>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -303,6 +304,11 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
 		return baseNetwork->startThread(func, arg, stackSize, name);
 	}
+#if defined(__cpp_lib_jthread) && __cpp_lib_jthread >= 201911
+	std::jthread startJThread(std::function<void(std::stop_token)>&& func) override {
+		return baseNetwork->startJThread(std::move(func));
+	}
+#endif
 	Future<Reference<class IAsyncFile>> open(std::string filename, int64_t flags, int64_t mode) {
 		return IAsyncFileSystem::filesystem()->open(filename, flags, mode);
 	}
