@@ -79,6 +79,7 @@ HEADER = """\
 """
 
 
+# Failure injection workloads are for simulation; against a real cluster, Attrition suspends processes indefinitely
 def test_header(title, timeout, wait_for_quiescence_end=True):
     return f"""\
 [[test]]
@@ -87,6 +88,7 @@ clearAfterTest = false
 waitForQuiescenceBegin = false
 waitForQuiescenceEnd = {'true' if wait_for_quiescence_end else 'false'}
 runConsistencyCheck = false
+runFailureWorkloads = false
 runSetup = false
 databasePingDelay = 0.0
 timeout = {timeout}
@@ -158,6 +160,7 @@ clearAfterTest = false
 waitForQuiescenceBegin = false
 waitForQuiescenceEnd = true
 runConsistencyCheck = false
+runFailureWorkloads = false
 databasePingDelay = 0.0
 timeout = 20000
 
