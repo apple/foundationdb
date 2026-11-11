@@ -1180,9 +1180,8 @@ BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
                                    const std::string& jobRoot,
                                    const BulkLoadTransportMethod& transportMethod);
 
-// Operator control over a running bulkdump or bulkload job. Shared by both paths and stored in its own
-// per-job key, so an absent key means no control has been applied: every default here must therefore
-// mean "behave as if this did not exist".
+// Operator control over a running bulkdump or bulkload job, shared by both paths. An absent control key
+// means no control has been applied, so every default here must mean "behave as if this did not exist".
 struct BulkJobControlState {
 	constexpr static FileIdentifier file_identifier = 1384512;
 
@@ -1190,12 +1189,9 @@ struct BulkJobControlState {
 	// completion, so a pause takes effect over the drain time of the work in flight, not immediately.
 	bool paused = false;
 
-	// Wall-clock seconds the job should aim to take, measured from the owner record's submitTime. Zero
-	// means unpaced. Advisory in one direction only: it can delay admission but cannot make the cluster
-	// go faster than it does.
-	//
-	// NOT YET ENFORCED. The field is defined here so the persisted format does not have to change again
-	// when admission pacing lands; until then nothing reads it, and no command sets it.
+	// Wall-clock seconds the job should aim to take, measured from the owner record's submitTime; zero
+	// means unpaced. NOT YET ENFORCED: defined now so the persisted format does not have to change again
+	// when admission pacing lands, but nothing reads it and no command sets it.
 	double targetDurationSeconds = 0;
 
 	BulkJobControlState() = default;

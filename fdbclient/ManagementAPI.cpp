@@ -2966,8 +2966,7 @@ Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 			co_await releaseExclusiveReadLockOnRange(&tr, aliveJob.get().getJobRange(), rangeLockNameForBulkLoad);
 			// Clean up BulkLoad owner info when clearing job metadata
 			tr.clear(bulkLoadOwnerKeyFor(jobId));
-			// Operator control dies with the job it refers to; leaving it would strand a paused flag under
-			// a jobId nothing can resume.
+			// Leaving control behind would strand a paused flag under a jobId nothing can resume
 			tr.clear(bulkLoadControlKeyFor(jobId));
 			co_await tr.commit();
 			break;
@@ -3258,6 +3257,24 @@ Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr) {
 	co_return Optional<BulkDumpState>();
 }
 
+Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Database cx) {
+	Transaction tr(cx);
+	Optional<BulkDumpState> job;
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			job = co_await getSubmittedBulkDumpJob(&tr);
+			break;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+	co_return job;
+}
+
 Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
 	Transaction tr(cx);
 	while (true) {
@@ -3352,8 +3369,7 @@ Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 			    &tr, bulkDumpPrefix, rangeToRead, normalKeys, bulkDumpStateValue(BulkDumpState()));
 			// Clean up owner info when clearing job metadata
 			tr.clear(bulkDumpOwnerKeyFor(jobId));
-			// Operator control dies with the job it refers to; leaving it would strand a paused flag under
-			// a jobId nothing can resume.
+			// Leaving control behind would strand a paused flag under a jobId nothing can resume
 			tr.clear(bulkDumpControlKeyFor(jobId));
 			co_await tr.commit();
 			tr.reset();

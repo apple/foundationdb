@@ -355,8 +355,6 @@ TEST_CASE("/bulkjobcontrol/defaultsMeanNoControl") {
 	ASSERT(!control.hasTargetDuration());
 	ASSERT_EQ(control.targetDurationSeconds, 0);
 
-	// An absent key decodes via this same default path in getBulkJobControl, which reports Optional{} and
-	// leaves the caller to treat it as unpaced and unpaused.
 	const BulkJobControlState decodedDefault = decodeBulkJobControlState(bulkJobControlStateValue(control));
 	ASSERT(!decodedDefault.isPaused());
 	ASSERT(!decodedDefault.hasTargetDuration());

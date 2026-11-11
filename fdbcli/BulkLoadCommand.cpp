@@ -176,8 +176,7 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 			co_return UID();
 		}
 		UID controlJobId = validateBulkJobId(tokens[2], usage.c_str());
-		// Refuse an unknown job id rather than writing a control record for it: nothing would ever read
-		// that record, and nothing cleans it up, since cleanup is tied to the job's own lifecycle.
+		// A control record written for a job that is not running would never be read and never cleaned up.
 		Optional<BulkLoadJobState> liveJob = co_await getRunningBulkLoadJob(cx);
 		if (!liveJob.present() || liveJob.get().getJobId() != controlJobId) {
 			fmt::println("No bulkload job {} is running.", controlJobId.toString());

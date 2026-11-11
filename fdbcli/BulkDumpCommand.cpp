@@ -130,22 +130,8 @@ Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 			co_return UID();
 		}
 		UID jobId = validateBulkJobId(tokens[2], usage);
-		// Refuse an unknown job id rather than writing a control record for it: nothing would ever read
-		// that record, and nothing cleans it up, since cleanup is tied to the job's own lifecycle.
-		Transaction jobTr(cx);
-		Optional<BulkDumpState> liveJob;
-		while (true) {
-			Error err;
-			try {
-				jobTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				jobTr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				liveJob = co_await getSubmittedBulkDumpJob(&jobTr);
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await jobTr.onError(err);
-		}
+		// A control record written for a job that is not running would never be read and never cleaned up.
+		Optional<BulkDumpState> liveJob = co_await getSubmittedBulkDumpJob(cx);
 		if (!liveJob.present() || !liveJob.get().isValid() || liveJob.get().getJobId() != jobId) {
 			fmt::println("No bulkdump job {} is running.", jobId.toString());
 			co_return UID();

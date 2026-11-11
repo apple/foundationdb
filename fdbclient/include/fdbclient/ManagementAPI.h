@@ -271,6 +271,7 @@ Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob);
 
 // Return the existing job metadata
 Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr);
+Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Database cx);
 
 // Count the completed and the failed tasks within the input range
 struct BulkDumpTaskCounts {

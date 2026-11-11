@@ -686,8 +686,9 @@ extern const KeyRef bulkLoadOwnerPrefix;
 Key bulkDumpOwnerKeyFor(const UID& jobId);
 Key bulkLoadOwnerKeyFor(const UID& jobId);
 
-// Operator control for one bulk job, kept out of the job state so an absent key means "no control
-// applied" and there is nothing to migrate.
+// Operator control for one bulk job, kept out of the job state: BulkDumpState is a key-range map, so a
+// field added there would be copied into every range entry. An absent key means "no control applied",
+// so there is nothing to migrate.
 // "\xff/bulkDumpControl/[[jobId]]" := "[[BulkJobControlState]]"
 extern const KeyRangeRef bulkDumpControlKeys;
 extern const KeyRef bulkDumpControlPrefix;
