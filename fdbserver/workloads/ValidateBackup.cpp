@@ -43,6 +43,7 @@ struct ValidateBackupWorkload : TestWorkload {
 	FileBackupAgent backupAgent;
 
 	Standalone<StringRef> tag;
+	BackupSteps::BackupVersion version;
 	double delayFor;
 	// Seconds from the workload start after which the quiescent version is read.
 	double validateAfter;
@@ -64,6 +65,7 @@ struct ValidateBackupWorkload : TestWorkload {
 
 	explicit ValidateBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		tag = getOption(options, "tag"_sr, "default"_sr);
+		version = BackupSteps::parseBackupVersion(getOption(options, "version"_sr, "v1"_sr));
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
 		validateAfter = getOption(options, "validateAfter"_sr, 20.0);
 		maxWaitSeconds = getOption(options, "maxWaitSeconds"_sr, 600.0);
@@ -105,9 +107,12 @@ struct ValidateBackupWorkload : TestWorkload {
 	Future<Void> _start(Database cx) {
 		// An in-place restore in the same test waits for the pending validations, so it cannot overwrite the data under
 		// audit.
-		PendingValidationClaim::add();
-		PendingValidationClaim claim(true);
-		Future<Version> quiescentVersion = readVersionAfter(cx, validateAfter);
+		QuiescentValidation validation;
+		validation.enabled = true;
+		validation.validateAfter = validateAfter;
+		validation.claim();
+		PendingValidationClaim claim = validation.takeClaim();
+		validation.begin(cx);
 		co_await delay(delayFor);
 
 		Reference<IBackupContainer> container;
@@ -127,9 +132,9 @@ struct ValidateBackupWorkload : TestWorkload {
 
 		// Discontinuing a restorable backup completes it at whatever its log copy has reached, so it must first
 		// cover everything written before the quiescent version.
-		Version target = co_await quiescentVersion;
+		Version target = co_await validation.quiescentVersion;
 		double waitStart = now();
-		co_await waitForRestorableVersion(cx, &backupAgent, tag.toString(), target, maxWaitSeconds);
+		co_await validation.waitForBackupToCover(cx, &backupAgent, tag.toString(), maxWaitSeconds);
 		waitForRestorableSeconds = now() - waitStart;
 
 		if (discontinue && state == EBackupState::STATE_RUNNING_DIFFERENTIAL) {
@@ -167,6 +172,7 @@ struct ValidateBackupWorkload : TestWorkload {
 		traceOptions.audits = &audits;
 		traceOptions.traceRestoreProgress = true;
 		traceOptions.clearWhenDone = clearValidationData;
+		traceOptions.version = version;
 		co_await validateAgainstPrefixedRestore(cx, &backupAgent, container, ranges, tag, traceOptions);
 
 		// The audit's per-range progress is cleared once it completes, so coverage cannot be read back from it, and the
