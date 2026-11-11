@@ -1,0 +1,18 @@
+# Excludes a storage process while YCSB runs, so the cluster moves its data elsewhere under load.
+
+[[test]]
+testTitle = 'ExcludeProcessesYCSB'
+
+    [[test.workload]]
+    testName = 'YCSB'
+    testDuration = 30.0
+    threads = 4
+    nodeCount = 1000
+    tps = 100
+    valueBytes = 1024
+    variant = 'singleCF'
+    distribution = 'random'
+
+    [[test.workload]]
+    testName = 'ExcludeProcesses'
+    excludeDelay = 10.0
