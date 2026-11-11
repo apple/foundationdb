@@ -97,25 +97,10 @@ static Optional<S3BlobStoreEndpoint::Credentials> parseS3Credentials(Optional<St
 	return S3BlobStoreEndpoint::Credentials{ key.toString(), secret.toString(), securityToken.toString() };
 }
 
-S3BlobStoreEndpoint::S3BlobStoreEndpoint(std::string const& host,
-                                         std::string const& service,
+S3BlobStoreEndpoint::S3BlobStoreEndpoint(BlobStoreEndpointParams const& params,
                                          std::string region,
-                                         Optional<std::string> const& proxyHost,
-                                         Optional<std::string> const& proxyPort,
-                                         Optional<StringRef> const& creds,
-                                         BlobKnobs const& knobs,
-                                         HTTP::Headers extraHeaders,
-                                         Optional<std::string> const& serverSideEncryption,
-                                         Optional<std::string> const& proxyParameter)
-  : IBlobStoreEndpoint(host,
-                       service,
-                       region.empty() ? guessRegionFromDomain(host) : region,
-                       proxyHost,
-                       proxyPort,
-                       knobs,
-                       extraHeaders,
-                       serverSideEncryption,
-                       proxyParameter),
+                                         Optional<StringRef> const& creds)
+  : IBlobStoreEndpoint(params, region.empty() ? guessRegionFromDomain(params.host) : region),
     credentials(parseS3Credentials(creds)), lookupKey(credentials.present() && credentials.get().key.empty()),
     lookupSecret(credentials.present() && credentials.get().secret.empty()) {
 	if (this->region.empty() && CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
@@ -1621,9 +1606,14 @@ Future<std::map<std::string, std::string>> S3BlobStoreEndpoint::getObjectTags(st
 TEST_CASE("/backup/s3/v4headers") {
 	std::string credStr = "AKIAIOSFODNN7EXAMPLE:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY:";
 	Optional<StringRef> creds = StringRef(credStr);
+	BlobStoreEndpointParams endpointParams;
+	endpointParams.host = "s3.amazonaws.com";
+	endpointParams.service = "443";
+	endpointParams.proxyHost = "proxy";
+	endpointParams.proxyPort = "port";
 	// GET without query parameters
 	{
-		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);
+		S3BlobStoreEndpoint s3(endpointParams, "amazonaws", creds);
 		std::string verb("GET");
 		std::string resource("/test.txt");
 		HTTP::Headers headers;
@@ -1638,7 +1628,7 @@ TEST_CASE("/backup/s3/v4headers") {
 
 	// GET with query parameters
 	{
-		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);
+		S3BlobStoreEndpoint s3(endpointParams, "amazonaws", creds);
 		std::string verb("GET");
 		std::string resource("/test/examplebucket?Action=DescribeRegions&Version=2013-10-15");
 		HTTP::Headers headers;
@@ -1653,7 +1643,8 @@ TEST_CASE("/backup/s3/v4headers") {
 
 	// POST
 	{
-		S3BlobStoreEndpoint s3("s3.us-west-2.amazonaws.com", "443", "us-west-2", "proxy", "port", creds);
+		endpointParams.host = "s3.us-west-2.amazonaws.com";
+		S3BlobStoreEndpoint s3(endpointParams, "us-west-2", creds);
 		std::string verb("POST");
 		std::string resource("/simple.json");
 		HTTP::Headers headers;

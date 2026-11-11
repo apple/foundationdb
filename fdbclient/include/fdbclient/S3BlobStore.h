@@ -37,16 +37,7 @@ public:
 		std::string securityToken;
 	};
 
-	S3BlobStoreEndpoint(std::string const& host,
-	                    std::string const& service,
-	                    std::string region,
-	                    Optional<std::string> const& proxyHost,
-	                    Optional<std::string> const& proxyPort,
-	                    Optional<StringRef> const& creds,
-	                    BlobKnobs const& knobs = BlobKnobs(),
-	                    HTTP::Headers extraHeaders = HTTP::Headers(),
-	                    Optional<std::string> const& serverSideEncryption = Optional<std::string>(),
-	                    Optional<std::string> const& proxyParameter = Optional<std::string>());
+	S3BlobStoreEndpoint(BlobStoreEndpointParams const& params, std::string region, Optional<StringRef> const& creds);
 
 	// Infer the cloud region from a hostname by matching known service prefixes
 	// (e.g. "s3.us-west-2.amazonaws.com" -> "us-west-2", "cos.ap-beijing.myqcloud.com" -> "ap-beijing").
