@@ -8789,6 +8789,68 @@ void Transaction::addGranuleMaterializeStats(const GranuleMaterializeStats& stat
 	trState->cx->bgReadRowsUpdated += stats.rowsUpdated;
 }
 
+TEST_CASE("/fdbclient/NativeAPI/watchRefCount/removesEmptyEntries") {
+	// Default error "operation_failed()" avoids "internal" range (4xxx),
+	// which causes simulation tests with --crash enabled to abort/fail.
+	Database database = Database(new DatabaseContext(operation_failed()));
+	const int64_t tenantId = TenantInfo::INVALID_TENANT;
+	Key k = "k"_sr;
+
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
+
+	database->increaseWatchRefCount(tenantId, k, 1);
+	database->increaseWatchRefCount(tenantId, k, 2);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 1);
+
+	// Reference count entry should remain while version set for k is not empty
+	database->decreaseWatchRefCount(tenantId, k, 2);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 1);
+
+	// …but should be removed once the reference set is empty
+	database->decreaseWatchRefCount(tenantId, k, 1);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
+
+	// …and nothing should happen when removing a stale reference
+	ASSERT_EQ(database->decreaseWatchRefCount(tenantId, k, 1), 0);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/watchRefCount/deletesMetadataOnlyOnLastRef") {
+	// Default error "operation_failed()" avoids "internal" range (4xxx),
+	// which causes simulation tests with --crash enabled to abort/fail.
+	Database database = Database(new DatabaseContext(operation_failed()));
+	const int64_t tenantId = TenantInfo::INVALID_TENANT;
+	Key k = "k"_sr;
+	Promise<Void> neverSet;
+	auto watchParameters = makeReference<WatchParameters>(TenantInfo(),
+	                                                      k,
+	                                                      Optional<Value>(),
+	                                                      1,
+	                                                      TagSet(),
+	                                                      SpanContext(),
+	                                                      TaskPriority::DefaultEndpoint,
+	                                                      Optional<UID>(),
+	                                                      UseProvisionalProxies::False);
+
+	auto md = makeReference<WatchMetadata>(watchParameters);
+	md->watchFutureSS = success(neverSet.getFuture());
+
+	database->setWatchMetadata(md);
+	database->increaseWatchRefCount(tenantId, k, 1);
+	database->increaseWatchRefCount(tenantId, k, 2);
+	database->decreaseWatchRefCount(tenantId, k, 1);
+	ASSERT(database->getWatchMetadata(tenantId, k).isValid());
+
+	database->decreaseWatchRefCount(tenantId, k, 2);
+	ASSERT(!database->getWatchMetadata(tenantId, k).isValid());
+	ASSERT(md->watchFutureSS.isError());
+	ASSERT(md->watchFutureSS.getError().code() == error_code_actor_cancelled);
+
+	return Void();
+}
+
 ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
 	state ReadYourWritesTransaction tr(cx);
 	state Version version = invalidVersion;
