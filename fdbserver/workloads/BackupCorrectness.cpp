@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
@@ -566,7 +564,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		Future<Void> extraBackup;
 		PendingValidationClaim validationClaim = validation.takeClaim();
 		validation.begin(cx);
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		TraceEvent("BARW_Arguments")
 		    .detail("BackupTag", printable(backupTag))
 		    .detail("PerformRestore", performRestore)

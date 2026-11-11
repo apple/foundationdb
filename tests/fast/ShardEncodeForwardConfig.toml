@@ -1,0 +1,64 @@
+# Config-driven forward switch with the SHARD_ENCODE_LOCATION_METADATA knob left FALSE.
+#
+# Mirror of ShardEncodeRollbackConfig.toml in the other direction: the knob stays
+# false for the whole run and `configure shard_metadata_format=encoded` alone makes
+# DD's effective encoding target encoded. Machine kills and forced TLog recoveries
+# then interrupt shard-encoded data moves, so every newly recruited DD restores
+# persisted data moves at init. Every DD check on a restored move must use the
+# configured target, not the raw knob; a raw-knob check sees "encoding disabled",
+# restarts DD, and the next DD restores the same moves, so DD never makes progress
+# and the database never quiesces.
+#
+# Exclude sharded RocksDB (type 5) — it requires new-format metadata from the start.
+[configuration]
+storageEngineExcludeTypes=[3,4,5]
+config = "triple ssd-2"
+datacenters = 1
+generateFearless = false
+
+# Fine-grained sharding so DD runs many data moves for the kills and recoveries
+# below to interrupt.
+[[knobs]]
+shard_encode_location_metadata = false
+min_shard_bytes = 10000
+shard_bytes_per_sqrt_bytes = 0
+
+[[test]]
+testTitle = 'ShardEncodeForwardConfigSetup'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 5000.0
+    nodeCount = 60000
+    testDuration = 20.0
+
+# Its own block so the configure commits before the moves below are started.
+[[test]]
+testTitle = 'ShardEncodeForwardConfigTrigger'
+
+    [[test.workload]]
+    testName = 'ChangeConfig'
+    configMode = 'shard_metadata_format=encoded shard_metadata_migration=disabled'
+    minDelayBeforeChange = 1.0
+    maxDelayBeforeChange = 3.0
+
+[[test]]
+testTitle = 'ShardEncodeForwardConfigRecoveries'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 5000.0
+    nodeCount = 60000
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 1
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 5.0
+    testDuration = 60.0
