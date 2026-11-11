@@ -168,26 +168,29 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 		fmt::println("Job {} has been cancelled. The job range lock has been cleared", cancelJobId.toString());
 		co_return UID();
 
-	} else if (tokencmp(tokens[1], "pause")) {
+	} else if (tokencmp(tokens[1], "pause") || tokencmp(tokens[1], "resume")) {
+		const bool pause = tokencmp(tokens[1], "pause");
+		const std::string& usage = pause ? BULK_LOAD_PAUSE_USAGE : BULK_LOAD_RESUME_USAGE;
 		if (tokens.size() != 3) {
-			fmt::println("{}", BULK_LOAD_PAUSE_USAGE);
+			fmt::println("{}", usage);
 			co_return UID();
 		}
-		UID pauseJobId = validateBulkJobId(tokens[2], BULK_LOAD_PAUSE_USAGE.c_str());
-		co_await setBulkJobPaused(cx, pauseJobId, /*paused=*/true, /*isBulkDump=*/false);
-		fmt::println("Job {} is paused. Tasks already dispatched will run to completion, so the job keeps "
-		             "making progress until that work drains. The job range lock remains held.",
-		             pauseJobId.toString());
-		co_return UID();
-
-	} else if (tokencmp(tokens[1], "resume")) {
-		if (tokens.size() != 3) {
-			fmt::println("{}", BULK_LOAD_RESUME_USAGE);
+		UID controlJobId = validateBulkJobId(tokens[2], usage.c_str());
+		// Refuse an unknown job id rather than writing a control record for it: nothing would ever read
+		// that record, and nothing cleans it up, since cleanup is tied to the job's own lifecycle.
+		Optional<BulkLoadJobState> liveJob = co_await getRunningBulkLoadJob(cx);
+		if (!liveJob.present() || liveJob.get().getJobId() != controlJobId) {
+			fmt::println("No bulkload job {} is running.", controlJobId.toString());
 			co_return UID();
 		}
-		UID resumeJobId = validateBulkJobId(tokens[2], BULK_LOAD_RESUME_USAGE.c_str());
-		co_await setBulkJobPaused(cx, resumeJobId, /*paused=*/false, /*isBulkDump=*/false);
-		fmt::println("Job {} is resumed.", resumeJobId.toString());
+		co_await setBulkJobPaused(cx, controlJobId, pause, /*isBulkDump=*/false);
+		if (pause) {
+			fmt::println("Job {} is paused. Tasks already dispatched will run to completion, so the job keeps "
+			             "making progress until that work drains. The job range lock remains held.",
+			             controlJobId.toString());
+		} else {
+			fmt::println("Job {} is resumed.", controlJobId.toString());
+		}
 		co_return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {

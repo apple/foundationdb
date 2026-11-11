@@ -1640,9 +1640,6 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 	RangeResult result;
 	std::vector<Future<Void>> bulkLoadActors;
 	KeyRange range;
-	// Pause is a property of the owning job, but tasks are walked individually and a task may have been
-	// submitted without a job at all. Resolve each job once per pass rather than once per task.
-	std::map<UID, bool> jobPaused;
 	while (beginKey < endKey) {
 		Error err;
 		try {
@@ -1671,31 +1668,31 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 				if (bulkLoadTaskState.phase == BulkLoadPhase::Submitted ||
 				    bulkLoadTaskState.phase == BulkLoadPhase::Triggered ||
 				    bulkLoadTaskState.phase == BulkLoadPhase::Running) {
-					// While the owning job is paused, admit nothing new. Tasks already handed to the
-					// engine keep running, so the job drains rather than stopping on the spot. A task
-					// with no owning job cannot be paused and is always eligible.
-					UID taskJobId = bulkLoadTaskState.getJobId();
-					if (taskJobId.isValid()) {
-						auto cached = jobPaused.find(taskJobId);
-						if (cached == jobPaused.end()) {
-							Optional<BulkJobControlState> control =
-							    co_await getBulkJobControl(cx, taskJobId, /*isBulkDump=*/false);
-							cached = jobPaused.emplace(taskJobId, control.present() && control.get().isPaused()).first;
-						}
-						if (cached->second) {
-							TraceEvent(SevInfo, "DDBulkLoadTaskJobPaused", self->ddId)
-							    .suppressFor(60.0)
-							    .detail("JobId", taskJobId)
-							    .detail("TaskRange", bulkLoadTaskState.getRange());
-							continue;
-						}
-					}
 					// Limit parallelism
 					while (true) {
 						if (self->bulkLoadEngineParallelismLimitor.canStart()) {
 							break;
 						}
 						co_await self->bulkLoadEngineParallelismLimitor.waitUntilCounterChanged();
+					}
+					// While the owning job is paused, admit nothing new. Tasks already handed to the engine
+					// keep running, so the job drains rather than stopping on the spot. A task with no
+					// owning job cannot be paused and is always eligible.
+					//
+					// Read after the limiter wait, and per task rather than once per pass: this pass walks
+					// every task and blocks on that limiter, so it lasts about as long as the job, and a
+					// value cached before the wait would ignore any pause arriving during it.
+					UID taskJobId = bulkLoadTaskState.getJobId();
+					if (taskJobId.isValid()) {
+						Optional<BulkJobControlState> control =
+						    co_await getBulkJobControl(cx, taskJobId, /*isBulkDump=*/false);
+						if (control.present() && control.get().isPaused()) {
+							TraceEvent(SevInfo, "DDBulkLoadTaskJobPaused", self->ddId)
+							    .suppressFor(60.0)
+							    .detail("JobId", taskJobId)
+							    .detail("NotAdmittedRange", bulkLoadTaskState.getRange());
+							continue;
+						}
 					}
 					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskSchedule", self->ddId)
 					    .detail("Range", bulkLoadTaskState.getRange())
@@ -2833,7 +2830,11 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	std::map<Key, KeyRange> skippedRanges;
 	std::vector<Future<Void>> actors;
 	Transaction tr(cx);
-	while (beginKey < endKey) {
+	// One call of this function walks the whole remaining job and blocks on the parallelism limiter as it
+	// goes, so it can run for as long as the job does. A pause must therefore be observed inside the
+	// dispatch loop; checking once before the call would not take effect until the job had finished.
+	bool pausedMidPass = false;
+	while (beginKey < endKey && !pausedMidPass) {
 		Error err;
 		try {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
@@ -2914,6 +2915,19 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 							break;
 						}
 						co_await self->bulkDumpParallelismLimitor.waitUntilCounterChanged();
+					}
+					// Read the control record after the limiter wait rather than before it: that wait is
+					// where the time goes, so a pause issued during it has to be seen here or it would be
+					// missed for this task. Cost is one point get per admitted shard task, against dumping
+					// a whole shard.
+					Optional<BulkJobControlState> control = co_await getBulkJobControl(cx, jobId, /*isBulkDump=*/true);
+					if (control.present() && control.get().isPaused()) {
+						TraceEvent(SevInfo, "DDBulkDumpJobScheduleJobPaused", self->ddId)
+						    .suppressFor(60.0)
+						    .detail("JobId", jobId)
+						    .detail("NotAdmittedRange", taskRange);
+						pausedMidPass = true;
+						break;
 					}
 					SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
 					                                        bulkDumpState.generateRangeTask(taskRange),
@@ -3164,8 +3178,9 @@ Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 			// through bulkdump_task_outdated.
 			TraceEvent(SevWarnAlways, "DDBulkDumpJobFailed", self->ddId).suppressFor(60.0).detail("JobId", jobId);
 		} else {
-			// An operator pause stops admitting new tasks; tasks already dispatched are left to finish,
-			// so the job quiesces over the drain time of the work in flight rather than at once.
+			// Cheap outer guard only: do not start a whole dispatch pass while already paused. A pause
+			// arriving mid-pass is caught inside the dispatch loop, which is the real enforcement point --
+			// one pass walks the entire remaining job, so this check alone would not stop it.
 			Optional<BulkJobControlState> control = co_await getBulkJobControl(cx, jobId, /*isBulkDump=*/true);
 			if (control.present() && control.get().isPaused()) {
 				TraceEvent(SevInfo, "DDBulkDumpManagerJobPaused", self->ddId).suppressFor(60.0).detail("JobId", jobId);

@@ -122,26 +122,42 @@ Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 		fmt::println("Job {} has been cancelled. No new tasks will be spawned.", jobId.toString());
 		co_return UID();
 
-	} else if (tokencmp(tokens[1], "pause")) {
+	} else if (tokencmp(tokens[1], "pause") || tokencmp(tokens[1], "resume")) {
+		const bool pause = tokencmp(tokens[1], "pause");
+		const char* usage = pause ? BULK_DUMP_PAUSE_USAGE : BULK_DUMP_RESUME_USAGE;
 		if (tokens.size() != 3) {
-			fmt::println("{}", BULK_DUMP_PAUSE_USAGE);
+			fmt::println("{}", usage);
 			co_return UID();
 		}
-		UID jobId = validateBulkJobId(tokens[2], BULK_DUMP_PAUSE_USAGE);
-		co_await setBulkJobPaused(cx, jobId, /*paused=*/true, /*isBulkDump=*/true);
-		fmt::println("Job {} is paused. Tasks already dispatched will run to completion, so the job keeps "
-		             "making progress until that work drains.",
-		             jobId.toString());
-		co_return UID();
-
-	} else if (tokencmp(tokens[1], "resume")) {
-		if (tokens.size() != 3) {
-			fmt::println("{}", BULK_DUMP_RESUME_USAGE);
+		UID jobId = validateBulkJobId(tokens[2], usage);
+		// Refuse an unknown job id rather than writing a control record for it: nothing would ever read
+		// that record, and nothing cleans it up, since cleanup is tied to the job's own lifecycle.
+		Transaction jobTr(cx);
+		Optional<BulkDumpState> liveJob;
+		while (true) {
+			Error err;
+			try {
+				jobTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				jobTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				liveJob = co_await getSubmittedBulkDumpJob(&jobTr);
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await jobTr.onError(err);
+		}
+		if (!liveJob.present() || !liveJob.get().isValid() || liveJob.get().getJobId() != jobId) {
+			fmt::println("No bulkdump job {} is running.", jobId.toString());
 			co_return UID();
 		}
-		UID jobId = validateBulkJobId(tokens[2], BULK_DUMP_RESUME_USAGE);
-		co_await setBulkJobPaused(cx, jobId, /*paused=*/false, /*isBulkDump=*/true);
-		fmt::println("Job {} is resumed.", jobId.toString());
+		co_await setBulkJobPaused(cx, jobId, pause, /*isBulkDump=*/true);
+		if (pause) {
+			fmt::println("Job {} is paused. Tasks already dispatched will run to completion, so the job keeps "
+			             "making progress until that work drains.",
+			             jobId.toString());
+		} else {
+			fmt::println("Job {} is resumed.", jobId.toString());
+		}
 		co_return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {

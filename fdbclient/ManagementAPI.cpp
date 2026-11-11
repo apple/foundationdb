@@ -3428,24 +3428,6 @@ Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId) {
 	co_return result;
 }
 
-Future<Void> setBulkJobControl(Database cx, UID jobId, BulkJobControlState controlState, bool isBulkDump) {
-	Transaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Key controlKey = isBulkDump ? bulkDumpControlKeyFor(jobId) : bulkLoadControlKeyFor(jobId);
-			tr.set(controlKey, bulkJobControlStateValue(controlState));
-			co_await tr.commit();
-			co_return;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
 Future<Optional<BulkJobControlState>> getBulkJobControl(Database cx, UID jobId, bool isBulkDump) {
 	Transaction tr(cx);
 	while (true) {
@@ -3481,23 +3463,6 @@ Future<Void> setBulkJobPaused(Database cx, UID jobId, bool paused, bool isBulkDu
 			    value.present() ? decodeBulkJobControlState(value.get()) : BulkJobControlState();
 			controlState.paused = paused;
 			tr.set(controlKey, bulkJobControlStateValue(controlState));
-			co_await tr.commit();
-			co_return;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
-Future<Void> clearBulkJobControl(Database cx, UID jobId, bool isBulkDump) {
-	Transaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.clear(isBulkDump ? bulkDumpControlKeyFor(jobId) : bulkLoadControlKeyFor(jobId));
 			co_await tr.commit();
 			co_return;
 		} catch (Error& e) {
