@@ -2560,6 +2560,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
+	// Compacting the whole keyspace down to the last level leaves no compaction work outstanding
+	Future<Void> vacuum() override { return compactRange(allKeys); }
+
 	DB db = nullptr;
 	std::shared_ptr<SharedRocksDBState> sharedState;
 	std::shared_ptr<PerfContextMetrics> perfContextMetrics;
