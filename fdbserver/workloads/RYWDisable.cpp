@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/tester/workloads.h"
 
 struct RYWDisableWorkload : TestWorkload {
@@ -44,7 +45,62 @@ struct RYWDisableWorkload : TestWorkload {
 		return Void();
 	}
 
+	// Regression test for #14478: a getKey that runs past the end of the user keyspace must not conflict with
+	// system key writes, but writes in the user keyspace must still conflict.
+	Future<Void> getKeyConflictTest(Database cx) {
+		ReadYourWritesTransaction clearTr(cx);
+		clearTr.clear(normalKeys);
+		co_await clearTr.commit();
+
+		{
+			ReadYourWritesTransaction reader(cx);
+			reader.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+			Key key = co_await reader.getKey(firstGreaterOrEqual(""_sr));
+			ASSERT(key == normalKeys.end);
+			reader.set("rywdisable/test-key"_sr, ""_sr);
+
+			ReadYourWritesTransaction systemWriter(cx);
+			systemWriter.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			systemWriter.set("\xff\x02/rywdisable-test"_sr, ""_sr);
+			co_await systemWriter.commit();
+
+			co_await reader.commit();
+
+			ReadYourWritesTransaction cleanup(cx);
+			cleanup.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			cleanup.clear("\xff\x02/rywdisable-test"_sr);
+			co_await cleanup.commit();
+		}
+
+		ReadYourWritesTransaction clearAgain(cx);
+		clearAgain.clear(normalKeys);
+		co_await clearAgain.commit();
+
+		{
+			ReadYourWritesTransaction reader(cx);
+			reader.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+			Key key = co_await reader.getKey(firstGreaterOrEqual(""_sr));
+			ASSERT(key == normalKeys.end);
+			reader.set("rywdisable/test-key"_sr, ""_sr);
+
+			ReadYourWritesTransaction writer(cx);
+			writer.set("rywdisable/other-key"_sr, ""_sr);
+			co_await writer.commit();
+
+			bool committed = true;
+			try {
+				co_await reader.commit();
+			} catch (Error& e) {
+				committed = false;
+				ASSERT(e.code() == error_code_not_committed);
+			}
+			ASSERT(!committed);
+		}
+	}
+
 	Future<Void> _start(Database cx) {
+		co_await getKeyConflictTest(cx);
+
 		double testStart = now();
 
 		while (true) {
