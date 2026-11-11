@@ -5,7 +5,7 @@ run YCSB while the cluster absorbs a large clear or moves data off an excluded s
 whatever the cluster is configured with, so the same tests compare engines across clusters.
 
 For each layout this writes:
-  YCSBClusterBench_{size}_Setup_{layout}.toml        load the layout's dataset
+  YCSBClusterBench_{size}_Setup_{layout}.toml        load the layout's dataset, then churn it with update-only YCSB
   YCSBClusterBench_{size}_Throughput_{layout}.toml   per (distribution, threads): bounce, warmup, measured at unlimited
                                                      tps, to find where throughput saturates
 With --latency-tps and --latency-threads (a non-saturating rate chosen from a throughput run), also:
@@ -61,6 +61,11 @@ BOUNCE_WORKERS = 100000
 
 # Throughput ramps total client threads across all testers at unlimited tps
 THROUGHPUT_THREAD_LEVELS = [1, 2, 4, 8, 16, 32, 64, 128, 256]
+
+# After loading, update-only YCSB at the top of the throughput ramp, so the engine's background work (compaction,
+# page reuse) is underway when measurement starts
+CHURN_THREADS = THROUGHPUT_THREAD_LEVELS[-1]
+CHURN_DURATION = 1800.0
 
 # The interference event happens this long into the measured phase, which keeps going this long after it, so slow
 # reclaims and data moves can be seen to finish
@@ -145,14 +150,25 @@ def warmup_block(tag, layout, node_count):
 """
 
 
+def churn_block(layout, node_count):
+    return f"""
+{test_header(f"Churn_{layout}", int(CHURN_DURATION) + 300)}\
+{ycsb_workload(layout, node_count, CHURN_DURATION, CHURN_THREADS, "random", 0, read_weight=0)}"""
+
+
 def setup_toml(size, layout, node_count, workload, node_prefix, title):
     load_only = {
         "YCSB": "    testDuration = 0.0",
         "ConcurrentClearRange": "    clear = false",
     }
+    # Only the measured dataset is churned; the large clear's second copy is only there to be cleared
+    churn = churn_block(layout, node_count) if workload == "YCSB" else ""
+    description = f"Load {node_count:,} rows under nodePrefix {node_prefix}"
+    if churn:
+        description += f", then update them at saturation for {CHURN_DURATION:.0f}s"
     return f"""\
 {HEADER}
-# Load {node_count:,} rows under nodePrefix {node_prefix}.
+# {description}.
 
 [[test]]
 testTitle = '{title}'
@@ -167,7 +183,7 @@ timeout = 20000
     [[test.workload]]
     testName = '{workload}'
 {load_only[workload]}
-{dataset_fields(layout, node_count, node_prefix)}"""
+{dataset_fields(layout, node_count, node_prefix)}{churn}"""
 
 
 def ramp_toml(kind, description, size, layout, node_count, levels, test_duration):
