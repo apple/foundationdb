@@ -2583,6 +2583,53 @@ TEST_CASE("special-key-space set transaction ID after write") {
 	}
 }
 
+TEST_CASE("special-key-space decimal transaction ID") {
+	fdb::Transaction tr(db);
+	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+	constexpr std::string_view idKey = "\xff\xff/tracing/transaction_id";
+	tr.set(idKey, "12345");
+	auto result = tr.get(idKey, false);
+	REQUIRE(wait_future(result) == 0);
+	fdb_bool_t present;
+	const uint8_t* value;
+	int length;
+	fdb_check(result.get(&present, &value, &length));
+	REQUIRE(present);
+	CHECK(std::string(reinterpret_cast<const char*>(value), length) == UID(0, 12345).toString());
+	auto commit = tr.commit();
+	CHECK(wait_future(commit) == 0);
+}
+
+TEST_CASE("special-key-space invalid tracing and maintenance values") {
+	fdb::Transaction tr(db);
+	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+	SUBCASE("out-of-range decimal transaction ID") {
+		tr.set("\xff\xff/tracing/transaction_id", "18446744073709551616");
+	}
+	SUBCASE("non-hexadecimal digit in transaction ID") {
+		tr.set("\xff\xff/tracing/transaction_id", "0000000000000001000000000000000g");
+	}
+	SUBCASE("non-numeric maintenance duration") {
+		tr.set("\xff\xff/management/maintenance/zone1", "abc");
+	}
+	SUBCASE("non-finite maintenance duration") {
+		tr.set("\xff\xff/management/maintenance/zone1", "nan");
+	}
+	SUBCASE("maintenance duration exceeds the version range") {
+		tr.set("\xff\xff/management/maintenance/zone1", "1e30");
+	}
+	auto commit = tr.commit();
+	REQUIRE(wait_future(commit) == error_code_special_keys_api_failure);
+	auto message = tr.get("\xff\xff/error_message", false);
+	REQUIRE(wait_future(message) == 0);
+	fdb_bool_t present;
+	const uint8_t* value;
+	int length;
+	fdb_check(message.get(&present, &value, &length));
+	CHECK(present);
+	CHECK(length > 0);
+}
+
 TEST_CASE("special-key-space disable tracing") {
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));

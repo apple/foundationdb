@@ -21,7 +21,10 @@
 #include "boost/lexical_cast.hpp"
 #include "boost/algorithm/string.hpp"
 
+#include <charconv>
+#include <limits>
 #include <string>
+#include <string_view>
 #include <time.h>
 #include <msgpack.hpp>
 
@@ -1731,6 +1734,26 @@ Future<RangeResult> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
 	return result;
 }
 
+static Optional<UID> parseTracingTransactionId(std::string_view text) {
+	if (text.empty()) {
+		return {};
+	}
+	auto parse = [](std::string_view digits, int base, uint64_t& value) {
+		const char* end = digits.data() + digits.size();
+		auto result = std::from_chars(digits.data(), end, value, base);
+		return result.ec == std::errc{} && result.ptr == end;
+	};
+	uint64_t high = 0, low = 0;
+	if (text.size() == 32) {
+		if (parse(text.substr(0, 16), 16, high) && parse(text.substr(16), 16, low)) {
+			return UID(high, low);
+		}
+	} else if (parse(text, 10, low)) {
+		return UID(0, low);
+	}
+	return {};
+}
+
 void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 	if (ryw->getApproximateSize() > 0) {
 		ryw->setSpecialKeySpaceErrorMsg(
@@ -1740,7 +1763,16 @@ void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, 
 	}
 
 	if (key.endsWith(kTracingTransactionIdKey)) {
-		ryw->setTransactionID(UID::fromString(value.toString()));
+		auto id = parseTracingTransactionId(value.toStringView());
+		if (!id.present()) {
+			ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
+			    false,
+			    "configure trace",
+			    "transaction_id must be an unsigned decimal 64-bit integer or 32 hex digits"));
+			ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
+			return;
+		}
+		ryw->setTransactionID(id.get());
 	} else if (key.endsWith(kTracingTokenKey)) {
 		if (value.toString() == "true") {
 			ryw->setToken(deterministicRandom()->randomUInt64());
@@ -2564,7 +2596,10 @@ static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWritesTransa
 				    false, "maintenance", "Multiple zones given for maintenance, only one allowed at the same time"));
 			isSet = true;
 			zoneId = iter->begin().removePrefix(kr.begin);
-			seconds = boost::lexical_cast<double>(iter->value().second.get().toString());
+			if (!boost::conversion::try_lexical_convert(iter->value().second.get().toString(), seconds)) {
+				co_return Optional<std::string>(ManagementAPIError::toJsonString(
+				    false, "maintenance", "Expected a non-negative duration in seconds"));
+			}
 		} else {
 			// if we already have set operation, then all clear operations will be meaningless, thus skip
 			if (!isSet && healthyZone.present() && iter.range().contains(healthyZone.get().first.withPrefix(kr.begin)))
@@ -2582,11 +2617,16 @@ static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWritesTransa
 			    "The specified maintenance time " + boost::lexical_cast<std::string>(seconds) + " is a negative value";
 			co_return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
 		} else {
+			const Version readVersion = ryw->getTransaction().getReadVersion().get();
+			const double duration = seconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+			if (!(duration < static_cast<double>(std::numeric_limits<Version>::max())) ||
+			    static_cast<Version>(duration) > std::numeric_limits<Version>::max() - readVersion) {
+				co_return Optional<std::string>(ManagementAPIError::toJsonString(
+				    false, "maintenance", "Maintenance duration must give a representable end version"));
+			}
 			TraceEvent(SevDebug, "SKSMaintenanceSet").detail("ZoneId", zoneId.toString());
 			ryw->getTransaction().set(healthyZoneKey,
-			                          healthyZoneValue(zoneId,
-			                                           ryw->getTransaction().getReadVersion().get() +
-			                                               (seconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND)));
+			                          healthyZoneValue(zoneId, readVersion + static_cast<Version>(duration)));
 		}
 	}
 	co_return Optional<std::string>();

@@ -273,7 +273,7 @@ data. Every transaction contains a unique identifier which follows the
 transaction through the system. By providing access to set this identifier,
 clients can connect FoundationDB transactions to outside events.
 
-#. ``\xff\xff/tracing/transaction_id := <transaction_id>`` Read/write. A 64-bit integer transaction ID which follows the transaction as it moves through FoundationDB. All transactions are assigned a random transaction ID on creation, and this key can be read to surface the randomly generated ID. Alternatively, set this key to provide a custom identifier. When setting this key, provide a string in the form of a 64-bit integer, which will be automatically converted to the appropriate type.
+#. ``\xff\xff/tracing/transaction_id := <transaction_id>`` Read/write. A 128-bit trace ID which follows the transaction as it moves through FoundationDB. A new transaction receives a random ID. Reading this key returns the ID as 32 hexadecimal digits. To set a custom ID, provide 32 hexadecimal digits or an unsigned 64-bit decimal integer. A decimal ID occupies the low 64 bits of the trace ID.
 #. ``\xff\xff/tracing/token := <tracing_enabled>`` Read/write. Set to true/false to enable or disable tracing for the transaction, respectively. If read, returns a 64-bit integer set to 0 if tracing has been disabled, or a random 64-bit integer otherwise (this integers value has no meaning to the client other than to determine whether the transaction will be traced).
 
 .. _special-key-space-deprecation:
