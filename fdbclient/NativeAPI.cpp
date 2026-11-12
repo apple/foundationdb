@@ -2578,7 +2578,11 @@ void getRangeFinished(Reference<TransactionState> trState,
                       Snapshot snapshot,
                       Promise<std::pair<Key, Key>> conflictRange,
                       Reverse reverse,
-                      RangeResultFamily result) {
+                      RangeResultFamily& result) {
+	// A reverse read can normalize its begin selector before reading any of the shards below its first page.
+	if (begin.getKey() == allKeys.begin && begin.offset < 1 && (!reverse || !result.more)) {
+		result.readToBegin = true;
+	}
 	int64_t bytes = getRangeResultFamilyBytes(result);
 
 	trState->totalCost += getReadOperationCost(bytes);
@@ -2624,6 +2628,31 @@ void getRangeFinished(Reference<TransactionState> trState,
 	}
 }
 
+TEST_CASE("/fdbclient/NativeAPI/getRange/reverseReadToBegin") {
+	auto state = makeReference<TransactionState>(TaskPriority::DefaultEndpoint, SpanContext());
+	state->cx = Database(new DatabaseContext(operation_failed()));
+	for (bool more : { true, false }) {
+		RangeResult result;
+		result.push_back_deep(result.arena(), KeyValueRef("row"_sr, "value"_sr));
+		result.more = more;
+		if (more) {
+			result.setReadThrough("m"_sr);
+		}
+		Promise<std::pair<Key, Key>> conflict;
+		getRangeFinished(state,
+		                 now(),
+		                 lastLessThan(allKeys.begin),
+		                 firstGreaterOrEqual("z"_sr),
+		                 Snapshot::False,
+		                 conflict,
+		                 Reverse::True,
+		                 result);
+		ASSERT_EQ(result.readToBegin, !more);
+		ASSERT_EQ(conflict.getFuture().get().first, more ? "row"_sr : allKeys.begin);
+	}
+	return Void();
+}
+
 template <class GetKeyValuesFamilyRequest, // GetKeyValuesRequest or GetMappedKeyValuesRequest
           class GetKeyValuesFamilyReply, // GetKeyValuesReply or GetMappedKeyValuesReply (It would be nice if
                                          // we could use REPLY_TYPE(GetKeyValuesFamilyRequest) instead of specify
@@ -2661,7 +2690,6 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trStateInput,
 		double startTime = now();
 
 		if (begin.getKey() == allKeys.begin && begin.offset < 1) {
-			output.readToBegin = true;
 			begin = KeySelector(firstGreaterOrEqual(begin.getKey()), begin.arena());
 		}
 
@@ -2812,14 +2840,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trStateInput,
 
 				// optimization: first request got all data--just return it
 				if (finished && !output.size()) {
-					bool readToBegin = output.readToBegin;
-					bool readThroughEnd = output.readThroughEnd;
-
 					using RangeResultRefFamily = typename RangeResultFamily::RefType;
 					output = RangeResultFamily(
 					    RangeResultRefFamily(rep.data, modifiedSelectors || limits.isReached() || rep.more), rep.arena);
-					output.readToBegin = readToBegin;
-					output.readThroughEnd = readThroughEnd;
 
 					if (buggify() && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) &&
 					    (!std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value)) {
