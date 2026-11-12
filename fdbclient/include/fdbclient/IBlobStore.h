@@ -270,9 +270,12 @@ protected:
 	                   Optional<std::string> const& proxyHost,
 	                   Optional<std::string> const& proxyPort,
 	                   BlobKnobs const& knobs = BlobKnobs(),
-	                   HTTP::Headers extraHeaders = HTTP::Headers())
+	                   HTTP::Headers extraHeaders = HTTP::Headers(),
+	                   Optional<std::string> const& serverSideEncryption = Optional<std::string>(),
+	                   Optional<std::string> const& proxyParameter = Optional<std::string>())
 	  : host(host), service(service), region(region), proxyHost(proxyHost), proxyPort(proxyPort),
 	    useProxy(proxyHost.present() && proxyPort.present()), knobs(knobs), extraHeaders(extraHeaders),
+	    serverSideEncryption(serverSideEncryption), proxyParameter(proxyParameter),
 	    requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
 	    requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
@@ -472,6 +475,11 @@ public:
 	// Shared state
 	BlobKnobs knobs;
 	HTTP::Headers extraHeaders;
+	// From the URL's server_side_encryption (or sse) parameter. Overrides the BLOBSTORE_ENCRYPTION_TYPE knob when
+	// present.
+	Optional<std::string> serverSideEncryption;
+	// The URL's proxy parameter, kept so getResourceURL can write it back. proxyHost and proxyPort already apply it.
+	Optional<std::string> proxyParameter;
 	std::string host;
 	std::string service;
 	std::string region;
