@@ -104,6 +104,7 @@ BlobKnobs::BlobKnobs() {
 	sdk_auth = false;
 	enable_object_integrity_check = CLIENT_KNOBS->BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK;
 	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
+	aws_v4_header = CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER;
 }
 
 bool BlobKnobs::set(StringRef name, int value) {
@@ -147,6 +148,7 @@ bool BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(sdk_auth, sa);
 	TRY_PARAM(enable_object_integrity_check, eoic);
 	TRY_PARAM(global_connection_pool, gcp);
+	TRY_PARAM(aws_v4_header, v4);
 #undef TRY_PARAM
 	return false;
 }
@@ -188,6 +190,7 @@ std::string BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(global_connection_pool, gcp);
 	_CHECK_PARAM(max_delay_retryable_error, dre);
 	_CHECK_PARAM(max_delay_connection_failed, dcf);
+	_CHECK_PARAM(aws_v4_header, v4);
 #undef _CHECK_PARAM
 	return r;
 }
