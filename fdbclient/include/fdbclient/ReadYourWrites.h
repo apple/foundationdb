@@ -237,8 +237,8 @@ private:
 	Future<Standalone<StringRef>> versionStampFuture;
 	Standalone<VectorRef<KeyRangeRef>>
 	    nativeReadRanges; // Used to read conflict ranges after committing an ryw disabled transaction
-	Standalone<VectorRef<KeyRangeRef>>
-	    nativeWriteRanges; // Used to read conflict ranges after committing an ryw disabled transaction
+	// Write conflicts flushed out of the write map by versionstamped keys, or saved before a RYW-disabled commit.
+	Standalone<VectorRef<KeyRangeRef>> nativeWriteRanges;
 
 	Reference<TransactionDebugInfo> transactionDebugInfo;
 
