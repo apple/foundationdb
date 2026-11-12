@@ -49,7 +49,7 @@ struct BlobKnobs {
 	    concurrent_uploads, concurrent_lists, concurrent_reads_per_file, concurrent_writes_per_file, enable_read_cache,
 	    read_block_size, read_ahead_blocks, read_cache_blocks_per_file, max_send_bytes_per_second,
 	    max_recv_bytes_per_second, sdk_auth, enable_object_integrity_check, global_connection_pool,
-	    max_delay_retryable_error, max_delay_connection_failed, multipart_retry_delay_ms;
+	    max_delay_retryable_error, max_delay_connection_failed, multipart_retry_delay_ms, aws_v4_header;
 
 	bool set(StringRef name, int value);
 	std::string getURLParameters() const;
@@ -92,6 +92,8 @@ struct BlobKnobs {
 			"BUILD_AWS_BACKUP is enabled.",
 			"enable_object_integrity_check (or eoic) Enable integrity check on GET requests (Default: false).",
 			"global_connection_pool (or gcp)       Enable shared connection pool between all blobstore instances.",
+			"aws_v4_header (or v4)                 Set 1 to sign requests with AWS V4 or 0 for V2. Defaults to the "
+			"HTTP_REQUEST_AWS_V4_HEADER knob.",
 			"provider (or p)                       Blob store provider: s3 (default) or gcs."
 		};
 	}

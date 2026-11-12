@@ -118,7 +118,7 @@ S3BlobStoreEndpoint::S3BlobStoreEndpoint(std::string const& host,
                        proxyParameter),
     credentials(parseS3Credentials(creds)), lookupKey(credentials.present() && credentials.get().key.empty()),
     lookupSecret(credentials.present() && credentials.get().secret.empty()) {
-	if (this->region.empty() && CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
+	if (this->region.empty() && knobs.aws_v4_header) {
 		throw std::string(
 		    "Failed to get region from host or parameter in url, region is required for aws v4 signature");
 	}
@@ -458,7 +458,7 @@ void S3BlobStoreEndpoint::setRequestHeaders(std::string const& verb,
 	headers["Accept"] = "application/xml";
 	if (credentials.present() && !credentials.get().securityToken.empty())
 		headers["x-amz-security-token"] = credentials.get().securityToken;
-	if (CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
+	if (knobs.aws_v4_header) {
 		setV4AuthHeaders(verb, resource, headers);
 	} else {
 		setAuthHeaders(verb, resource, headers);
@@ -467,7 +467,7 @@ void S3BlobStoreEndpoint::setRequestHeaders(std::string const& verb,
 
 std::string S3BlobStoreEndpoint::normalizeResourceForRequest(std::string const& resource) {
 	std::vector<std::string> queryParameters;
-	std::string canonicalURI = awsCanonicalURI(resource, queryParameters, CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER);
+	std::string canonicalURI = awsCanonicalURI(resource, queryParameters, knobs.aws_v4_header);
 	if (!queryParameters.empty()) {
 		canonicalURI += "?";
 		for (size_t i = 0; i < queryParameters.size(); ++i) {
@@ -576,7 +576,7 @@ Future<bool> S3BlobStoreEndpoint::preRetryCheck(std::string const& verb,
 	    .detail("OriginalResource", resource)
 	    .detail("DryrunResource", dryrunRequest->resource)
 	    .detail("Bucket", bucket)
-	    .detail("V4", CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER);
+	    .detail("V4", knobs.aws_v4_header);
 
 	co_await requestRate->getAllowance(1);
 	Future<Reference<HTTP::IncomingResponse>> dryrunResponse =
@@ -1669,6 +1669,25 @@ TEST_CASE("/backup/s3/v4headers") {
 		ASSERT(headers["Content-Type"] == "Application/x-amz-json-1.0");
 	}
 
+	return Void();
+}
+
+// The URL's v4 parameter, not the HTTP_REQUEST_AWS_V4_HEADER knob, decides how requests are signed.
+TEST_CASE("/backup/s3/v4/urlOverridesKnob") {
+	const bool v4 = !CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER;
+	std::string resource;
+	std::string error;
+	S3BlobStoreEndpoint::ParametersT parameters;
+	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(
+	    format("blobstore://key:secret@127.0.0.1:9000/resource_name?bucket=bucket_name&region=test_region&v4=%d", v4),
+	    {},
+	    &resource,
+	    &error,
+	    &parameters);
+	HTTP::Headers headers;
+	headers["Host"] = "127.0.0.1";
+	s3->setRequestHeaders("GET", "/bucket_name/object", headers);
+	ASSERT(headers["Authorization"].starts_with(v4 ? "AWS4-HMAC-SHA256 " : "AWS key:"));
 	return Void();
 }
 
