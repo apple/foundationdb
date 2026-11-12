@@ -89,6 +89,9 @@ waitForQuiescence = false
     # Enough keys that the range splits into several shards, hence several dump tasks.
     dataKeyCount = 60000
     minTasksToProbe = 8
+    # Must exceed the dispatch parallelism, which a buggified run re-randomises to 1-5 regardless of
+    # dd_bulkdump_parallelism below, so that the drain cannot consume every outstanding task.
+    minOutstandingToProbe = 6
     pauseProbeTimeout = 900.0
 
     # The workload otherwise coinflips between the full keyspace and a random subrange. A random

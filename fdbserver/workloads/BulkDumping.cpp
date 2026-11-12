@@ -71,6 +71,7 @@ struct BulkDumping : TestWorkload {
 	// count, which follows how many bytes the dataset occupies.
 	int dataKeyCount = 1000;
 	int minTasksToProbe = 4;
+	int minOutstandingToProbe = 6;
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
@@ -116,6 +117,7 @@ struct BulkDumping : TestWorkload {
 		pauseProbeTimeout = getOption(options, "pauseProbeTimeout"_sr, 600.0);
 		dataKeyCount = getOption(options, "dataKeyCount"_sr, 1000);
 		minTasksToProbe = getOption(options, "minTasksToProbe"_sr, 4);
+		minOutstandingToProbe = getOption(options, "minOutstandingToProbe"_sr, 6);
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
@@ -253,14 +255,15 @@ struct BulkDumping : TestWorkload {
 				co_return;
 			}
 			Optional<BulkDumpProgress> progress = co_await getBulkDumpProgress(cx);
-			// Require at least two tasks still outstanding, not merely one. getBulkDumpProgress counts
-			// every non-complete entry as "running", so outstanding is all that can be measured here --
-			// and with dispatch serialized at most one of those is actually in flight. One outstanding
-			// task would therefore finish during the drain below and complete the job, leaving the pause
-			// nothing to hold and the run proving nothing about admission.
+			// Require enough outstanding tasks that the drain below cannot consume all of them.
+			// getBulkDumpProgress counts every non-complete entry as "running", so outstanding is all
+			// that can be measured here, and however many are genuinely in flight will finish during the
+			// drain. The margin must therefore exceed the dispatch parallelism -- and that cannot be
+			// pinned from the toml, because DD_BULKDUMP_PARALLELISM carries a buggify clause
+			// (ServerKnobs.cpp, randomInt(1, 5)) that re-randomises it whatever the toml says.
 			if (progress.present() && progress.get().completeTasks > 0 &&
 			    progress.get().totalTasks >= self->minTasksToProbe &&
-			    progress.get().totalTasks - progress.get().completeTasks >= 2) {
+			    progress.get().totalTasks - progress.get().completeTasks >= self->minOutstandingToProbe) {
 				completeAtPause = progress.get().completeTasks;
 				totalAtPause = progress.get().totalTasks;
 				runningAtPause = progress.get().runningTasks;
@@ -284,6 +287,9 @@ struct BulkDumping : TestWorkload {
 		// Drain is the chosen semantics, so completions after the pause are expected; what has to stop is
 		// the admission of new work. Poll until the count holds still.
 		int completeAfterDrain = completeAtPause;
+		// Read alongside completeTasks every poll. Comparing against the pre-pause snapshot was wrong:
+		// data distribution keeps creating task entries, so the totals are from different moments.
+		int totalAfterDrain = totalAtPause;
 		int stablePolls = 0;
 		double drainStart = now();
 		while (stablePolls < 3) {
@@ -296,6 +302,7 @@ struct BulkDumping : TestWorkload {
 				    .detail("TotalAtPause", totalAtPause);
 				co_return;
 			}
+			totalAfterDrain = progress.get().totalTasks;
 			if (progress.get().completeTasks == completeAfterDrain) {
 				stablePolls++;
 			} else {
@@ -311,8 +318,18 @@ struct BulkDumping : TestWorkload {
 			}
 		}
 
-		// Work must remain, or the flatness asserted below would just be the job having finished.
-		ASSERT(completeAfterDrain < totalAtPause);
+		// Work has to remain, or the flatness below would just be the job having finished. This is a
+		// precondition of the probe rather than a claim about the product, so it is reported as the
+		// vacuity miss it is; the run still fails, but it does not read as a pause defect.
+		if (completeAfterDrain >= totalAfterDrain) {
+			TraceEvent(SevError, "BulkDumpingPauseProbeNoWorkLeftAfterDrain")
+			    .detail("JobId", jobId)
+			    .detail("CompleteAtPause", completeAtPause)
+			    .detail("OutstandingAtPause", totalAtPause - completeAtPause)
+			    .detail("CompleteAfterDrain", completeAfterDrain)
+			    .detail("TotalAfterDrain", totalAfterDrain);
+			co_return;
+		}
 		// Whether anything was mid-flight at the pause is recorded but NOT asserted: getBulkDumpProgress
 		// counts every non-complete entry as running, so a task that is dispatched cannot be told apart
 		// from one merely waiting, and a pause landing between dispatches legitimately drains nothing.
