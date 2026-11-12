@@ -31,6 +31,7 @@
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "BackupRangeSpec.h"
+#include "BackupSteps.h"
 
 // TODO: explain the purpose of this workload and how it different from the
 // 20+ (literally) other backup/restore workloads.
@@ -53,6 +54,7 @@ struct RestoreBackupWorkload : TestWorkload {
 	// The extra describeBackup() call is skipped in simulation so existing seeds are unaffected.
 	bool reportBackupMetrics;
 	std::vector<PerfMetric> backupMetrics;
+	BackupSteps::BackupVersion version;
 	Optional<double> restoreDuration;
 	Optional<double> snapshotMB;
 
@@ -60,6 +62,7 @@ struct RestoreBackupWorkload : TestWorkload {
 		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
 		tag = getOption(options, "tag"_sr, "default"_sr);
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
+		version = BackupSteps::parseBackupVersion(getOption(options, "version"_sr, "v1"_sr));
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, false));
 		restoreRanges = BackupRangeSpec::readOptionalRanges(options, "restoreRanges"_sr, "restoreRangePrefix"_sr);
 		addPrefix = BackupRangeSpec::readKeyOption(options, "addPrefix"_sr);
@@ -103,15 +106,7 @@ struct RestoreBackupWorkload : TestWorkload {
 				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
 				    .detail("TargetVersion", waitForVersion);
 				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() >= waitForVersion) {
-					try {
-						TraceEvent("DiscontinuingBackup").log();
-						co_await backupAgent.discontinueBackup(cx, tag);
-					} catch (Error& e) {
-						TraceEvent("ErrorDiscontinuingBackup").error(e);
-						if (e.code() != error_code_backup_unneeded) {
-							throw;
-						}
-					}
+					co_await BackupSteps::discontinueBackup(cx, &backupAgent, tag);
 					co_return;
 				}
 				co_await delay(5.0);
@@ -130,12 +125,7 @@ struct RestoreBackupWorkload : TestWorkload {
 	// endVersion, which is the snapshot a restore to the latest restorable version uses.
 	Future<Void> describeBackupMetrics() {
 		BackupDescription desc = co_await backupContainer->describeBackup();
-		const KeyspaceSnapshotFile* snapshot = nullptr;
-		for (const auto& s : desc.snapshots) {
-			if (s.restorable.orDefault(false) && (!snapshot || s.endVersion > snapshot->endVersion)) {
-				snapshot = &s;
-			}
-		}
+		const KeyspaceSnapshotFile* snapshot = BackupSteps::latestRestorableSnapshot(desc);
 		if (snapshot) {
 			snapshotMB = snapshot->totalSize / 1e6;
 			backupMetrics.emplace_back("Backup snapshot duration (s)",
@@ -179,43 +169,16 @@ struct RestoreBackupWorkload : TestWorkload {
 		}
 	}
 
-	static std::string describeRange(KeyRangeRef const& r) { return printable(r.begin) + ":" + printable(r.end); }
-
-	static std::string describeRanges(std::vector<KeyRange> const& ranges) {
-		std::string result;
-		for (auto const& r : ranges) {
-			result += (result.empty() ? "" : ";") + describeRange(r);
-		}
-		return result;
-	}
-
 	// Returns the ranges to restore: restoreRanges if set, else the ranges the backup covers. Every restoreRanges
 	// entry must lie within one backup range: submitBackup coalesces them, so a range spanning two is not covered.
 	Future<Standalone<VectorRef<KeyRangeRef>>> getRangesToRestore(Database cx) {
-		std::vector<KeyRange> backupRanges =
-		    co_await BackupConfig(backupUID).backupRanges().getOrThrow(cx.getReference());
-		Standalone<VectorRef<KeyRangeRef>> ranges;
-		if (restoreRanges.present()) {
-			for (auto const& r : restoreRanges.get()) {
-				bool covered = std::any_of(
-				    backupRanges.begin(), backupRanges.end(), [&](KeyRange const& b) { return b.contains(r); });
-				if (!covered) {
-					TraceEvent(SevWarnAlways, "RestoreRangeNotInBackup")
-					    .detail("RestoreRange", describeRange(r))
-					    .detail("BackupRanges", describeRanges(backupRanges));
-					throw restore_error();
-				}
-				ranges.push_back_deep(ranges.arena(), r);
-			}
-		} else {
-			for (auto const& r : backupRanges) {
-				ranges.push_back_deep(ranges.arena(), r);
-			}
-		}
+		std::vector<KeyRange> backupRanges = co_await BackupSteps::readBackupRanges(cx, backupUID);
+		Standalone<VectorRef<KeyRangeRef>> ranges =
+		    BackupSteps::selectBackupRanges(backupRanges, restoreRanges, "RestoreRangeNotInBackup");
 		for (auto const& r : ranges) {
 			if (!r.begin.startsWith(removePrefix) || !r.end.startsWith(removePrefix)) {
 				TraceEvent(SevWarnAlways, "RestoreRangeOutsideRemovePrefix")
-				    .detail("RestoreRange", describeRange(r))
+				    .detail("RestoreRange", BackupSteps::describeRange(r))
 				    .detail("RemovePrefix", removePrefix);
 				throw restore_error();
 			}
@@ -247,23 +210,15 @@ struct RestoreBackupWorkload : TestWorkload {
 
 		LockDB lockDB(inPlace);
 		double restoreStart = now();
-		co_await backupAgent.restore(cx,
-		                             cx,
-		                             tag,
-		                             Key(backupContainer->getURL()),
-		                             backupContainer->getProxy(),
-		                             ranges,
-		                             WaitForComplete::True,
-		                             ::invalidVersion,
-		                             Verbose::True,
-		                             addPrefix,
-		                             removePrefix,
-		                             lockDB,
-		                             UnlockDB(lockDB),
-		                             OnlyApplyMutationLogs::False,
-		                             InconsistentSnapshotOnly::False,
-		                             ::invalidVersion,
-		                             encryptionKeyFileName);
+		BackupSteps::RestoreSpec spec;
+		spec.tag = tag;
+		spec.container = backupContainer;
+		spec.ranges = ranges;
+		spec.addPrefix = addPrefix;
+		spec.removePrefix = removePrefix;
+		spec.lockDB = lockDB;
+		spec.encryptionKeyFileName = encryptionKeyFileName;
+		co_await BackupSteps::restoreBackup(cx, &backupAgent, version, spec);
 		restoreDuration = now() - restoreStart;
 	}
 

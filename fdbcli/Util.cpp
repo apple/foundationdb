@@ -284,150 +284,6 @@ void printProgressMetrics(double avgBytesPerSecond, Optional<double> etaSeconds,
 	}
 }
 
-// Print detailed task breakdown for bulk operations
-void printTaskBreakdown(int submittedTasks, int triggeredTasks, int runningTasks, int completeTasks, int errorTasks) {
-	int totalTasks = submittedTasks + triggeredTasks + runningTasks + completeTasks + errorTasks;
-	if (totalTasks > 0) {
-		fmt::println(" Task Status Breakdown:");
-		if (submittedTasks > 0)
-			fmt::println("   Submitted: {}", submittedTasks);
-		if (triggeredTasks > 0)
-			fmt::println("   Triggered: {}", triggeredTasks);
-		if (runningTasks > 0)
-			fmt::println("   Running: {}", runningTasks);
-		if (completeTasks > 0)
-			fmt::println("   Complete: {}", completeTasks);
-		if (errorTasks > 0)
-			fmt::println("   Error: {}", errorTasks);
-	}
-}
-
-// Advanced performance monitoring for bulk operations
-BulkHealthMetrics BulkHealthMetrics::analyze(double throughputMBps,
-                                             double efficiencyPercent,
-                                             int stalledTasks,
-                                             int errorTasks,
-                                             double elapsedMinutes) {
-	BulkHealthMetrics metrics;
-
-	// Calculate health score (weighted average)
-	double throughputScore = std::min(100.0, throughputMBps * 2); // 50MB/s = 100 points
-	double efficiencyScore = efficiencyPercent;
-	double reliabilityScore = std::max(0.0, 100.0 - (stalledTasks * 10) - (errorTasks * 20));
-
-	metrics.healthScore = (throughputScore * 0.4) + (efficiencyScore * 0.4) + (reliabilityScore * 0.2);
-
-	// Determine status
-	if (metrics.healthScore >= 90) {
-		metrics.healthStatus = "Excellent";
-	} else if (metrics.healthScore >= 75) {
-		metrics.healthStatus = "Good";
-	} else if (metrics.healthScore >= 50) {
-		metrics.healthStatus = "Fair";
-	} else {
-		metrics.healthStatus = "Poor";
-	}
-
-	// Generate recommendations
-	if (throughputMBps < 5) {
-		metrics.recommendations.push_back("Consider increasing cluster resources for better throughput");
-	}
-	if (errorTasks > 0) {
-		metrics.recommendations.push_back("Investigate error tasks for potential issues");
-	}
-	if (stalledTasks > 0) {
-		metrics.recommendations.push_back("Monitor stalled tasks - may indicate network or storage issues");
-	}
-	if (elapsedMinutes > 60 && efficiencyPercent < 50) {
-		metrics.recommendations.push_back("Long-running job with low efficiency - consider optimization");
-	}
-
-	return metrics;
-}
-
-void printBulkHealthAnalysis(const BulkHealthMetrics& health) {
-	fmt::println("");
-	fmt::println("Health Analysis:");
-	fmt::println(" Overall Health: {:.1f}/100 ({})", health.healthScore, health.healthStatus);
-
-	if (!health.recommendations.empty()) {
-		fmt::println(" Recommendations");
-		for (const auto& rec : health.recommendations) {
-			fmt::println("   - {}", rec);
-		}
-	}
-}
-
-BulkErrorAnalysis BulkErrorAnalysis::analyze(int errorTasks,
-                                             int stalledTasks,
-                                             const std::vector<std::string>& recentErrors) {
-	BulkErrorAnalysis analysis;
-	analysis.totalErrors = errorTasks;
-
-	// Categorize errors
-	for (const auto& error : recentErrors) {
-		if (error.find("timeout") != std::string::npos) {
-			analysis.errorCategories["Timeout Issues"]++;
-		} else if (error.find("network") != std::string::npos || error.find("connection") != std::string::npos) {
-			analysis.errorCategories["Network Issues"]++;
-		} else if (error.find("permission") != std::string::npos || error.find("access") != std::string::npos) {
-			analysis.errorCategories["Access Issues"]++;
-		} else if (error.find("disk") != std::string::npos || error.find("storage") != std::string::npos) {
-			analysis.errorCategories["Storage Issues"]++;
-		} else {
-			analysis.errorCategories["Other Issues"]++;
-		}
-	}
-
-	return analysis;
-}
-
-void printErrorDiagnostics(const BulkErrorAnalysis& analysis) {
-	if (analysis.totalErrors > 0) {
-		fmt::println("");
-		fmt::println("Error Diagnostics:");
-
-		if (!analysis.errorCategories.empty()) {
-			fmt::println(" Error Categories:");
-			for (const auto& [category, count] : analysis.errorCategories) {
-				fmt::println("   {} - {} occurrences", category, count);
-			}
-		}
-	}
-}
-
-BulkOptimizationRecommendations BulkOptimizationRecommendations::generate(double throughputMBps,
-                                                                          double efficiency,
-                                                                          int stalledTasks,
-                                                                          int errorTasks,
-                                                                          double elapsedMinutes,
-                                                                          int totalTasks) {
-	BulkOptimizationRecommendations recs;
-
-	// Performance recommendations
-	if (throughputMBps < 10 && totalTasks > 100) {
-		recs.performanceRecommendations.push_back(
-		    "Low throughput detected. Consider increasing storage server resources or parallelism");
-	}
-	if (elapsedMinutes > 30 && efficiency < 80) {
-		recs.performanceRecommendations.push_back(
-		    "Long-running job with low efficiency. Consider optimizing shard sizes or task distribution");
-	}
-
-	return recs;
-}
-
-void printOptimizationRecommendations(const BulkOptimizationRecommendations& recs) {
-	if (!recs.performanceRecommendations.empty()) {
-		fmt::println("");
-		fmt::println("Optimization Recommendations:");
-		fmt::println(" Performance:");
-		for (const auto& rec : recs.performanceRecommendations) {
-			fmt::println("   - {}", rec);
-		}
-	}
-}
-
 // Format bytes with progress percentage for bulk operations
 std::string formatBytesProgress(int64_t completedBytes, Optional<int64_t> totalBytes) {
 	std::string result = format("%.2f MB", completedBytes / 1048576.0);
@@ -437,21 +293,6 @@ std::string formatBytesProgress(int64_t completedBytes, Optional<int64_t> totalB
 		                      totalBytes.get() > 0 ? 100.0 * completedBytes / totalBytes.get() : 0.0);
 	}
 	return result;
-}
-
-// Print progress summary for bulk operations
-void printProgressSummary(const char* operationName,
-                          int completeTasks,
-                          int totalTasks,
-                          int64_t completedBytes,
-                          int64_t totalBytes) {
-	fmt::println("");
-	fmt::println("{} Progress Summary:", operationName);
-	fmt::println(" Tasks: {} / {} ({:.1f}%)",
-	             completeTasks,
-	             totalTasks,
-	             totalTasks > 0 ? 100.0 * completeTasks / totalTasks : 0.0);
-	fmt::println(" Data: {}", formatBytesProgress(completedBytes, totalBytes));
 }
 
 void printStalledTasks(const std::vector<BulkLoadStalledTask>& stalledTasks) {
@@ -470,34 +311,6 @@ void printStalledTasks(const std::vector<BulkLoadStalledTask>& stalledTasks) {
 				fmt::println("           Last error: {}", stalled.lastError);
 			}
 		}
-	}
-}
-
-void printBulkAnalysis(double avgBytesPerSecond,
-                       double elapsedSeconds,
-                       int completeTasks,
-                       int totalTasks,
-                       int errorTasks,
-                       const std::vector<BulkLoadStalledTask>& stalledTasks) {
-	double efficiency = totalTasks > 0 ? 100.0 * completeTasks / totalTasks : 0.0;
-
-	auto healthMetrics = BulkHealthMetrics::analyze(
-	    avgBytesPerSecond / 1048576.0, efficiency, stalledTasks.size(), errorTasks, elapsedSeconds / 60.0);
-	printBulkHealthAnalysis(healthMetrics);
-
-	printStalledTasks(stalledTasks);
-
-	std::vector<std::string> recentErrors;
-	auto errorAnalysis = BulkErrorAnalysis::analyze(errorTasks, stalledTasks.size(), recentErrors);
-	printErrorDiagnostics(errorAnalysis);
-
-	auto recommendations = BulkOptimizationRecommendations::generate(
-	    avgBytesPerSecond / 1048576.0, efficiency, stalledTasks.size(), errorTasks, elapsedSeconds / 60.0, totalTasks);
-	printOptimizationRecommendations(recommendations);
-
-	if (errorTasks > 0) {
-		fmt::println("");
-		fmt::println("WARNING: {} tasks in error state", errorTasks);
 	}
 }
 

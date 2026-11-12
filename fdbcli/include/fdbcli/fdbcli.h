@@ -168,78 +168,8 @@ std::string formatBytesProgress(int64_t completedBytes, Optional<int64_t> totalB
 // Print throughput, ETA, and elapsed time metrics to stdout.
 void printProgressMetrics(double avgBytesPerSecond, Optional<double> etaSeconds, double elapsedSeconds);
 
-// Print task and byte completion summary (e.g., "Tasks: 5/10, Bytes: 1.2 GB / 2.4 GB").
-void printProgressSummary(const char* operationName,
-                          int completeTasks,
-                          int totalTasks,
-                          int64_t completedBytes,
-                          int64_t totalBytes);
-
-// Print detailed task state breakdown for bulkload operations.
-void printTaskBreakdown(int submittedTasks, int triggeredTasks, int runningTasks, int completeTasks, int errorTasks);
-
-// ============================================================================
-// BulkDump/BulkLoad Health Analysis
-// Used by "bulkdump status --analyze" and "bulkload status --analyze"
-// ============================================================================
-
-// Health assessment based on throughput, efficiency, and error rates.
-// healthScore: 0-100 rating, healthStatus: "healthy"/"degraded"/"critical"
-struct BulkHealthMetrics {
-	double healthScore;
-	std::string healthStatus;
-	std::vector<std::string> recommendations;
-
-	static BulkHealthMetrics analyze(double throughputMBps,
-	                                 double efficiencyPercent,
-	                                 int stalledTasks,
-	                                 int errorTasks,
-	                                 double elapsedMinutes);
-};
-
-// Error categorization and actionable diagnostics.
-struct BulkErrorAnalysis {
-	int totalErrors;
-	std::map<std::string, int> errorCategories;
-	std::vector<std::string> criticalIssues;
-	std::vector<std::string> actionableAdvice;
-
-	static BulkErrorAnalysis analyze(int errorTasks, int stalledTasks, const std::vector<std::string>& recentErrors);
-};
-
-// Performance and operational recommendations based on current metrics.
-struct BulkOptimizationRecommendations {
-	std::vector<std::string> performanceRecommendations;
-	std::vector<std::string> reliabilityRecommendations;
-	std::vector<std::string> operationalRecommendations;
-
-	static BulkOptimizationRecommendations generate(double throughputMBps,
-	                                                double efficiency,
-	                                                int stalledTasks,
-	                                                int errorTasks,
-	                                                double elapsedMinutes,
-	                                                int totalTasks);
-};
-
-// Print formatted health analysis to stdout.
-void printBulkHealthAnalysis(const BulkHealthMetrics& health);
-
-// Print error diagnostics and advice to stdout.
-void printErrorDiagnostics(const BulkErrorAnalysis& analysis);
-
-// Print optimization recommendations to stdout.
-void printOptimizationRecommendations(const BulkOptimizationRecommendations& recs);
-
 // Print warnings for tasks that have stalled (no progress for extended period).
 void printStalledTasks(const std::vector<BulkLoadStalledTask>& stalledTasks);
-
-// Run full analysis and print results: health metrics, stalled tasks, error diagnostics, recommendations.
-void printBulkAnalysis(double avgBytesPerSecond,
-                       double elapsedSeconds,
-                       int completeTasks,
-                       int totalTasks,
-                       int errorTasks,
-                       const std::vector<BulkLoadStalledTask>& stalledTasks);
 
 // Using \xff\xff/worker_interfaces/ special key, get all worker interfaces.
 // A worker list will be returned from CC.

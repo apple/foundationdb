@@ -272,8 +272,13 @@ Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob);
 // Return the existing job metadata
 Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr);
 
-// Get total number of completed tasks within the input range
-Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead);
+// Count the completed and the failed tasks within the input range
+struct BulkDumpTaskCounts {
+	size_t complete = 0;
+	size_t error = 0;
+};
+
+Future<BulkDumpTaskCounts> getBulkDumpTaskCounts(Database cx, KeyRange rangeToRead);
 
 // ==================== BulkDump/BulkLoad Progress Tracking ====================
 
@@ -309,7 +314,6 @@ struct BulkDumpProgress {
 	int64_t completedBytes;
 	double elapsedSeconds;
 	double startTime; // For computing current throughput
-	std::vector<BulkLoadStalledTask> stalledTasks;
 
 	BulkDumpProgress()
 	  : totalTasks(0), completeTasks(0), runningTasks(0), errorTasks(0), completedBytes(0), elapsedSeconds(0),
