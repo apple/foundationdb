@@ -286,6 +286,8 @@ var (
 	ErrCdcProxyFailed = Error{Code: 1254}
 	// TLog CDC peek reply exceeds configured byte limit
 	ErrCdcTLogPeekReplyTooLarge = Error{Code: 1255}
+	// BulkLoad range is covered by a running backup or DR; stop it before loading
+	ErrBulkloadRangeUnderBackup = Error{Code: 1256}
 	// Platform error
 	ErrPlatformError = Error{Code: 1500}
 	// Large block allocation failed
