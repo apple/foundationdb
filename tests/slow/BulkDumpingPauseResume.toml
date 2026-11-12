@@ -61,7 +61,7 @@ max_trace_lines = 5000000
 
 # Force many small shards so the job has many tasks: a pause has to be observable with work still
 # outstanding, and 1000 keys in a handful of shards would leave no mid-flight window to pause in.
-min_shard_bytes = 500
+min_shard_bytes = 10000
 
 # Stop DD coalescing the small shards straight back together; paired with min_shard_bytes this is
 # the same recipe DDPipelineSaturation and ShardEncodeRollback use to force many small shards.
@@ -71,6 +71,13 @@ shard_bytes_per_sqrt_bytes = 0
 # limiter, which is exactly where a pause consulted only once per pass would be ignored -- so this is
 # what makes the regression this test guards against observable rather than lucky.
 dd_bulkdump_parallelism = 1
+
+# Make each dump task slow rather than making more of them. The mid-flight window needs the job to
+# last; forcing tiny shards achieved that only by making data distribution split, assign and move
+# hundreds of them, and that churn -- not the bulkdump work -- was most of the trace volume, which
+# then tripped MAX_TRACE_LINES. Draining a shard in small batches stretches the job with no moves.
+ss_bulkdump_batch_bytes = 2000
+ss_serve_bulkdump_parallelism = 1
 
 [[test]]
 testTitle = 'BulkDumpingPauseResumeWorkload'
@@ -92,11 +99,11 @@ timeout = 7200
     # ~76 tasks the probe raced the job to completion and failed on 3 of 10 Joshua seeds with
     # NeverMidFlight; with hundreds of tasks the job cannot finish inside the probe window, so the
     # mid-flight precondition stops being a coin flip. This is why the test lives in slow/.
-    dataKeyCount = 150000
-    minTasksToProbe = 8
+    dataKeyCount = 60000
     # Must exceed the dispatch parallelism, which a buggified run re-randomises to 1-5 regardless of
     # dd_bulkdump_parallelism below, so that the drain cannot consume every outstanding task.
-    minOutstandingToProbe = 6
+    # Pause once this many tasks have been dispatched: early, with most of the job still ahead.
+    minAdmissionsToProbe = 5
     pauseProbeTimeout = 1800.0
 
     # The workload otherwise coinflips between the full keyspace and a random subrange. A random

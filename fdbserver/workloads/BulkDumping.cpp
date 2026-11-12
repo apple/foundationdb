@@ -70,8 +70,7 @@ struct BulkDumping : TestWorkload {
 	// A pause can only be observed on a job with several tasks, and the task count follows the shard
 	// count, which follows how many bytes the dataset occupies.
 	int dataKeyCount = 1000;
-	int minTasksToProbe = 4;
-	int minOutstandingToProbe = 6;
+	int minAdmissionsToProbe = 5;
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
@@ -116,8 +115,7 @@ struct BulkDumping : TestWorkload {
 		testPauseResume = getOption(options, "testPauseResume"_sr, false);
 		pauseProbeTimeout = getOption(options, "pauseProbeTimeout"_sr, 600.0);
 		dataKeyCount = getOption(options, "dataKeyCount"_sr, 1000);
-		minTasksToProbe = getOption(options, "minTasksToProbe"_sr, 4);
-		minOutstandingToProbe = getOption(options, "minOutstandingToProbe"_sr, 6);
+		minAdmissionsToProbe = getOption(options, "minAdmissionsToProbe"_sr, 5);
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
@@ -248,154 +246,95 @@ struct BulkDumping : TestWorkload {
 	// whole remaining job and blocks on the parallelism limiter as it goes, so such an implementation
 	// keeps admitting tasks for the lifetime of the job. The pause here is therefore issued mid-flight,
 	// and the assertions below distinguish "stopped admitting" from "kept going".
+	// Pause a job that is dispatching, and require that dispatch stops.
+	//
+	// Everything here is measured with the admitted-task counter and nothing with getBulkDumpProgress.
+	// That is deliberate: progress counts range-map entries, which the storage server writes per dump
+	// batch rather than per task, so its totals are batch counts wearing a task label. Earlier versions
+	// of this probe derived their preconditions from those numbers and were measuring the wrong
+	// population; they could be made to pass or fail by changing the batch size alone.
+	//
+	// Admissions are also the right signal for a second reason. How many tasks *complete* in a window
+	// depends on how long a task takes, so a configuration slow enough to leave work outstanding also
+	// stops producing completions, and a hold then looks quiet whether or not the pause works.
+	// Admissions stop the moment a pause is seen, whatever the tasks are doing.
 	Future<Void> probePauseResume(BulkDumping* self, Database cx, UID jobId) {
-		// Wait until the job has completed something and still has something left. Without outstanding
-		// work every assertion below is trivially true, so this is the test's own non-vacuity check.
+		// Pause early, once dispatch is demonstrably under way but with most of it still ahead. Waiting
+		// for some later "mid-flight" state only narrows the window the pause has to act on.
 		double probeStart = now();
-		int completeAtPause = 0;
-		int totalAtPause = 0;
-		int runningAtPause = 0;
+		int64_t admittedAtPause = 0;
 		while (true) {
 			if (now() - probeStart > self->pauseProbeTimeout) {
-				// Not a product failure: the job never presented a mid-flight window, so this run would
-				// have proved nothing. Fail loudly rather than silently pass a vacuous test.
-				Optional<BulkDumpProgress> last = co_await getBulkDumpProgress(cx);
-				TraceEvent(SevError, "BulkDumpingPauseProbeNeverMidFlight")
+				TraceEvent(SevError, "BulkDumpingPauseProbeNeverDispatched")
 				    .detail("JobId", jobId)
-				    .detail("Elapsed", now() - probeStart)
-				    .detail("MinTasksRequired", self->minTasksToProbe)
-				    .detail("LastTotalTasks", last.present() ? last.get().totalTasks : -1)
-				    .detail("LastCompleteTasks", last.present() ? last.get().completeTasks : -1);
+				    .detail("Admitted", admittedAtPause)
+				    .detail("Required", self->minAdmissionsToProbe)
+				    .detail("Elapsed", now() - probeStart);
 				co_return;
 			}
-			Optional<BulkDumpProgress> progress = co_await getBulkDumpProgress(cx);
-			// Require enough outstanding tasks that the drain below cannot consume all of them.
-			// getBulkDumpProgress counts every non-complete entry as "running", so outstanding is all
-			// that can be measured here, and however many are genuinely in flight will finish during the
-			// drain. The margin must therefore exceed the dispatch parallelism -- and that cannot be
-			// pinned from the toml, because DD_BULKDUMP_PARALLELISM carries a buggify clause
-			// (ServerKnobs.cpp, randomInt(1, 5)) that re-randomises it whatever the toml says.
-			if (progress.present() && progress.get().completeTasks > 0 &&
-			    progress.get().totalTasks >= self->minTasksToProbe &&
-			    progress.get().totalTasks - progress.get().completeTasks >= self->minOutstandingToProbe) {
-				completeAtPause = progress.get().completeTasks;
-				totalAtPause = progress.get().totalTasks;
-				runningAtPause = progress.get().runningTasks;
+			admittedAtPause = co_await getBulkDumpAdmittedCount(cx, jobId);
+			if (admittedAtPause >= self->minAdmissionsToProbe) {
 				break;
 			}
 			co_await delay(1.0);
 		}
 
-		// Completion rate while running. This is the denominator for the zero asserted further down: a
-		// zero over a window too short to expect anything is not evidence of a pause.
-		double observedRatePerSec = completeAtPause / std::max(1.0, now() - probeStart);
+		// Admission rate while running: the denominator for the zero required below. A zero over a
+		// window too short to expect anything is not evidence of a pause.
+		double observedAdmitRatePerSec = admittedAtPause / std::max(1.0, now() - probeStart);
 		TraceEvent("BulkDumpingPauseProbePausing")
 		    .detail("JobId", jobId)
-		    .detail("CompleteTasks", completeAtPause)
-		    .detail("TotalTasks", totalAtPause)
-		    .detail("RunningTasks", runningAtPause)
-		    .detail("ObservedRatePerSec", observedRatePerSec);
+		    .detail("AdmittedAtPause", admittedAtPause)
+		    .detail("ObservedAdmitRatePerSec", observedAdmitRatePerSec);
 
 		co_await setBulkJobPaused(cx, jobId, /*paused=*/true, /*isBulkDump=*/true);
 
-		// Drain is the chosen semantics, so completions after the pause are expected; what has to stop is
-		// the admission of new work. Poll until the count holds still.
-		int completeAfterDrain = completeAtPause;
-		// Read alongside completeTasks every poll. Comparing against the pre-pause snapshot was wrong:
-		// data distribution keeps creating task entries, so the totals are from different moments.
-		int totalAfterDrain = totalAtPause;
-		int stablePolls = 0;
-		double drainStart = now();
-		while (stablePolls < 3) {
-			co_await delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
-			Optional<BulkDumpProgress> progress = co_await getBulkDumpProgress(cx);
-			if (!progress.present()) {
-				TraceEvent(SevError, "BulkDumpingPauseProbeJobCompletedWhilePaused")
-				    .detail("JobId", jobId)
-				    .detail("CompleteAtPause", completeAtPause)
-				    .detail("TotalAtPause", totalAtPause);
-				co_return;
-			}
-			totalAfterDrain = progress.get().totalTasks;
-			if (progress.get().completeTasks == completeAfterDrain) {
-				stablePolls++;
-			} else {
-				completeAfterDrain = progress.get().completeTasks;
-				stablePolls = 0;
-			}
-			if (now() - drainStart > self->pauseProbeTimeout) {
-				TraceEvent(SevError, "BulkDumpingPauseProbeNeverQuiesced")
-				    .detail("JobId", jobId)
-				    .detail("CompleteTasks", completeAfterDrain)
-				    .detail("TotalTasks", totalAtPause);
-				co_return;
-			}
-		}
+		// Let data distribution notice. Tasks dispatched before this keep running -- that is the drain
+		// semantics -- so the count may still advance briefly; what must stop is further dispatch.
+		co_await delay(2 * SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
+		int64_t admittedAtHoldStart = co_await getBulkDumpAdmittedCount(cx, jobId);
 
-		// Work has to remain, or the flatness below would just be the job having finished. This is a
-		// precondition of the probe rather than a claim about the product, so it is reported as the
-		// vacuity miss it is; the run still fails, but it does not read as a pause defect.
-		if (completeAfterDrain >= totalAfterDrain) {
-			TraceEvent(SevError, "BulkDumpingPauseProbeNoWorkLeftAfterDrain")
-			    .detail("JobId", jobId)
-			    .detail("CompleteAtPause", completeAtPause)
-			    .detail("OutstandingAtPause", totalAtPause - completeAtPause)
-			    .detail("CompleteAfterDrain", completeAfterDrain)
-			    .detail("TotalAfterDrain", totalAfterDrain);
-			co_return;
-		}
-		// Whether anything was mid-flight at the pause is recorded but NOT asserted: getBulkDumpProgress
-		// counts every non-complete entry as running, so a task that is dispatched cannot be told apart
-		// from one merely waiting, and a pause landing between dispatches legitimately drains nothing.
-		// Drain versus freeze is therefore outside what these counters can decide.
-		TraceEvent("BulkDumpingPauseProbeDrained")
-		    .detail("JobId", jobId)
-		    .detail("CompleteAtPause", completeAtPause)
-		    .detail("CompleteAfterDrain", completeAfterDrain)
-		    .detail("CompletedDuringDrain", completeAfterDrain - completeAtPause)
-		    .detail("TotalTasks", totalAtPause);
-
-		// Hold the pause long enough that the pre-pause rate predicts many completions, and require none.
-		double holdSeconds = std::max(60.0, 10.0 / std::max(observedRatePerSec, 0.001));
+		double holdSeconds = std::max(60.0, 10.0 / std::max(observedAdmitRatePerSec, 0.001));
 		double holdStart = now();
 		while (now() - holdStart < holdSeconds) {
 			co_await delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
-			Optional<BulkDumpProgress> progress = co_await getBulkDumpProgress(cx);
-			if (!progress.present() || progress.get().completeTasks != completeAfterDrain) {
+			int64_t admittedNow = co_await getBulkDumpAdmittedCount(cx, jobId);
+			if (admittedNow != admittedAtHoldStart) {
 				TraceEvent(SevError, "BulkDumpingPauseProbeAdmittedWhilePaused")
 				    .detail("JobId", jobId)
-				    .detail("Expected", completeAfterDrain)
-				    .detail("Observed", progress.present() ? progress.get().completeTasks : -1)
-				    .detail("TotalTasks", totalAtPause)
+				    .detail("AdmittedAtHoldStart", admittedAtHoldStart)
+				    .detail("AdmittedNow", admittedNow)
 				    .detail("HeldSeconds", now() - holdStart);
 				co_return;
 			}
 		}
 		TraceEvent("BulkDumpingPauseProbeHeld")
 		    .detail("JobId", jobId)
-		    .detail("CompleteTasks", completeAfterDrain)
-		    .detail("TotalTasks", totalAtPause)
+		    .detail("Admitted", admittedAtHoldStart)
 		    .detail("HeldSeconds", holdSeconds)
-		    .detail("ExpectedCompletionsIfRunning", observedRatePerSec * holdSeconds);
+		    .detail("ExpectedAdmissionsIfRunning", observedAdmitRatePerSec * holdSeconds);
 
 		co_await setBulkJobPaused(cx, jobId, /*paused=*/false, /*isBulkDump=*/true);
 
-		// Admission has to restart. The job disappearing counts: its metadata is cleared on completion.
+		// Dispatch must restart. This doubles as the probe's non-vacuity check: if admissions resume,
+		// then work was pending throughout the hold, so the zero above was a pause and not an empty
+		// queue. A job that had finished would never satisfy this.
 		double resumeStart = now();
 		while (true) {
-			Optional<BulkDumpProgress> progress = co_await getBulkDumpProgress(cx);
-			if (!progress.present() || progress.get().completeTasks > completeAfterDrain) {
+			int64_t admittedNow = co_await getBulkDumpAdmittedCount(cx, jobId);
+			if (admittedNow > admittedAtHoldStart) {
 				TraceEvent("BulkDumpingPauseProbeResumed")
 				    .detail("JobId", jobId)
-				    .detail("CompleteTasks", progress.present() ? progress.get().completeTasks : -1)
+				    .detail("AdmittedAtHoldStart", admittedAtHoldStart)
+				    .detail("AdmittedNow", admittedNow)
 				    .detail("SecondsToResume", now() - resumeStart);
 				co_return;
 			}
 			if (now() - resumeStart > self->pauseProbeTimeout) {
 				TraceEvent(SevError, "BulkDumpingPauseProbeDidNotResume")
 				    .detail("JobId", jobId)
-				    .detail("CompleteTasks", completeAfterDrain)
-				    .detail("TotalTasks", totalAtPause);
+				    .detail("Admitted", admittedAtHoldStart)
+				    .detail("WaitedSeconds", now() - resumeStart);
 				co_return;
 			}
 			co_await delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
