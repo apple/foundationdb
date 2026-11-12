@@ -175,24 +175,38 @@ struct BulkDumping : TestWorkload {
 		return kvs; // ordered
 	}
 
+	// Committed in batches rather than one transaction: a dataset large enough to split into hundreds of
+	// shards does not fit in a single commit, and the whole set in one transaction fails with
+	// transaction_too_large. Every write lands before the dump job is submitted either way, so the
+	// snapshot the dump takes is unaffected by the split.
 	Future<Void> setKeys(Database cx, std::map<Key, Value> kvs) {
-		Transaction tr(cx);
-		while (true) {
-			Error err;
-			try {
-				for (const auto& [key, value] : kvs) {
-					tr.set(key, value);
+		// Well under the commit size limit for the key and value sizes this workload generates.
+		constexpr int keysPerCommit = 5000;
+		auto it = kvs.begin();
+		int written = 0;
+		while (it != kvs.end()) {
+			Transaction tr(cx);
+			auto batchBegin = it;
+			while (true) {
+				Error err;
+				try {
+					it = batchBegin;
+					int inBatch = 0;
+					while (it != kvs.end() && inBatch < keysPerCommit) {
+						tr.set(it->first, it->second);
+						++it;
+						++inBatch;
+					}
+					co_await tr.commit();
+					written += inBatch;
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				co_await tr.commit();
-				TraceEvent("BulkDumpingWorkLoadSetKey")
-				    .detail("KeyCount", kvs.size())
-				    .detail("Version", tr.getCommittedVersion());
-				co_return;
-			} catch (Error& e) {
-				err = e;
+				co_await tr.onError(err);
 			}
-			co_await tr.onError(err);
 		}
+		TraceEvent("BulkDumpingWorkLoadSetKey").detail("KeyCount", written);
 	}
 
 	Future<Void> waitUntilDumpJobComplete(BulkDumping* self, Database cx) {

@@ -61,7 +61,7 @@ max_trace_lines = 5000000
 
 # Force many small shards so the job has many tasks: a pause has to be observable with work still
 # outstanding, and 1000 keys in a handful of shards would leave no mid-flight window to pause in.
-min_shard_bytes = 1000
+min_shard_bytes = 500
 
 # Stop DD coalescing the small shards straight back together; paired with min_shard_bytes this is
 # the same recipe DDPipelineSaturation and ShardEncodeRollback use to force many small shards.
@@ -76,6 +76,7 @@ dd_bulkdump_parallelism = 1
 testTitle = 'BulkDumpingPauseResumeWorkload'
 useDB = true
 waitForQuiescence = false
+timeout = 7200
 
     [[test.workload]]
     testName = 'BulkDumpingWorkload'
@@ -87,12 +88,16 @@ waitForQuiescence = false
     # already dispatched still finishes, and that resume restarts admission. See probePauseResume.
     testPauseResume = true
     # Enough keys that the range splits into several shards, hence several dump tasks.
-    dataKeyCount = 60000
+    # Sized so that outstanding work is guaranteed by construction rather than caught by luck. At
+    # ~76 tasks the probe raced the job to completion and failed on 3 of 10 Joshua seeds with
+    # NeverMidFlight; with hundreds of tasks the job cannot finish inside the probe window, so the
+    # mid-flight precondition stops being a coin flip. This is why the test lives in slow/.
+    dataKeyCount = 150000
     minTasksToProbe = 8
     # Must exceed the dispatch parallelism, which a buggified run re-randomises to 1-5 regardless of
     # dd_bulkdump_parallelism below, so that the drain cannot consume every outstanding task.
     minOutstandingToProbe = 6
-    pauseProbeTimeout = 900.0
+    pauseProbeTimeout = 1800.0
 
     # The workload otherwise coinflips between the full keyspace and a random subrange. A random
     # subrange of a 1000-key dataset can hold almost no data and so produce too few tasks for a
