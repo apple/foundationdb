@@ -3038,6 +3038,33 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 				throw bulkload_task_failed();
 			}
 			ASSERT(!jobState.getJobRange().empty());
+			// Bulkload ingests storage-engine files without committing mutations, so a backup or DR logging the
+			// range would record any earlier clear of it but never the loaded data.
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			RangeResult logRanges = co_await tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
+			for (const auto& kv : logRanges) {
+				Key logEnd = logRangesDecodeValue(kv.value);
+				KeyRange logRange = KeyRangeRef(logRangesDecodeKey(kv.key), logEnd);
+				if (logRange.intersects(jobState.getJobRange())) {
+					TraceEvent(SevWarnAlways, "SubmitBulkLoadJobFailed")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("Reason", "Job range is covered by a running backup or DR")
+					    .detail("LogRange", logRange)
+					    .detail("SubmitJob", jobState.toString());
+					throw bulkload_range_under_backup();
+				}
+			}
+			// Partitioned-log backups are written by backup workers from the TLogs, which bulkload also bypasses.
+			Optional<Value> backupStarted = co_await tr.get(backupStartedKey);
+			if (backupStarted.present() && !decodeBackupStartedValue(backupStarted.get()).empty()) {
+				TraceEvent(SevWarnAlways, "SubmitBulkLoadJobFailed")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "A partitioned-log backup is running")
+				    .detail("SubmitJob", jobState.toString());
+				throw bulkload_range_under_backup();
+			}
 			// Init the map of task states
 			co_await krmSetRange(
 			    &tr, bulkLoadTaskPrefix, jobState.getJobRange(), bulkLoadTaskStateValue(BulkLoadTaskState()));
