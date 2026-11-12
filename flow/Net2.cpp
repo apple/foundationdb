@@ -153,7 +153,8 @@ public:
 	Future<Reference<IConnection>> connect(NetworkAddress toAddr, tcp::socket* existingSocket = nullptr) override;
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override;
 	Future<Reference<IConnection>> connectExternalWithHostname(NetworkAddress toAddr,
-	                                                           const std::string& hostname) override;
+	                                                           const std::string& hostname,
+	                                                           tcp::socket* existingSocket = nullptr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
 	// The mock DNS methods should only be used in simulation.
@@ -940,6 +941,7 @@ public:
 		if (existingSocket != nullptr) {
 			Reference<SSLConnection> self(new SSLConnection(context, existingSocket));
 			self->peer_address = addr;
+			self->sni_hostname = std::move(hostname);
 			self->init();
 			co_return self;
 		}
@@ -1076,16 +1078,40 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(N2::g_net2->activeTlsPolicy,
-			                   self->ssl_sock,
-			                   self->peer_address,
-			                   [conn = self.getPtr()](bool verifyOk) { conn->has_trusted_peer = verifyOk; });
+			if (self->sni_hostname.empty()) {
+				ConfigureSSLStream(N2::g_net2->activeTlsPolicy,
+				                   self->ssl_sock,
+				                   self->peer_address,
+				                   [conn = self.getPtr()](bool verifyOk) { conn->has_trusted_peer = verifyOk; });
+			} else {
+				// An external server (S3, a KMS) is authenticated by CA chain plus the SSL_set1_host() check below.
+				// The cluster's --tls-verify-peers rules describe FDB peers and would reject any such server.
+				self->ssl_sock.set_verify_callback(
+				    [conn = self.getPtr()](bool preverified, boost::asio::ssl::verify_context& ctx) {
+					    if (!preverified) {
+						    TraceEvent(SevWarn, "TLSExternalServerVerifyFailed")
+						        .suppressFor(1.0)
+						        .detail("PeerAddress", conn->peer_address)
+						        .detail("Hostname", conn->sni_hostname)
+						        .detail("VerifyError",
+						                X509_verify_cert_error_string(X509_STORE_CTX_get_error(ctx.native_handle())));
+					    }
+					    conn->has_trusted_peer = preverified;
+					    return preverified;
+				    });
+			}
 
 			// Set SNI hostname if we have one (for connections made with hostname) and SSL flags to check
 			// certificate against.
 			if (!self->sni_hostname.empty()) {
 				int result = SSL_set_tlsext_host_name(self->ssl_sock.native_handle(), self->sni_hostname.c_str());
-				SSL_set1_host(self->ssl_sock.native_handle(), self->sni_hostname.c_str());
+				// The hostname check is the only identity check beyond the CA chain, so it must not fail open.
+				if (SSL_set1_host(self->ssl_sock.native_handle(), self->sni_hostname.c_str()) != 1) {
+					TraceEvent(SevWarnAlways, "TLSSetHostnameCheckFailed")
+					    .detail("Hostname", self->sni_hostname)
+					    .detail("Addr", self->peer_address);
+					throw connection_failed();
+				}
 				SSL_set_hostflags(self->ssl_sock.native_handle(), X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
 				TraceEvent("SSLSetSNIResult")
 				    .detail("Hostname", self->sni_hostname)
@@ -1960,6 +1986,7 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket*
 		throw connection_failed();
 	}
 
+	ASSERT(existingSocket == nullptr);
 	return Connection::connect(&this->reactor.ios, toAddr);
 }
 
@@ -1967,12 +1994,14 @@ Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr) {
 	return connect(toAddr);
 }
 
-Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr, const std::string& hostname) {
+Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr,
+                                                                 const std::string& hostname,
+                                                                 tcp::socket* existingSocket) {
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
-		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, nullptr, hostname);
+		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, existingSocket, hostname);
 	}
-	return connect(toAddr);
+	return connect(toAddr, existingSocket);
 }
 
 Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {
@@ -2356,12 +2385,10 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 	std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
 		                                            QueueTestThreadState(1, 100000),
 		                                            QueueTestThreadState(2, 1000000) };
-	std::vector<Future<Void>> doneProducing;
 
 	int total = 0;
 	for (int t = 0; t < perThread.size(); ++t) {
 		auto& s = perThread[t];
-		doneProducing.push_back(s.doneProducing.getFuture());
 		total += s.toProduce;
 		auto produce = [&queue, &s]() {
 			printf("Thread%d\n", s.threadId);
@@ -2374,7 +2401,6 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 				}
 			}
 			printf("T%dDone\n", s.threadId);
-			s.doneProducing.send(Void());
 		};
 		s.handle = startThreadF(produce);
 	}
@@ -2393,18 +2419,11 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 			queue.canSleep();
 	}
 
-	co_await waitForAll(doneProducing);
-
-	// Make sure we continue on the main thread.
-	Promise<Void> signal;
-	Future<Void> doneConsuming = signal.getFuture();
-	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
-	co_await doneConsuming;
-
 	for (int t = 0; t < perThread.size(); ++t) {
 		waitThread(perThread[t].handle);
 		perThread[t].checkDone();
 	}
+	return Void();
 }
 
 TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
@@ -2428,7 +2447,7 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 				int v = s.nextProduced();
 				onMainThreadVoid([&s, v]() { ASSERT_EQ(v, s.nextConsumed()); });
 			}
-			s.doneProducing.send(Void());
+			onMainThreadVoid([&s]() { s.doneProducing.send(Void()); });
 		});
 	}
 	co_await waitForAll(doneProducing);
