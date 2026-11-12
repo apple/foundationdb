@@ -28,6 +28,7 @@
 #include <sys/socket.h>
 
 #include "flow/Error.h"
+#include "flow/Knobs.h"
 #include "flow/Trace.h"
 
 namespace {
@@ -70,7 +71,7 @@ TLSHandshakeJob::TLSHandshakeJob(TLSHandshakeSocket& socket,
 TLSHandshakeWorker::TLSHandshakeWorker(double handshakeTimeoutSeconds)
   : timeout(std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(handshakeTimeoutSeconds))),
-    thread(startThread(threadMain, this, 0, "fdb-tls-hshake")) {}
+    thread(startThread(threadMain, this, FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE, "fdb-tls-hshake")) {}
 
 TLSHandshakeWorker::~TLSHandshakeWorker() {
 	// Set the flag before waking, so the thread sees it when its wait returns. run() completes every remaining job
@@ -111,6 +112,8 @@ THREAD_FUNC_RETURN TLSHandshakeWorker::threadMain(void* worker) {
 }
 
 void TLSHandshakeWorker::run() {
+	// Below the network thread, like the blocking handshake pool's threads (createGenericThreadPool's default).
+	setThreadPriority(10);
 	// The jobs this worker is driving, in submission order, which is also deadline order: every job has the same
 	// timeout. Exactly these have their sockets watched by `poller`, and the list keeps each alive until it is
 	// completed.

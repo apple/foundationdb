@@ -104,8 +104,10 @@ target_link_libraries(flow_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>" fdb
 if(NOT WIN32)
   add_flow_target(EXECUTABLE NAME tls_handshake_pool_test SRCS TLSHandshakePoolTest.cpp)
   target_link_libraries(tls_handshake_pool_test PRIVATE flow)
+  # Built with the unit_tests target, like the binaries register_fdb_unit_tests() registers.
+  set_target_properties(tls_handshake_pool_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
+  add_dependencies(unit_tests tls_handshake_pool_test)
   if(FDB_REGISTER_UNIT_TESTS)
-    add_dependencies(unit_tests tls_handshake_pool_test)
     add_test(NAME unit/tls_handshake_pool_test/native
       COMMAND $<TARGET_FILE:tls_handshake_pool_test>)
     set_tests_properties(unit/tls_handshake_pool_test/native PROPERTIES
