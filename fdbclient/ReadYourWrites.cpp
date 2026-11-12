@@ -1392,6 +1392,14 @@ public:
 				co_return;
 			}
 
+			auto& flushedRanges = ryw->nativeWriteRanges;
+			if (!flushedRanges.empty()) {
+				// Commit appends the remaining conflicts and sorts the native array in place. Keep the flushed
+				// descriptors in a separate array; their key bytes already belong to the retained arena.
+				VectorRef<KeyRangeRef> saved;
+				saved.append(flushedRanges.arena(), flushedRanges.begin(), flushedRanges.size());
+				flushedRanges.contents() = saved;
+			}
 			ryw->writeRangeToNativeTransaction(KeyRangeRef(StringRef(), allKeys.end));
 
 			auto conflictRanges = ryw->readConflicts.ranges();
