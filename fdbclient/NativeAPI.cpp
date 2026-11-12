@@ -4402,6 +4402,10 @@ void Transaction::setupWatches() {
 		Future<Version> watchVersion = getCommittedVersion() > 0 ? getCommittedVersion() : getReadVersion();
 
 		for (auto& watch : watches) {
+			// A locally triggered watch may have expected a value that was never committed.
+			if (watch->onChangeTrigger.isSet()) {
+				continue;
+			}
 			watch->setWatch(
 			    watchValueMap(watchVersion,
 			                  watch->key,
@@ -6503,7 +6507,8 @@ TEST_CASE("/fdbclient/NativeAPI/sameVersionWatch/preservesInstalledWatch") {
 	auto metadata = makeReference<WatchMetadata>(current);
 	database->setWatchMetadata(metadata);
 	Future<Void> first = getWatchFuture(database, current);
-	Future<Void> second = reconcileWatchValue(database, current, current->value);
+	auto matching = watch("v"_sr, 2);
+	Future<Void> second = reconcileWatchValue(database, matching, current->value);
 	auto older = watch("old"_sr, 1);
 	Future<Void> obsolete = reconcileWatchValue(database, older, older->value);
 	ASSERT(obsolete.isReady() && !obsolete.isError());
