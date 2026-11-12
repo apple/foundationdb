@@ -497,7 +497,7 @@ The ``cleanup`` subcommand will list orphaned backups and DRs and optionally rem
 
 .. program:: fdbrestore
 
-The ``fdbrestore`` command line tool is used to control restore tasks.  Note that a restore operation will not clear the target key ranges, for safety reasons, so you must manually clear the ranges to be restored prior to starting the restore.
+The ``fdbrestore`` command line tool is used to control restore tasks.  Note that a restore operation will not clear the target key ranges up front, for safety reasons, so you must manually clear the ranges to be restored prior to starting the restore; starting a restore from range files into a range that already contains keys fails with ``restore_destination_not_empty`` (restores under the validation prefix are exempt). While the restore runs, it clears the key span of each block of a snapshot (range) file in the same transaction that writes the block's keys, so any key inside that span that is not in the backup is removed.
 
 .. warning:: It is your responsibility to ensure that no clients are accessing the database while it is being restored. During the restore process the database is in an inconsistent state, and writes that happen during the restore process might be partially or completely overwritten by restored data.
 
