@@ -2106,33 +2106,32 @@ Future<Void> watchStorageServerResp(Key key, Database cx) {
 	}
 }
 
+Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters);
+
+// A competing same-version lookup can install a matching watch while the storage read is pending.
+Future<Void> reconcileWatchValue(Database cx, Reference<WatchParameters> parameters, const Optional<Value>& observed) {
+	auto metadata = cx->getWatchMetadata(parameters->key);
+	if (metadata.isValid() && metadata->parameters->version <= parameters->version &&
+	    metadata->parameters->value != observed) {
+		cx->deleteWatchMetadata(parameters->key);
+		metadata->watchPromise.send(parameters->version);
+		metadata->watchFutureSS.cancel();
+	}
+
+	if (observed != parameters->value) {
+		return Void();
+	}
+	return getWatchFuture(cx, parameters);
+}
+
 Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> parameters) {
 	ReadYourWritesTransaction tr(cx);
-
 	while (true) {
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> valSS = co_await tr.get(parameters->key);
-			Reference<WatchMetadata> metadata = cx->getWatchMetadata(parameters->key);
-
-			// val_3 != val_1 (storage server value doesn't match value in map)
-			if (metadata.isValid() && valSS != metadata->parameters->value) {
-				cx->deleteWatchMetadata(parameters->key);
-
-				metadata->watchPromise.send(parameters->version);
-				metadata->watchFutureSS.cancel();
-			}
-
-			// val_3 == val_2 (storage server value matches value passed into the function -> new watch)
-			if (valSS == parameters->value) {
-				metadata = makeReference<WatchMetadata>(parameters);
-				cx->setWatchMetadata(metadata);
-
-				metadata->watchFutureSS = watchStorageServerResp(parameters->key, cx);
-				co_await metadata->watchPromise.getFuture();
-			}
-
+			Optional<Value> observed = co_await tr.get(parameters->key);
+			co_await reconcileWatchValue(cx, parameters, observed);
 			co_return;
 		} catch (Error& e) {
 			err = e;
@@ -6484,6 +6483,35 @@ TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/multipleShards") {
 	       unlimitedResults[3] == "B"_sr && unlimitedResults[4] == "B1"_sr && unlimitedResults[5] == "B2"_sr &&
 	       unlimitedResults[6] == "C"_sr && unlimitedResults[7] == "Z"_sr);
 
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/sameVersionWatch/preservesInstalledWatch") {
+	Database database(new DatabaseContext(operation_failed()));
+	auto watch = [](Value value, Version version) {
+		return makeReference<WatchParameters>("k"_sr,
+		                                      value,
+		                                      version,
+		                                      TagSet(),
+		                                      SpanContext(),
+		                                      TaskPriority::DefaultEndpoint,
+		                                      Optional<UID>(),
+		                                      UseProvisionalProxies::False);
+	};
+
+	auto current = watch("v"_sr, 2);
+	auto metadata = makeReference<WatchMetadata>(current);
+	database->setWatchMetadata(metadata);
+	Future<Void> first = getWatchFuture(database, current);
+	Future<Void> second = reconcileWatchValue(database, current, current->value);
+	auto older = watch("old"_sr, 1);
+	Future<Void> obsolete = reconcileWatchValue(database, older, older->value);
+	ASSERT(obsolete.isReady() && !obsolete.isError());
+	ASSERT(!first.isReady() && !second.isReady());
+
+	database->getWatchMetadata(current->key)->watchPromise.send(3);
+	ASSERT(first.isReady() && !first.isError());
+	ASSERT(second.isReady() && !second.isError());
 	return Void();
 }
 
