@@ -22,21 +22,6 @@
 #include <memory>
 #include <string_view>
 
-#ifndef BOOST_DATE_TIME_NO_LIB
-#define BOOST_DATE_TIME_NO_LIB
-#endif
-#ifndef BOOST_REGEX_NO_LIB
-#define BOOST_REGEX_NO_LIB
-#endif
-#include <boost/asio.hpp>
-#include <boost/asio/ssl.hpp>
-#include <boost/asio/buffer.hpp>
-#include <boost/asio/ip/address.hpp>
-#include <boost/system/system_error.hpp>
-#include <boost/date_time/posix_time/posix_time_types.hpp>
-#include <boost/range.hpp>
-#include <boost/algorithm/string/join.hpp>
-
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
@@ -44,9 +29,25 @@
 #include "flow/Trace.h"
 #include "flow/swift.h"
 #include "flow/swift_concurrency_hooks.h"
+
+#ifndef BOOST_DATE_TIME_NO_LIB
+#define BOOST_DATE_TIME_NO_LIB
+#endif
+#ifndef BOOST_REGEX_NO_LIB
+#define BOOST_REGEX_NO_LIB
+#endif
+#include <boost/asio.hpp>
+#include "boost/asio/buffer.hpp"
+#include <boost/asio/ssl.hpp>
+#include <boost/asio/ip/address.hpp>
+#include <boost/system/system_error.hpp>
+#include <boost/date_time/posix_time/posix_time_types.hpp>
+#include <boost/range.hpp>
+#include <boost/algorithm/string/join.hpp>
+#include "openssl/ssl.h"
+
 #include "flow/network.h"
 #include "flow/IThreadPool.h"
-
 #include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include "flow/TaskQueue.h"
@@ -210,6 +211,9 @@ public:
 	}
 
 	bool isSimulated() const override { return false; }
+#if defined(__cpp_lib_jthread) && __cpp_lib_jthread >= 201911
+	std::jthread startJThread(std::function<void(std::stop_token)>&& func) override;
+#endif
 	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override;
 
 	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override;
@@ -241,13 +245,12 @@ public:
 	ASIOReactor reactor;
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
 	Reference<IThreadPool> sslHandshakerPool;
-	int sslHandshakerThreadsStarted;
-	int sslPoolHandshakesInProgress;
 	TLSConfig tlsConfig;
 	Reference<TLSPolicy> activeTlsPolicy;
 	Future<Void> backgroundCertRefresh;
 	Future<Void> dnsCacheRefreshActor;
 	ETLSInitState tlsInitializedState;
+	int numSSLHandlerThreads = 0;
 
 	INetworkConnections* network; // initially this, but can be changed
 
@@ -918,7 +921,11 @@ public:
 		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
 			if (now() < iter->second.second) {
 				if (iter->second.first >= FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS) {
-					TraceEvent("TLSOutgoingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", addr);
+					TraceEvent("TLSOutgoingConnectionThrottlingWarning")
+					    .suppressFor(1.0)
+					    .detail("PeerIP", addr)
+					    .detail("ThrottleAttempts", iter->second.first)
+					    .detail("ThrottleTimeout", iter->second.second);
 					co_await delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 					static SimpleCounter<int64_t>* countClientTLSHandshakeThrottled =
 					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakeThrottled");
@@ -964,7 +971,10 @@ public:
 	}
 
 	static Future<Void> doAcceptHandshake(Uncancellable, Reference<SSLConnection> self, Promise<Void> connected) {
-		Hold<int> holder;
+		bool isThreadPoolUsed = false;
+		double handshakeStartTime = now();
+		static SimpleCounter<int64_t>* countServerTLSHandshakesOnSideThreads =
+		    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnSideThreads");
 
 		try {
 			Future<Void> onHandshook;
@@ -973,14 +983,11 @@ public:
 			                   self->peer_address,
 			                   [conn = self.getPtr()](bool verifyOk) { conn->has_trusted_peer = verifyOk; });
 
-			// If the background handshakers are not all busy, use one
-			// FIXME: see comment elsewhere about making this the only path.
-			if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
-			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
-				static SimpleCounter<int64_t>* countServerTLSHandshakesOnSideThreads =
-				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnSideThreads");
+			if (N2::g_net2->sslHandshakerPool.isValid() && N2::g_net2->numSSLHandlerThreads > 0 &&
+			    FLOW_KNOBS->TLS_HANDSHAKE_MAX_TEMPORARY_THREADS > 0) {
+				// Thread pool is available
+				isThreadPoolUsed = true;
 				countServerTLSHandshakesOnSideThreads->increment(1);
-				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
 				handshake->setPeerAddr(self->getPeerAddress());
@@ -1002,11 +1009,19 @@ public:
 			self->closeSocket();
 			connected.sendError(connection_failed());
 		}
+		TraceEvent("TLSAcceptHandshakeDone")
+		    .suppressFor(1.0)
+		    .detail("PeerAddr", self->getPeerAddress())
+		    .detail("PeerAddress", self->getPeerAddress())
+		    .detail("HandshakeTime", now() - handshakeStartTime)
+		    .detail("BackgroundThread", isThreadPoolUsed);
 	}
 
 	static Future<Void> acceptHandshakeWrapper(Reference<SSLConnection> self) {
-		std::pair<IPAddress, uint16_t> peerIP;
-		peerIP = std::make_pair(self->getPeerAddress().ip, static_cast<uint16_t>(0));
+		static SimpleCounter<int64_t>* countServerTLSHandshakeThrottled =
+		    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakeThrottled");
+		std::pair<IPAddress, uint16_t> peerIP = std::make_pair(self->getPeerAddress().ip, static_cast<uint16_t>(0));
+
 		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
 			if (now() < iter->second.second) {
@@ -1016,8 +1031,6 @@ public:
 					    .detail("PeerIP", peerIP.first.toString());
 					co_await delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 					self->closeSocket();
-					static SimpleCounter<int64_t>* countServerTLSHandshakeThrottled =
-					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakeThrottled");
 					countServerTLSHandshakeThrottled->increment(1);
 					throw connection_failed();
 				}
@@ -1066,8 +1079,6 @@ public:
 	Future<Void> acceptHandshake() override { return acceptHandshakeWrapper(Reference<SSLConnection>::addRef(this)); }
 
 	static Future<Void> doConnectHandshake(Uncancellable, Reference<SSLConnection> self, Promise<Void> connected) {
-		Hold<int> holder;
-
 		try {
 			Future<Void> onHandshook;
 			if (self->sni_hostname.empty()) {
@@ -1111,21 +1122,11 @@ public:
 				    .detail("Addr", self->peer_address);
 			}
 
-			// If the background handshakers are not all busy, use one
-
-			// FIXME: this should probably be changed never to use the
-			// main thread, as waiting for potentially high-RTT TLS
-			// handshakes can delay execution of everything else that
-			// runs on the main thread.  The cost of that (in terms of
-			// unpredictable system performance and reliability) is
-			// much, much higher than the cost a few hundred or
-			// thousand incremental threads.
-			if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
-			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
+			if (N2::g_net2->sslHandshakerPool.isValid() && N2::g_net2->numSSLHandlerThreads > 0 &&
+			    FLOW_KNOBS->TLS_HANDSHAKE_MAX_TEMPORARY_THREADS > 0) {
 				static SimpleCounter<int64_t>* countClientTLSHandshakesOnSideThreads =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesOnSideThreads");
 				countClientTLSHandshakesOnSideThreads->increment(1);
-				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
 				handshake->setPeerAddr(self->getPeerAddress());
@@ -1389,8 +1390,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
   : globals(enumGlobal::COUNT), useThreadPool(useThreadPool), reactor(this),
     sslContextVar({ ReferencedObject<boost::asio::ssl::context>::from(
         boost::asio::ssl::context(boost::asio::ssl::context::tls)) }),
-    sslHandshakerThreadsStarted(0), sslPoolHandshakesInProgress(0), tlsConfig(tlsConfig),
-    tlsInitializedState(ETLSInitState::NONE), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
+    tlsConfig(tlsConfig), tlsInitializedState(ETLSInitState::NONE), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
     currentTaskID(TaskPriority::DefaultYield), stopped(false), started(false), numYields(0),
     lastPriorityStats(nullptr) {
 	// Until run() is called, yield() will always yield
@@ -1497,34 +1497,31 @@ void Net2::initTLS(ETLSInitState targetState) {
 
 	// If a TLS connection is actually going to be used then start background threads if configured
 	if (targetState > ETLSInitState::CONFIG) {
-		int threadsToStart;
-		switch (targetState) {
-		case ETLSInitState::CONNECT:
-			threadsToStart = FLOW_KNOBS->TLS_CLIENT_HANDSHAKE_THREADS;
-			break;
-		case ETLSInitState::LISTEN:
-			threadsToStart = FLOW_KNOBS->TLS_SERVER_HANDSHAKE_THREADS;
-			break;
-		default:
-			threadsToStart = 0;
-		};
-		threadsToStart -= sslHandshakerThreadsStarted;
-
-		if (threadsToStart > 0) {
-			if (sslHandshakerThreadsStarted == 0) {
 #if defined(__linux__)
-				if (mallopt(M_ARENA_MAX, FLOW_KNOBS->TLS_MALLOC_ARENA_MAX) != 1) {
-					TraceEvent(SevWarn, "TLSMallocSetMaxArenasFailure")
-					    .detail("MaxArenas", FLOW_KNOBS->TLS_MALLOC_ARENA_MAX);
-				};
+		if (mallopt(M_ARENA_MAX, FLOW_KNOBS->TLS_MALLOC_ARENA_MAX) != 1) {
+			TraceEvent(SevWarn, "TLSMallocSetMaxArenasFailure").detail("MaxArenas", FLOW_KNOBS->TLS_MALLOC_ARENA_MAX);
+		};
 #endif
-				sslHandshakerPool = createGenericThreadPool(FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE);
-			}
+		int numThreads = 0;
+		if (targetState == ETLSInitState::CONNECT) {
+			numThreads = FLOW_KNOBS->TLS_CLIENT_HANDSHAKE_THREADS;
+		} else if (targetState == ETLSInitState::LISTEN) {
+			numThreads = FLOW_KNOBS->TLS_SERVER_HANDSHAKE_THREADS;
+		}
 
-			for (int i = 0; i < threadsToStart; ++i) {
-				++sslHandshakerThreadsStarted;
-				sslHandshakerPool->addThread(new SSLHandshakerThread(), "fdb-ssl-connect");
-			}
+		if (!sslHandshakerPool) {
+			TraceEvent("N2_StartTLSHandshakeThreads")
+			    .detail("TargetState", targetState)
+			    .detail("NumThreads", numThreads)
+			    .detail("InitializedState", tlsInitializedState);
+			sslHandshakerPool =
+			    createDynamicThreadPool(FLOW_KNOBS->TLS_HANDSHAKE_MAX_TEMPORARY_THREADS,
+			                            std::chrono::milliseconds(FLOW_KNOBS->TLS_HANDSHAKE_THREAD_MAX_IDLE_TIME_MS),
+			                            []() { return new SSLHandshakerThread(); });
+		}
+
+		for (; numSSLHandlerThreads < numThreads; ++numSSLHandlerThreads) {
+			sslHandshakerPool->addThread(new SSLHandshakerThread(), "fdb-ssl-connect");
 		}
 	}
 
@@ -1969,6 +1966,12 @@ void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) {
 	return ::startThread(func, arg, stackSize, name);
 }
+
+#if defined(__cpp_lib_jthread) && __cpp_lib_jthread >= 201911
+std::jthread Net2::startJThread(std::function<void(std::stop_token)>&& func) {
+	return ::startJThread(std::move(func));
+}
+#endif
 
 Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket* existingSocket) {
 	if (toAddr.isTLS()) {

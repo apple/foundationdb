@@ -1492,6 +1492,16 @@ public:
 		return ::startThread(simStartThread, simArgs, stackSize, name);
 	}
 
+#if defined(__cpp_lib_jthread) && __cpp_lib_jthread >= 201911
+	std::jthread startJThread(std::function<void(std::stop_token)>&& func) override {
+		auto process = g_simulator->getCurrentProcess();
+		return std::jthread([func, process](std::stop_token token) {
+			ISimulator::currentProcess = process;
+			func(token);
+		});
+	}
+#endif
+
 	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override {
 		ProcessInfo* proc = getCurrentProcess();
 		SimDiskSpace& diskSpace = diskSpaceMap[proc->address.ip];

@@ -32,6 +32,7 @@
 #include <string>
 #include <stdint.h>
 #include <atomic>
+#include <thread>
 #include <unordered_map>
 #include "flow/IRandom.h"
 #include "flow/WriteOnlySet.h"
@@ -239,6 +240,14 @@ public:
 	                                  void* arg,
 	                                  int stackSize = 0,
 	                                  const char* name = nullptr) = 0;
+
+#if defined(__cpp_lib_jthread) && __cpp_lib_jthread >= 201911
+	virtual std::jthread startJThread(std::function<void(std::stop_token)>&& func) = 0;
+#else
+	virtual void startJThread(void (*func)(void*)) {
+		throw internal_error();
+	}
+#endif
 
 	// Devotes this thread to running the network (generally until stop())
 	virtual void run() = 0;

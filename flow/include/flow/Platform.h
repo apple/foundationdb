@@ -24,6 +24,18 @@
 
 #include "flow/config.h"
 
+#ifdef __cplusplus
+#include <thread>
+#include <utility>
+#endif // This header may be included by C code
+
+#if defined(__cpp_lib_jthread) && __cpp_lib_jthread >= 201911
+template <typename F, typename... Args>
+std::jthread startJThread(F&& f, Args&&... args) {
+	return std::jthread(std::forward<F>(f), std::forward<Args>(args)...);
+}
+#endif
+
 #if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 #define __unixish__ 1
 #endif
