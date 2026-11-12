@@ -600,24 +600,30 @@ struct BulkDumping : TestWorkload {
 		const std::string tag = "bulkload_backup_guard";
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		co_await backupAgent.submitBackup(
-		    cx, "file://simfdb/backups/"_sr, {}, 0, 100000, tag, backupRanges, StopWhenDone::False);
+		// Only the backup's mutation-log registration matters here: keep the snapshot slow and the backup running
+		// (StopWhenDone::False) so the log range stays registered until it is aborted below.
+		constexpr int slowSnapshotSeconds = 100000;
+		co_await backupAgent.submitBackup(cx,
+		                                  "file://simfdb/backups/"_sr,
+		                                  /*proxy=*/{},
+		                                  /*initialSnapshotIntervalSeconds=*/slowSnapshotSeconds,
+		                                  /*snapshotIntervalSeconds=*/slowSnapshotSeconds,
+		                                  tag,
+		                                  backupRanges,
+		                                  StopWhenDone::False);
 		// The mutation-log range is registered by the backup's first task, not by submitBackup.
 		co_await waitForLogRanges(cx, true);
 
 		BulkLoadJobState job = createBulkLoadJob(
 		    bulkDumpJob.getJobId(), bulkDumpJob.getJobRange(), bulkDumpJob.getJobRoot(), bulkLoadTransportMethod);
 		bool rejected = false;
-		Error submitError;
 		try {
 			co_await timeoutError(submitBulkLoadJob(cx, job), jobSubmitTimeout);
 		} catch (Error& e) {
-			submitError = e;
-		}
-		if (submitError.code() == error_code_bulkload_range_under_backup) {
+			if (e.code() != error_code_bulkload_range_under_backup) {
+				throw;
+			}
 			rejected = true;
-		} else if (submitError.isValid()) {
-			throw submitError;
 		}
 		if (!rejected) {
 			TraceEvent(SevError, "BulkDumpingWorkLoadBackupGuardMissed").detail("Job", job.toString());
