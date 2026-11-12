@@ -5104,7 +5104,21 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 					                 : data[start].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()),
 					    (iend == end) ? fileRange.end
 					                  : data[iend].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()));
-					tr->clear(trRange);
+					// A clear in the same transaction as the sets makes the storage server split it around every
+					// set. A span with no keys has nothing to remove, so skip the clear; a span that has keys (a
+					// re-applied block, the validation prefix, an overlapping file) is cleared as before. The read is
+					// not a snapshot read, and the span stays in the write conflict set either way, so two
+					// transactions cannot both see an overlapping span empty and both skip the clear.
+					bool clearSpan = true;
+					if (CLIENT_KNOBS->RESTORE_RANGE_READ_BEFORE_CLEAR) {
+						RangeResult existing = co_await tr->getRange(trRange, 1);
+						clearSpan = !existing.empty();
+					}
+					if (clearSpan) {
+						tr->clear(trRange);
+					} else {
+						tr->addWriteConflictRange(trRange);
+					}
 
 					for (; i < iend; ++i) {
 						tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
@@ -8599,23 +8613,6 @@ public:
 							bdDoc.setKey("AvgBytesPerSecond", bdProgress.avgBytesPerSecond());
 							bdDoc.setKey("ElapsedSeconds", bdProgress.elapsedSeconds);
 
-							// Add stalled tasks if any
-							if (!bdProgress.stalledTasks.empty()) {
-								JsonBuilderArray stalledArray;
-								for (const auto& stalled : bdProgress.stalledTasks) {
-									JsonBuilderObject stalledDoc;
-									stalledDoc.setKey("TaskId", stalled.taskId.toString());
-									stalledDoc.setKey("Range", stalled.range.toString());
-									stalledDoc.setKey("StalledSeconds", stalled.stalledSeconds);
-									stalledDoc.setKey("RestartCount", stalled.restartCount);
-									if (!stalled.lastError.empty()) {
-										stalledDoc.setKey("LastError", stalled.lastError);
-									}
-									stalledArray.push_back(stalledDoc);
-								}
-								bdDoc.setKey("StalledTasks", stalledArray);
-							}
-
 							doc.setKey("BulkDumpProgress", bdDoc);
 						}
 					}
@@ -8810,22 +8807,6 @@ public:
 									statusText +=
 									    format(" Elapsed: %s\n",
 									           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
-								}
-
-								if (!bdProgress.stalledTasks.empty()) {
-									statusText += format("\nWARNING: %zu stalled tasks (no progress > 60s):\n",
-									                     bdProgress.stalledTasks.size());
-									for (const auto& stalled : bdProgress.stalledTasks) {
-										statusText += format(" Task %s: %s, stalled %.0fs, %d restarts\n",
-										                     stalled.taskId.shortString().c_str(),
-										                     stalled.range.toString().c_str(),
-										                     stalled.stalledSeconds,
-										                     stalled.restartCount);
-										if (!stalled.lastError.empty()) {
-											statusText +=
-											    format("           Last error: %s\n", stalled.lastError.c_str());
-										}
-									}
 								}
 							} else {
 								statusText += " Status: pending\n";
