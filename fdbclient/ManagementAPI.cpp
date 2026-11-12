@@ -3371,6 +3371,7 @@ Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 			tr.clear(bulkDumpOwnerKeyFor(jobId));
 			// Leaving control behind would strand a paused flag under a jobId nothing can resume
 			tr.clear(bulkDumpControlKeyFor(jobId));
+			tr.clear(bulkDumpAdmittedKeyFor(jobId));
 			co_await tr.commit();
 			tr.reset();
 
@@ -3481,6 +3482,29 @@ Future<Void> setBulkJobPaused(Database cx, UID jobId, bool paused, bool isBulkDu
 			tr.set(controlKey, bulkJobControlStateValue(controlState));
 			co_await tr.commit();
 			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+// Dispatched-task count for a job; absent means none dispatched yet.
+Future<int64_t> getBulkDumpAdmittedCount(Database cx, UID jobId) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<Value> value = co_await tr.get(bulkDumpAdmittedKeyFor(jobId));
+			if (!value.present()) {
+				co_return 0;
+			}
+			int64_t count = 0;
+			ASSERT(value.get().size() == sizeof(count));
+			memcpy(&count, value.get().begin(), sizeof(count));
+			co_return count;
 		} catch (Error& e) {
 			err = e;
 		}

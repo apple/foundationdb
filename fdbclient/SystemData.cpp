@@ -1555,6 +1555,20 @@ Key bulkLoadControlKeyFor(const UID& jobId) {
 	return wr.toValue();
 }
 
+// Count of tasks data distribution has dispatched for a job. Maintained with an atomic add so
+// concurrent dispatch needs no read-modify-write, and separate from the task metadata because that
+// records what exists rather than what has been handed out: progress counts every non-complete entry
+// as running, so it cannot answer "has anything started since I looked".
+const KeyRangeRef bulkDumpAdmittedKeys = KeyRangeRef("\xff/bulkDumpAdmitted/"_sr, "\xff/bulkDumpAdmitted0"_sr);
+const KeyRef bulkDumpAdmittedPrefix = bulkDumpAdmittedKeys.begin;
+
+Key bulkDumpAdmittedKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkDumpAdmittedPrefix);
+	wr << jobId;
+	return wr.toValue();
+}
+
 Value bulkJobControlStateValue(const BulkJobControlState& controlState) {
 	return ObjectWriter::toValue(controlState, IncludeVersion());
 }

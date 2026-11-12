@@ -2934,6 +2934,28 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					    .detail("TaskJobID", bulkDumpState.getJobId())
 					    .detail("TaskRange", taskRange)
 					    .detail("TaskID", task.bulkDumpState.getTaskId());
+					// Record the dispatch. This is the only durable witness that a task started: the task
+					// metadata records what exists, and progress counts every non-complete entry as
+					// running, so neither can answer whether anything has been handed out since a given
+					// moment. An atomic add keeps it off the read-modify-write path.
+					{
+						Transaction admitTr(cx);
+						int64_t one = 1;
+						Value delta = StringRef(reinterpret_cast<const uint8_t*>(&one), sizeof(one));
+						while (true) {
+							Error admitErr;
+							try {
+								admitTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+								admitTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+								admitTr.atomicOp(bulkDumpAdmittedKeyFor(jobId), delta, MutationRef::AddValue);
+								co_await admitTr.commit();
+								break;
+							} catch (Error& e) {
+								admitErr = e;
+							}
+							co_await admitTr.onError(admitErr);
+						}
+					}
 					actors.push_back(doBulkDumpTask(self, task.targetServer, task.bulkDumpState, task.checksumServers));
 				}
 				beginKey = rangeLocations.back().range.end;

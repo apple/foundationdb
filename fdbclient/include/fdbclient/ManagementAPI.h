@@ -409,6 +409,9 @@ Future<Optional<BulkJobControlState>> getBulkJobControl(Database cx, UID jobId, 
 // that the job exists: a record written for an unknown job id would never be read or cleaned up.
 Future<Void> setBulkJobPaused(Database cx, UID jobId, bool paused, bool isBulkDump);
 
+// Number of tasks data distribution has dispatched for a bulkdump job. Zero if none yet.
+Future<int64_t> getBulkDumpAdmittedCount(Database cx, UID jobId);
+
 // ==================== End Progress Tracking ====================
 
 Future<Void> printHealthyZone(Database cx);
