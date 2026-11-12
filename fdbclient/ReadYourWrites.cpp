@@ -28,6 +28,7 @@
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/CoroUtils.h"
+#include "flow/UnitTest.h"
 #include "flow/Util.h"
 
 struct ReadYourWritesTransaction::RYWState {
@@ -404,7 +405,8 @@ public:
 	                                        KeyRef const& maxKey,
 	                                        bool* readToBegin,
 	                                        bool* readThroughEnd,
-	                                        int* actualOffset) {
+	                                        int* actualOffset,
+	                                        Arena& arena) {
 		// If the key indicated by `key` can be determined without reading unknown data from the snapshot, then
 		// it.kv().key is the resolved key. If the indicated key is determined to be "off the beginning or end" of the
 		// database, it points to the first or last segment in the DB,
@@ -427,15 +429,18 @@ public:
 		// Invariant: it.beginKey() <= keykey && keykey <= it.endKey() && (key.isBackward() ? it.beginKey() != keykey :
 		// it.endKey() != keykey) Maintaining this invariant, we transform the key selector toward firstGreaterOrEqual
 		// form until we reach an unknown range or the result
+
+		// A dependent write can coalesce to an absent value (for example CompareAndClear) while still being typed as
+		// a KV segment. Only segments that actually have a value count as keys.
 		while (key.offset > 1 && !it.is_unreadable() && !it.is_unknown_range() && it.endKey() < maxKey) {
-			if (it.is_kv())
+			if (it.is_kv() && it.kv(arena) != nullptr)
 				--key.offset;
 			++it;
 			keykey = it.beginKey();
 			keyNeedsCopy = true;
 		}
 		while (key.offset < 1 && !it.is_unreadable() && !it.is_unknown_range() && it.beginKey() != allKeys.begin) {
-			if (it.is_kv()) {
+			if (it.is_kv() && it.kv(arena) != nullptr) {
 				++key.offset;
 				if (key.offset == 1) {
 					keykey = it.beginKey();
@@ -603,8 +608,10 @@ public:
 		int actualEndOffset = end.offset;
 		// state UID randomID = nondeterministicRandom()->randomUniqueID();
 
-		resolveKeySelectorFromCache(begin, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset);
-		resolveKeySelectorFromCache(end, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset);
+		resolveKeySelectorFromCache(
+		    begin, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset, ryw->arena);
+		resolveKeySelectorFromCache(
+		    end, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset, ryw->arena);
 
 		if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
 			co_return RangeResultRef(false, false);
@@ -627,9 +634,9 @@ public:
 			}
 
 			resolveKeySelectorFromCache(
-			    begin, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset);
+			    begin, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset, ryw->arena);
 			resolveKeySelectorFromCache(
-			    end, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset);
+			    end, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset, ryw->arena);
 		}
 
 		//TraceEvent("RYWSelectorsStartForward", randomID).detail("ByteLimit", limits.bytes).detail("RowLimit", limits.rows);
@@ -761,9 +768,9 @@ public:
 
 				// TODO: Is there a more efficient way to deal with invalidation?
 				resolveKeySelectorFromCache(
-				    begin, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset);
+				    begin, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset, ryw->arena);
 				resolveKeySelectorFromCache(
-				    end, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset);
+				    end, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset, ryw->arena);
 			} else if (it.is_kv()) {
 				KeyValueRef const* start = it.kv(ryw->arena);
 				if (start == nullptr) {
@@ -909,9 +916,10 @@ public:
 		int actualEndOffset = end.offset;
 		// state UID randomID = nondeterministicRandom()->randomUniqueID();
 
-		resolveKeySelectorFromCache(end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset);
 		resolveKeySelectorFromCache(
-		    begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset);
+		    end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset, ryw->arena);
+		resolveKeySelectorFromCache(
+		    begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset, ryw->arena);
 
 		if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
 			co_return RangeResultRef(false, false);
@@ -933,9 +941,10 @@ public:
 				co_return RangeResultRef(readToBegin, readThroughEnd);
 			}
 
-			resolveKeySelectorFromCache(end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset);
 			resolveKeySelectorFromCache(
-			    begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset);
+			    end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset, ryw->arena);
+			resolveKeySelectorFromCache(
+			    begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset, ryw->arena);
 		}
 
 		//TraceEvent("RYWSelectorsStartReverse", randomID).detail("ByteLimit", limits.bytes).detail("RowLimit", limits.rows);
@@ -1075,9 +1084,9 @@ public:
 
 				// TODO: Is there a more efficient way to deal with invalidation?
 				resolveKeySelectorFromCache(
-				    end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset);
+				    end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset, ryw->arena);
 				resolveKeySelectorFromCache(
-				    begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset);
+				    begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset, ryw->arena);
 			} else {
 				KeyValueRef const* end = it.is_kv() ? it.kv(ryw->arena) : nullptr;
 				if (end != nullptr) {
@@ -2743,4 +2752,58 @@ void ReadYourWritesTransaction::debugTrace(BaseTraceEvent&& event) {
 
 void ReadYourWritesTransaction::debugPrint(std::string const& message) {
 	debugMessages.push_back(message);
+}
+
+TEST_CASE("/fdbclient/ReadYourWrites/resolveKeySelectorSkipsClearedKey") {
+	Arena arena;
+	SnapshotCache cache(&arena);
+	WriteMap writes(&arena);
+
+	Standalone<VectorRef<KeyValueRef>> values;
+	values.push_back_deep(values.arena(), KeyValueRef("a"_sr, "v"_sr));
+	cache.insert(KeyRangeRef("a"_sr, allKeys.end), values);
+
+	// CompareAndClear leaves b absent: b must not count as a key when resolving the selector.
+	writes.mutate("b"_sr, MutationRef::CompareAndClear, "x"_sr, true);
+
+	RYWIterator it(&cache, &writes);
+	KeySelector selector = lastLessThan("c"_sr);
+	bool readToBegin = false;
+	bool readThroughEnd = false;
+	int actualOffset = selector.offset;
+	RYWImpl::resolveKeySelectorFromCache(
+	    selector, it, allKeys.end, &readToBegin, &readThroughEnd, &actualOffset, arena);
+
+	ASSERT(selector.isFirstGreaterOrEqual());
+	ASSERT(selector.getKey() == "a"_sr);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/ReadYourWrites/resolveKeySelectorSkipsClearedKeyForward") {
+	Arena arena;
+	SnapshotCache cache(&arena);
+	WriteMap writes(&arena);
+
+	Standalone<VectorRef<KeyValueRef>> values;
+	values.push_back_deep(values.arena(), KeyValueRef("a"_sr, "v"_sr));
+	values.push_back_deep(values.arena(), KeyValueRef("c"_sr, "v"_sr));
+	values.push_back_deep(values.arena(), KeyValueRef("d"_sr, "v"_sr));
+	cache.insert(KeyRangeRef("a"_sr, allKeys.end), values);
+
+	writes.mutate("b"_sr, MutationRef::CompareAndClear, "x"_sr, true);
+
+	RYWIterator it(&cache, &writes);
+	// The second existing key after a is d: the cleared b must not count.
+	KeySelector selector = firstGreaterThan("a"_sr) + 1;
+	bool readToBegin = false;
+	bool readThroughEnd = false;
+	int actualOffset = selector.offset;
+	RYWImpl::resolveKeySelectorFromCache(
+	    selector, it, allKeys.end, &readToBegin, &readThroughEnd, &actualOffset, arena);
+
+	ASSERT(selector.isFirstGreaterOrEqual());
+	ASSERT(selector.getKey() == "d"_sr);
+
+	return Void();
 }

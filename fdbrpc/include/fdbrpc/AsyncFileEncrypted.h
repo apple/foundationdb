@@ -37,6 +37,7 @@ public:
 
 private:
 	Reference<IAsyncFile> file;
+	std::shared_ptr<const StreamCipherKey> cipherKey;
 	StreamCipher::IV firstBlockIV;
 	StreamCipher::IV getIV(uint32_t block) const;
 	Mode mode;
@@ -52,7 +53,7 @@ private:
 	Future<Void> initialize();
 
 public:
-	AsyncFileEncrypted(Reference<IAsyncFile>, Mode, int);
+	AsyncFileEncrypted(Reference<IAsyncFile>, Mode, int, std::shared_ptr<const StreamCipherKey>);
 	void addref() override;
 	void delref() override;
 	Future<int> read(void* data, int length, int64_t offset) override;

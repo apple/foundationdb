@@ -325,12 +325,12 @@ func (podClient *kubernetesClient) updateAnnotationsOnPod(ctx context.Context, a
 }
 
 // OnAdd is called when an object is added.
-func (podClient *kubernetesClient) OnAdd(_ interface{}, _ bool) {}
+func (podClient *kubernetesClient) OnAdd(_ any, _ bool) {}
 
 // OnUpdate is also called when a re-list happens, and it will
 // get called even if nothing changed. This is useful for periodically
 // evaluating or syncing something.
-func (podClient *kubernetesClient) OnUpdate(prevObj, newObj interface{}) {
+func (podClient *kubernetesClient) OnUpdate(prevObj, newObj any) {
 	switch castedObj := newObj.(type) {
 	case *corev1.Pod:
 		podClient.Logger.Info("Got event for OnUpdate for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace, "generation", castedObj.Generation)
@@ -372,4 +372,4 @@ func (podClient *kubernetesClient) OnUpdate(prevObj, newObj interface{}) {
 // it will get an object of type DeletedFinalStateUnknown. This can
 // happen if the watch is closed and misses the delete event and we don't
 // notice the deletion until the subsequent re-list.
-func (podClient *kubernetesClient) OnDelete(_ interface{}) {}
+func (podClient *kubernetesClient) OnDelete(_ any) {}

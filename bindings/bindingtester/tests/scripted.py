@@ -331,6 +331,23 @@ class ScriptedTest(Test):
         self.add_result(main_thread, args, rng.stop)
         self.add_result(main_thread, args, rng.start)
 
+        main_thread.append("EMPTY_STACK")
+        float_tups = [
+            (2.5,),
+            (fdb.tuple.SingleFloat(1.5), b"foo"),
+            (-1.0, "bar"),
+            (fdb.tuple.SingleFloat(-3.0),),
+            ((0.0, -0.0),),
+            ((-0.0, 0.0),),
+        ]
+        for float_tup in float_tups:
+            main_thread.push_args(*test_util.with_length(float_tup))
+            main_thread.append("TUPLE_PACK")
+        main_thread.push_args(len(float_tups))
+        main_thread.append("TUPLE_SORT")
+        for packed in sorted(map(fdb.tuple.pack, float_tups), reverse=True):
+            self.add_result(main_thread, args, packed)
+
         stampKey = b"stampedXXXXXXXXXXsuffix"
         stampKeyIndex = stampKey.find(b"XXXXXXXXXX")
         main_thread.push_args(

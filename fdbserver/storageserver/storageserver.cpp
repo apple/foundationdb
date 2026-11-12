@@ -7365,97 +7365,95 @@ Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 	}
 }
 
-// Utility function to process sample files during bulk load
+// Stage one whole sample file so a failed read cannot publish partial samples or notify metrics twice.
+static std::vector<KeyValue> readBulkLoadByteSamples(const std::string& path, KeyRangeRef range) {
+	auto reader = newRocksDBSstFileReader();
+	if (!reader) {
+		throw unsupported_operation();
+	}
+	reader->open(abspath(path));
+	std::vector<KeyValue> samples;
+	while (reader->hasNext()) {
+		KeyValue kv = reader->next();
+		if (range.contains(kv.key)) {
+			if (kv.value.size() != sizeof(int64_t)) {
+				throw file_corrupt();
+			}
+			samples.push_back(std::move(kv));
+		}
+	}
+	return samples;
+}
+
+static Future<Void> rebuildBulkLoadByteSamples(StorageServer* data, KeyRange range, ReadOptions options) {
+	Key begin = range.begin;
+	while (begin < range.end) {
+		Optional<RangeResult> page;
+		try {
+			page = co_await data->storage.readRange(KeyRangeRef(begin, range.end),
+			                                        SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE,
+			                                        SERVER_KNOBS->FETCH_BLOCK_BYTES,
+			                                        options);
+		} catch (Error& e) {
+			if (e.code() != error_code_transaction_too_old && e.code() != error_code_server_overloaded) {
+				throw;
+			}
+		}
+		if (!page.present()) {
+			co_await delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			continue;
+		}
+		for (const auto& kv : page.get()) {
+			data->byteSampleApplySet(kv, invalidVersion);
+		}
+		if (!page.get().more) {
+			break;
+		}
+		begin = page.get().getReadThrough();
+	}
+	co_return;
+}
+
 static Future<Void> processSampleFiles(StorageServer* data,
                                        KeyRange maxRange,
-                                       std::string bulkLoadLocalDir,
-                                       std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
-	auto iter = localFileSets->begin();
-	auto end = localFileSets->end();
-	std::vector<KeyValue> rawSamples;
-	std::unique_ptr<IRocksDBSstFileReader> reader;
-
-	while (iter != end) {
-		const auto& [range, fileSet] = *iter;
-		if (fileSet.hasByteSampleFile()) {
-			std::string sampleFilePath = fileSet.getBytesSampleFileFullPath();
-			int retryCount = 0;
-			int maxRetries = 10; // Consider making this a KNOB
-			Error lastError;
-
-			// This outer loop retries reading the entire file if errors occur during opening/reading
-			while (retryCount < maxRetries) {
-				{
-					Error err;
-					try {
-						// Read all samples from the SST file into memory first
-						// Store as KeyValueRef to keep the original encoded size value
-						rawSamples.clear();
-						reader = newRocksDBSstFileReader();
-						if (reader == nullptr) {
-							TraceEvent(SevWarnAlways, "StorageServerNoSstReader", data->thisServerID)
-							    .detail("Reason", "Binary was built without RocksDB and cannot read SST files")
-							    .detail("File", sampleFilePath);
-							throw unsupported_operation();
-						}
-						reader->open(abspath(sampleFilePath));
-
-						TraceEvent(SevInfo, "StorageServerProcessingSampleFile", data->thisServerID)
-						    .detail("File", sampleFilePath);
-
-						// Read all samples
-						while (reader->hasNext()) {
-							// Copy the next kv to rawSamples.
-							rawSamples.push_back(reader->next());
-						}
-
-						// Now apply all read samples to the in-memory set and update metrics
-						for (const auto& kv : rawSamples) {
-							const KeyRef& key = kv.key;
-							if (!maxRange.contains(key)) {
-								// Skip keys outside the maxRange
-								continue;
-							}
-							int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
-							data->metrics.byteSample.sample.insert(key, size);
-							data->metrics.notifyBytes(key, size);
-							data->addMutationToMutationLogOrStorage(
-							    invalidVersion,
-							    MutationRef(
-							        MutationRef::SetValue, key.withPrefix(persistByteSampleKeys.begin), kv.value));
-						}
-
-						// If we get here, processing was successful for this file
-						break; // Exit the retry loop
-
-					} catch (Error& e) {
-						err = e;
-					}
-					lastError = err;
-					retryCount++;
-					TraceEvent(retryCount < maxRetries ? SevWarn : SevError,
-					           "StorageServerSampleFileProcessingError",
-					           data->thisServerID)
-					    .error(err) // Log the actual error 'e'
-					    .detail("File", sampleFilePath)
-					    // REMOVED: .detail("Key", kv.key).detail("Value", kv.value) as 'kv' is out of scope
-					    .detail("RetryCount", retryCount)
-					    .detail("MaxRetries", maxRetries);
-
-					// No need to check/close reader here, unique_ptr handles it.
-
-					if (retryCount < maxRetries) {
-						// Wait before retrying, with exponential backoff
-						co_await delay(0.1 * pow(2, retryCount)); // Consider adding jitter
-						continue; // Retry reading the file
-					}
-					// On final retry failure, throw the last error encountered
-					throw lastError;
-				}
-			} // end retry loop
+                                       std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets,
+                                       ReadOptions options) {
+	for (const auto& [range, fileSet] : *localFileSets) {
+		if (!fileSet.hasByteSampleFile()) {
+			continue;
 		}
-		++iter;
-	} // end file iteration loop
+
+		KeyRange sampleRange = range & maxRange;
+		const std::string path = fileSet.getBytesSampleFileFullPath();
+		Optional<std::vector<KeyValue>> samples;
+		try {
+			samples = readBulkLoadByteSamples(path, sampleRange);
+		} catch (Error& e) {
+			// Only recover errors reading the external input. Errors applying samples to local storage
+			// must still reach the storage server's error handler.
+			if (e.code() != error_code_file_corrupt && e.code() != error_code_io_error &&
+			    e.code() != error_code_transaction_too_old && e.code() != error_code_operation_failed) {
+				throw;
+			}
+			TraceEvent(SevWarnAlways, "BulkLoadRebuildByteSample", data->thisServerID)
+			    .error(e)
+			    .detail("File", path)
+			    .detail("Range", sampleRange);
+		}
+
+		if (!samples.present()) {
+			co_await rebuildBulkLoadByteSamples(data, sampleRange, options);
+			continue;
+		}
+		for (const auto& kv : samples.get()) {
+			int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
+			data->metrics.byteSample.sample.insert(kv.key, size);
+			data->metrics.notifyBytes(kv.key, size);
+			data->addMutationToMutationLogOrStorage(
+			    invalidVersion,
+			    MutationRef(MutationRef::SetValue, kv.key.withPrefix(persistByteSampleKeys.begin), kv.value));
+		}
+	}
 }
 
 // Filter the whole task's file set down to what this fetchKeys owns. The set spans the task, while `keys` is a
@@ -7944,7 +7942,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					co_await data->storage.getKeyValueStore()->compactRange(keys);
 
 					// Process sample files after SST ingestion
-					co_await processSampleFiles(data, keys, bulkLoadLocalDir, ownedBulkLoadFileSets);
+					co_await processSampleFiles(data, keys, ownedBulkLoadFileSets, readOptions);
 
 					// NOTICE: We break the 'fetchKeys' loop here if we successfully ingest the SST files.
 					// EARLY EXIT FROM 'fetchKeys' LOOP!!!
@@ -9271,6 +9269,11 @@ ShardInfo* ShardInfo::newShard(StorageServer* data, const StorageServerShard& sh
 	return res;
 }
 
+static bool skipDeliveredToNotAssigned(Version version) {
+	const int64_t skipVersion = SERVER_KNOBS->SS_SKIP_DELIVERED_TO_NOT_ASSIGNED_VERSION;
+	return skipVersion != 0 && skipVersion == version;
+}
+
 void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
 	ASSERT(keys.contains(mutation.param1));
 	if (adding) {
@@ -9280,9 +9283,47 @@ void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& 
 	} else if (readWrite) {
 		readWrite->addMutation(version, fromFetch, mutation, this->keys, readWrite->updateEagerReads);
 	} else if (mutation.type != MutationRef::ClearRange) {
-		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation);
-		ASSERT(false); // Mutation delivered to notAssigned shard!
+		const bool skip = skipDeliveredToNotAssigned(version);
+		// Unbounded fields: when skipping, the hex is the only record from which the mutation can be replayed by hand.
+		TraceEvent(skip ? SevWarnAlways : SevError, "DeliveredToNotAssigned")
+		    .setMaxFieldLength(-1)
+		    .setMaxEventLength(-1)
+		    .detail("Version", version)
+		    .detail("MutationType", mutation.type)
+		    .detail("KeyHex", mutation.param1.toHexString())
+		    .detail("ValueHex", mutation.param2.toHexString())
+		    .detail("Skipping", skip)
+		    .detail("SkipVersion", SERVER_KNOBS->SS_SKIP_DELIVERED_TO_NOT_ASSIGNED_VERSION);
+		ASSERT(skip);
 	}
+}
+
+TEST_CASE("/fdbserver/storageserver/deliveredToNotAssigned") {
+	auto setSkipVersion = [](int64_t version) {
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->SS_SKIP_DELIVERED_TO_NOT_ASSIGNED_VERSION = version;
+	};
+	Reference<ShardInfo> shard(ShardInfo::newNotAssigned(KeyRangeRef("a"_sr, "z"_sr)));
+	MutationRef set(MutationRef::SetValue, "k"_sr, "v"_sr);
+	MutationRef clear(MutationRef::ClearRange, "k"_sr, "l"_sr);
+
+	// Default: nothing is dropped, and clears never assert.
+	ASSERT_EQ(SERVER_KNOBS->SS_SKIP_DELIVERED_TO_NOT_ASSIGNED_VERSION, 0);
+	ASSERT(!skipDeliveredToNotAssigned(1));
+	ASSERT(!skipDeliveredToNotAssigned(100));
+	shard->addMutation(100, false, clear);
+
+	// Only mutations at exactly the knob's version are dropped, however many there are.
+	setSkipVersion(100);
+	ASSERT(!skipDeliveredToNotAssigned(99));
+	ASSERT(!skipDeliveredToNotAssigned(101));
+	ASSERT(skipDeliveredToNotAssigned(100));
+	shard->addMutation(100, false, set);
+	shard->addMutation(100, false, set);
+	shard->addMutation(99, false, clear);
+
+	setSkipVersion(0);
+	ASSERT(!skipDeliveredToNotAssigned(100));
+	return Void();
 }
 
 Future<Void> restoreShards(StorageServer* data,

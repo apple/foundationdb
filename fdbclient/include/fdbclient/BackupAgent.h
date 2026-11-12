@@ -329,6 +329,11 @@ public:
 		});
 	}
 
+	// Returns the tag of a runnable backup, other than excludeTag, whose container is at bc's location.
+	static Future<Optional<std::string>> findRunningBackupAtLocation(Reference<ReadYourWritesTransaction> tr,
+	                                                                 Reference<IBackupContainer> bc,
+	                                                                 std::string excludeTag);
+
 	Future<Void> discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> discontinueBackup(Database cx, Key tagName) {
 		return runRYWTransaction(
@@ -1067,30 +1072,11 @@ void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys);
 // Return a vector containing the key ranges in system key-space that should be backed up in a default backup.
 VectorRef<KeyRangeRef> const& getSystemBackupRanges();
 
-// Return a key-range map that can be used to check whether a system key is a candidate backup key (i.e. whether it is
-// part of any system backup ranges).
-KeyRangeMap<bool> const& systemBackupMutationMask();
-
 // Returns true if the given set of ranges exactly matches the set of ranges included in a default backup.
 template <class Container>
 bool isDefaultBackup(Container ranges) {
 	std::unordered_set<KeyRangeRef> uniqueRanges(ranges.begin(), ranges.end());
-	auto& systemBackupRanges = getSystemBackupRanges();
-
-	if (uniqueRanges.size() != systemBackupRanges.size() + 1) {
-		return false;
-	}
-
-	if (!uniqueRanges.contains(normalKeys)) {
-		return false;
-	}
-	for (auto range : getSystemBackupRanges()) {
-		if (!uniqueRanges.contains(range)) {
-			return false;
-		}
-	}
-
-	return true;
+	return uniqueRanges.size() == 1 && uniqueRanges.contains(normalKeys);
 }
 
 // Returns a key-range used to denote that a shared mutation stream belongs to the default backup set.
