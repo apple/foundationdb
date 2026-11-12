@@ -422,6 +422,13 @@ Future<Reference<IConnection>> INetworkConnections::connect(const std::string& h
 	});
 }
 
+Future<Reference<IConnection>> INetworkConnections::connectExternalWithHostname(
+    NetworkAddress toAddr,
+    const std::string& hostname,
+    boost::asio::ip::tcp::socket* existingSocket) {
+	return existingSocket ? connect(toAddr, existingSocket) : connectExternal(toAddr);
+}
+
 IUDPSocket::~IUDPSocket() = default;
 
 const std::vector<int> NetworkMetrics::starvationBins = { 1, 3500, 7000, 7500, 8500, 8900, 10500 };
