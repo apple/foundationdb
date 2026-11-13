@@ -58,6 +58,7 @@ enum TesterOptionId {
 	OPT_TLS_KEY_FILE,
 	OPT_TLS_CA_FILE,
 	OPT_RETAIN_CLIENT_LIB_COPIES,
+	OPT_SYMLINK_CLIENT_LIB_COPIES,
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -85,6 +86,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_TLS_KEY_FILE, "--tls-key-file", SO_REQ_SEP },
 	  { OPT_TLS_CA_FILE, "--tls-ca-file", SO_REQ_SEP },
 	  { OPT_RETAIN_CLIENT_LIB_COPIES, "--retain-client-lib-copies", SO_NONE },
+	  { OPT_SYMLINK_CLIENT_LIB_COPIES, "--symlink-client-lib-copies", SO_NONE },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -224,6 +226,9 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_RETAIN_CLIENT_LIB_COPIES:
 		options.retainClientLibCopies = true;
 		break;
+	case OPT_SYMLINK_CLIENT_LIB_COPIES:
+		options.symlinkClientLibCopies = true;
+		break;
 	}
 	return true;
 }
@@ -323,6 +328,10 @@ void applyNetworkOptions(TesterOptions& options) {
 
 	if (options.retainClientLibCopies) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_RETAIN_CLIENT_LIBRARY_COPIES);
+	}
+
+	if (options.symlinkClientLibCopies) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_SYMLINK_CLIENT_LIBRARY_COPIES);
 	}
 
 	for (const auto& knob : options.testSpec.knobs) {
