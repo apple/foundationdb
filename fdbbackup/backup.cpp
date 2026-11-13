@@ -3163,7 +3163,11 @@ constexpr CSimpleOpt::SOption END_MARKER = SO_END_OF_OPTIONS;
  *
  * This function is used to reorder and validate command-line arguments.
  */
-static bool processOption(int argc, char* argv[], int& i, std::vector<char*>& options) {
+static bool processOption(int argc,
+                          char* argv[],
+                          int& i,
+                          std::vector<char*>& options,
+                          const CSimpleOpt::SOption* preferred = nullptr) {
 	std::string_view option = argv[i];
 
 	options.emplace_back(argv[i]);
@@ -3173,7 +3177,14 @@ static bool processOption(int argc, char* argv[], int& i, std::vector<char*>& op
 		option = option.substr(0, equalPos);
 	}
 
-	for (auto* opt : allOptionArrays) {
+	// The first table that knows the name decides whether it takes a value.
+	std::vector<const CSimpleOpt::SOption*> tables;
+	if (preferred) {
+		tables.push_back(preferred);
+	}
+	tables.insert(tables.end(), std::begin(allOptionArrays), std::end(allOptionArrays));
+
+	for (auto* opt : tables) {
 		for (int j = 0; opt[j].nId != END_MARKER.nId; ++j) {
 			const char* knownOpt = opt[j].pszArg;
 			size_t knownOptLen = strlen(knownOpt);
@@ -3217,14 +3228,21 @@ static bool reorderArguments(int argc, char* argv[], int& newArgC, char**& newAr
 
 	parameters.push_back(argv[0]); // program name
 	auto isOptions = [](const char* arg) -> bool { return arg && *arg == '-'; };
+	// The top-level table makes -v/--version a flag, but after an fdbrestore subcommand they carry the restore
+	// version, so look options up in the restore table first once one is seen.
+	const CSimpleOpt::SOption* preferred = nullptr;
 
 	for (int i = 1; i < argc; ++i) {
 		char* arg = argv[i];
 
 		if (isOptions(arg)) {
-			if (!processOption(argc, argv, i, options))
+			if (!processOption(argc, argv, i, options, preferred))
 				return false;
 		} else {
+			if (parameters.size() == 1 && getProgramType(argv[0]) == ProgramExe::RESTORE &&
+			    getRestoreType(arg) != RestoreType::UNKNOWN) {
+				preferred = g_rgRestoreOptions;
+			}
 			parameters.emplace_back(arg);
 		}
 	}
@@ -4748,6 +4766,24 @@ int main() {
 	                               true,
 	                               g_rgBackupQueryOptions,
 	                               1);
+
+	printf("\n6c) Restore version option Tests:\n");
+	allPassed &= testOptionParsing({ "fdbrestore", "start", "-v", "123", "-w" },
+	                               { "start", "-v", "123", "-w" },
+	                               true,
+	                               "6c.1 Restore -v takes the restore version",
+	                               true,
+	                               g_rgRestoreOptions,
+	                               1);
+	allPassed &= testOptionParsing({ "fdbrestore", "start", "--version", "123" },
+	                               { "start", "--version", "123" },
+	                               true,
+	                               "6c.2 Restore --version takes the restore version",
+	                               true,
+	                               g_rgRestoreOptions,
+	                               1);
+	allPassed &=
+	    testOptionParsing({ "fdbrestore", "--version" }, { "--version" }, true, "6c.3 fdbrestore --version flag");
 
 	printf("\n7) Error Tests:\n");
 	allPassed &= testOptionParsing({ "fdbbackup", "start", "--unknown-option" }, {}, false, "7.1 Unknown option");
