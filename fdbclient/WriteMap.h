@@ -22,6 +22,8 @@
 #define FDBCLIENT_WRITEMAP_H
 #pragma once
 
+#include <deque>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/VersionedMap.h"
 #include "SnapshotCache.h"
@@ -38,12 +40,23 @@ struct RYWMutation {
 	bool operator!=(const RYWMutation& r) const { return !(*this == r); }
 };
 
+// Operations after the first are kept in a buffer that copies of the stack share. Each copy sees only the first
+// `extraCount` entries, so a copy can push onto the buffer's tail in place while older copies (e.g. the entries
+// seen by WriteMap iterator snapshots) keep their prefix. Entries a copy can see are never modified in place
+// while the buffer is shared.
+struct OperationBuffer : ReferenceCounted<OperationBuffer>, FastAllocated<OperationBuffer> {
+	std::deque<RYWMutation> operations;
+};
+
 class OperationStack {
 private:
 	RYWMutation singletonOperation;
-	Optional<std::vector<RYWMutation>> optionalOperations;
-	bool hasVector() const { return optionalOperations.present(); }
+	Reference<OperationBuffer> extraOperations;
+	int extraCount = 0;
 	bool defaultConstructed;
+
+	// Makes extraOperations safe to modify past its first `keep` entries.
+	void prepareExtraOperations(int keep);
 
 public:
 	OperationStack() { defaultConstructed = true; } // Don't use this!
@@ -56,12 +69,13 @@ public:
 	void push(RYWMutation entry);
 	bool isDependent() const;
 
-	const RYWMutation& top() const { return hasVector() ? optionalOperations.get().back() : singletonOperation; }
-	RYWMutation& operator[](int n) { return (n == 0) ? singletonOperation : optionalOperations.get()[n - 1]; }
+	const RYWMutation& top() const {
+		return extraCount ? extraOperations->operations[extraCount - 1] : singletonOperation;
+	}
 
-	const RYWMutation& at(int n) const { return (n == 0) ? singletonOperation : optionalOperations.get()[n - 1]; }
+	const RYWMutation& at(int n) const { return (n == 0) ? singletonOperation : extraOperations->operations[n - 1]; }
 
-	int size() const { return defaultConstructed ? 0 : hasVector() ? optionalOperations.get().size() + 1 : 1; }
+	int size() const { return defaultConstructed ? 0 : extraCount + 1; }
 
 	bool operator==(const OperationStack& r) const;
 };

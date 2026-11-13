@@ -21,6 +21,7 @@
 #include "RYWIterator.h"
 #include "fdbclient/RandomTestUtils.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/Knobs.h"
 #include "flow/UnitTest.h"
 
 const RYWIterator::SEGMENT_TYPE RYWIterator::typeMap[12] = {
@@ -671,6 +672,233 @@ TEST_CASE("/fdbclient/WriteMap/addValue") {
 	writes.mutate("apple123"_sr, MutationRef::AddValue, "1"_sr, true);
 	ASSERT(getWriteMapCount(&writes) == 3);
 
+	return Void();
+}
+
+// AppendIfFits is not associative under truncation. Two equal-sized appends must stay
+// on the OperationStack and be applied sequentially against the base value; coalescing
+// the operands first can reject work that would have succeeded one-at-a-time (#13828).
+TEST_CASE("/fdbclient/WriteMap/appendIfFitsNonAssociative") {
+	Arena arena = Arena();
+	const int baseSize = 70000;
+	const int appendSize = 20000;
+	ASSERT(baseSize + appendSize <= CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+	ASSERT(baseSize + 2 * appendSize > CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+
+	ValueRef firstAppend = StringRef(arena, std::string(appendSize, 'b'));
+	ValueRef secondAppend = StringRef(arena, std::string(appendSize, 'b'));
+	ValueRef base = StringRef(arena, std::string(baseSize, 'a'));
+
+	OperationStack stack(RYWMutation(firstAppend, MutationRef::AppendIfFits));
+	WriteMap::coalesceOver(stack, RYWMutation(secondAppend, MutationRef::AppendIfFits), arena);
+	ASSERT(stack.size() == 2);
+	ASSERT(stack.at(0).type == MutationRef::AppendIfFits);
+	ASSERT(stack.at(1).type == MutationRef::AppendIfFits);
+
+	RYWMutation under = WriteMap::coalesceUnder(stack, base, arena);
+	ASSERT(under.type == MutationRef::SetValue);
+	ASSERT(under.value.present());
+	ASSERT(under.value.get().size() == baseSize + appendSize);
+
+	// Dependent writes (no prior SetValue in the transaction): RYW must still yield 90KB.
+	WriteMap writes = WriteMap(&arena);
+	writes.mutate("k"_sr, MutationRef::AppendIfFits, firstAppend, true);
+	writes.mutate("k"_sr, MutationRef::AppendIfFits, secondAppend, true);
+	WriteMap::iterator it(&writes);
+	it.skip("k"_sr);
+	ASSERT(it.is_operation());
+	ASSERT(it.op().size() == 2);
+	RYWMutation visible = WriteMap::coalesceUnder(it.op(), base, arena);
+	ASSERT(visible.value.present());
+	ASSERT(visible.value.get().size() == baseSize + appendSize);
+
+	return Void();
+}
+
+// Pending AppendIfFits operands over an unknown base must give the same value as applying them one at a time.
+TEST_CASE("/fdbclient/WriteMap/appendIfFitsSequentialEquivalence") {
+	const int limit = CLIENT_KNOBS->VALUE_SIZE_LIMIT;
+	for (int iter = 0; iter < 200; iter++) {
+		Arena arena;
+		WriteMap writes = WriteMap(&arena);
+		auto randomSize = [&]() {
+			switch (deterministicRandom()->randomInt(0, 4)) {
+			case 0:
+				return 0;
+			case 1:
+				return deterministicRandom()->randomInt(1, 100);
+			case 2:
+				return deterministicRandom()->randomInt(1, limit / 3);
+			default:
+				return deterministicRandom()->randomInt(1, limit + 1);
+			}
+		};
+		Optional<ValueRef> base;
+		if (deterministicRandom()->coinflip()) {
+			base = StringRef(arena, std::string(randomSize(), 'a'));
+		}
+
+		Optional<ValueRef> expected = base;
+		int n = deterministicRandom()->randomInt(1, 12);
+		for (int i = 0; i < n; i++) {
+			ValueRef operand = StringRef(arena, std::string(randomSize(), 'b' + i));
+			writes.mutate("k"_sr, MutationRef::AppendIfFits, operand, true);
+			expected = doAppendIfFits(expected, operand, arena);
+		}
+
+		WriteMap::iterator it(&writes);
+		it.skip("k"_sr);
+		ASSERT(it.op().size() == n);
+		RYWMutation actual = WriteMap::coalesceUnder(it.op(), base, arena);
+		ASSERT(actual.type == MutationRef::SetValue);
+		ASSERT(actual.value.present() && actual.value.get() == expected.get());
+	}
+	return Void();
+}
+
+// Pushing onto a key's pending operations must not copy the earlier ones, and iterators created before later writes
+// must still see the operations as they were when the iterator was created.
+TEST_CASE("/fdbclient/WriteMap/manyPendingOperationsOnOneKey") {
+	Arena arena;
+	WriteMap writes = WriteMap(&arena);
+	const int total = 30000;
+	const std::vector<int> snapshotAt = { 1, 2, 1000, total / 2 };
+	std::vector<WriteMap::iterator> snapshots;
+	std::vector<ValueRef> operands;
+	int nextSnapshot = 0;
+	for (int i = 0; i < total; i++) {
+		operands.push_back(StringRef(arena, format("%d", i)));
+		writes.mutate("k"_sr, MutationRef::AppendIfFits, operands.back(), true);
+		if (nextSnapshot < snapshotAt.size() && i + 1 == snapshotAt[nextSnapshot]) {
+			snapshots.emplace_back(&writes);
+			++nextSnapshot;
+		}
+	}
+
+	WriteMap::iterator it(&writes);
+	it.skip("k"_sr);
+	ASSERT(it.op().size() == total);
+	for (int i = 0; i < total; i++) {
+		ASSERT(it.op().at(i).value.get() == operands[i]);
+	}
+	for (int s = 0; s < snapshots.size(); s++) {
+		snapshots[s].skip("k"_sr);
+		ASSERT(snapshots[s].op().size() == snapshotAt[s]);
+		for (int i = 0; i < snapshotAt[s]; i++) {
+			ASSERT(snapshots[s].op().at(i).value.get() == operands[i]);
+		}
+	}
+
+	// Replacing the top of a stack that an older snapshot shares must not change what that snapshot sees.
+	WriteMap::iterator beforeAdds(&writes);
+	writes.mutate("k"_sr, MutationRef::AddValue, "\x01"_sr, true);
+	writes.mutate("k"_sr, MutationRef::AddValue, "\x01"_sr, true);
+	beforeAdds.skip("k"_sr);
+	ASSERT(beforeAdds.op().size() == total);
+	ASSERT(beforeAdds.op().top().type == MutationRef::AppendIfFits);
+	ASSERT(beforeAdds.op().top().value.get() == operands.back());
+	WriteMap::iterator afterAdds(&writes);
+	afterAdds.skip("k"_sr);
+	ASSERT(afterAdds.op().size() == total + 1);
+	ASSERT(afterAdds.op().top().type == MutationRef::AddValue);
+	ASSERT(afterAdds.op().top().value.get() == "\x02"_sr);
+	return Void();
+}
+
+// Reading a key with a single pending append over an absent or empty value must return the operand itself rather
+// than allocating a copy in the transaction arena on every read.
+TEST_CASE("/fdbclient/WriteMap/singleAppendReadDoesNotAllocate") {
+	Arena arena;
+	WriteMap writes = WriteMap(&arena);
+	ValueRef operand = StringRef(arena, std::string(CLIENT_KNOBS->VALUE_SIZE_LIMIT, 'x'));
+	writes.mutate("k"_sr, MutationRef::AppendIfFits, operand, true);
+
+	WriteMap::iterator it(&writes);
+	it.skip("k"_sr);
+	ASSERT(it.op().size() == 1);
+	Arena readArena;
+	size_t sizeBefore = readArena.getSize();
+	for (int i = 0; i < 100; i++) {
+		for (Optional<ValueRef> base : { Optional<ValueRef>(), Optional<ValueRef>(StringRef()) }) {
+			RYWMutation visible = WriteMap::coalesceUnder(it.op(), base, readArena);
+			ASSERT(visible.value.present());
+			ASSERT(visible.value.get().begin() == operand.begin());
+			ASSERT(visible.value.get().size() == operand.size());
+		}
+	}
+	ASSERT(readArena.getSize() == sizeBefore);
+	return Void();
+}
+
+static Optional<ValueRef> applyAtomicOpSequentially(MutationRef::Type t, Optional<ValueRef> e, ValueRef o, Arena& a) {
+	switch (t) {
+	case MutationRef::AddValue:
+		return doLittleEndianAdd(e, o, a);
+	case MutationRef::And:
+		return doAnd(e, o, a);
+	case MutationRef::AndV2:
+		return doAndV2(e, o, a);
+	case MutationRef::Or:
+		return doOr(e, o, a);
+	case MutationRef::Xor:
+		return doXor(e, o, a);
+	case MutationRef::AppendIfFits:
+		return doAppendIfFits(e, o, a);
+	case MutationRef::Max:
+		return doMax(e, o, a);
+	case MutationRef::Min:
+		return doMin(e, o, a);
+	case MutationRef::MinV2:
+		return doMinV2(e, o, a);
+	case MutationRef::ByteMin:
+		return doByteMin(e, o, a);
+	case MutationRef::ByteMax:
+		return doByteMax(e, o, a);
+	case MutationRef::CompareAndClear:
+		return doCompareAndClear(e, o, a);
+	default:
+		ASSERT(false);
+		return Optional<ValueRef>();
+	}
+}
+
+// Pending atomic ops over an unknown base must read back the same as applying them one at a time against it.
+TEST_CASE("/fdbclient/WriteMap/atomicOpsSequentialEquivalence") {
+	std::vector<MutationRef::Type> types = {
+		MutationRef::AddValue, MutationRef::And,          MutationRef::AndV2,   MutationRef::Or,
+		MutationRef::Xor,      MutationRef::AppendIfFits, MutationRef::Max,     MutationRef::Min,
+		MutationRef::MinV2,    MutationRef::ByteMin,      MutationRef::ByteMax, MutationRef::CompareAndClear
+	};
+	for (int mode = -1; mode < (int)types.size(); mode++) { // -1 = mixed
+		for (int iter = 0; iter < 2000; iter++) {
+			Arena arena;
+			WriteMap writes = WriteMap(&arena);
+			auto rv = [&](bool allowEmpty) {
+				int len = deterministicRandom()->randomInt(allowEmpty ? 0 : 1, 5);
+				std::string str;
+				for (int i = 0; i < len; i++)
+					str.push_back((char)(deterministicRandom()->coinflip() ? deterministicRandom()->randomInt(0, 3)
+					                                                       : deterministicRandom()->randomInt(0, 256)));
+				return StringRef(arena, str);
+			};
+			Optional<ValueRef> base;
+			if (deterministicRandom()->coinflip())
+				base = rv(true);
+			Optional<ValueRef> expected = base;
+			int n = deterministicRandom()->randomInt(2, 7);
+			for (int i = 0; i < n; i++) {
+				MutationRef::Type t = mode < 0 ? deterministicRandom()->randomChoice(types) : types[mode];
+				ValueRef o = rv(true);
+				writes.mutate("k"_sr, t, o, true);
+				expected = applyAtomicOpSequentially(t, expected, o, arena);
+			}
+			WriteMap::iterator it(&writes);
+			it.skip("k"_sr);
+			RYWMutation actual = WriteMap::coalesceUnder(it.op(), base, arena);
+			ASSERT(actual.value.present() == expected.present());
+			ASSERT(!expected.present() || actual.value.get() == expected.get());
+		}
+	}
 	return Void();
 }
 
