@@ -23,13 +23,26 @@
 void OperationStack::reset(RYWMutation initialEntry) {
 	defaultConstructed = false;
 	singletonOperation = initialEntry;
-	optionalOperations = Optional<std::vector<RYWMutation>>();
+	extraOperations.clear();
+	extraCount = 0;
+}
+
+void OperationStack::prepareExtraOperations(int keep) {
+	if (!extraOperations) {
+		extraOperations = makeReference<OperationBuffer>();
+	} else if (extraOperations->isSoleOwner()) {
+		extraOperations->operations.resize(keep);
+	} else if (extraOperations->operations.size() != keep) {
+		auto copy = makeReference<OperationBuffer>();
+		copy->operations.assign(extraOperations->operations.begin(), extraOperations->operations.begin() + keep);
+		extraOperations = copy;
+	}
 }
 
 void OperationStack::poppush(RYWMutation entry) {
-	if (hasVector()) {
-		optionalOperations.get().pop_back();
-		optionalOperations.get().push_back(entry);
+	if (extraCount) {
+		prepareExtraOperations(extraCount - 1);
+		extraOperations->operations.push_back(entry);
 	} else {
 		singletonOperation = entry;
 	}
@@ -39,11 +52,10 @@ void OperationStack::push(RYWMutation entry) {
 	if (defaultConstructed) {
 		singletonOperation = entry;
 		defaultConstructed = false;
-	} else if (hasVector()) {
-		optionalOperations.get().push_back(entry);
 	} else {
-		optionalOperations = std::vector<RYWMutation>();
-		optionalOperations.get().push_back(entry);
+		prepareExtraOperations(extraCount);
+		extraOperations->operations.push_back(entry);
+		++extraCount;
 	}
 }
 
@@ -68,8 +80,8 @@ bool OperationStack::operator==(const OperationStack& r) const {
 	if (size() == 1)
 		return true;
 
-	for (int i = 0; i < optionalOperations.get().size(); i++) {
-		if (optionalOperations.get()[i] != r.optionalOperations.get()[i])
+	for (int i = 1; i < size(); i++) {
+		if (at(i) != r.at(i))
 			return false;
 	}
 
@@ -542,6 +554,9 @@ static ValueRef applyAppendIfFitsRun(Optional<ValueRef> const& existing,
                                      int begin,
                                      int end,
                                      Arena& arena) {
+	if (end - begin == 1) {
+		return doAppendIfFits(existing, stack.at(begin).value.get(), arena);
+	}
 	ValueRef base = existing.present() ? existing.get() : StringRef();
 	int totalSize = base.size();
 	for (int i = begin; i < end; ++i) {

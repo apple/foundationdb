@@ -714,6 +714,80 @@ TEST_CASE("/fdbclient/WriteMap/appendIfFitsSequentialEquivalence") {
 	return Void();
 }
 
+// Pushing onto a key's pending operations must not copy the earlier ones, and iterators created before later writes
+// must still see the operations as they were when the iterator was created.
+TEST_CASE("/fdbclient/WriteMap/manyPendingOperationsOnOneKey") {
+	Arena arena;
+	WriteMap writes = WriteMap(&arena);
+	const int total = 30000;
+	const std::vector<int> snapshotAt = { 1, 2, 1000, total / 2 };
+	std::vector<WriteMap::iterator> snapshots;
+	std::vector<ValueRef> operands;
+	int nextSnapshot = 0;
+	for (int i = 0; i < total; i++) {
+		operands.push_back(StringRef(arena, format("%d", i)));
+		writes.mutate("k"_sr, MutationRef::AppendIfFits, operands.back(), true);
+		if (nextSnapshot < snapshotAt.size() && i + 1 == snapshotAt[nextSnapshot]) {
+			snapshots.emplace_back(&writes);
+			++nextSnapshot;
+		}
+	}
+
+	WriteMap::iterator it(&writes);
+	it.skip("k"_sr);
+	ASSERT(it.op().size() == total);
+	for (int i = 0; i < total; i++) {
+		ASSERT(it.op().at(i).value.get() == operands[i]);
+	}
+	for (int s = 0; s < snapshots.size(); s++) {
+		snapshots[s].skip("k"_sr);
+		ASSERT(snapshots[s].op().size() == snapshotAt[s]);
+		for (int i = 0; i < snapshotAt[s]; i++) {
+			ASSERT(snapshots[s].op().at(i).value.get() == operands[i]);
+		}
+	}
+
+	// Replacing the top of a stack that an older snapshot shares must not change what that snapshot sees.
+	WriteMap::iterator beforeAdds(&writes);
+	writes.mutate("k"_sr, MutationRef::AddValue, "\x01"_sr, true);
+	writes.mutate("k"_sr, MutationRef::AddValue, "\x01"_sr, true);
+	beforeAdds.skip("k"_sr);
+	ASSERT(beforeAdds.op().size() == total);
+	ASSERT(beforeAdds.op().top().type == MutationRef::AppendIfFits);
+	ASSERT(beforeAdds.op().top().value.get() == operands.back());
+	WriteMap::iterator afterAdds(&writes);
+	afterAdds.skip("k"_sr);
+	ASSERT(afterAdds.op().size() == total + 1);
+	ASSERT(afterAdds.op().top().type == MutationRef::AddValue);
+	ASSERT(afterAdds.op().top().value.get() == "\x02"_sr);
+	return Void();
+}
+
+// Reading a key with a single pending append over an absent or empty value must return the operand itself rather
+// than allocating a copy in the transaction arena on every read.
+TEST_CASE("/fdbclient/WriteMap/singleAppendReadDoesNotAllocate") {
+	Arena arena;
+	WriteMap writes = WriteMap(&arena);
+	ValueRef operand = StringRef(arena, std::string(CLIENT_KNOBS->VALUE_SIZE_LIMIT, 'x'));
+	writes.mutate("k"_sr, MutationRef::AppendIfFits, operand, true);
+
+	WriteMap::iterator it(&writes);
+	it.skip("k"_sr);
+	ASSERT(it.op().size() == 1);
+	Arena readArena;
+	size_t sizeBefore = readArena.getSize();
+	for (int i = 0; i < 100; i++) {
+		for (Optional<ValueRef> base : { Optional<ValueRef>(), Optional<ValueRef>(StringRef()) }) {
+			RYWMutation visible = WriteMap::coalesceUnder(it.op(), base, readArena);
+			ASSERT(visible.value.present());
+			ASSERT(visible.value.get().begin() == operand.begin());
+			ASSERT(visible.value.get().size() == operand.size());
+		}
+	}
+	ASSERT(readArena.getSize() == sizeBefore);
+	return Void();
+}
+
 static Optional<ValueRef> applyAtomicOpSequentially(MutationRef::Type t, Optional<ValueRef> e, ValueRef o, Arena& a) {
 	switch (t) {
 	case MutationRef::AddValue:
