@@ -166,12 +166,17 @@ Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Vers
 			replies.push_back(locations->get(i, &StorageServerInterface::getValue).getReply(req));
 		}
 		co_await waitForAll(replies);
+		UID auditId = deterministicRandom()->randomUniqueID();
 		for (int i = 0; i < replies.size(); i++) {
 			std::string ssi = locations->getInterface(i).address().toString();
 			if (replies[i].isError()) {
 				fmt::println(stderr, "ERROR: {} {}", ssi, replies[i].getError().what());
 			} else {
 				Optional<Value> v = replies[i].get().value;
+				if (v.present()) {
+					auditLogReturnedKey(
+					    cx, "getall", auditId, tokens[1], v.get(), locations->getInterface(i).address());
+				}
 				fmt::println(" {} {}", ssi, v.present() ? printable(v.get()) : "(not found)");
 			}
 		}
