@@ -296,8 +296,8 @@ private:
 
 	// Available task subspaces.  Priority 0, the default, will be under available which is backward
 	// compatible with pre-priority TaskBucket processes.  Priority 1 and higher will be in
-	// available_prioritized.  Currently only priority level 1 is allowed but adding more levels
-	// in the future is possible and simple.
+	// available_prioritized.  Priority levels up to TASKBUCKET_MAX_PRIORITY are allowed.  A process only
+	// scans levels up to its own TASKBUCKET_MAX_PRIORITY, so tasks at a higher level are invisible to it.
 	Subspace available;
 	Subspace available_prioritized;
 	Subspace timeouts;
