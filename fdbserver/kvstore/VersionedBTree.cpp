@@ -2854,6 +2854,14 @@ public:
 		return newID;
 	}
 
+	bool isPageRemapped(LogicalPageID pageID) const override {
+		auto i = remappedPages.find(pageID);
+		if (i == remappedPages.end() || i->second.empty()) {
+			return false;
+		}
+		return RemappedPage::getTypeOf(i->second.rbegin()->second) == RemappedPage::REMAP;
+	}
+
 	void freePage(LogicalPageID pageID, Version v) override {
 		// If pageID has been remapped, then it can't be freed until all existing remaps for that page have been undone,
 		// so queue it for later deletion during remap cleanup
@@ -4951,34 +4959,6 @@ public:
 
 	using LazyClearQueueT = FIFOQueue<LazyClearQueueEntry>;
 
-	struct ParentInfo {
-		ParentInfo() {
-			count = 0;
-			bits = 0;
-		}
-		void clear() {
-			count = 0;
-			bits = 0;
-		}
-
-		static uint32_t mask(LogicalPageID id) { return 1 << (id & 31); }
-
-		void pageUpdated(LogicalPageID child) {
-			auto m = mask(child);
-			if ((bits & m) == 0) {
-				bits |= m;
-				++count;
-			}
-		}
-
-		bool maybeUpdated(LogicalPageID child) const { return (mask(child) & bits) != 0; }
-
-		uint32_t bits;
-		int count;
-	};
-
-	using ParentInfoMapT = std::unordered_map<LogicalPageID, ParentInfo>;
-
 	struct BTreeCommitHeader {
 		constexpr static FileIdentifier file_identifier = 10847329;
 		constexpr static unsigned int FORMAT_VERSION = 17;
@@ -5575,7 +5555,6 @@ private:
 	std::string m_name;
 	UID m_logID;
 	int m_blockSize;
-	ParentInfoMapT childUpdateTracker;
 
 	BTreeCommitHeader m_header;
 	LazyClearQueueT m_lazyClearQueue;
@@ -6135,11 +6114,6 @@ private:
 		for (LogicalPageID id : btPageID) {
 			m_pager->freePage(id, v);
 		}
-
-		// Stop tracking child updates for deleted internal nodes
-		if (height > 1 && !btPageID.empty()) {
-			childUpdateTracker.erase(btPageID.front());
-		}
 	}
 
 	// Write new version of pageID at version v using page as its data.
@@ -6359,9 +6333,8 @@ private:
 		InternalPageModifier(Reference<const ArenaPage> p,
 		                     bool alreadyCloned,
 		                     bool updating,
-		                     ParentInfo* parentInfo,
 		                     int maxHeightAllowed)
-		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false), parentInfo(parentInfo),
+		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false),
 		    maxHeightAllowed(maxHeightAllowed) {}
 
 		// Whether updating the existing page is allowed
@@ -6375,7 +6348,10 @@ private:
 
 		// Whether there are any changes to the page, either made in place or staged in rebuild
 		bool changesMade;
-		ParentInfo* parentInfo;
+
+		// Whether any child link kept by this page was updated in place, so its page ID is unchanged but it may now be
+		// remapped
+		bool childUpdatedInPlace{ false };
 
 		int maxHeightAllowed;
 
@@ -6497,14 +6473,8 @@ private:
 				changesMade = true;
 			} else {
 
-				// If this was an in-place update, where the child page IDs do not change, notify the
-				// parentInfo that those pages have been updated so it can possibly eliminate their
-				// second writes later.
-				if (u.inPlaceUpdate) {
-					for (auto id : u.decodeLowerBound.getChildPage()) {
-						parentInfo->pageUpdated(id);
-					}
-				}
+				// An in-place update keeps the child page IDs, so the children may now be remapped and detachable
+				childUpdatedInPlace |= u.inPlaceUpdate;
 
 				keep(u.cBegin, u.cEnd);
 			}
@@ -7096,16 +7066,12 @@ private:
 			co_await waitForAll(recursions);
 			debug_printf("%s Recursions done, processing slice updates.\n", context.c_str());
 
-			// ParentInfo could be invalid after a wait and must be re-initialized.
-			// All uses below occur before waits so no reinitialization is done.
-			ParentInfo* parentInfo = &self->childUpdateTracker[rootID.front()];
-
 			// InternalPageModifier takes the results of the recursive commitSubtree() calls in order
 			// and makes changes to page as needed, copying as needed, and generating an array from
 			// which to build new page(s) if modification is not possible or not allowed.
 			// If pageCopy is already set it was initialized to page above so the modifier doesn't need
 			// to copy it
-			InternalPageModifier modifier(page, pageCopy.isValid(), tryToUpdate, parentInfo, maxHeightAllowed);
+			InternalPageModifier modifier(page, pageCopy.isValid(), tryToUpdate, maxHeightAllowed);
 
 			// Apply the possible changes for each subtree range recursed to, except the last one.
 			// For each range, the expected next record, if any, is checked against the first boundary
@@ -7130,7 +7096,40 @@ private:
 			                     modifier.changesMade || slices.back()->childrenChanged ? &update->subtreeUpperBound
 			                                                                            : &update->decodeUpperBound);
 
-			bool detachChildren = (parentInfo->count > 2);
+			// Only scan children for remaps if one was just updated in place. The pager's remap table is the source of
+			// truth, so remaps already popped by remap cleanup aren't counted.
+			int remappedChildren = 0;
+			if (modifier.childUpdatedInPlace) {
+				// Only > 2 matters, so stop scanning once exceeded
+				auto countIfRemapped = [&](RedwoodRecordRef const& rec) {
+					if (rec.value.present()) {
+						BTreeNodeLinkRef child = rec.getChildPage();
+						// Nodes larger than 1 page are never remapped.
+						remappedChildren += (child.size() == 1 && self->m_pager->isPageRemapped(child.front()));
+					}
+					return remappedChildren > 2;
+				};
+				if (modifier.updating) {
+					auto childCursor = cursor;
+					if (modifier.clonedPage) {
+						childCursor.switchTree(modifier.btPage()->tree());
+					}
+					for (childCursor.moveFirst(); childCursor.valid(); childCursor.moveNext()) {
+						if (countIfRemapped(childCursor.get())) {
+							break;
+						}
+					}
+				} else {
+					for (auto const& rec : modifier.rebuild) {
+						if (countIfRemapped(rec)) {
+							break;
+						}
+					}
+				}
+			}
+
+			bool detachChildren = (remappedChildren > 2);
+			CODE_PROBE(detachChildren, "Redwood commitSubtree found remapped children to detach");
 			bool forceUpdate = false;
 
 			// If no changes were made, but we should rewrite it to point directly to remapped child pages
@@ -7138,7 +7137,7 @@ private:
 				debug_printf(
 				    "%s Internal page forced rewrite because at least %d children have been updated in-place.\n",
 				    context.c_str(),
-				    parentInfo->count);
+				    remappedChildren);
 
 				forceUpdate = true;
 				modifier.updating = true;
@@ -7185,7 +7184,7 @@ private:
 									// Nodes larger than 1 page are never remapped.
 									if (child.size() == 1) {
 										LogicalPageID& p = child.front();
-										if (parentInfo->maybeUpdated(p)) {
+										if (self->m_pager->isPageRemapped(p)) {
 											PhysicalPageID newID =
 											    self->m_pager->detachRemappedPage(p, batch->writeVersion);
 											if (newID != invalidPhysicalPageID) {
@@ -7203,7 +7202,6 @@ private:
 								}
 								cursor.moveNext();
 							}
-							parentInfo->clear();
 							if (forceUpdate && detached == 0) {
 								debug_printf("%s No children detached during forced update, returning slice:\n",
 								             context.c_str());
@@ -7247,7 +7245,7 @@ private:
 									// Nodes larger than 1 page are never remapped.
 									if (oldPages.size() == 1) {
 										LogicalPageID p = oldPages.front();
-										if (parentInfo->maybeUpdated(p)) {
+										if (self->m_pager->isPageRemapped(p)) {
 											PhysicalPageID newID =
 											    self->m_pager->detachRemappedPage(p, batch->writeVersion);
 											if (newID != invalidPhysicalPageID) {
@@ -7267,7 +7265,6 @@ private:
 									}
 								}
 							}
-							parentInfo->clear();
 						}
 						Standalone<VectorRef<RedwoodRecordRef>> newChildEntries =
 						    co_await writePages(self,

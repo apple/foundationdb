@@ -672,6 +672,9 @@ public:
 	// is then responsible for referencing and deleting the returned page ID.
 	virtual LogicalPageID detachRemappedPage(LogicalPageID id, Version v) = 0;
 
+	// Returns true if id currently has a remap that detachRemappedPage() can detach
+	virtual bool isPageRemapped(LogicalPageID id) const = 0;
+
 	// Returns the latest data (regardless of version) for a page by LogicalPageID
 	// The data returned will be the later of
 	//   - the most recent committed atomic
