@@ -450,8 +450,12 @@ Optional<int> TCTeamInfo::getMaxOngoingBulkLoadTaskCount() const {
 	return count;
 }
 
-int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) const {
-	int64_t physicalBytes = getLoadAverage();
+int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty, bool rankOnWorstMember) const {
+	// The mean divides one member's excess by the replication factor, so a server running out of room stays
+	// invisible in every team it belongs to and keeps being chosen. Penalising that mean by free space does
+	// not recover the signal: a crowded team's mean is low precisely because its partners are empty, so the
+	// penalty fights the dilution instead of removing it. Only the worst member carries it undivided.
+	int64_t physicalBytes = rankOnWorstMember ? getLoadMaximum() : getLoadAverage();
 	double minAvailableSpaceRatio = getMinAvailableSpaceRatio(includeInFlight);
 	int64_t inFlightBytes = includeInFlight ? getDataInFlightToTeam() / servers.size() : 0;
 	double availableSpaceMultiplier =
@@ -592,6 +596,22 @@ int64_t TCTeamInfo::getLoadAverage() const {
 		bytesSum *= 2;
 
 	return added == 0 ? 0 : bytesSum / added;
+}
+
+int64_t TCTeamInfo::getLoadMaximum() const {
+	int64_t maxBytes = 0;
+	int added = 0;
+	for (const auto& server : servers) {
+		if (server->metricsPresent()) {
+			added++;
+			maxBytes = std::max(maxBytes, server->loadBytes());
+		}
+	}
+
+	if (added < servers.size())
+		maxBytes *= 2;
+
+	return maxBytes;
 }
 
 Future<Void> TCTeamInfo::updateStorageMetrics() {
