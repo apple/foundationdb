@@ -46,6 +46,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/tester/workloads.h"
+#include "ValidateRestoreAudit.h"
 
 struct RangeDigestValidationWorkload : TestWorkload {
 	static constexpr auto NAME = "RangeDigestValidation";
@@ -243,43 +244,9 @@ struct RangeDigestValidationWorkload : TestWorkload {
 		}
 	}
 
-	// Wait for data distribution to go idle. The digest requires a quiescent cluster: every server
-	// folds at its own read version, and the additive combine assumes each key-value is folded exactly
-	// once, so a shard in flight can be counted by both the losing and the gaining server or by
-	// neither. Digesting mid-movement is not a theoretical hazard -- at 100M scale it produced a root
-	// over-counting ~104.8M against a true ~100M.
-	//
-	// Returns false on timeout so the caller can decline to assert rather than digest a moving cluster.
+	// False on timeout, so the caller can decline to assert rather than digest a moving cluster.
 	Future<bool> waitForQuiescence(Database cx, double timeoutSeconds) {
-		double start = now();
-		while (now() - start < timeoutSeconds) {
-			Error err;
-			try {
-				int64_t inFlight = co_await getDataInFlight(cx, dbInfo);
-				int64_t queueSize = co_await getDataDistributionQueueSize(cx, dbInfo, /*reportInFlight=*/true);
-				if (inFlight == 0 && queueSize == 0) {
-					TraceEvent("RangeDigestValidationQuiesced").detail("Elapsed", now() - start);
-					co_return true;
-				}
-			} catch (Error& e) {
-				err = e;
-			}
-			if (err.code() == error_code_actor_cancelled) {
-				throw err;
-			}
-			if (err.code() != invalid_error_code) {
-				// These metrics come from per-worker event logs, so they throw (attribute_not_found when
-				// a server's worker cannot be found, timed_out when it does not answer) exactly while the
-				// cluster is churning -- which is when this is called. Not being able to observe
-				// quiescence is not evidence of it, so keep polling and let the timeout be the only exit.
-				TraceEvent(SevInfo, "RangeDigestValidationQuiesceProbeFailed")
-				    .error(err)
-				    .detail("Elapsed", now() - start);
-			}
-			co_await delay(1.0);
-		}
-		TraceEvent(SevWarn, "RangeDigestValidationQuiesceTimeout").detail("Timeout", timeoutSeconds);
-		co_return false;
+		return waitForQuiescentDataDistribution(cx, dbInfo, timeoutSeconds, "RangeDigestValidation");
 	}
 
 	// Force a repartition between the two digests by excluding one storage server, so DD relocates its
@@ -375,8 +342,6 @@ struct RangeDigestValidationWorkload : TestWorkload {
 		co_return true;
 	}
 
-	// Retries the whole audit on transient cluster errors (e.g. movekeys_conflict during DD failover),
-	// mirroring RestoreValidation's tolerance for buggify-induced instability.
 	Future<RangeDigestSummary> runOneDigest(Database cx) {
 		AuditWaitOptions waitOptions;
 		waitOptions.pollIntervalSeconds = checkInterval;
@@ -386,60 +351,18 @@ struct RangeDigestValidationWorkload : TestWorkload {
 		// buggify; give each attempt as long as the audit itself gets.
 		waitOptions.maxScheduleAttempts = 10;
 		waitOptions.roundTripTimeoutSeconds = maxWaitTime;
-		int auditRetryCount = 0;
-		int maxAuditRetries = 10;
-		while (true) {
-			Error retryErr;
-			try {
-				AuditStorageState finalState = co_await auditStorageAndWait(
-				    cx, normalKeys, AuditType::RangeDigest, KeyValueStoreType::END, waitOptions);
-				if (finalState.getPhase() != AuditPhase::Complete) {
-					TraceEvent(SevWarn, "RangeDigestValidationAuditPhaseFailed")
-					    .detail("AuditID", finalState.id)
-					    .detail("Phase", (int)finalState.getPhase())
-					    .detail("Error", finalState.error);
-					throw audit_storage_failed();
-				}
-				// The combined root is stored in the top-level audit record on completion (the
-				// per-range progress is cleared by then).
-				RangeDigestSummary summary;
-				summary.root = RangeDigest::fromBytes(finalState.digest);
-				summary.kvCount = finalState.kvCount;
-				summary.byteCount = finalState.byteCount;
-				summary.complete = true;
-				TraceEvent("RangeDigestValidationAuditRoot")
-				    .detail("AuditID", finalState.id)
-				    .detail("Root", summary.root.toHex())
-				    .detail("KVCount", summary.kvCount)
-				    .detail("Bytes", summary.byteCount)
-				    .detail("Complete", summary.complete)
-				    .detail("RetryCount", auditRetryCount);
-				co_return summary;
-			} catch (Error& e) {
-				retryErr = e;
-			}
-			if (retryErr.code() == error_code_actor_cancelled) {
-				throw retryErr;
-			}
-			// audit_storage_failed and related transient conditions are retryable under buggify. A timed_out
-			// is not retried: it means the audit was scheduled and stopped making progress, which is a finding
-			// (an audit that could not be triggered at all was already retried by auditStorageAndWait), and
-			// re-arming it maxAuditRetries times would spend maxWaitTime on each before failing anyway.
-			if ((retryErr.code() == error_code_audit_storage_failed ||
-			     retryErr.code() == error_code_persist_new_audit_metadata_error ||
-			     retryErr.code() == error_code_audit_storage_cancelled ||
-			     retryErr.code() == error_code_audit_storage_task_outdated) &&
-			    auditRetryCount < maxAuditRetries) {
-				++auditRetryCount;
-				TraceEvent(SevWarn, "RangeDigestValidationAuditRetry")
-				    .error(retryErr)
-				    .detail("RetryCount", auditRetryCount)
-				    .detail("MaxRetries", maxAuditRetries);
-				co_await delay(std::min(10.0, 2.0 * auditRetryCount));
-			} else {
-				throw retryErr;
-			}
-		}
+		// Tolerates the transient errors buggify induces (e.g. movekeys_conflict during DD failover).
+		RangeDigestResult result = co_await runRangeDigestAudit(cx, normalKeys, waitOptions);
+		RangeDigestSummary summary;
+		summary.root = RangeDigest::fromBytes(result.digest);
+		summary.kvCount = result.kvCount;
+		summary.byteCount = result.byteCount;
+		summary.complete = true;
+		TraceEvent("RangeDigestValidationAuditRoot")
+		    .detail("Root", summary.root.toHex())
+		    .detail("KVCount", summary.kvCount)
+		    .detail("Bytes", summary.byteCount);
+		co_return summary;
 	}
 
 	Future<Void> _start(Database cx) {

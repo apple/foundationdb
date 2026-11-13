@@ -86,6 +86,8 @@ runConsistencyCheck = false
     tag = 'rangesA'
     delayFor = 0
     restoreRangePrefix = 'cy/'
+    # The restored 'cy/' must have the digest of the live 'cy/' it replaces.
+    verifyDigest = true
 
 [[test]]
 testTitle = 'VerifyAfterRestoreA'
