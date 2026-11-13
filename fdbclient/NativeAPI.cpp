@@ -2578,7 +2578,11 @@ void getRangeFinished(Reference<TransactionState> trState,
                       Snapshot snapshot,
                       Promise<std::pair<Key, Key>> conflictRange,
                       Reverse reverse,
-                      RangeResultFamily result) {
+                      RangeResultFamily& result) {
+	// A reverse read can normalize its begin selector before reading any of the shards below its first page.
+	if (begin.getKey() == allKeys.begin && begin.offset < 1 && (!reverse || !result.more)) {
+		result.readToBegin = true;
+	}
 	int64_t bytes = getRangeResultFamilyBytes(result);
 
 	trState->totalCost += getReadOperationCost(bytes);
@@ -2598,6 +2602,9 @@ void getRangeFinished(Reference<TransactionState> trState,
 
 		if (result.readToBegin) {
 			rangeBegin = allKeys.begin;
+		} else if (reverse && result.readThrough.present()) {
+			// The next reverse page excludes readThrough, so this page must protect it.
+			rangeBegin = result.readThrough.get();
 		} else if (((!reverse || !result.more || begin.offset > 1) && begin.offset > 0) || result.size() == 0) {
 			rangeBegin = Key(begin.getKey(), begin.arena());
 		} else {
@@ -2622,6 +2629,36 @@ void getRangeFinished(Reference<TransactionState> trState,
 
 		conflictRange.send(std::make_pair(rangeBegin, rangeEnd));
 	}
+}
+
+TEST_CASE("/fdbclient/NativeAPI/getRange/reverseReadToBegin") {
+	auto state = makeReference<TransactionState>(TaskPriority::DefaultEndpoint, SpanContext());
+	state->cx = Database(new DatabaseContext(operation_failed()));
+	auto checkPage = [&](RangeResult result, KeyRef expectedConflictBegin) {
+		Promise<std::pair<Key, Key>> conflict;
+		getRangeFinished(state,
+		                 now(),
+		                 lastLessThan(allKeys.begin),
+		                 firstGreaterOrEqual("z"_sr),
+		                 Snapshot::False,
+		                 conflict,
+		                 Reverse::True,
+		                 result);
+		ASSERT_EQ(result.readToBegin, !result.more);
+		ASSERT_EQ(conflict.getFuture().get().first, expectedConflictBegin);
+	};
+
+	RangeResult page;
+	page.more = true;
+	page.setReadThrough("m"_sr);
+	checkPage(page, "m"_sr);
+	page.push_back_deep(page.arena(), KeyValueRef("row"_sr, "value"_sr));
+	checkPage(page, "m"_sr);
+	page.readThrough.reset();
+	checkPage(page, "row"_sr);
+	page.more = false;
+	checkPage(page, allKeys.begin);
+	return Void();
 }
 
 template <class GetKeyValuesFamilyRequest, // GetKeyValuesRequest or GetMappedKeyValuesRequest
@@ -2661,7 +2698,6 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trStateInput,
 		double startTime = now();
 
 		if (begin.getKey() == allKeys.begin && begin.offset < 1) {
-			output.readToBegin = true;
 			begin = KeySelector(firstGreaterOrEqual(begin.getKey()), begin.arena());
 		}
 
@@ -2812,14 +2848,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trStateInput,
 
 				// optimization: first request got all data--just return it
 				if (finished && !output.size()) {
-					bool readToBegin = output.readToBegin;
-					bool readThroughEnd = output.readThroughEnd;
-
 					using RangeResultRefFamily = typename RangeResultFamily::RefType;
 					output = RangeResultFamily(
 					    RangeResultRefFamily(rep.data, modifiedSelectors || limits.isReached() || rep.more), rep.arena);
-					output.readToBegin = readToBegin;
-					output.readThroughEnd = readThroughEnd;
 
 					if (buggify() && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) &&
 					    (!std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value)) {
