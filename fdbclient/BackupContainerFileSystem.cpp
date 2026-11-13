@@ -31,6 +31,7 @@
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
+#include "flow/ScopeExit.h"
 
 #include <algorithm>
 #include <charconv>
@@ -2638,6 +2639,28 @@ TEST_CASE("/backup/containers/localdir/encrypted") {
 	                             Optional<std::string>(),
 	                             format("%s/test_encryption_key", params.getDataDir().c_str()));
 }
+
+#ifdef __unixish__
+static Future<Void> testBackupContainerWithAsyncMetadata(std::string dataDir, bool encrypted) {
+	auto& knob = const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_LOCAL_FILE_ASYNC_METADATA;
+	ScopeExit restoreKnob([&knob, saved = knob] { knob = saved; });
+	knob = true;
+	Optional<std::string> keyFile;
+	if (encrypted) {
+		keyFile = joinPath(dataDir, "test_encryption_key_async");
+	}
+	std::string backupPath = abspath(joinPath(dataDir, fmt::format("fdb_backups/{:x}", timer_int())));
+	co_await testBackupContainer("file://" + backupPath, {}, keyFile);
+}
+
+TEST_CASE("noSim/backup/containers/localdir/asyncMetadata/unencrypted") {
+	co_await testBackupContainerWithAsyncMetadata(params.getDataDir(), false);
+}
+
+TEST_CASE("noSim/backup/containers/localdir/asyncMetadata/encrypted") {
+	co_await testBackupContainerWithAsyncMetadata(params.getDataDir(), true);
+}
+#endif
 
 TEST_CASE("/backup/containers/localdir/encryptedDescribeWithoutBlockSize") {
 	std::string url = fmt::format("file://{}/fdb_backups/{:x}", params.getDataDir(), timer_int());
