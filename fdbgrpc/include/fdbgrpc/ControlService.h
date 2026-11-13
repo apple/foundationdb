@@ -19,8 +19,8 @@
  */
 
 #ifdef FLOW_GRPC_ENABLED
-#ifndef FDBGRPC_CLI_COMMAND_SERVER_H
-#define FDBGRPC_CLI_COMMAND_SERVER_H
+#ifndef FDBGRPC_COMMAND_SERVICE_H
+#define FDBGRPC_COMMAND_SERVICE_H
 
 #include <grpcpp/support/status.h>
 
@@ -44,7 +44,7 @@ Future<grpc::Status> grpcHandlerWrapper(Reference<IDatabase> db,
                                         Reply* rep,
                                         grpc::ServerContext* context) {
 	try {
-		double timeout = CLIENT_KNOBS->GRPC_CTL_SERVICE_DEFAULT_TIMEOUT; // Default timeout when no deadline is set
+		double timeout = CLIENT_KNOBS->GRPC_SERVICE_DEFAULT_TIMEOUT; // Default timeout when no deadline is set
 		auto deadline = context->deadline();
 		auto now = std::chrono::system_clock::now();
 
@@ -96,5 +96,5 @@ private:
 };
 } // namespace fdbgrpc
 
-#endif // FDBGRPC_CLI_COMMAND_SERVER_H
+#endif // FDBGRPC_COMMAND_SERVICE_H
 #endif // FLOW_GRPC_ENABLED

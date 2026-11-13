@@ -19,8 +19,8 @@
  */
 
 #ifdef FLOW_GRPC_ENABLED
-#ifndef FDB_CTL_LIB_FDB_CONTROL_COMMANDS_H
-#define FDB_CTL_LIB_FDB_CONTROL_COMMANDS_H
+#ifndef FDBGRPC_CONTROL_COMMANDS_H
+#define FDBGRPC_CONTROL_COMMANDS_H
 
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.h"
@@ -92,5 +92,5 @@ const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/optio
 } // namespace special_keys
 } // namespace fdbgrpc
 
-#endif
+#endif // FDBGRPC_CONTROL_COMMANDS_H
 #endif // FLOW_GRPC_ENABLED
