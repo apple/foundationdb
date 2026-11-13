@@ -2198,7 +2198,7 @@ def init_c_api():
         ctypes.c_int,
         ctypes.c_void_p,
         ctypes.c_int,
-        ctypes.c_int,
+        ctypes.c_int64,
     ]
     _capi.fdb_transaction_get_range_split_points.restype = ctypes.c_void_p
 
