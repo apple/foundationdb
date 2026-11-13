@@ -4836,7 +4836,21 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 					                 : data[start].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()),
 					    (iend == end) ? fileRange.end
 					                  : data[iend].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()));
-					tr->clear(trRange);
+					// A clear in the same transaction as the sets makes the storage server split it around every
+					// set. A span with no keys has nothing to remove, so skip the clear; a span that has keys (a
+					// re-applied block, the validation prefix, an overlapping file) is cleared as before. The read is
+					// not a snapshot read, and the span stays in the write conflict set either way, so two
+					// transactions cannot both see an overlapping span empty and both skip the clear.
+					bool clearSpan = true;
+					if (CLIENT_KNOBS->RESTORE_RANGE_READ_BEFORE_CLEAR) {
+						RangeResult existing = co_await tr->getRange(trRange, 1);
+						clearSpan = !existing.empty();
+					}
+					if (clearSpan) {
+						tr->clear(trRange);
+					} else {
+						tr->addWriteConflictRange(trRange);
+					}
 
 					for (; i < iend; ++i) {
 						tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
