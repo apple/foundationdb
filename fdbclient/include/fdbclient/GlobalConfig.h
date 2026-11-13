@@ -126,7 +126,8 @@ public:
 	// the caller keeps the ConfigValue reference, the value is guaranteed to
 	// be readable. An empty reference is returned if the value does not exist.
 	Reference<const ConfigValue> get(KeyRef name);
-	std::map<KeyRef, Reference<const ConfigValue>> get(KeyRangeRef range);
+	std::map<KeyRef, Reference<const ConfigValue>> get(KeyRef begin, Optional<KeyRef> end);
+	std::map<KeyRef, Reference<const ConfigValue>> get(KeyRangeRef range) { return get(range.begin, range.end); }
 
 	// For arithmetic value types, returns a copy of the value for the given
 	// key, or the supplied default value if the framework does not know about
@@ -184,7 +185,7 @@ private:
 	void erase(Key key);
 	// Removes the given key range (and associated values) from the local copy
 	// of the global configuration keyspace.
-	void erase(KeyRangeRef range);
+	void erase(Optional<KeyRangeRef> range);
 
 	// Updates local copy of global configuration by reading the entire key-range
 	// from storage (proxied through the GrvProxies). Returns the version of the
