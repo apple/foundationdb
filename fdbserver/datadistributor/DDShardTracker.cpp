@@ -1029,22 +1029,31 @@ Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<Initial
 	self->maxShardSizeUpdater = updateMaxShardSize(self->dbSizeEstimate, self->maxShardSize);
 }
 
+static void sampleShardRanges(std::vector<KeyRange>& ranges, int limit, IRandom& random) {
+	if (limit <= 0) {
+		ranges.clear();
+		return;
+	}
+	if (ranges.size() <= limit) {
+		return;
+	}
+	for (int i = 0; i < limit; ++i) {
+		std::swap(ranges[i], ranges[random.randomInt(i, ranges.size())]);
+	}
+	ranges.resize(limit);
+}
+
 Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, GetTopKMetricsRequest req) {
 	Future<Void> onChange;
 	std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics> returnMetrics;
-	// random pick a portion of shard
-	if (req.keys.size() > SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT) {
-		deterministicRandom()->randomShuffle(req.keys, 0, SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT);
-	}
+	sampleShardRanges(req.keys, SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT, *deterministicRandom());
 	try {
 		while (true) {
 			onChange = Future<Void>();
 			returnMetrics.clear();
 			int64_t minReadLoad = -1;
 			int64_t maxReadLoad = -1;
-			int i{ 0 };
-			for (i = 0; i < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT && i < req.keys.size(); ++i) {
-				auto range = req.keys[i];
+			for (const auto& range : req.keys) {
 				StorageMetrics metrics;
 				for (auto t : self->shards->intersectingRanges(range)) {
 					auto& stats = t.value().stats;
@@ -2046,6 +2055,22 @@ void PhysicalShardCollection::logPhysicalShardCollection() {
 
 bool PhysicalShardCollection::physicalShardExists(uint64_t physicalShardID) {
 	return physicalShardInstances.find(physicalShardID) != physicalShardInstances.end();
+}
+
+TEST_CASE("/DataDistributor/Tracker/SampleShardRanges") {
+	const std::vector<KeyRange> all{ singleKeyRange("a"_sr), singleKeyRange("b"_sr), singleKeyRange("c"_sr) };
+	DeterministicRandom random(1);
+	std::set<Key> sampled;
+	for (int i = 0; i < 32; ++i) {
+		auto ranges = all;
+		sampleShardRanges(ranges, 2, random);
+		ASSERT_EQ(ranges.size(), 2);
+		ASSERT(ranges[0] != ranges[1]);
+		sampled.insert(ranges[0].begin);
+		sampled.insert(ranges[1].begin);
+	}
+	ASSERT_EQ(sampled.size(), all.size());
+	return Void();
 }
 
 // FIXME: complete this test with non-empty range
