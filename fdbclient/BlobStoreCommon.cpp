@@ -104,6 +104,7 @@ BlobKnobs::BlobKnobs() {
 	sdk_auth = false;
 	enable_object_integrity_check = CLIENT_KNOBS->BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK;
 	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
+	aws_v4_header = CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER;
 }
 
 bool BlobKnobs::set(StringRef name, int value) {
@@ -147,6 +148,7 @@ bool BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(sdk_auth, sa);
 	TRY_PARAM(enable_object_integrity_check, eoic);
 	TRY_PARAM(global_connection_pool, gcp);
+	TRY_PARAM(aws_v4_header, v4);
 #undef TRY_PARAM
 	return false;
 }
@@ -188,6 +190,7 @@ std::string BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(global_connection_pool, gcp);
 	_CHECK_PARAM(max_delay_retryable_error, dre);
 	_CHECK_PARAM(max_delay_connection_failed, dcf);
+	_CHECK_PARAM(aws_v4_header, v4);
 #undef _CHECK_PARAM
 	return r;
 }
@@ -260,10 +263,46 @@ std::string IBlobStoreEndpoint::getResourceURL(std::string resource, std::string
 		params.append(v);
 	}
 
+	if (serverSideEncryption.present()) {
+		if (!params.empty()) {
+			params.append("&");
+		}
+		params.append("sse=");
+		params.append(serverSideEncryption.get());
+	}
+
+	if (proxyParameter.present()) {
+		if (!params.empty()) {
+			params.append("&");
+		}
+		params.append("proxy=");
+		params.append(proxyParameter.get());
+	}
+
 	if (!params.empty())
 		r.append("?").append(params);
 
 	return r;
+}
+
+// Parses a proxy given as host:port, IP:port, or either with an http:// prefix. Throws a std::string if invalid.
+static void parseProxy(const std::string& proxy, Optional<std::string>& proxyHost, Optional<std::string>& proxyPort) {
+	StringRef proxyRef(proxy);
+	if (proxy.find("://") != std::string::npos) {
+		StringRef proxyPrefix = proxyRef.eat("://");
+		if (proxyPrefix != "http"_sr) {
+			throw format("Invalid proxy URL prefix '%s'. Either don't use a prefix, or use http://",
+			             proxyPrefix.toString().c_str());
+		}
+	}
+	std::string proxyBody = proxyRef.eat().toString();
+	if (!Hostname::isHostname(proxyBody) && !NetworkAddress::parseOptional(proxyBody).present()) {
+		throw format("'%s' is not a valid value for proxy. Format should be either IP:port or host:port.",
+		             proxyBody.c_str());
+	}
+	StringRef p(proxyBody);
+	proxyHost = p.eat(":").toString();
+	proxyPort = p.eat().toString();
 }
 
 Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& url,
@@ -282,22 +321,7 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 
 		Optional<std::string> proxyHost, proxyPort;
 		if (proxy.present()) {
-			StringRef proxyRef(proxy.get());
-			if (proxy.get().find("://") != std::string::npos) {
-				StringRef proxyPrefix = proxyRef.eat("://");
-				if (proxyPrefix != "http"_sr) {
-					throw format("Invalid proxy URL prefix '%s'. Either don't use a prefix, or use http://",
-					             proxyPrefix.toString().c_str());
-				}
-			}
-			std::string proxyBody = proxyRef.eat().toString();
-			if (!Hostname::isHostname(proxyBody) && !NetworkAddress::parseOptional(proxyBody).present()) {
-				throw format("'%s' is not a valid value for proxy. Format should be either IP:port or host:port.",
-				             proxyBody.c_str());
-			}
-			StringRef p(proxyBody);
-			proxyHost = p.eat(":").toString();
-			proxyPort = p.eat().toString();
+			parseProxy(proxy.get(), proxyHost, proxyPort);
 		}
 
 		Optional<StringRef> cred;
@@ -322,6 +346,8 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 		std::string region;
 		std::string gcsProjectId;
 		std::string provider = "s3";
+		Optional<std::string> serverSideEncryption;
+		Optional<std::string> proxyParameter;
 
 		BlobKnobs knobs;
 		HTTP::Headers extraHeaders;
@@ -376,6 +402,32 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 				continue;
 			}
 
+			// Server-side encryption type for this URL, overriding the BLOBSTORE_ENCRYPTION_TYPE knob
+			if (name == "server_side_encryption"_sr || name == "sse"_sr) {
+				if (value.empty()) {
+					throw std::string("'server_side_encryption' (or 'sse') parameter cannot be empty.  Use sse=none to "
+					                  "send no server-side encryption header.");
+				}
+				serverSideEncryption = value.toString();
+				continue;
+			}
+
+			// Proxy for this URL, overriding the proxy passed in (such as the agent's --proxy). "none" connects
+			// directly.
+			if (name == "proxy"_sr) {
+				if (value.empty()) {
+					throw std::string("'proxy' parameter cannot be empty.  Use proxy=none to connect directly.");
+				}
+				proxyParameter = value.toString();
+				if (proxyParameter.get() == "none") {
+					proxyHost.reset();
+					proxyPort.reset();
+				} else {
+					parseProxy(proxyParameter.get(), proxyHost, proxyPort);
+				}
+				continue;
+			}
+
 			// See if the parameter is a knob
 			// First try setting a dummy value (all knobs are currently numeric) just to see if this parameter is
 			// known. If it is, then we will set it to a good value or throw below, so the dummy set has no bad
@@ -407,12 +459,28 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 			*resourceFromURL = resource.toString();
 
 		if (provider == "gcs") {
-			return makeReference<GCSBlobStoreEndpoint>(
-			    host.toString(), service.toString(), proxyHost, proxyPort, cred, gcsProjectId, knobs, extraHeaders);
+			return makeReference<GCSBlobStoreEndpoint>(host.toString(),
+			                                           service.toString(),
+			                                           proxyHost,
+			                                           proxyPort,
+			                                           cred,
+			                                           gcsProjectId,
+			                                           knobs,
+			                                           extraHeaders,
+			                                           serverSideEncryption,
+			                                           proxyParameter);
 		}
 
-		return makeReference<S3BlobStoreEndpoint>(
-		    host.toString(), service.toString(), region, proxyHost, proxyPort, cred, knobs, extraHeaders);
+		return makeReference<S3BlobStoreEndpoint>(host.toString(),
+		                                          service.toString(),
+		                                          region,
+		                                          proxyHost,
+		                                          proxyPort,
+		                                          cred,
+		                                          knobs,
+		                                          extraHeaders,
+		                                          serverSideEncryption,
+		                                          proxyParameter);
 
 	} catch (std::string& err) {
 		if (error != nullptr)

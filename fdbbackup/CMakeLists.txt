@@ -65,8 +65,10 @@ if (NOT WIN32 AND NOT OPEN_FOR_IDE)
   add_test(NAME s3_backup_bulkdump_bulkload_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3_backup_bulkdump_bulkload.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
   # BulkDump/BulkLoad with the backup objects placed under a key prefix in the bucket
   add_test(NAME s3_backup_bulkdump_bulkload_prefix_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3_backup_bulkdump_bulkload.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
-  set_tests_properties(dir_backup_tests
+  add_test(NAME s3_backup_status_bad_url_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3_backup_status_bad_url_test.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
+  set_tests_properties(dir_backup_tests s3_backup_status_bad_url_tests
     PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
+  set_tests_properties(s3_backup_status_bad_url_tests PROPERTIES SKIP_RETURN_CODE 66)
   # Explicitly clear BACKUP_URL_KEY_PREFIX so an inherited environment value cannot turn
   # the non-prefixed variants into prefixed runs.
   set_tests_properties(blob_backup_restore_tests s3_backup_bulkdump_bulkload_tests

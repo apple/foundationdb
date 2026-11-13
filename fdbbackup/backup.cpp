@@ -1429,7 +1429,7 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		std::vector<KeyBackedTag> backupTags = co_await getAllBackupTags(tr, snapshot);
 		std::vector<Future<Optional<Version>>> tagLastRestorableVersions;
 		std::vector<Future<EBackupState>> tagStates;
-		std::vector<Future<Reference<IBackupContainer>>> tagContainers;
+		std::vector<Future<Optional<Value>>> tagContainerValues;
 		std::vector<Future<int64_t>> tagRangeBytes;
 		std::vector<Future<int64_t>> tagLogBytes;
 		Future<Optional<Value>> fBackupPaused = tr->get(fba.taskBucket->getPauseKey(), snapshot);
@@ -1446,38 +1446,12 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 			tagStates.push_back(config.stateEnum().getOrThrow(tr, snapshot));
 			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, snapshot, 0));
 			tagLogBytes.push_back(config.logBytesWritten().getD(tr, snapshot, 0));
-			tagContainers.push_back(config.backupContainer().getOrThrow(tr, snapshot));
+			tagContainerValues.push_back(tr->get(config.backupContainer().key, snapshot));
 			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName), snapshot));
 		}
 
-		co_await (waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) &&
+		co_await (waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainerValues) &&
 		          waitForAll(tagRangeBytes) && waitForAll(tagLogBytes) && success(fBackupPaused));
-
-		std::vector<Future<Void>> encryptionSetupResults;
-		std::vector<int> encryptionContainerIndices;
-
-		for (int i = 0; i < tagContainers.size(); i++) {
-			if (tagContainers[i].get()->getEncryptionKeyFileName().present()) {
-				encryptionSetupResults.push_back(tagContainers[i].get()->encryptionSetupComplete());
-				encryptionContainerIndices.push_back(i);
-			}
-		}
-		co_await waitForAllReady(encryptionSetupResults);
-		json_spirit::mArray keysArr;
-		std::unordered_set<std::string> seenKeyPaths;
-		for (int j = 0; j < encryptionContainerIndices.size() && j < 1e6; j++) {
-			int i = encryptionContainerIndices[j];
-			std::string keyPath = tagContainers[i].get()->getEncryptionKeyFileName().get();
-
-			if (!seenKeyPaths.contains(keyPath)) {
-				seenKeyPaths.insert(keyPath);
-				json_spirit::mObject keyObj;
-				keyObj["path"] = tagContainers[i].get()->getEncryptionKeyFileName().get();
-				keyObj["success"] = !encryptionSetupResults[j].isError();
-				keysArr.push_back(keyObj);
-			}
-		}
-		o.create("encryption_keys") = keysArr;
 
 		JSONDoc tagsRoot = layerRoot.subDoc("tags");
 		layerRoot.create("tags.timestamp") = now();
@@ -1485,17 +1459,59 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		    fBackupPaused.get().present() ? 0 : CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT;
 		layerRoot.create("paused.$latest") = fBackupPaused.get().present();
 
-		int j = 0;
-		for (const KeyBackedTag& eachTag : backupTags) {
-			EBackupState status = tagStates[j].get();
+		std::vector<Future<Void>> encryptionSetupResults;
+		std::vector<std::string> encryptionKeyPaths;
+
+		for (int i = 0; i < backupTags.size(); i++) {
+			std::string url;
+			Optional<std::string> encryptionKeyFileName;
+			Error error;
+			try {
+				if (!tagContainerValues[i].get().present()) {
+					throw key_not_found();
+				}
+				const Value& value = tagContainerValues[i].get().get();
+				Tuple t = Tuple::unpack(value);
+				ASSERT(t.size() >= 1);
+				url = t.getString(0).toString();
+				if (t.size() > 1 && !t.getString(1).empty()) {
+					encryptionKeyFileName = t.getString(1).toString();
+				}
+				// This tag's status needs only the URL and key file name parsed above. Opening the container via
+				// unpack() checks that both are usable:
+				//
+				// - The URL must be valid, or we throw here and the tag reports "error". Validity can depend on this
+				//   agent's knobs (e.g. HTTP_REQUEST_AWS_V4_HEADER for aws v4 signing).
+				//
+				// - For an encrypted backup, this attempts to read the key file. The result goes in this agent's
+				//   "encryption_keys".
+				//
+				// Finished backups are opened too: we're not concerned about a saved backup URL being invalid, because
+				// that's something that should never happen.
+				Reference<IBackupContainer> bc = TupleCodec<Reference<IBackupContainer>>::unpack(value);
+				if (encryptionKeyFileName.present()) {
+					encryptionSetupResults.push_back(bc->encryptionSetupComplete());
+					encryptionKeyPaths.push_back(encryptionKeyFileName.get());
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				error = e;
+			}
+
+			EBackupState status = tagStates[i].get();
 			const char* statusText = fba.getStateText(status);
 
 			// The object for this backup tag inside this instance's subdocument
-			JSONDoc tagRoot = tagsRoot.subDoc(eachTag.tagName).subDoc("$latest");
-			tagRoot.create("current_container") = tagContainers[j].get()->getURL();
+			JSONDoc tagRoot = tagsRoot.subDoc(backupTags[i].tagName).subDoc("$latest");
+			tagRoot.create("current_container") = url;
 			tagRoot.create("current_status") = statusText;
-			if (tagLastRestorableVersions[j].get().present()) {
-				Version last_restorable_version = tagLastRestorableVersions[j].get().get();
+			if (error.isValid()) {
+				tagRoot.create("error") = error.what();
+			}
+			if (tagLastRestorableVersions[i].get().present()) {
+				Version last_restorable_version = tagLastRestorableVersions[i].get().get();
 				double last_restorable_seconds_behind =
 				    ((double)readVer - last_restorable_version) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 				tagRoot.create("last_restorable_version") = last_restorable_version;
@@ -1504,16 +1520,30 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 			tagRoot.create("running_backup") =
 			    (status == EBackupState::STATE_RUNNING_DIFFERENTIAL || status == EBackupState::STATE_RUNNING);
 			tagRoot.create("running_backup_is_restorable") = (status == EBackupState::STATE_RUNNING_DIFFERENTIAL);
-			tagRoot.create("range_bytes_written") = tagRangeBytes[j].get();
-			tagRoot.create("mutation_log_bytes_written") = tagLogBytes[j].get();
-			tagRoot.create("mutation_stream_id") = backupTagUids[j].toString();
-			tagRoot.create("file_level_encryption") =
-			    tagContainers[j].get()->getEncryptionKeyFileName().present() ? true : false;
-			if (tagContainers[j].get()->getEncryptionKeyFileName().present()) {
-				tagRoot.create("encryption_key_file") = tagContainers[j].get()->getEncryptionKeyFileName().get();
+			tagRoot.create("range_bytes_written") = tagRangeBytes[i].get();
+			tagRoot.create("mutation_log_bytes_written") = tagLogBytes[i].get();
+			tagRoot.create("mutation_stream_id") = backupTagUids[i].toString();
+			tagRoot.create("file_level_encryption") = encryptionKeyFileName.present();
+			if (encryptionKeyFileName.present()) {
+				tagRoot.create("encryption_key_file") = encryptionKeyFileName.get();
 			}
-			j++;
 		}
+
+		co_await waitForAllReady(encryptionSetupResults);
+		json_spirit::mArray keysArr;
+		std::unordered_set<std::string> seenKeyPaths;
+		for (int j = 0; j < encryptionKeyPaths.size() && j < 1e6; j++) {
+			const std::string& keyPath = encryptionKeyPaths[j];
+
+			if (!seenKeyPaths.contains(keyPath)) {
+				seenKeyPaths.insert(keyPath);
+				json_spirit::mObject keyObj;
+				keyObj["path"] = keyPath;
+				keyObj["success"] = !encryptionSetupResults[j].isError();
+				keysArr.push_back(keyObj);
+			}
+		}
+		o.create("encryption_keys") = keysArr;
 	} else if (exe == ProgramExe::DR_AGENT) {
 		DatabaseBackupAgent dba;
 		auto tr2 = makeReference<ReadYourWritesTransaction>(dest);
