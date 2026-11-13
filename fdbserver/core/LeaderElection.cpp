@@ -78,7 +78,8 @@ Future<Void> buggifyDelayedAsyncVar(Reference<AsyncVar<T>> in, Reference<AsyncVa
 
 template <class T>
 Future<Void> buggifyDelayedAsyncVar(Reference<AsyncVar<T>>& var) {
-	auto in = makeReference<AsyncVar<T>>();
+	// Starts from the current value, so that wrapping `var` does not clear a value it already has.
+	auto in = makeReference<AsyncVar<T>>(var->get());
 	auto f = buggifyDelayedAsyncVar(in, var);
 	var = in;
 	return f;
@@ -109,6 +110,45 @@ Future<Void> changeLeaderCoordinators(ServerCoordinators const& coordinators, Va
 	return changeLeaderCoordinatorsImpl(coordinators, forwardingInfo);
 }
 
+// Long-polls one coordinator at a time for the elected leader and publishes it, without submitting a candidacy.
+// Never returns; the caller cancels it.
+static Future<Void> monitorLeaderDuringCandidacyDelay(ServerCoordinators coordinators,
+                                                      Reference<AsyncVar<Value>> outSerializedLeader) {
+	ClusterConnectionString cs = coordinators.ccr->getConnectionString();
+	ElectionResultRequest request;
+	int index = deterministicRandom()->randomInt(0, coordinators.leaderElectionServers.size());
+	int successIndex = index;
+	request.key = coordinators.clusterKey;
+	request.hostnames = cs.hostnames;
+	request.coordinators = cs.coords;
+
+	while (true) {
+		LeaderElectionRegInterface interf = coordinators.leaderElectionServers[index];
+		request.reply = ReplyPromise<Optional<LeaderInfo>>();
+		ErrorOr<Optional<LeaderInfo>> leader;
+		if (interf.hostname.present()) {
+			leader = co_await tryGetReplyFromHostname(
+			    request, interf.hostname.get(), WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT);
+		} else {
+			leader = co_await interf.electionResult.tryGetReply(request);
+		}
+
+		if (leader.present()) {
+			successIndex = index;
+			if (leader.get().present() && !leader.get().get().forward) {
+				request.knownLeader = leader.get().get().changeID;
+				TraceEvent("LeaderLearnedDuringCandidacyDelay").detail("LeaderID", leader.get().get().changeID);
+				outSerializedLeader->set(leader.get().get().serializedInfo);
+			}
+		} else {
+			index = (index + 1) % coordinators.leaderElectionServers.size();
+			if (index == successIndex) {
+				co_await delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY);
+			}
+		}
+	}
+}
+
 Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
                                      Value proposedSerializedInterface,
                                      Reference<AsyncVar<Value>> outSerializedLeader,
@@ -121,19 +161,34 @@ Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 	bool iAmLeader{ false };
 	UID prevChangeID;
 
+	double candidacyDelay = 0;
 	if (asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessBad ||
 	    asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessRemote ||
 	    asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessNotPreferred ||
 	    asyncPriorityInfo->get().isExcluded) {
-		co_await delay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
+		candidacyDelay = SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY;
 	} else if (asyncPriorityInfo->get().processClassFitness > recruitment::UnsetFit) {
-		co_await delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY);
+		candidacyDelay = SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY;
+	}
+
+	if (candidacyDelay > 0) {
+		if (SERVER_KNOBS->MONITOR_LEADER_DURING_CANDIDACY_DELAY) {
+			// The delay only lets better candidates win the election. Publishing the current leader meanwhile lets
+			// this process register with it, so recruitment does not wait for the delay to expire.
+			Future<Void> leaderMonitor = monitorLeaderDuringCandidacyDelay(coordinators, outSerializedLeader);
+			co_await (delay(candidacyDelay) || leaderMonitor);
+		} else {
+			co_await delay(candidacyDelay);
+		}
 	}
 
 	nominees.resize(coordinators.leaderElectionServers.size());
 
 	myInfo.serializedInfo = proposedSerializedInterface;
-	outSerializedLeader->set(Value());
+	// Keeps a leader learned during the candidacy delay; the election below replaces it if the leader changes.
+	if (!SERVER_KNOBS->MONITOR_LEADER_DURING_CANDIDACY_DELAY) {
+		outSerializedLeader->set(Value());
+	}
 
 	[[maybe_unused]] Future<Void> buggifyDelay =
 	    (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify()) ? buggifyDelayedAsyncVar(outSerializedLeader) : Void();
