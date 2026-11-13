@@ -1732,7 +1732,7 @@ Future<RangeResult> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
-	if (ryw->getApproximateSize() > 0) {
+	if (ryw->getApproximateSize() > 0 || ryw->getTransaction().getSize() > 0) {
 		ryw->setSpecialKeySpaceErrorMsg(
 		    ManagementAPIError::toJsonString(false, "configure trace", "tracing options must be set first"));
 		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
