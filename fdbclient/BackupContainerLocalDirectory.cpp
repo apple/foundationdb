@@ -32,13 +32,38 @@ namespace {
 
 class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 public:
-	BackupFile(const std::string& fileName, Reference<IAsyncFile> file, const std::string& finalFullPath)
-	  : IBackupFile(fileName), m_file(file), m_writeOffset(0), m_finalFullPath(finalFullPath),
+	BackupFile(const std::string& fileName, const std::string& finalFullPath)
+	  : IBackupFile(fileName), m_writeOffset(0), m_finalFullPath(finalFullPath),
+	    m_tempPath(finalFullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp"),
 	    m_blockSize(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
 		if (buggify()) {
 			m_blockSize = deterministicRandom()->randomInt(100, 20000);
 		}
 		m_buffer.reserve(m_buffer.arena(), m_blockSize);
+	}
+
+	~BackupFile() override {
+		if (!m_tempPath.empty()) {
+			discard();
+		}
+	}
+
+	static Future<Reference<IBackupFile>> open(std::string path,
+	                                          std::string fullPath,
+	                                          Future<Void> encryptionReady,
+	                                          Optional<int> encryptionBlockSize) {
+		co_await encryptionReady;
+		auto writer = makeReference<BackupFile>(path, fullPath);
+		const int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
+		                  IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
+		auto opened = IAsyncFileSystem::filesystem()->open(writer->m_tempPath, flags, 0644);
+		writer->m_pendingIO = success(opened);
+		writer->m_file = co_await opened;
+		if (encryptionBlockSize.present()) {
+			writer->m_file = makeReference<AsyncFileEncrypted>(
+			    writer->m_file, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize.get());
+		}
+		co_return writer;
 	}
 
 	Future<Void> appendImpl(const void* data, size_t len) override {
@@ -65,21 +90,34 @@ public:
 		m_buffer = Standalone<VectorRef<uint8_t>>(old.slice(size, old.size()));
 
 		// Write the old buffer to the underlying file and update the write offset
-		Future<Void> r = uncancellable(holdWhile(old, m_file->write(old.begin(), size, m_writeOffset)));
+		m_pendingIO = holdWhile(old, m_file->write(old.begin(), size, m_writeOffset));
 		m_writeOffset += size;
 
 		INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::flush");
 
-		return r;
+		return m_pendingIO;
 	}
 
 	static Future<Void> finish_impl(Reference<BackupFile> f) {
-		co_await f->flush(f->m_buffer.size());
-		co_await f->m_file->truncate(f->size()); // Some IAsyncFile implementations extend in whole block sizes.
-		co_await f->m_file->sync();
-		std::string name = f->m_file->getFilename();
-		f->m_file.clear();
-		co_await IAsyncFileSystem::filesystem()->renameFile(name, f->m_finalFullPath);
+		Error publishError;
+		try {
+			co_await f->flush(f->m_buffer.size());
+			// Some IAsyncFile implementations extend in whole block sizes.
+			f->m_pendingIO = f->m_file->truncate(f->size());
+			co_await f->m_pendingIO;
+			f->m_pendingIO = f->m_file->sync();
+			co_await f->m_pendingIO;
+			f->m_file.clear();
+			f->m_pendingIO = IAsyncFileSystem::filesystem()->renameFile(f->m_tempPath, f->m_finalFullPath);
+			co_await f->m_pendingIO;
+			f->m_tempPath.clear();
+		} catch (Error& e) {
+			publishError = e;
+		}
+		if (publishError.isValid()) {
+			co_await f->discard();
+			throw publishError;
+		}
 
 		INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::finish");
 	}
@@ -92,10 +130,38 @@ public:
 	void delref() override { return ReferenceCounted<BackupFile>::delref(); }
 
 private:
+	Future<Void> discard() {
+		return removeTempFile(std::exchange(m_tempPath, {}), std::move(m_file), std::move(m_pendingIO));
+	}
+
+	static Future<Void> removeTempFile(std::string tempPath,
+	                                   Reference<IAsyncFile> file,
+	                                   Future<Void> pendingIO,
+	                                   Uncancellable = {}) {
+		// An abandoned open or sync can still create or rename the private file after its caller has gone away.
+		if (pendingIO.isValid()) {
+			co_await ready(pendingIO);
+			pendingIO = Future<Void>();
+		}
+		file.clear();
+		for (const auto& name : { tempPath + ".part", tempPath }) {
+			try {
+				co_await IAsyncFileSystem::filesystem()->deleteFile(name, true);
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled || e.code() == error_code_broken_promise) {
+					throw;
+				}
+				TraceEvent(SevWarnAlways, "BackupTempFileCleanupError").error(e).detail("File", name);
+			}
+		}
+	}
+
 	Reference<IAsyncFile> m_file;
+	Future<Void> m_pendingIO;
 	Standalone<VectorRef<uint8_t>> m_buffer;
 	int64_t m_writeOffset;
 	std::string m_finalFullPath;
+	std::string m_tempPath;
 	int m_blockSize;
 };
 
@@ -310,23 +376,13 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const std::string& path) {
 	validatePathInContainer(path, m_path, /*allowContainerRoot=*/false);
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::writeFile");
-	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
-	            IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
 	std::string fullPath = joinPath(m_path, path);
 	platform::createDirectory(parentDirectory(fullPath));
-	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
-	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		int encBlockSize = encryptionBlockSize;
-		f = map(success(f) && encryptionSetupComplete(), [file = f, encBlockSize](Void) {
-			return Reference<IAsyncFile>(
-			    makeReference<AsyncFileEncrypted>(file.get(), AsyncFileEncrypted::Mode::APPEND_ONLY, encBlockSize));
-		});
+		return BackupFile::open(path, fullPath, encryptionSetupComplete(), encryptionBlockSize);
 	}
-	return map(f, [=](Reference<IAsyncFile> file) -> Reference<IBackupFile> {
-		return makeReference<BackupFile>(path, file, fullPath);
-	});
+	return BackupFile::open(path, fullPath, Void(), {});
 }
 
 Future<Void> BackupContainerLocalDirectory::writeEntireFile(const std::string& path, const std::string& contents) {
@@ -393,4 +449,57 @@ TEST_CASE("/backup/containers/localdir/rejectsEscapingPaths") {
 	}
 
 	return Void();
+}
+
+#ifndef _WIN32
+TEST_CASE("/backup/containers/localdir/FailedRenameCleanup") {
+	// Sim2's platform rename reports an expected syscall failure as SevError.
+	if (g_network->isSimulated()) {
+		co_return;
+	}
+
+	const std::string dir = abspath(joinPath(params.getDataDir(), deterministicRandom()->randomUniqueID().toString()));
+	const std::string target = joinPath(dir, "log");
+	const std::string sentinel = joinPath(target, "previous");
+	platform::createDirectory(target);
+	::writeFile(sentinel, "previous");
+	auto container = makeReference<BackupContainerLocalDirectory>("file://" + dir, Optional<std::string>(), 0);
+
+	// Renaming the synced temporary file over a nonempty directory must fail.
+	const std::string contents = "new batch";
+	auto writer = co_await container->writeFile("log");
+	co_await writer->append(contents.data(), contents.size());
+	auto finish = co_await coro::errorOr(writer->finish());
+	ASSERT(finish.isError());
+	ASSERT_EQ(finish.getError().code(), error_code_io_error);
+	ASSERT(platform::listFiles(dir, ".temp").empty());
+	ASSERT_EQ(readFileBytes(sentinel, 8), "previous");
+
+	platform::eraseDirectoryRecursive(target);
+	co_await container->writeEntireFile("log", contents);
+	ASSERT_EQ(readFileBytes(target, contents.size()), contents);
+	ASSERT(platform::listFiles(dir, ".temp").empty());
+	platform::eraseDirectoryRecursive(dir);
+}
+#endif
+
+TEST_CASE("/backup/containers/localdir/AbandonedWriteCleanup") {
+	const std::string dir = abspath(joinPath(params.getDataDir(), deterministicRandom()->randomUniqueID().toString()));
+	auto container = makeReference<BackupContainerLocalDirectory>("file://" + dir, Optional<std::string>(), 0);
+	Reference<IBackupFile> writer = co_await container->writeFile("log");
+	const std::string data(std::max(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK, 20000), 'x');
+	co_await writer->append(data.data(), data.size());
+
+	// Inspect the directory directly. The container's listing hides both .temp and .temp.part.
+	const auto files = platform::listFiles(dir);
+	ASSERT_EQ(files.size(), 1);
+	ASSERT(StringRef(files.front()).endsWith(".temp.part"_sr) || StringRef(files.front()).endsWith(".temp"_sr));
+	writer.clear();
+
+	const double deadline = now() + 10.0;
+	while (!platform::listFiles(dir).empty() && now() < deadline) {
+		co_await delay(0.1);
+	}
+	ASSERT(platform::listFiles(dir).empty());
+	platform::eraseDirectoryRecursive(dir);
 }
