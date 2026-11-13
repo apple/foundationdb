@@ -908,9 +908,18 @@ Future<Void> connectionKeeper(Reference<Peer> self,
 					// Override waiting, if we are in failed state to update failure monitoring status.
 					Future<Void> retryConnectF = Never();
 					if (retryConnect) {
-						retryConnectF = IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()
-						                    ? delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY)
-						                    : delay(FLOW_KNOBS->SERVER_REQUEST_INTERVAL);
+						if (!IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()) {
+							double interval = FLOW_KNOBS->SERVER_REQUEST_INTERVAL;
+							if (FlowTransport::isClient() && FLOW_KNOBS->CLIENT_FAILED_PEER_PROBE_JITTER > 0) {
+								interval +=
+								    deterministicRandom()->random01() * FLOW_KNOBS->CLIENT_FAILED_PEER_PROBE_JITTER;
+							}
+							retryConnectF = delay(interval);
+						} else if (!FlowTransport::isClient() || !FLOW_KNOBS->CLIENT_SKIP_AVAILABLE_PEER_PROBE) {
+							retryConnectF = delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY);
+						}
+						// Otherwise a client waits for something to send, so a cluster restart does not make every
+						// client reconnect to every server it has cached at the same moment.
 					}
 
 					auto res = co_await race(self->dataToSend.onTrigger(), retryConnectF);
