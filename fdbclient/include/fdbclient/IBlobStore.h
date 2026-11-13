@@ -52,6 +52,7 @@ struct BlobKnobs {
 	    max_delay_retryable_error, max_delay_connection_failed, multipart_retry_delay_ms;
 
 	bool set(StringRef name, int value);
+	int requestTimeout(int contentLen) const;
 	std::string getURLParameters() const;
 	static std::vector<std::string> getKnobDescriptions() {
 		return {

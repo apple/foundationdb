@@ -130,13 +130,16 @@ public:
 	                                  const std::string& id) override {
 		ASSERT_EQ(bucket, "bucket");
 		ASSERT_EQ(object, "log");
-		ASSERT(parts.at(id) == (std::set<unsigned int>{ 1, 3 }));
+		ASSERT_EQ(parts.at(id).count(1), 1);
+		ASSERT_EQ(parts.at(id).count(2), 0);
+		ASSERT_EQ(parts.at(id).count(3), thirdPart.isSet() ? 1 : 0);
 		aborted.push_back(id);
 		parts.erase(id);
+		Future<Void> response = abortResponse;
 		if (abortCalled.canBeSet()) {
 			abortCalled.send(Void());
 		}
-		return Void();
+		return response;
 	}
 
 	Future<Void> deleteObject(const std::string&, const std::string&) override {
@@ -151,6 +154,7 @@ public:
 	Promise<std::string> secondPart;
 	Promise<Void> thirdPart;
 	Promise<Void> abortCalled;
+	Future<Void> abortResponse = Void();
 };
 
 } // namespace
@@ -185,4 +189,36 @@ TEST_CASE("/backup/blobstore/AbortAbandonedMultipartUpload") {
 	ASSERT_EQ(endpoint->published, "2");
 	ASSERT(endpoint->parts.empty());
 	ASSERT_EQ(endpoint->aborted, std::vector<std::string>{ "1" });
+}
+
+TEST_CASE("/backup/blobstore/AbortAbandonedMultipartUploadWithStalledPart") {
+	auto endpoint = makeReference<MultipartTestEndpoint>();
+	endpoint->knobs.request_timeout_min = 1;
+	endpoint->knobs.connect_timeout = 1;
+	Promise<Void> abortResponse;
+	endpoint->abortResponse = abortResponse.getFuture();
+	auto writer = makeReference<AsyncFileBlobStoreWrite>(endpoint, "bucket", "log");
+	const std::string contents = "123456789012";
+	co_await writer->write(contents.data(), contents.size(), 0);
+	auto finish = writer->sync();
+	endpoint->secondPart.sendError(io_timeout());
+	auto failure = co_await coro::errorOr(finish);
+	ASSERT(failure.isError());
+	ASSERT_EQ(failure.getError().code(), error_code_io_timeout);
+	writer.clear();
+
+	// The third PUT can keep receiving HTTP 429 responses after its writer has gone away.
+	co_await timeoutError(endpoint->abortCalled.getFuture(), 5.0);
+	ASSERT_EQ(endpoint->aborted, std::vector<std::string>{ "1" });
+	ASSERT_EQ(endpoint->published, "previous");
+	ASSERT(endpoint->parts.empty());
+	ASSERT_EQ(endpoint->thirdPart.getFutureReferenceCount(), 0);
+
+	// A throttled abort must eventually release the endpoint as well.
+	endpoint->abortResponse = Future<Void>();
+	const double deadline = now() + 5.0;
+	while (abortResponse.getFutureReferenceCount() && now() < deadline) {
+		co_await delay(0.1);
+	}
+	ASSERT_EQ(abortResponse.getFutureReferenceCount(), 0);
 }

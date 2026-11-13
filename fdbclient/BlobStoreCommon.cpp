@@ -106,6 +106,13 @@ BlobKnobs::BlobKnobs() {
 	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
 }
 
+int BlobKnobs::requestTimeout(int contentLen) const {
+	// Allow time to upload the request at its share of the configured send rate.
+	int bandwidthThisRequest = 1 + max_send_bytes_per_second / concurrent_uploads;
+	int contentUploadSeconds = contentLen / bandwidthThisRequest;
+	return std::max(request_timeout_min, 3 * contentUploadSeconds);
+}
+
 bool BlobKnobs::set(StringRef name, int value) {
 #define TRY_PARAM(n, sn)                                                                                               \
 	if (name == #n || name == #sn) {                                                                                   \
@@ -753,11 +760,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<IBlobStoreEnd
 		resource = "/";
 	}
 
-	// For requests with content to upload, the request timeout should be at least twice the amount of time
-	// it would take to upload the content given the upload bandwidth and concurrency limits.
-	int bandwidthThisRequest = 1 + bstore->knobs.max_send_bytes_per_second / bstore->knobs.concurrent_uploads;
-	int contentUploadSeconds = contentLen / bandwidthThisRequest;
-	int requestTimeout = std::max(bstore->knobs.request_timeout_min, 3 * contentUploadSeconds);
+	int requestTimeout = bstore->knobs.requestTimeout(contentLen);
 
 	co_await bstore->concurrentRequests.take();
 	FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);

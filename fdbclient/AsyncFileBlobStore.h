@@ -248,15 +248,29 @@ private:
 	                                         std::vector<Reference<Part>> parts,
 	                                         Uncancellable = {}) {
 		try {
-			std::string id = co_await uploadID;
-			// The shared error signal can end an etag wait before its PUT has stopped using the part buffer.
+			// Give all dispatched PUTs one connection and request window to settle before aborting. A
+			// throttled request may keep retrying HTTP 429 indefinitely while holding its endpoint slots.
+			const auto& knobs = endpoint->knobs;
+			Future<Void> drainDeadline =
+			    delay(double(knobs.connect_timeout) + knobs.requestTimeout(knobs.multipart_min_part_size));
+			co_await (ready(uploadID) || drainDeadline);
+			if (!uploadID.isReady()) {
+				uploadID.cancel();
+				throw timed_out(); // No upload ID to abort.
+			}
+			std::string id = uploadID.get();
 			for (const auto& part : parts) {
-				if (part->uploadRequest.isValid()) {
-					co_await ready(part->uploadRequest);
+				auto& request = part->uploadRequest;
+				if (request.isValid() && !request.isReady()) {
+					co_await (ready(request) || drainDeadline);
+					if (!request.isReady()) {
+						request.cancel();
+					}
 				}
 			}
 			parts.clear();
-			co_await endpoint->abortMultiPartUpload(bucket, object, id);
+			co_await timeoutError(endpoint->abortMultiPartUpload(bucket, object, id),
+			                      double(knobs.connect_timeout) + knobs.request_timeout_min);
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "AsyncFileBlobStoreAbortError")
 			    .errorUnsuppressed(e)
