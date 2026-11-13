@@ -195,6 +195,50 @@ Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 	}
 }
 
+// Returns the addresses of all tlogs (current and previous generation still recovering) known from the
+// persisted DBCoreState, as of the cluster's last recovery. A log whose interface wasn't known at that recovery
+// (down or still being recruited) is recorded with an empty NetworkAddress instead of a real one; those are
+// counted in unknownInterfaceLogCount rather than returned as addresses, since there's no address to report.
+Future<Void> getActiveLogAddresses(Reference<IDatabase> db,
+                                   std::set<NetworkAddress>* logAddresses,
+                                   int* unknownInterfaceLogCount) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
+		logAddresses->clear();
+		*unknownInterfaceLogCount = 0;
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			ThreadFuture<Optional<Value>> logsF = tr->get(logsKey);
+			Optional<Value> logsValue = co_await safeThreadFutureToFuture(logsF);
+			if (logsValue.present()) {
+				auto logs = decodeLogsValue(logsValue.get());
+				for (const auto& [_id, addr] : logs.first) {
+					if (addr == NetworkAddress()) {
+						++(*unknownInterfaceLogCount);
+					} else {
+						logAddresses->insert(addr);
+					}
+				}
+				for (const auto& [_id, addr] : logs.second) {
+					if (addr == NetworkAddress()) {
+						++(*unknownInterfaceLogCount);
+					} else {
+						logAddresses->insert(addr);
+					}
+				}
+			}
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		TraceEvent(SevWarn, "GetActiveLogAddressesError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
+	}
+}
+
 // Shared UID validation for bulk operations (BulkDump/BulkLoad)
 UID validateBulkJobId(StringRef token, const char* usage) {
 	UID jobId;
