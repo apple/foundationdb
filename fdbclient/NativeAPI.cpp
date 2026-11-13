@@ -402,16 +402,27 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 	ASSERT(g_network);
 
 	Optional<NetworkAddress> localAddress;
+	Optional<Error> localIPError;
 	if (connRecord) {
-		IPAddress traceIP;
-		if (networkOptions.traceIP.present()) {
-			traceIP = networkOptions.traceIP.get();
-		} else {
+		Optional<IPAddress> traceIP = networkOptions.traceIP;
+		if (!traceIP.present()) {
 			// Automatically determine public IP if not provided
-			traceIP = connRecord->getConnectionString().determineLocalSourceIP();
+			try {
+				traceIP = connRecord->getConnectionString().determineLocalSourceIP();
+			} catch (Error& e) {
+				localIPError = e;
+			}
 		}
-		localAddress = NetworkAddress(traceIP, ::getpid());
+		if (traceIP.present()) {
+			localAddress = NetworkAddress(traceIP.get(), ::getpid());
+		}
 	}
+
+	if (initialized && !localAddress.present()) {
+		TraceEvent(SevWarn, "ClientCouldNotDetermineLocalIP").error(localIPError.get());
+		return;
+	}
+
 	platform::ImageInfo imageInfo = platform::getImageInfo();
 
 	if (initialized) {
@@ -461,6 +472,10 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 
 		g_network->initMetrics();
 		FlowTransport::transport().initMetrics();
+
+		if (localIPError.present()) {
+			TraceEvent(SevWarn, "ClientCouldNotDetermineLocalIP").error(localIPError.get());
+		}
 	}
 
 	// Initialize system monitoring once the local IP is available

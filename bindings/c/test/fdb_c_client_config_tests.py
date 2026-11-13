@@ -170,6 +170,13 @@ class ClientConfigTest:
         with open(self.test_cluster_file, "w") as file:
             file.write("abcde:fghijk@127.0.0.1:{}".format(port))
 
+    def create_cluster_file_with_unresolvable_hostname(self):
+        self.test_cluster_file = self.test_dir.joinpath(
+            "{}.cluster".format(random_alphanum_string(16))
+        )
+        with open(self.test_cluster_file, "w") as file:
+            file.write("abcde:fghijk@coordinator.invalid:4500")
+
     def create_invalid_cluster_file(self):
         self.test_cluster_file = self.test_dir.joinpath(
             "{}.cluster".format(random_alphanum_string(16))
@@ -783,6 +790,25 @@ class ClientTracingTests(unittest.TestCase):
         self.assertEqual(1, len(self.trace_files))
         primary_trace = self.find_trace_file()
         self.find_and_check_event(primary_trace, "ClientStart", [], ["Machine"])
+
+    def test_unresolvable_coordinator_hostname(self):
+        test = self.test
+        test.create_external_lib_dir([CURRENT_VERSION])
+        test.api_version = api_version_from_str(CURRENT_VERSION)
+        test.disable_local_client = True
+        test.create_cluster_file_with_unresolvable_hostname()
+        test.transaction_timeout = 100
+        test.expected_error = 1031  # Timeout
+
+        self.exec_test()
+        self.assertEqual(2, len(self.trace_files))
+        primary_trace = self.find_trace_file()
+        self.find_and_check_event(primary_trace, "ClientStart", [], ["Machine"])
+        cur_ver_trace = self.find_trace_file(version=CURRENT_VERSION, thread_idx=0)
+        self.find_and_check_event(cur_ver_trace, "ClientStart", [], ["Machine"])
+        self.find_and_check_event(
+            cur_ver_trace, "ClientCouldNotDetermineLocalIP", ["Error"], []
+        )
 
     def test_trace_identifier(self):
         # Test trace files created with file identifier
