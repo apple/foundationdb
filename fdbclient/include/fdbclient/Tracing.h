@@ -55,7 +55,7 @@ struct SpanContext {
 	SpanContext(const SpanContext& span) = default;
 	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
 	std::string toString() const { return format("%016llx%016llx%016llx", traceID.first(), traceID.second(), spanID); };
-	bool isValid() const { return traceID.first() != 0 && traceID.second() != 0 && spanID != 0; }
+	bool isValid() const { return traceID.isValid() && spanID != 0; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
