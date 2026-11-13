@@ -571,11 +571,31 @@ static void completeOwnedDest(RelocateData const& relocation,
 	}
 }
 
-static void resetDestinationsForRetry(RelocateData& relocation,
+static void recordDestinationFetch(DDQueue& queue,
+                                   const RelocateData& relocation,
+                                   bool finalStage,
+                                   bool& signalledTransferComplete,
+                                   bool& ownsDestBusyness) {
+	// The first cross-region fetch frees source capacity. The remaining destinations must fetch
+	// before the queue can protect the relocation as a finishing move.
+	if (finalStage) {
+		queue.fetchKeysComplete.insert(relocation);
+	}
+	if (!signalledTransferComplete) {
+		signalledTransferComplete = true;
+		ownsDestBusyness = false;
+		queue.dataTransferComplete.send(relocation);
+	}
+}
+
+static void resetDestinationsForRetry(DDQueue& queue,
+                                      RelocateData& relocation,
                                       ParallelTCInfo& healthyDestinations,
-                                      std::map<UID, Busyness>& destBusymap,
                                       bool& ownsDestBusyness) {
-	completeOwnedDest(relocation, destBusymap, ownsDestBusyness);
+	if (queue.fetchKeysComplete.erase(relocation)) {
+		queue.scheduleRangeLaunch(relocation.keys);
+	}
+	completeOwnedDest(relocation, queue.destBusymap, ownsDestBusyness);
 	relocation.completeDests.clear();
 	healthyDestinations.clear();
 }
@@ -1173,8 +1193,8 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 	[[maybe_unused]] int startedHere = 0;
 	double startTime = now();
 	// kick off relocators from items in the queue as need be
-	for (auto it = combined.begin(); it != combined.end(); it++) {
-		RelocateData rd(*it);
+	for (const auto& queued : combined) {
+		RelocateData rd(queued);
 		// A restored move can be held behind the pipeline gate while shard-encoded metadata is disabled.
 		// Restart DD before mutating the queue so the move is cancelled by the rollback path.
 		if (rd.isRestore() && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -1198,20 +1218,30 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		bool overlappingInFlight = false;
 		auto intersectingInFlight = inFlight.intersectingRanges(rd.keys);
 		for (auto it = intersectingInFlight.begin(); it != intersectingInFlight.end(); ++it) {
+			if (!inFlightActors.liveActorAt(it->range().begin)) {
+				continue;
+			}
+			const RelocateData& active = it->value();
 			// A retry can grow to cover a newer repair after a merge. Let the repair finish if it
 			// has already fetched its keys and the retry has no higher-priority work to do.
-			if (fetchKeysComplete.contains(it->value()) && inFlightActors.liveActorAt(it->range().begin) &&
-			    it->value().priority >= rd.priority &&
-			    (rd.destinationFailureRetry ||
-			     (!rd.keys.contains(it->range()) && rd.healthPriority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY))) {
+			if (fetchKeysComplete.contains(active) && active.priority >= queued.priority &&
+			    (queued.destinationFailureRetry || (!queued.keys.contains(it->range()) &&
+			                                        queued.healthPriority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY))) {
 
 				DebugRelocationTraceEvent("OverlappingInFlight", distributorId)
-				    .detail("KeyBegin", it->value().keys.begin)
-				    .detail("KeyEnd", it->value().keys.end)
-				    .detail("Priority", it->value().priority);
+				    .detail("KeyBegin", active.keys.begin)
+				    .detail("KeyEnd", active.keys.end)
+				    .detail("Priority", active.priority);
 
 				overlappingInFlight = true;
 				break;
+			}
+			rd.wantsNewServers |= active.wantsNewServers;
+			if (rd.destinationFailureRetry) {
+				// A retry that replaces a live repair needs its priority when choosing sources and destinations.
+				rd.priority = std::max(rd.priority, active.priority);
+				rd.healthPriority = std::max(rd.healthPriority, active.healthPriority);
+				rd.boundaryPriority = std::max(rd.boundaryPriority, active.boundaryPriority);
 			}
 		}
 
@@ -1258,23 +1288,15 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			    .detail("DataMoveID", rd.dataMoveId)
 			    .detail("RandomID", rd.randomId)
 			    .detail("Total", queuedRelocations);
-			finishRelocation(rd.priority, rd.healthPriority);
+			finishRelocation(queued.priority, queued.healthPriority);
 
 			// now we are launching: remove this entry from the queue of all the src servers
 			for (size_t i = 0; i < rd.src.size(); i++) {
-				const auto result = queue[rd.src[i]].erase(rd);
+				const auto result = queue[rd.src[i]].erase(queued);
 				ASSERT(result);
 			}
 		}
 
-		// If there is a job in flight that wants data relocation which we are about to cancel/modify,
-		//     make sure that we keep the relocation intent for the job that we launch
-		auto f = inFlight.intersectingRanges(rd.keys);
-		for (auto it = f.begin(); it != f.end(); ++it) {
-			if (inFlightActors.liveActorAt(it->range().begin)) {
-				rd.wantsNewServers |= it->value().wantsNewServers;
-			}
-		}
 		startedHere++;
 
 		// update both inFlightActors and inFlight key range maps, cancelling deleted RelocateShards
@@ -2271,21 +2293,23 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                          doBulkLoading ? rd.bulkLoadTask.get().coreState
 				                                                        : Optional<BulkLoadTaskState>());
 			}
+			Future<Void> dataMovementFuture = dataMovementComplete.getFuture();
 			Future<Void> doMoveKeys = self->txnProcessor->moveKeys(*params);
 			Future<Void> pollHealth = signalledTransferComplete && !ddEnabledState->shardEncodeLocationMetadata()
 			                              ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
 			try {
 				while (true) {
-					Future<Void> dataMovementFuture =
-					    signalledTransferComplete ? Never() : dataMovementComplete.getFuture();
 					auto res = co_await race(doMoveKeys, pollHealth, dataMovementFuture);
 					if (res.index() == 0) {
+						recordDestinationFetch(*self, rd, extraIds.empty(), signalledTransferComplete, ownsDestBusyness);
 						if (!extraIds.empty()) {
 							destIds.insert(destIds.end(), extraIds.begin(), extraIds.end());
 							healthyIds.insert(healthyIds.end(), extraIds.begin(), extraIds.end());
 							extraIds.clear();
 							ASSERT(totalIds == destIds.size()); // Sanity check the destIDs before we move keys
+							dataMovementComplete = Promise<Void>();
+							dataMovementFuture = dataMovementComplete.getFuture();
 							std::unique_ptr<MoveKeysParams> params;
 							if (ddEnabledState->shardEncodeLocationMetadata()) {
 								params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
@@ -2293,7 +2317,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 								                                          destIds,
 								                                          healthyIds,
 								                                          self->lock,
-								                                          Promise<Void>(),
+								                                          dataMovementComplete,
 								                                          &self->startMoveKeysParallelismLock,
 								                                          &self->finishMoveKeysParallelismLock,
 								                                          self->teamCollections.size() > 1,
@@ -2309,7 +2333,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 								                                          destIds,
 								                                          healthyIds,
 								                                          self->lock,
-								                                          Promise<Void>(),
+								                                          dataMovementComplete,
 								                                          &self->startMoveKeysParallelismLock,
 								                                          &self->finishMoveKeysParallelismLock,
 								                                          self->teamCollections.size() > 1,
@@ -2322,7 +2346,6 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 							}
 							doMoveKeys = self->txnProcessor->moveKeys(*params);
 						} else {
-							self->fetchKeysComplete.insert(rd);
 							if (ddEnabledState->shardEncodeLocationMetadata()) {
 								auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(rd.keys);
 								if (ranges.size() == 1 && static_cast<KeyRange>(ranges[0]) == rd.keys &&
@@ -2367,12 +2390,8 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 						                 ? Never()
 						                 : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
 					} else if (res.index() == 2) {
-						self->fetchKeysComplete.insert(rd);
-						if (!signalledTransferComplete) {
-							signalledTransferComplete = true;
-							self->dataTransferComplete.send(rd);
-							ownsDestBusyness = false;
-						}
+						dataMovementFuture = Never();
+						recordDestinationFetch(*self, rd, extraIds.empty(), signalledTransferComplete, ownsDestBusyness);
 					} else {
 						UNREACHABLE();
 					}
@@ -2453,13 +2472,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 						    .trackLatest(self->movedKeyServersEventHolder->trackingKey);
 					}
 
-					if (!signalledTransferComplete) {
-						signalledTransferComplete = true;
-						dataTransferComplete.send(rd);
-						ownsDestBusyness = false;
-					} else {
-						completeOwnedDest(rd, self->destBusymap, ownsDestBusyness);
-					}
+					completeOwnedDest(rd, self->destBusymap, ownsDestBusyness);
 
 					// In the case of merge, rd.completeSources would be the intersection set of two source server
 					// lists, while rd.src would be the union set.
@@ -2533,7 +2546,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
 				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 
-				resetDestinationsForRetry(rd, healthyDestinations, self->destBusymap, ownsDestBusyness);
+				resetDestinationsForRetry(*self, rd, healthyDestinations, ownsDestBusyness);
 
 				if (doBulkLoading) {
 					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskRelocatorError")
@@ -3009,6 +3022,11 @@ Future<Void> pipelineGateActor(Reference<DDQueue> self,
 	}
 }
 
+void DDQueue::scheduleRangeLaunch(KeyRange const& keys) {
+	// Launching work can cancel the relocator that requested this wakeup.
+	noErrorActors.add(tag(delay(0, TaskPriority::DataDistributionLaunch), keys, rangesToLaunch));
+}
+
 struct DDQueueImpl {
 	struct RunState {
 		explicit RunState(Reference<DDQueue> self)
@@ -3017,7 +3035,6 @@ struct DDQueueImpl {
 		Reference<DDQueue> self;
 		std::set<UID> serversToLaunchFrom;
 		FutureStream<RelocateData> completedRelocations;
-		PromiseStream<KeyRange> rangesComplete;
 		PromiseStream<Void> launchQueuedWorkTrigger;
 		// Serialize queue mutations so inline stream callbacks cannot observe partially updated state.
 		FlowLock queueMutationLock;
@@ -3121,11 +3138,7 @@ struct DDQueueImpl {
 			FlowLock::Releaser lockGuard(state->queueMutationLock);
 			state->self->processRelocationComplete(done);
 			// self->logRelocation( done, "ShardRelocatorDone" );
-			auto scheduleRangesComplete = [&](KeyRange keys) {
-				state->self->noErrorActors.add(
-				    tag(delay(0, TaskPriority::DataDistributionLaunch), keys, state->rangesComplete));
-			};
-			scheduleRangesComplete(done.keys);
+			state->self->scheduleRangeLaunch(done.keys);
 			// Batch drain: process all remaining ready completions without yielding.
 			// This prevents fetchKeysComplete from growing when completions are starved by other events.
 			int drained = 0;
@@ -3133,7 +3146,7 @@ struct DDQueueImpl {
 			       drained++ < 1000) {
 				RelocateData next = state->completedRelocations.pop();
 				state->self->processRelocationComplete(next);
-				scheduleRangesComplete(next.keys);
+				state->self->scheduleRangeLaunch(next.keys);
 			}
 			if (drained > 0) {
 				static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/queue/relocationComplete/batchDrained");
@@ -3146,15 +3159,15 @@ struct DDQueueImpl {
 		}
 	}
 
-	static Future<Void> launchCompletedRanges(RunState* state) {
-		FutureStream<KeyRange> rangesComplete = state->rangesComplete.getFuture();
+	static Future<Void> launchQueuedRanges(RunState* state) {
+		FutureStream<KeyRange> ranges = state->self->rangesToLaunch.getFuture();
 		while (true) {
-			KeyRange done = co_await rangesComplete;
+			KeyRange keys = co_await ranges;
 			co_await state->queueMutationLock.take(TaskPriority::DataDistributionLaunch);
 			FlowLock::Releaser lockGuard(state->queueMutationLock);
 			validate(state);
-			if (!done.empty()) {
-				state->self->launchQueuedWork(done, state->self->ddEnabledState);
+			if (!keys.empty()) {
+				state->self->launchQueuedWork(keys, state->self->ddEnabledState);
 			}
 		}
 	}
@@ -3330,7 +3343,7 @@ struct DDQueueImpl {
 		actors.push_back(processFetchedSourceServers(&state, self->fetchSourceServersComplete.getFuture()));
 		actors.push_back(processCompletedDataTransfers(&state, self->dataTransferComplete.getFuture()));
 		actors.push_back(processCompletedRelocations(&state));
-		actors.push_back(launchCompletedRanges(&state));
+		actors.push_back(launchQueuedRanges(&state));
 		actors.push_back(recordMetrics(&state));
 		actors.push_back(waitAndValidate(&state, self->error.getFuture()));
 		actors.push_back(waitAndValidate(&state, waitForAll(ddQueueFutures)));
@@ -3515,10 +3528,13 @@ TEST_CASE("/DataDistribution/DDQueue/DestinationRetryHelperAccounting") {
 	rd.priority = SERVER_KNOBS->PRIORITY_TEAM_HEALTHY;
 	rd.src = { sourceId };
 	rd.workFactor = workFactor;
-	std::map<UID, Busyness> sourceBusymap;
-	std::map<UID, Busyness> destBusymap;
-	PromiseStream<RelocateData> dataTransferComplete;
-	FutureStream<RelocateData> completedTransfers = dataTransferComplete.getFuture();
+	DDQueue queue;
+	rd.keys = KeyRangeRef("a"_sr, "b"_sr);
+	auto& sourceBusymap = queue.busymap;
+	auto& destBusymap = queue.destBusymap;
+	auto completedTransfers = queue.dataTransferComplete.getFuture();
+	auto rangesToLaunch = queue.rangesToLaunch.getFuture();
+	bool signalledTransferComplete = false;
 	ParallelTCInfo healthyDestinations;
 	bool ownsDestBusyness = false;
 	sourceBusymap[sourceId].addWork(rd.priority, rd.workFactor);
@@ -3532,12 +3548,18 @@ TEST_CASE("/DataDistribution/DDQueue/DestinationRetryHelperAccounting") {
 	ASSERT_EQ(destBusymap[firstId].ledger[rd.priority / 100], workFactor);
 
 	// Transfer completion owns the first attempt's destination cleanup, even if the queue has not drained it yet.
-	dataTransferComplete.send(rd);
+	recordDestinationFetch(queue, rd, false, signalledTransferComplete, ownsDestBusyness);
 	ASSERT(completedTransfers.isReady());
-	ownsDestBusyness = false;
+	ASSERT(!queue.fetchKeysComplete.contains(rd));
+	recordDestinationFetch(queue, rd, true, signalledTransferComplete, ownsDestBusyness);
+	ASSERT(queue.fetchKeysComplete.contains(rd));
 	healthyDestinations.addDataInFlightToTeam(-bytes);
 	ParallelTCInfo firstReadCleanup(healthyDestinations);
-	resetDestinationsForRetry(rd, healthyDestinations, destBusymap, ownsDestBusyness);
+	resetDestinationsForRetry(queue, rd, healthyDestinations, ownsDestBusyness);
+	ASSERT(!queue.fetchKeysComplete.contains(rd));
+	ASSERT(!rangesToLaunch.isReady());
+	KeyRange readyRange = co_await timeoutError(waitAndForward(rangesToLaunch), 1.0);
+	ASSERT(readyRange == rd.keys);
 	ASSERT(rd.completeDests.empty());
 	ASSERT(healthyDestinations.getServerIDs().empty());
 	ASSERT_EQ(destBusymap[firstId].ledger[rd.priority / 100], workFactor);
@@ -3564,7 +3586,7 @@ TEST_CASE("/DataDistribution/DDQueue/DestinationRetryHelperAccounting") {
 	// A bounded error releases the replacement attempt before another retry.
 	healthyDestinations.addDataInFlightToTeam(-bytes);
 	ParallelTCInfo secondReadCleanup(healthyDestinations);
-	resetDestinationsForRetry(rd, healthyDestinations, destBusymap, ownsDestBusyness);
+	resetDestinationsForRetry(queue, rd, healthyDestinations, ownsDestBusyness);
 	secondReadCleanup.addReadInFlightToTeam(-readLoad);
 	ASSERT(!ownsDestBusyness);
 	ASSERT(rd.completeDests.empty());
@@ -3575,6 +3597,7 @@ TEST_CASE("/DataDistribution/DDQueue/DestinationRetryHelperAccounting") {
 
 	// The queued first-attempt completion still contains the original destination after later retries mutate rd.
 	RelocateData transferComplete = completedTransfers.pop();
+	ASSERT(!completedTransfers.isReady());
 	ASSERT_EQ(transferComplete.completeDests, std::vector<UID>{ firstId });
 	complete(transferComplete, sourceBusymap, destBusymap);
 	ASSERT(ledgerIsEmpty(sourceBusymap[sourceId]));
@@ -3587,6 +3610,9 @@ TEST_CASE("/DataDistribution/DDQueue/DestinationRetryHelperAccounting") {
 	launchDest(rd, { { secondTeam, false } }, destBusymap);
 	ownsDestBusyness = true;
 	ASSERT_EQ(destBusymap[secondId].ledger[rd.priority / 100], workFactor);
+	recordDestinationFetch(queue, rd, true, signalledTransferComplete, ownsDestBusyness);
+	ASSERT(queue.fetchKeysComplete.contains(rd));
+	ASSERT(!completedTransfers.isReady());
 	completeOwnedDest(rd, destBusymap, ownsDestBusyness);
 	healthyDestinations.addDataInFlightToTeam(-bytes);
 	healthyDestinations.addReadInFlightToTeam(-readLoad);
@@ -3630,8 +3656,7 @@ TEST_CASE("/DataDistribution/DDQueue/BatchDrainRelocationComplete") {
 	RelocateData first = co_await completions;
 	self.processRelocationComplete(first);
 
-	// Mirrors the production drain loop. Note: noErrorActors.add(tag(..., rangesComplete)) is
-	// not exercised here since that requires a running actor collection.
+	// Exercise the completion drain separately from launching queued ranges.
 	int drained = 0;
 	while (completions.isReady() && !completions.isError() && drained++ < 1000) {
 		RelocateData next = completions.pop();
@@ -3786,8 +3811,6 @@ TEST_CASE("/DataDistribution/DDQueue/RetryDestinationTeamFailureAfterShardSplit"
 	ASSERT_EQ(self.queuedRelocations, 1);
 	ASSERT(self.queueMap[middle.begin].keys == failedRange);
 
-	// The merged repair is now in flight and has copied its data. A delayed child retry must
-	// leave it running, even though both moves now cover exactly the same keys.
 	DDEnabledState ddEnabledState;
 	ddEnabledState.setShardEncodeLocationMetadata(false); // Exercise scheduling without persistent move cleanup.
 	self.teamSize = self.singleRegionTeamSize = 1;
@@ -3803,17 +3826,35 @@ TEST_CASE("/DataDistribution/DDQueue/RetryDestinationTeamFailureAfterShardSplit"
 	launchWithSource();
 	const RelocateData repair = self.inFlight[failedRange.begin];
 	ASSERT_EQ(repair.healthPriority, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT);
-	self.inFlight.rangeContaining(failedRange.begin).value().cancellable = false;
-	self.fetchKeysComplete.insert(repair);
-	complete(repair, self.busymap, self.destBusymap);
 
+	// Before the merged repair finishes fetching, a child retry can replace it but must keep its priority.
 	failed.keys = middle;
-	auto childRetry = makeDestinationFailureRetry(failed, UID(4, 5));
+	auto earlyRetry = makeDestinationFailureRetry(failed, UID(4, 5));
+	self.queueRelocation(earlyRetry, serversToLaunchFrom);
+	launchWithSource();
+	ASSERT_EQ(self.queuedRelocations, 0);
+	const RelocateData replacement = self.inFlight[failedRange.begin];
+	ASSERT(replacement.randomId == earlyRetry.traceId);
+	ASSERT(replacement.keys == failedRange);
+	ASSERT_EQ(replacement.priority, repair.priority);
+	ASSERT_EQ(replacement.healthPriority, repair.healthPriority);
+	ASSERT_EQ(replacement.boundaryPriority, repair.boundaryPriority);
+	complete(self.dataTransferComplete.getFuture().pop(), self.busymap, self.destBusymap);
+	self.processRelocationComplete(self.relocationComplete.getFuture().pop());
+	ASSERT_EQ(self.priority_relocations[failed.priority], 0);
+	ASSERT_EQ(self.unhealthyRelocations, 1);
+
+	// Once the replacement has fetched its keys, an equally wide maintenance retry must leave it running.
+	self.inFlight.rangeContaining(failedRange.begin).value().cancellable = false;
+	self.fetchKeysComplete.insert(replacement);
+	complete(replacement, self.busymap, self.destBusymap);
+
+	auto childRetry = makeDestinationFailureRetry(failed, UID(5, 6));
 	self.queueRelocation(childRetry, serversToLaunchFrom);
 	launchWithSource();
 	ASSERT_EQ(self.queuedRelocations, 1);
 	ASSERT(self.inFlightActors.liveActorAt(failedRange.begin));
-	ASSERT(self.inFlight[failedRange.begin].randomId == repair.randomId);
+	ASSERT(self.inFlight[failedRange.begin].randomId == replacement.randomId);
 
 	self.inFlightActors.cancel(failedRange);
 	self.processRelocationComplete(self.relocationComplete.getFuture().pop());
