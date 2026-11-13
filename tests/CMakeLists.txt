@@ -47,10 +47,15 @@ set(TEST_LOG_FORMAT "xml" CACHE STRING "Format for test trace files (xml, json)"
 set(TEST_INCLUDE ".*" CACHE STRING "Include only tests that match the given regex")
 set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
 
-# For the restart test, prefer an installed fdbserver from an older stable release
-# to exercise upgrade paths from existing on-disk state. If it is unavailable,
-# the current build is used instead.
 if(WITH_PYTHON)
+  add_test(NAME testrunner/restart_test_policy
+    COMMAND $<TARGET_FILE:Python3::Interpreter>
+      ${PROJECT_SOURCE_DIR}/tests/TestRunner/tests/test_restart_test_policy.py)
+  set_tests_properties(testrunner/restart_test_policy PROPERTIES LABELS "unit;testrunner" TIMEOUT 30)
+
+  # For the restart test, prefer an installed fdbserver from an older stable release
+  # to exercise upgrade paths from existing on-disk state. If it is unavailable,
+  # the current build is used instead.
   find_program(OLD_FDBSERVER_BINARY
     fdbserver-7.1.69 fdbserver fdbserver.exe
     HINTS /opt/foundationdb/old/7.1.69/bin/ /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
@@ -455,6 +460,20 @@ if(WITH_PYTHON)
     add_fdb_test(
       TEST_FILES restarting/to_8.0.0/CycleTestRestart-1.toml
       restarting/to_8.0.0/CycleTestRestart-2.toml)
+
+    # Each range contains one released patch. Reuse the existing workloads so
+    # both CTest and Joshua exercise the same restart in each direction.
+    foreach(version_range IN ITEMS 7.4.3_until_7.4.4 7.4.8_until_7.4.9)
+      add_fdb_test(RESTART_VARIANT from_${version_range}
+        TEST_FILES restarting/from_7.4.3_until_7.4.4/StorefrontTestRestart-1.toml
+                   restarting/from_7.4.3_until_7.4.4/StorefrontTestRestart-2.toml)
+    endforeach()
+    add_fdb_test(RESTART_VARIANT to_7.4.3_until_7.4.4
+      TEST_FILES restarting/to_7.4.5/CycleTestRestart-1.toml
+                 restarting/to_7.4.3_until_7.4.4/CycleTestRestart-2.toml)
+    add_fdb_test(RESTART_VARIANT to_7.4.8_until_7.4.9
+      TEST_FILES restarting/to_7.4.5/CycleTestRestart-1.toml
+                 restarting/to_7.4.5/CycleTestRestart-2.toml)
   endif()
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)

@@ -425,6 +425,20 @@ def is_restarting_test(test_file: Path):
     return False
 
 
+def is_single_patch_restart(test_file: Path) -> bool:
+    parts = test_file.parent.name.split("_")
+    if (
+        test_file.parent.parent.name != "restarting"
+        or len(parts) != 4
+        or parts[0] not in ("from", "to")
+        or parts[2] != "until"
+    ):
+        return False
+    lower = Version.parse(parts[1])
+    upper = Version.parse(parts[3])
+    return upper.version_tuple() == (lower.major, lower.minor, lower.patch + 1)
+
+
 def is_negative(test_file: Path):
     return test_file.parts[-2] == "negative"
 
@@ -596,6 +610,12 @@ class TestRun:
             "-s",
             str(self.random_seed),
         ]
+        # The binaries in a patch-specific restart can link different Boost
+        # versions. Keep both away from host shared memory.
+        if is_single_patch_restart(self.test_file) and not any(
+            arg in ("-i", "--machine-id", "--machine_id") for arg in self.extra_args
+        ):
+            command += ["-i", "1"]
         memory_limit = resolve_fdbserver_memory(self.binary, self.extra_args)
         if memory_limit is not None:
             command += ["--memory", memory_limit]

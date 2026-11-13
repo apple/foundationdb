@@ -55,9 +55,11 @@ endfunction()
 # - TEST_FILES followed by typically one test file. The test runner will run
 #   all these tests in serialized order and within the same directory. This is
 #   useful for restart tests
+# - RESTART_VARIANT runs and packages the given files under a bounded restart
+#   directory, e.g. from_7.4.3_until_7.4.4, using that patch release in CTest.
 function(add_fdb_test)
   set(options UNIT IGNORE LONG_RUNNING)
-  set(oneValueArgs TEST_NAME TIMEOUT)
+  set(oneValueArgs TEST_NAME TIMEOUT RESTART_VARIANT)
   set(multiValueArgs TEST_FILES)
   cmake_parse_arguments(ADD_FDB_TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   set(this_test_timeout ${ADD_FDB_TEST_TIMEOUT})
@@ -79,6 +81,38 @@ function(add_fdb_test)
   endif()
   if(ADD_FDB_TEST_UNIT)
     set(test_type "test")
+  endif()
+  set(test_root "${CMAKE_CURRENT_SOURCE_DIR}")
+  set(enable_ctest "${ENABLE_SIMULATION_TESTS}")
+  set(old_binary_args -O "${OLD_FDBSERVER_BINARY}")
+  if(ADD_FDB_TEST_RESTART_VARIANT)
+    if(NOT ADD_FDB_TEST_RESTART_VARIANT MATCHES "^(from|to)_([0-9]+[.][0-9]+[.][0-9]+)_until_[0-9]+[.][0-9]+[.][0-9]+$")
+      message(FATAL_ERROR "Invalid bounded restart directory: ${ADD_FDB_TEST_RESTART_VARIANT}")
+    endif()
+    set(old_version "${CMAKE_MATCH_2}")
+    string(REPLACE "." "_" version_key "${old_version}")
+    find_program(FDBSERVER_${version_key} NAMES fdbserver-${old_version}
+      HINTS /opt/foundationdb/old/${old_version}/bin /opt/foundationdb/old
+      DOC "Path to fdbserver ${old_version} for restart tests")
+    set(old_binary_args --old-version "${old_version}")
+    if(CMAKE_CROSSCOMPILING)
+      set(enable_ctest OFF)
+    elseif(FDBSERVER_${version_key})
+      list(APPEND old_binary_args -O "${FDBSERVER_${version_key}}")
+    elseif(NOT (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|aarch64)$"))
+      # Automatic downloads use the upstream standalone Linux binaries.
+      set(enable_ctest OFF)
+    endif()
+    # The path tells both TestRunner and Joshua which phase uses the old binary.
+    set(test_root "${CMAKE_CURRENT_BINARY_DIR}/restart_variants")
+    set(variant_files "")
+    foreach(source IN LISTS ADD_FDB_TEST_TEST_FILES)
+      get_filename_component(filename "${source}" NAME)
+      set(variant_file "restarting/${ADD_FDB_TEST_RESTART_VARIANT}/${filename}")
+      configure_file("${CMAKE_CURRENT_SOURCE_DIR}/${source}" "${test_root}/${variant_file}" COPYONLY)
+      list(APPEND variant_files "${variant_file}")
+    endforeach()
+    set(ADD_FDB_TEST_TEST_FILES "${variant_files}")
   endif()
   list(GET ADD_FDB_TEST_TEST_FILES 0 first_file)
   string(REGEX REPLACE "^(.*)\\.(txt|toml)$" "\\1" test_name ${first_file})
@@ -125,14 +159,14 @@ function(add_fdb_test)
   if (USE_VALGRIND_FOR_CTEST)
     set(VALGRIND_OPTION "--use-valgrind")
   endif()
-  list(TRANSFORM ADD_FDB_TEST_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
-  if (ENABLE_SIMULATION_TESTS)
+  list(TRANSFORM ADD_FDB_TEST_TEST_FILES PREPEND "${test_root}/")
+  if (enable_ctest)
     add_test(NAME ${test_name}
       COMMAND $<TARGET_FILE:Python3::Interpreter> ${TestRunner}
       -n ${test_name}
       -b ${PROJECT_BINARY_DIR}
       -t ${test_type}
-      -O ${OLD_FDBSERVER_BINARY}
+      ${old_binary_args}
       --config "${CMAKE_BUILD_TYPE}"
       --crash
       --aggregate-traces ${TEST_AGGREGATE_TRACES}
@@ -153,6 +187,7 @@ function(add_fdb_test)
     endif()
   endif()
   # set variables used for generating test packages
+  set(TEST_FILE_ROOT_${test_name} "${test_root}" PARENT_SCOPE)
   if(ADD_FDB_TEST_LONG_RUNNING)
     set(LONG_RUNNING_TEST_NAMES ${LONG_RUNNING_TEST_NAMES} ${test_name} PARENT_SCOPE)
     set(LONG_RUNNING_TEST_FILES_${test_name} ${ADD_FDB_TEST_TEST_FILES} PARENT_SCOPE)
@@ -184,14 +219,13 @@ function(stage_correctness_package)
   foreach(test IN LISTS STAGE_TEST_LIST)
     if((${test} MATCHES ${TEST_PACKAGE_INCLUDE}) AND
         (NOT ${test} MATCHES ${TEST_PACKAGE_EXCLUDE}))
-      string(LENGTH "${CMAKE_SOURCE_DIR}/tests/" base_length)
       if(STAGE_LONG_RUNNING)
         set(TEST_FILES_PREFIX "LONG_RUNNING_TEST_FILES")
       else()
         set(TEST_FILES_PREFIX "TEST_FILES")
       endif()
       foreach(file IN LISTS ${TEST_FILES_PREFIX}_${test})
-        string(SUBSTRING ${file} ${base_length} -1 rel_out_file)
+        file(RELATIVE_PATH rel_out_file "${TEST_FILE_ROOT_${test}}" "${file}")
         set(out_file ${STAGE_OUT_DIR}/tests/${rel_out_file})
         list(APPEND test_files ${out_file})
         add_custom_command(
