@@ -525,6 +525,9 @@ func findTerminator(b []byte) int {
 
 	for {
 		idx := bytes.IndexByte(bp, 0x00)
+		if idx < 0 {
+			return -1
+		}
 		length += idx
 		if idx+1 == len(bp) || bp[idx+1] != 0xFF {
 			break
@@ -536,41 +539,52 @@ func findTerminator(b []byte) int {
 	return length
 }
 
-func decodeBytes(b []byte) ([]byte, int) {
-	idx := findTerminator(b[1:])
-	return bytes.Replace(b[1:idx+1], []byte{0x00, 0xFF}, []byte{0x00}, -1), idx + 2
-}
-
-func decodeString(b []byte) (string, int) {
-	bp, idx := decodeBytes(b)
-	return string(bp), idx
-}
-
-func decodeInt(b []byte) (interface{}, int) {
-	if b[0] == intZeroCode {
-		return int64(0), 1
+func decodeInteger(b []byte) (interface{}, int, error) {
+	code := int(b[0])
+	if code == intZeroCode {
+		return int64(0), 1, nil
 	}
 
-	var neg bool
-
-	n := int(b[0]) - intZeroCode
-	if n < 0 {
-		n = -n
-		neg = true
+	offset := 1
+	length := code - intZeroCode
+	if length < 0 {
+		length = -length
 	}
+	variable := code == negIntStart || code == posIntEnd
+	if variable {
+		if len(b) < 2 {
+			return nil, 0, errors.New("missing tuple integer length")
+		}
+		length = int(b[1])
+		if code == negIntStart {
+			length ^= 0xff
+		}
+		offset++
+	}
+	if length > len(b)-offset {
+		return nil, 0, errors.New("truncated tuple integer")
+	}
+	end := offset + length
+	if variable || (code == negIntStart+1 && b[offset]&0x80 == 0) {
+		return decodeBigInt(b[offset:end], code < intZeroCode), end, nil
+	}
+	return decodeInt(b[offset:end], code < intZeroCode), end, nil
+}
 
+func decodeInt(payload []byte, neg bool) interface{} {
+	n := len(payload)
 	bp := make([]byte, 8)
-	copy(bp[8-n:], b[1:n+1])
+	copy(bp[8-n:], payload)
 
 	var ret int64
 	binary.Read(bytes.NewBuffer(bp), binary.BigEndian, &ret)
 
 	if neg {
-		return ret - int64(sizeLimits[n]), n + 1
+		return ret - int64(sizeLimits[n])
 	}
 
 	if ret > 0 {
-		return ret, n + 1
+		return ret
 	}
 
 	// The encoded value claimed to be positive yet when put in an int64
@@ -578,40 +592,23 @@ func decodeInt(b []byte) (interface{}, int) {
 	// 64-bit value that uses the most significant bit. This can be fit in a
 	// uint64, so return that. Note that this is the *only* time we return
 	// a uint64.
-	return uint64(ret), n + 1
+	return uint64(ret)
 }
 
-func decodeBigInt(b []byte) (interface{}, int) {
-	val := new(big.Int)
-	offset := 1
-	var length int
-
-	if b[0] == negIntStart || b[0] == posIntEnd {
-		length = int(b[1])
-		if b[0] == negIntStart {
-			length ^= 0xff
-		}
-
-		offset += 1
-	} else {
-		// Must be a negative 8 byte integer
-		length = 8
-	}
-
-	val.SetBytes(b[offset : length+offset])
-
-	if b[0] < intZeroCode {
-		sub := new(big.Int).Lsh(big.NewInt(1), uint(length)*8)
+func decodeBigInt(payload []byte, neg bool) interface{} {
+	val := new(big.Int).SetBytes(payload)
+	if neg {
+		sub := new(big.Int).Lsh(big.NewInt(1), uint(len(payload))*8)
 		sub.Sub(sub, big.NewInt(1))
 		val.Sub(val, sub)
 	}
 
 	// This is the only value that fits in an int64 or uint64 that is decoded with this function
 	if val.Cmp(minInt64BigInt) == 0 {
-		return val.Int64(), length + offset
+		return val.Int64()
 	}
 
-	return val, length + offset
+	return val
 }
 
 func decodeFloat(b []byte) (float32, int) {
@@ -652,8 +649,11 @@ func decodeVersionstamp(b []byte) (Versionstamp, int) {
 	}, versionstampLength + 1
 }
 
-func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
+// Unpack returns the tuple encoded by the provided byte slice, or an error if
+// the key does not correctly encode a FoundationDB tuple.
+func Unpack(b []byte) (Tuple, error) {
 	var t Tuple
+	var parents []Tuple
 
 	var i int
 
@@ -663,33 +663,44 @@ func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
 
 		switch {
 		case b[i] == nilCode:
-			if !nested {
+			if len(parents) == 0 {
 				el = nil
 				off = 1
 			} else if i+1 < len(b) && b[i+1] == 0xff {
 				el = nil
 				off = 2
 			} else {
-				return t, i + 1, nil
+				last := len(parents) - 1
+				el = t
+				t = parents[last]
+				parents = parents[:last]
+				off = 1
 			}
-		case b[i] == bytesCode:
-			el, off = decodeBytes(b[i:])
-		case b[i] == stringCode:
-			el, off = decodeString(b[i:])
-		case negIntStart+1 < b[i] && b[i] < posIntEnd:
-			el, off = decodeInt(b[i:])
-		case negIntStart+1 == b[i] && (b[i+1]&0x80 != 0):
-			el, off = decodeInt(b[i:])
+		case b[i] == bytesCode || b[i] == stringCode:
+			length := findTerminator(b[i+1:])
+			if length < 0 {
+				return nil, fmt.Errorf("missing tuple string terminator at position %d", i)
+			}
+			payload := bytes.ReplaceAll(b[i+1:i+1+length], []byte{0x00, 0xFF}, []byte{0x00})
+			el = payload
+			if b[i] == stringCode {
+				el = string(payload)
+			}
+			off = length + 2
 		case negIntStart <= b[i] && b[i] <= posIntEnd:
-			el, off = decodeBigInt(b[i:])
+			var err error
+			el, off, err = decodeInteger(b[i:])
+			if err != nil {
+				return nil, fmt.Errorf("integer at position %d: %w", i, err)
+			}
 		case b[i] == floatCode:
-			if i+5 > len(b) {
-				return nil, i, fmt.Errorf("insufficient bytes to decode float starting at position %d of byte array for tuple", i)
+			if len(b)-i < 5 {
+				return nil, fmt.Errorf("insufficient bytes to decode float starting at position %d of byte array for tuple", i)
 			}
 			el, off = decodeFloat(b[i:])
 		case b[i] == doubleCode:
-			if i+9 > len(b) {
-				return nil, i, fmt.Errorf("insufficient bytes to decode double starting at position %d of byte array for tuple", i)
+			if len(b)-i < 9 {
+				return nil, fmt.Errorf("insufficient bytes to decode double starting at position %d of byte array for tuple", i)
 			}
 			el, off = decodeDouble(b[i:])
 		case b[i] == trueCode:
@@ -699,38 +710,32 @@ func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
 			el = false
 			off = 1
 		case b[i] == uuidCode:
-			if i+17 > len(b) {
-				return nil, i, fmt.Errorf("insufficient bytes to decode UUID starting at position %d of byte array for tuple", i)
+			if len(b)-i < 17 {
+				return nil, fmt.Errorf("insufficient bytes to decode UUID starting at position %d of byte array for tuple", i)
 			}
 			el, off = decodeUUID(b[i:])
 		case b[i] == versionstampCode:
-			if i+versionstampLength+1 > len(b) {
-				return nil, i, fmt.Errorf("insufficient bytes to decode Versionstamp starting at position %d of byte array for tuple", i)
+			if len(b)-i < versionstampLength+1 {
+				return nil, fmt.Errorf("insufficient bytes to decode Versionstamp starting at position %d of byte array for tuple", i)
 			}
 			el, off = decodeVersionstamp(b[i:])
 		case b[i] == nestedCode:
-			var err error
-			el, off, err = decodeTuple(b[i+1:], true)
-			if err != nil {
-				return nil, i, err
-			}
-			off++
+			parents = append(parents, t)
+			t = nil
+			i++
+			continue
 		default:
-			return nil, i, fmt.Errorf("unable to decode tuple element with unknown typecode %02x", b[i])
+			return nil, fmt.Errorf("unable to decode tuple element with unknown typecode %02x", b[i])
 		}
 
 		t = append(t, el)
 		i += off
 	}
 
-	return t, i, nil
-}
-
-// Unpack returns the tuple encoded by the provided byte slice, or an error if
-// the key does not correctly encode a FoundationDB tuple.
-func Unpack(b []byte) (Tuple, error) {
-	t, _, err := decodeTuple(b, false)
-	return t, err
+	if len(parents) != 0 {
+		return nil, errors.New("missing nested tuple terminator")
+	}
+	return t, nil
 }
 
 // FDBKey returns the packed representation of a Tuple, and allows Tuple to
