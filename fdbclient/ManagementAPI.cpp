@@ -2967,6 +2967,8 @@ Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 			co_await releaseExclusiveReadLockOnRange(&tr, aliveJob.get().getJobRange(), rangeLockNameForBulkLoad);
 			// Clean up BulkLoad owner info when clearing job metadata
 			tr.clear(bulkLoadOwnerKeyFor(jobId));
+			// Leaving control behind would strand a paused flag under a jobId nothing can resume
+			tr.clear(bulkLoadControlKeyFor(jobId));
 			co_await tr.commit();
 			break;
 		} catch (Error& e) {
@@ -3256,6 +3258,24 @@ Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr) {
 	co_return Optional<BulkDumpState>();
 }
 
+Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Database cx) {
+	Transaction tr(cx);
+	Optional<BulkDumpState> job;
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			job = co_await getSubmittedBulkDumpJob(&tr);
+			break;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+	co_return job;
+}
+
 Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
 	Transaction tr(cx);
 	while (true) {
@@ -3350,6 +3370,8 @@ Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 			    &tr, bulkDumpPrefix, rangeToRead, normalKeys, bulkDumpStateValue(BulkDumpState()));
 			// Clean up owner info when clearing job metadata
 			tr.clear(bulkDumpOwnerKeyFor(jobId));
+			// Leaving control behind would strand a paused flag under a jobId nothing can resume
+			tr.clear(bulkDumpControlKeyFor(jobId));
 			co_await tr.commit();
 			tr.reset();
 
@@ -3421,6 +3443,50 @@ Future<Void> setBulkLoadOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInf
 Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId) {
 	Optional<BulkDumpOwnerInfo> result = co_await getBulkOwner(cx, jobId, false);
 	co_return result;
+}
+
+Future<Optional<BulkJobControlState>> getBulkJobControl(Database cx, UID jobId, bool isBulkDump) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Key controlKey = isBulkDump ? bulkDumpControlKeyFor(jobId) : bulkLoadControlKeyFor(jobId);
+			Optional<Value> value = co_await tr.get(controlKey);
+			if (!value.present()) {
+				co_return Optional<BulkJobControlState>();
+			}
+			co_return decodeBulkJobControlState(value.get());
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+// Read-modify-write in one transaction so that setting one control field does not discard another that
+// a concurrent operator set.
+Future<Void> setBulkJobPaused(Database cx, UID jobId, bool paused, bool isBulkDump) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Key controlKey = isBulkDump ? bulkDumpControlKeyFor(jobId) : bulkLoadControlKeyFor(jobId);
+			Optional<Value> value = co_await tr.get(controlKey);
+			BulkJobControlState controlState =
+			    value.present() ? decodeBulkJobControlState(value.get()) : BulkJobControlState();
+			controlState.paused = paused;
+			tr.set(controlKey, bulkJobControlStateValue(controlState));
+			co_await tr.commit();
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
 }
 
 Future<BulkDumpTaskCounts> getBulkDumpTaskCounts(Database cx, KeyRange rangeToRead) {

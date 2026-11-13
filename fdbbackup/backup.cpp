@@ -2250,6 +2250,42 @@ Future<Void> changeBackupResumed(Database db, bool pause) {
 		FileBackupAgent backupAgent;
 		co_await backupAgent.changePause(db, pause);
 		printf("All backup agents have been %s.\n", pause ? "paused" : "resumed");
+
+		// Pausing the agents writes the task bucket pause key and backupPausedKey. A bulkdump snapshot is
+		// dispatched by data distribution, which reads neither, so the snapshot would keep running while
+		// the backup driving it reports paused.
+		Optional<BulkDumpState> bulkDumpJob = co_await getSubmittedBulkDumpJob(db);
+		if (bulkDumpJob.present() && bulkDumpJob.get().isValid()) {
+			UID jobId = bulkDumpJob.get().getJobId();
+			Optional<BulkDumpOwnerInfo> owner = co_await getBulkDumpOwner(db, jobId);
+			if (owner.present() && owner.get().ownerType == "backup") {
+				co_await setBulkJobPaused(db, jobId, pause, /*isBulkDump=*/true);
+				if (pause) {
+					printf("Bulkdump job %s (backup \"%s\") has been paused. Tasks already dispatched run to "
+					       "completion, so the snapshot keeps making progress until that work drains.\n",
+					       jobId.toString().c_str(),
+					       owner.get().ownerName.c_str());
+				} else {
+					printf("Bulkdump job %s (backup \"%s\") has been resumed.\n",
+					       jobId.toString().c_str(),
+					       owner.get().ownerName.c_str());
+				}
+			} else if (pause) {
+				fprintf(stderr,
+				        "WARNING: bulkdump job %s is running but was not submitted by a backup, so it has "
+				        "not been paused. Use `fdbcli bulkdump pause %s` if you intended to pause it.\n",
+				        jobId.toString().c_str(),
+				        jobId.toString().c_str());
+			}
+		}
+
+		// A bulkload job has no ownership link back to a backup, so there is nothing to carry the pause to.
+		if (pause && (co_await getBulkLoadMode(db)) == 1) {
+			fprintf(stderr,
+			        "WARNING: bulkload mode is enabled. Pausing backup agents does not pause a bulkload "
+			        "job; data distribution continues to dispatch it. Use `fdbcli bulkload pause <JOBID>` "
+			        "to stop dispatching new tasks; a paused bulkload job keeps its range lock.\n");
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;

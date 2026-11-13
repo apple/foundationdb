@@ -271,6 +271,7 @@ Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob);
 
 // Return the existing job metadata
 Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr);
+Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Database cx);
 
 // Count the completed and the failed tasks within the input range
 struct BulkDumpTaskCounts {
@@ -398,6 +399,14 @@ Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInf
 Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId);
 Future<Void> setBulkLoadOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo);
 Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId);
+
+// Operator control over a running bulk job. isBulkDump selects the bulkdump or bulkload namespace.
+// An absent control record is returned as an empty Optional and means no control has been applied.
+Future<Optional<BulkJobControlState>> getBulkJobControl(Database cx, UID jobId, bool isBulkDump);
+
+// Set the paused flag without discarding other control fields. The caller is responsible for checking
+// that the job exists: a record written for an unknown job id would never be read or cleaned up.
+Future<Void> setBulkJobPaused(Database cx, UID jobId, bool paused, bool isBulkDump);
 
 // ==================== End Progress Tracking ====================
 

@@ -1534,6 +1534,38 @@ Key bulkLoadOwnerKeyFor(const UID& jobId) {
 	return wr.toValue();
 }
 
+// Bulk job operator control - stored separately, so an absent key means no control applied
+const KeyRangeRef bulkDumpControlKeys = KeyRangeRef("\xff/bulkDumpControl/"_sr, "\xff/bulkDumpControl0"_sr);
+const KeyRef bulkDumpControlPrefix = bulkDumpControlKeys.begin;
+
+const KeyRangeRef bulkLoadControlKeys = KeyRangeRef("\xff/bulkLoadControl/"_sr, "\xff/bulkLoadControl0"_sr);
+const KeyRef bulkLoadControlPrefix = bulkLoadControlKeys.begin;
+
+Key bulkDumpControlKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkDumpControlPrefix);
+	wr << jobId;
+	return wr.toValue();
+}
+
+Key bulkLoadControlKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkLoadControlPrefix);
+	wr << jobId;
+	return wr.toValue();
+}
+
+Value bulkJobControlStateValue(const BulkJobControlState& controlState) {
+	return ObjectWriter::toValue(controlState, IncludeVersion());
+}
+
+BulkJobControlState decodeBulkJobControlState(const ValueRef& value) {
+	BulkJobControlState controlState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(controlState);
+	return controlState;
+}
+
 // Range Lock
 const std::string rangeLockNameForBulkLoad = "BulkLoad";
 
