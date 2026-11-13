@@ -1408,6 +1408,7 @@ public:
 	int64_t size() const override { return contents.size(); }
 	void addref() override { ReferenceCounted<MutationLogUploadTestFile>::addref(); }
 	void delref() override { ReferenceCounted<MutationLogUploadTestFile>::delref(); }
+	using ReferenceCounted<MutationLogUploadTestFile>::debugGetReferenceCount;
 	const std::string& bytes() const { return contents; }
 	bool isFinished() const { return finished; }
 
