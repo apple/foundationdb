@@ -332,10 +332,12 @@ Future<Void> runTests(const UnitTestRunnerOptions& options,
 		    .detail("Rand", deterministicRandom()->randomInt(0, 100001));
 
 		Error resultCode = success();
+		platform::createDirectory(testParams.getDataDir());
+		// Yield so Net2 refreshes now() after synchronous tests and directory I/O.
+		co_await delay(0);
 		double startNow = now();
 		double startTimer = timer();
 
-		platform::createDirectory(testParams.getDataDir());
 		try {
 			co_await test->func(testParams);
 		} catch (Error& e) {
