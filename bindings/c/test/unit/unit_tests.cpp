@@ -2526,6 +2526,39 @@ TEST_CASE("special-key-space valid transaction ID") {
 	CHECK(transaction_id.second() > 0);
 }
 
+TEST_CASE("special-key-space error message after a rejected clear") {
+	fdb::Transaction tr(db);
+	while (true) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+		tr.clear("\xff\xff/configuration/process/class_type/1.2.3.4:1");
+		auto commit = tr.commit();
+		const fdb_error_t err = wait_future(commit);
+		if (err != error_code_cluster_version_changed) {
+			REQUIRE(err == error_code_special_keys_api_failure);
+			break;
+		}
+		auto retry = tr.on_error(err);
+		REQUIRE(wait_future(retry) == 0);
+	}
+
+	auto diagnostic = tr.get("\xff\xff/error_message", false);
+	REQUIRE(wait_future(diagnostic) == 0);
+	fdb_bool_t present;
+	const uint8_t* value;
+	int length;
+	REQUIRE(diagnostic.get(&present, &value, &length) == 0);
+	REQUIRE(present);
+	rapidjson::Document error;
+	error.Parse(reinterpret_cast<const char*>(value), length);
+	REQUIRE(error.IsObject());
+	REQUIRE(error.HasMember("command"));
+	REQUIRE(error["command"].IsString());
+	CHECK(std::string_view(error["command"].GetString()) == "setclass");
+
+	auto read = tr.get(key("foo"), false);
+	CHECK(wait_future(read) == error_code_special_keys_api_failure);
+}
+
 TEST_CASE("special-key-space custom transaction ID") {
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
