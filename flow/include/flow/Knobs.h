@@ -142,6 +142,13 @@ public:
 	double BUSY_WAIT_THRESHOLD;
 	double CLIENT_REQUEST_INTERVAL;
 	double SERVER_REQUEST_INTERVAL;
+	// If true, a client does not probe a peer it considers available after losing the connection to it; it reconnects
+	// when it next has something to send. Otherwise every client probes every peer it holds an interface for
+	// FAILURE_DETECTION_DELAY after a cluster restart, all at the same moment.
+	bool CLIENT_SKIP_AVAILABLE_PEER_PROBE;
+	// Upper bound of a random delay a client adds to SERVER_REQUEST_INTERVAL between probes of a peer it considers
+	// failed, so that clients do not probe the same restarted servers in lockstep. 0 disables.
+	double CLIENT_FAILED_PEER_PROBE_JITTER;
 
 	int DISABLE_ASSERTS;
 	double QUEUE_MODEL_SMOOTHING_AMOUNT;
