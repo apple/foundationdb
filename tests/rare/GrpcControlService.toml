@@ -1,0 +1,30 @@
+[configuration]
+grpcEnabled = true
+# Headroom so that excluding one process cannot leave too few machines to recruit a transaction system.
+extraMachineCountDC = 2
+
+[[test]]
+testTitle = 'GrpcControlService'
+# Randomly added failure workloads can kill machines for good; with a process excluded, the rest may be too few to
+# recruit a transaction system, and recovery then waits for an include that cannot commit.
+runFailureWorkloads = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 250.0
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'GrpcControlService'
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 3
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 60.0

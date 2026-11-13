@@ -1,0 +1,55 @@
+Subject: [PATCH 2/2] FDB sim: chttp2 cancels streams in stream-id order
+
+---
+ .../chttp2/transport/chttp2_transport.cc      | 21 +++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/ext/transport/chttp2/transport/chttp2_transport.cc b/src/core/ext/transport/chttp2/transport/chttp2_transport.cc
+index 988c076..b7464db 100644
+--- a/src/core/ext/transport/chttp2/transport/chttp2_transport.cc
++++ b/src/core/ext/transport/chttp2/transport/chttp2_transport.cc
+@@ -1403,6 +1403,12 @@ void grpc_chttp2_add_incoming_goaway(grpc_chttp2_transport* t,
+         to_cancel.push_back(id_stream.second);
+       }
+     }
++    // FDB simulation patch: stream_map iteration order depends on absl's
++    // per-process hash seed; cancel in stream-id order instead.
++    std::sort(to_cancel.begin(), to_cancel.end(),
++              [](grpc_chttp2_stream* a, grpc_chttp2_stream* b) {
++                return a->id < b->id;
++              });
+     for (auto s : to_cancel) {
+       s->trailing_metadata_buffer.Set(
+           grpc_core::GrpcStreamNetworkState(),
+@@ -2921,6 +2927,11 @@ static void end_all_the_calls(grpc_chttp2_transport* t,
+   for (auto id_stream : t->stream_map) {
+     to_cancel.push_back(id_stream.second);
+   }
++  // FDB simulation patch: see the GOAWAY path; cancel in stream-id order.
++  std::sort(to_cancel.begin(), to_cancel.end(),
++            [](grpc_chttp2_stream* a, grpc_chttp2_stream* b) {
++              return a->id < b->id;
++            });
+   for (auto s : to_cancel) {
+     grpc_chttp2_cancel_stream(t, s, error, false);
+   }
+@@ -3526,8 +3537,14 @@ static void destructive_reclaimer_locked(
+     grpc_error_handle error) {
+   t->destructive_reclaimer_registered = false;
+   if (error.ok() && !t->stream_map.empty()) {
+-    // As stream_map is a hash map, this selects effectively a random stream.
+-    grpc_chttp2_stream* s = t->stream_map.begin()->second;
++    // FDB simulation patch: abandon the lowest stream id rather than whichever
++    // stream the per-process hash seed puts first.
++    grpc_chttp2_stream* s =
++        std::min_element(t->stream_map.begin(), t->stream_map.end(),
++                         [](const auto& a, const auto& b) {
++                           return a.first < b.first;
++                         })
++            ->second;
+     GRPC_TRACE_LOG(resource_quota, INFO)
+         << "HTTP2: " << t->peer_string.as_string_view()
+         << " - abandon stream id " << s->id;
+-- 
+2.53.0
+

@@ -362,7 +362,10 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	bool isStableConnection() const override { return stableConnection; }
 
 	void peerClosed() {
-		leakedConnectionTracker = trackLeakedConnection(this);
+		// A connection this side already closed cannot leak, however late the peer closes its end.
+		if (!closedByCaller) {
+			leakedConnectionTracker = trackLeakedConnection(this);
+		}
 		armStopReceive();
 	}
 
@@ -2386,6 +2389,11 @@ public:
 			killProcess_internal(machine.machineProcess, KillType::KillInstantly);
 		}
 		machines.erase(machineId);
+	}
+
+	void addProcessListener(ProcessInfo* process, NetworkAddress addr) override {
+		process->listenerMap[addr] = makeReference<Sim2Listener>(process, addr);
+		addressMap[addr] = process;
 	}
 
 	void startRequestHandlerOnProcess(ProcessInfo* process,
