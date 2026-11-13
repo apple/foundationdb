@@ -163,7 +163,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( DBCONTEXT_EAGER_PROXY_UPDATE,          true ); if( randomize && isSimulated ) DBCONTEXT_EAGER_PROXY_UPDATE = deterministicRandom()->coinflip();
 	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 	init( STATUS_TIMEOUT,                         30.0 );
-	init( GRPC_CTL_SERVICE_DEFAULT_TIMEOUT,        5.0 );
+	init( GRPC_SERVICE_DEFAULT_TIMEOUT,            5.0 );
 	init( SEND_ENTIRE_VERSION_VECTOR,            false );
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin

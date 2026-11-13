@@ -22,13 +22,13 @@
 #include <fmt/format.h>
 #include <chrono>
 
-#include "fdbctl/ControlService.h"
+#include "fdbgrpc/ControlService.h"
 
-namespace fdbctl {
+namespace fdbgrpc {
 
 using namespace std::chrono_literals;
 
 ControlServiceImpl::ControlServiceImpl(Reference<IDatabase> db) : Service(), db_(db) {}
 
-} // namespace fdbctl
+} // namespace fdbgrpc
 #endif // FLOW_GRPC_ENABLED

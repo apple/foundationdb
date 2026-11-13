@@ -70,7 +70,7 @@ public:
 	bool DBCONTEXT_EAGER_PROXY_UPDATE;
 	double STATUS_IDLE_TIMEOUT;
 	double STATUS_TIMEOUT;
-	double GRPC_CTL_SERVICE_DEFAULT_TIMEOUT; // Default timeout for gRPC FDBCTL service requests
+	double GRPC_SERVICE_DEFAULT_TIMEOUT; // Default timeout for gRPC fdbgrpc service requests
 	bool SEND_ENTIRE_VERSION_VECTOR;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin

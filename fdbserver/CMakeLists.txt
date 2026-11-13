@@ -234,7 +234,7 @@ if(NOT OPEN_FOR_IDE)
   fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
 endif()
 
-target_link_libraries(fdbserver PUBLIC fdbctl)
+target_link_libraries(fdbserver PUBLIC fdbgrpc)
 
 if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
                                      # x-compiling.
