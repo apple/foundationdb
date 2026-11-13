@@ -103,6 +103,7 @@
 #include "fdbserver/storageserver/StorageServer.h"
 #include "fdbserver/core/WorkerInterface.h"
 #include "StorageServerUtils.h"
+#include "StorageServerRangeTransfer.h"
 #include "flow/CoroUtils.h"
 #include "flow/TDMetric.h"
 #include "flow/genericactors.h"
@@ -635,6 +636,7 @@ struct StorageServerDisk {
 	void markRangeAsActive(KeyRangeRef range) { storage->markRangeAsActive(range); }
 
 	Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
+		// Akanksha: calls IKeyValueStore::replaceRange to clear the range.
 		return storage->replaceRange(range, data);
 	}
 
@@ -6994,6 +6996,8 @@ void applyMutation(StorageServer* self,
 	}
 }
 
+// Akanksha: Remove the specified key range from the storage server's data.
+// update loop → applyPrivateData → changeServerKeys(not assigned) → removeDataRange
 void removeDataRange(StorageServer* ss,
                      Standalone<VerUpdateRef>& mLV,
                      KeyRangeMap<Reference<ShardInfo>>& shards,
@@ -7004,15 +7008,24 @@ void removeDataRange(StorageServer* ss,
 	// be forgotten
 
 	MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
+	// Akanksha: 1. Add range to the mutation log to ensure it is removed from RocksDB disk through Compaction.
 	clearRange = ss->addMutationToMutationLog(mLV, clearRange);
 
+	// Akanksha: 2.Get the SS memory changes as well.
 	auto& data = ss->mutableData();
 
+	// Akanksha: 3. Start from this shard end and move untill you find a shard that is owned by this storage server.
 	// Expand the range to the right to include other shards not in versionedData
 	for (auto r = shards.rangeContaining(range.end); r != shards.ranges().end() && !r->value()->isInVersionedData();
-	     ++r)
+	     ++r) {
 		range = KeyRangeRef(range.begin, r->end());
+	}
 
+	// Akanksha: 4. look into the SS's memory (sorted order) and
+	// returns the last entry whose key is less than range.end (shard removal extended).
+	// because entries in memory never overlap. So return last entry.
+	// And if endClear->getEndKey() > range.end (past) then split from range.end to endClear->getEndKey().
+	// Add it to memory + mutation log to ensure it is properly tracked and removed when necessary.
 	auto endClear = data.latestLastLess(range.end);
 	if (endClear && endClear->isClearTo() && endClear->getEndKey() > range.end) {
 		// This clear has been bumped up to insertVersion==data.getLatestVersion and needs a corresponding mutation log
@@ -7023,6 +7036,7 @@ void removeDataRange(StorageServer* ss,
 		++ss->counters.kvSystemClearRanges;
 	}
 
+	/// Akanksha: 5. Do the same thing before start key of the range.
 	auto beginClear = data.latestLastLess(range.begin);
 	if (beginClear && beginClear->isClearTo() && beginClear->getEndKey() > range.begin) {
 		// We don't need any special mutationLog entry - because the begin key and insert version are unchanged the
@@ -7033,6 +7047,7 @@ void removeDataRange(StorageServer* ss,
 		data.insert(KeyRef(beginClear.key()), ValueOrClearToRef::clearTo(rb), beginClear.insertVersion());
 	}
 
+	// Remove this shard mutations from memory.
 	data.erase(range.begin, range.end);
 }
 
@@ -7620,7 +7635,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	std::string bulkLoadLocalDir =
 	    joinPath(joinPath(data->bulkLoadFolder, dataMoveId.toString()), fetchKeysID.toString());
 	std::shared_ptr<BulkLoadFileSetKeyMap> localBulkLoadFileSets;
-	// Since the fetchKey can split, so multiple fetchzkeys can have the same data move id. We want each fetchkey
+	// Since the fetchKey can split, so multiple fetchkeys can have the same data move id. We want each fetchkey
 	// downloads its file without conflict, so we add fetchKeysID to the bulkLoadLocalDir.
 	PromiseStream<Key> destroyedFeeds;
 	FetchKeysMetricReporter metricReporter(fetchKeysID,
@@ -7633,6 +7648,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 	// Set read options to use non-caching reads and set Fetch type unless low priority data fetching is disabled by
 	// a knob
+	// TODO: FETCH_KEYS_LOWER_PRIORITY is not yet fully implemented.
 	ReadOptions readOptions = ReadOptions(
 	    {}, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
 
@@ -7647,7 +7663,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	}
 
 	// delay(0) to force a return to the run loop before the work of fetchKeys is started.
-	//  This allows adding->start() to be called inline with CSK.
+	// This allows adding->start() to be called inline with CSK.
 	try {
 		if (conductBulkLoad) {
 			TraceEvent(SevDebug, "SSBulkLoadFetchKeysBeforeCoreStarted", data->thisServerID)
@@ -7744,6 +7760,19 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			    .detail("DataMoveId", dataMoveId)
 			    .detail("Elapsed", now() - startTime);
 		}
+		/*
+		    Akanksha: No of shards to fetch in parallel is controlled by fetchKeysParallelismLock.
+		    In that shard/multiple shards,
+		    Commit Side:
+		        STORAGE_FETCH_BYTES = 2.5 MB controls commit speed to disk. Not the memory.
+		    Reading Side:
+		       FETCH_BLOCK_BYTES limits the size of each fetch block which is read from the storage server.
+
+		    For one ~200 MB shard:
+		        - ~100 requests of 2 MB, one after another, and
+		        - the copy never asks for more than one block at once.
+		        - While the writer waits on the 2.5 MB allowance, those blocks collect in results on the destination.
+		*/
 		co_await data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield);
 		FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 		if (conductBulkLoad) {
@@ -7965,17 +7994,21 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					rangeEnd = keys.end;
 				}
 			} else {
+				// Akanksha: Actually Read the range for the transferred shard using tryGetRange.
 				hold = tryGetRange(results, &tr, keys);
 				rangeEnd = keys.end;
 			}
 
 			Key blockBegin = keys.begin;
 
+			// Akanksha: Writing/Commiting the fetched keys stored in results into the storage engine.
 			{
 				Error err;
 				try {
 					while (true) {
 						CODE_PROBE(true, "Fetching keys for transferred shard");
+						// Akanksha: Wait for the fetch keys budget to be available before processing the next block.
+						// Which is 2.5MB for one storage server shared by all shard copies.
 						while (data->fetchKeysBudgetUsed.get()) {
 							std::vector<Future<Void>> delays;
 							if (SERVER_KNOBS->STORAGE_FETCH_KEYS_DELAY > 0) {
@@ -7984,6 +8017,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 							delays.push_back(data->fetchKeysBudgetUsed.onChange());
 							co_await waitForAll(delays);
 						}
+						// Akanksha: Get the block of key values from the results.
 						RangeResult this_block = co_await results.getFuture();
 
 						int expectedBlockSize =
@@ -8033,6 +8067,8 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						Key blockEnd =
 						    !this_block.empty() && this_block.more ? keyAfter(this_block.back().key) : keys.end;
 						KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
+						// Akanksha: calls clear(rangeRef) to clear the keys so that deleted keys don't appear and then
+						// add them.
 						co_await data->storage.replaceRange(blockRange, blockData);
 
 						if (conductBulkLoad) {
@@ -8046,6 +8082,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 						data->fetchKeysLimiter.addBytes(expectedBlockSize);
 
+						// Akanksha: Update the byte sample for each key-value pair in this block.
 						KeyValueRef* kvItr = this_block.begin();
 						for (; kvItr != this_block.end(); ++kvItr) {
 							data->byteSampleApplySet(*kvItr, invalidVersion);
@@ -8067,6 +8104,9 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				} catch (Error& e) {
 					err = e;
 				}
+
+				// Akanksha: Write has completed or the attempt has failed.
+
 				if (!fetchKeyCanRetry(err)) {
 					throw err;
 				}
@@ -8080,6 +8120,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					co_await data->knownCommittedVersion.whenAtLeast(fetchVersion);
 				}
+				// Akanksha: If nothing is written, apply jitter and continue and try again.
 				if (blockBegin == keys.begin) {
 					TraceEvent("FKBlockFail", data->thisServerID)
 					    .errorUnsuppressed(lastError)
@@ -8098,12 +8139,16 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					co_await delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 					continue;
 				}
+
+				// Akanksha: If some keys were written, then apply the split.
 				if (blockBegin < keys.end) {
+					// Akanksha: This one holds the mutations from the tlogs to apply.
 					std::deque<Standalone<VerUpdateRef>> updatesToSplit = std::move(shard->updates);
 
 					// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
 					// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own
 					// fetchKeys.
+					// Akanksha: It's for sharded rocksdb.
 					if (data->shardAware) {
 						StorageServerShard rightShard = data->shards[keys.begin]->toStorageServerShard();
 						rightShard.range = KeyRangeRef(blockBegin, keys.end);
@@ -8112,6 +8157,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						shard->server->addShard(leftShard);
 						shard->server->addShard(ShardInfo::newShard(data, rightShard));
 					} else {
+						// Akanksha: Split into two shards.
 						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard));
 						shard->server->addShard(ShardInfo::newAdding(
 						    data, KeyRangeRef(blockBegin, keys.end), shard->reason, shard->getSSBulkLoadMetadata()));
@@ -8127,6 +8173,8 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					shard = data->shards.rangeContaining(keys.begin).value()->getAddingShard();
 					warningLogger = logFetchKeysWarning(shard);
 					AddingShard* otherShard = data->shards.rangeContaining(blockBegin).value()->getAddingShard();
+					// Akanksha: Now every update or changes will be on left side. Already written.
+					// Remaining one will fetch again in while loop.
 					keys = shard->keys;
 
 					// Split our prior updates.  The ones that apply to our new, restricted key range will go back
@@ -8134,6 +8182,8 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// in WaitPrevious phase (hasn't chosen a fetchVersion yet). What we are doing here is expensive
 					// and could get more expensive if we started having many more blocks per shard. May need
 					// optimization in the future.
+					// Akanksha: It itertes over the mutations in updatesToSplit and add that mutation in addMutations
+					// of the appropriate shard.
 					for (auto u = updatesToSplit.begin(); u != updatesToSplit.end(); ++u) {
 						splitMutations(data, data->shards, *u);
 					}
@@ -8163,7 +8213,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		}
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
-		//  As we have finished this work, we will allow more work to start...
+		// As we have finished this work, we will allow more work to start...
 		shard->fetchComplete.send(Void());
 		if (SERVER_KNOBS->SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE) {
 			data->storage.markRangeAsActive(keys);
@@ -8355,6 +8405,7 @@ AddingShard::AddingShard(StorageServer* server,
                          const SSBulkLoadMetadata& ssBulkLoadMetadata)
   : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious),
     reason(reason), ssBulkLoadMetadata(ssBulkLoadMetadata) {
+	// Akanksha: By creating addingshard object when it sees a server jey mutation, we are calling fetchKeys.
 	fetchClient = fetchKeys(server, this);
 }
 
@@ -9605,9 +9656,32 @@ void changeServerKeys(StorageServer* data,
 	// validate())
 	oldShards.clear();
 	ranges.clear();
+	const Version removalVersion = data->data().getLatestVersion();
 	for (auto r = removeRanges.begin(); r != removeRanges.end(); ++r) {
-		removeDataRange(data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, *r);
+		removeDataRange(data, data->addVersionToMutationLog(removalVersion), data->shards, *r);
 		setAvailableStatus(data, *r, false);
+		if (SERVER_KNOBS->ROCKSDB_DELETE_FILES_ON_SHARD_REMOVAL) {
+			// Free the removed range's disk space without waiting for compaction: delete the SST files that lie fully
+			// inside it. The clear added by removeDataRange() above still removes every key; this only frees the space
+			// sooner. It runs in the background, after the clear is on disk, and is skipped if the range was moved back
+			// to this server in the meantime.
+			KeyRange removed = *r;
+			data->actors.add(deleteFilesInRemovedRange(
+			    data->storage.getKeyValueStore(),
+			    removed,
+			    data->durableVersion.whenAtLeast(removalVersion),
+			    [data, removed]() {
+				    // Reassigned in the meantime: files in the range may hold newly fetched data.
+				    auto shards = data->shards.intersectingRanges(removed);
+				    for (auto it = shards.begin(); it != shards.end(); ++it) {
+					    if (!it->value()->notAssigned()) {
+						    return false;
+					    }
+				    }
+				    return true;
+			    },
+			    data->thisServerID));
+		}
 	}
 
 	// Clear the moving-in empty range, and set it available at the latestVersion.

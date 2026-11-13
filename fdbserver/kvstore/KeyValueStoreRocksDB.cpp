@@ -70,6 +70,7 @@
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/checkpoint/RocksDBCheckpointUtils.h"
 #include "RocksDBCommon.h"
+#include "RocksDBRangeTransfer.h"
 
 #include "flow/CoroUtils.h"
 
@@ -1352,6 +1353,25 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			a.done.send(Void());
 		}
 
+		struct DeleteFilesInRangeAction : TypedAction<Writer, DeleteFilesInRangeAction> {
+			explicit DeleteFilesInRangeAction(KeyRangeRef range) : range(range) {}
+
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
+			const KeyRange range;
+			ThreadReturnPromise<Void> done;
+		};
+
+		void action(DeleteFilesInRangeAction& a) {
+			rocksdb::Status s = RocksDBRangeTransfer::deleteFilesInRange(db, cf, a.range, id);
+			if (!s.ok()) {
+				logRocksDBError(id, s, "DeleteFilesInRange");
+				a.done.sendError(statusToError(s));
+				return;
+			}
+			a.done.send(Void());
+		}
+
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			std::string path;
 			ThreadReturnPromise<Void> done;
@@ -2193,6 +2213,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return openFuture;
 	}
 
+	/**
+	    Akanksha: Set the specified key-value pair in the RocksDB store.
+	    1. Create a WriteBatch if it doesn't exist.
+	    2. Add the key-value pair to the batch.
+	    3. If single-key deletes on clear range are enabled, add the key to the keys set.
+	**/
 	void set(KeyValueRef kv, const Arena*) override {
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch(
@@ -2212,6 +2238,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
+	/**
+	    Akanksha: Clear the specified key range in the RocksDB store.
+	    1. Create a WriteBatch if it doesn't exist.
+	    2. If the clear covers exactly one key, add one Delete(key) to the batch.
+	**/
+
 	void clear(KeyRangeRef keyRange, const Arena*) override {
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch(
@@ -2220,6 +2252,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    SERVER_KNOBS->ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY, // protection_bytes_per_key
 			    0 /* default_cf_ts_sz default:0 */));
 			keysSet.clear();
+			// Akanksha: maxDeletes is 200.
 			maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
 			deletesPerCommit = 0;
 			deleteRangesPerCommit = 0;
@@ -2228,13 +2261,22 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		ASSERT(defaultFdbCF != nullptr);
 		// Number of deletes to rocksdb = counters.deleteKeyReqs + convertedDeleteKeyReqs;
 		// Number of deleteRanges to rocksdb = counters.deleteRangeReqs - counters.convertedDeleteRangeReqs;
+		// Akanksha: if keyRange can contain only one key ([key, key\x00), i.e. a client tr.clear(key)),
+		// add one Delete(key) to the batch.
 		if (keyRange.singleKeyRange() && !SERVER_KNOBS->ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE) {
 			writeBatch->Delete(defaultFdbCF, toSlice(keyRange.begin));
 			++counters.deleteKeyReqs;
 			--maxDeletes;
 			++deletesPerCommit;
 		} else {
+			// Akanksha: Either a Delete or DeleteRange based on knobs.
 			++counters.deleteRangeReqs;
+			/*
+			    Akanksha:
+			    ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is true by default
+			    ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE is false by default
+			    only check is maxDeletes > 0 (i.e., we still have room to perform single key deletes)
+			*/
 			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE &&
 			    !SERVER_KNOBS->ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE && maxDeletes > 0) {
 				++counters.convertedDeleteRangeReqs;
@@ -2256,6 +2298,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				readOptions.iterate_upper_bound = &endSlice;
 				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions, defaultFdbCF));
 				cursor->Seek(toSlice(keyRange.begin));
+				// Akanksha: Iterate over the keys in the range and delete them individually until maxDeletes is
+				// exhausted.
 				while (cursor->Valid() && toStringRef(cursor->key()) < keyRange.end && maxDeletes > 0) {
 					writeBatch->Delete(defaultFdbCF, cursor->key());
 					++counters.convertedDeleteKeyReqs;
@@ -2268,6 +2312,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
 					++deleteRangesPerCommit;
 				} else {
+					// Akanksha: Delete the keys from the keysSet (Put requests) that fall within the key range.
 					auto it = keysSet.lower_bound(keyRange.begin);
 					while (it != keysSet.end() && *it < keyRange.end) {
 						writeBatch->Delete(defaultFdbCF, toSlice(*it));
@@ -2276,6 +2321,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						it++;
 						++deletesPerCommit;
 					}
+					// Akanksha: Delete the keys from previous batch keys set that hasn't landed in RocksDB yet.
 					it = previousCommitKeysSet.lower_bound(keyRange.begin);
 					while (it != previousCommitKeysSet.end() && *it < keyRange.end) {
 						writeBatch->Delete(defaultFdbCF, toSlice(*it));
@@ -2286,6 +2332,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					}
 				}
 			} else {
+				// Akanksha: Performing a delete range.
 				writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
 				++deleteRangesPerCommit;
 			}
@@ -2555,6 +2602,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Void> compactRange(KeyRangeRef range) override {
 		auto a = new Writer::CompactRangeAction(range);
+		auto res = a->done.getFuture();
+		writeThread->post(a);
+		return res;
+	}
+
+	Future<Void> deleteFilesInRange(KeyRangeRef range) override {
+		auto a = new Writer::DeleteFilesInRangeAction(range);
 		auto res = a->done.getFuture();
 		writeThread->post(a);
 		return res;

@@ -638,7 +638,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_SET_READ_TIMEOUT,         		    !isSimulated );
 	init( ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES,         true ); if( randomize && buggify() )  ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES = false;
 	init( ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,                 false );
-	init( ROCKSDB_READ_RANGE_ROW_LIMIT,                        65535 ); if( randomize && buggify() )  ROCKSDB_READ_RANGE_ROW_LIMIT = deterministicRandom()->randomInt(2, 10);
+	init( ROCKSDB_DELETE_FILES_ON_SHARD_REMOVAL,               false ); if( randomize && buggify() ) ROCKSDB_DELETE_FILES_ON_SHARD_REMOVAL = true;
+	init( ROCKSDB_READ_RANGE_ROW_LIMIT,                       65535 ); if( randomize && buggify() )  ROCKSDB_READ_RANGE_ROW_LIMIT = deterministicRandom()->randomInt(2, 10);
 	init( ROCKSDB_READER_THREAD_PRIORITY,                          0 );
 	init( ROCKSDB_WRITER_THREAD_PRIORITY,                          0 );
 	init( ROCKSDB_COMPACTION_THREAD_PRIORITY,                      0 );
