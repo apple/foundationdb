@@ -104,14 +104,18 @@ S3BlobStoreEndpoint::S3BlobStoreEndpoint(std::string const& host,
                                          Optional<std::string> const& proxyPort,
                                          Optional<StringRef> const& creds,
                                          BlobKnobs const& knobs,
-                                         HTTP::Headers extraHeaders)
+                                         HTTP::Headers extraHeaders,
+                                         Optional<std::string> const& serverSideEncryption,
+                                         Optional<std::string> const& proxyParameter)
   : IBlobStoreEndpoint(host,
                        service,
                        region.empty() ? guessRegionFromDomain(host) : region,
                        proxyHost,
                        proxyPort,
                        knobs,
-                       extraHeaders),
+                       extraHeaders,
+                       serverSideEncryption,
+                       proxyParameter),
     credentials(parseS3Credentials(creds)), lookupKey(credentials.present() && credentials.get().key.empty()),
     lookupSecret(credentials.present() && credentials.get().secret.empty()) {
 	if (this->region.empty() && knobs.aws_v4_header) {
@@ -998,6 +1002,15 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 	headers["Authorization"] = authorizationHeader;
 }
 
+void S3BlobStoreEndpoint::setServerSideEncryptionHeader(HTTP::Headers& headers) const {
+	// The URL's sse parameter wins over the knob, so any backup can turn the header off with sse=none.
+	const std::string& type =
+	    serverSideEncryption.present() ? serverSideEncryption.get() : CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
+	if (!type.empty() && type != "none") {
+		headers["x-amz-server-side-encryption"] = type;
+	}
+}
+
 void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers) {
 	if (!credentials.present()) {
 		return;
@@ -1114,8 +1127,7 @@ Future<Void> writeEntireFileFromBuffer_impl(Reference<S3BlobStoreEndpoint> bstor
 	} else {
 		headers["Content-MD5"] = contentHash;
 	}
-	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
-		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
+	bstore->setServerSideEncryptionHeader(headers);
 	Reference<HTTP::IncomingResponse> r =
 	    co_await bstore->doRequest("PUT", resource, headers, pContent, contentLen, { 200 });
 }
@@ -1202,8 +1214,7 @@ static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStoreEndpoi
 	std::string token =
 	    (g_network->isSimulated() ? debugRandom() : nondeterministicRandom())->randomUniqueID().toString();
 	headers[multipartUploadTokenHeader] = token;
-	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
-		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
+	bstore->setServerSideEncryptionHeader(headers);
 	if (bstore->knobs.enable_object_integrity_check) {
 		// CRITICAL: Adding x-amz-checksum-algorithm to multipart initiation means ALL parts
 		// must include checksums and completion request must include ChecksumSHA256 tags.
@@ -1880,5 +1891,112 @@ TEST_CASE("/backup/s3/multipartCompletionIdentity") {
 	ASSERT(!multipartObjectMatches(response, "our-upload", 11));
 	response.data.headers.erase(multipartUploadTokenHeader);
 	ASSERT(!multipartObjectMatches(response, "our-upload", 10));
+	return Void();
+}
+
+// passedProxy stands in for the proxy given to openContainer, such as the agent's --proxy.
+static Reference<S3BlobStoreEndpoint> openTestEndpoint(const std::string& extraParams,
+                                                       Optional<std::string> passedProxy = {}) {
+	std::string resource;
+	std::string error;
+	S3BlobStoreEndpoint::ParametersT parameters;
+	return S3BlobStoreEndpoint::fromString(
+	    "blobstore://127.0.0.1:9000/resource_name?bucket=bucket_name&region=test_region" + extraParams,
+	    passedProxy,
+	    &resource,
+	    &error,
+	    &parameters);
+}
+
+// Returns the x-amz-server-side-encryption header an upload would send, with the knob set to knobValue.
+static std::string sseHeaderForUpload(const std::string& knobValue, const std::string& extraParams) {
+	const std::string originalKnobValue = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
+	setClientKnob("blobstore_encryption_type", KnobValueRef::create(knobValue));
+	HTTP::Headers headers;
+	openTestEndpoint(extraParams)->setServerSideEncryptionHeader(headers);
+	setClientKnob("blobstore_encryption_type", KnobValueRef::create(originalKnobValue));
+	auto it = headers.find("x-amz-server-side-encryption");
+	return it == headers.end() ? "<not sent>" : it->second;
+}
+
+TEST_CASE("/backup/s3/sse/defaultsToKnob") {
+	ASSERT_EQ(sseHeaderForUpload("aws:kms", ""), std::string("aws:kms"));
+	return Void();
+}
+
+TEST_CASE("/backup/s3/sse/urlOverridesKnob") {
+	ASSERT_EQ(sseHeaderForUpload("AES256", "&sse=aws:kms"), std::string("aws:kms"));
+	return Void();
+}
+
+TEST_CASE("/backup/s3/sse/noneSendsNoHeader") {
+	ASSERT_EQ(sseHeaderForUpload("aws:kms", "&sse=none"), std::string("<not sent>"));
+	return Void();
+}
+
+TEST_CASE("/backup/s3/sse/longNameAccepted") {
+	ASSERT_EQ(sseHeaderForUpload("", "&server_side_encryption=aws:kms"), std::string("aws:kms"));
+	return Void();
+}
+
+TEST_CASE("/backup/s3/sse/keptInResourceURL") {
+	std::string url = openTestEndpoint("&sse=none")->getResourceURL("resource_name", "bucket=bucket_name");
+	ASSERT(url.find("sse=none") != std::string::npos);
+	return Void();
+}
+
+TEST_CASE("/backup/s3/sse/emptyValueRejected") {
+	try {
+		openTestEndpoint("&sse=");
+		ASSERT(false); // not reached
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+	}
+	return Void();
+}
+
+TEST_CASE("/backup/s3/proxy/defaultsToPassedProxy") {
+	Reference<S3BlobStoreEndpoint> s3 = openTestEndpoint("", std::string("agent-proxy.example.com:3128"));
+	ASSERT_EQ(s3->proxyHost.orDefault(""), std::string("agent-proxy.example.com"));
+	return Void();
+}
+
+TEST_CASE("/backup/s3/proxy/urlOverridesPassedProxy") {
+	Reference<S3BlobStoreEndpoint> s3 =
+	    openTestEndpoint("&proxy=url-proxy.example.com:3128", std::string("agent-proxy.example.com:3128"));
+	ASSERT_EQ(s3->proxyHost.orDefault(""), std::string("url-proxy.example.com"));
+	return Void();
+}
+
+TEST_CASE("/backup/s3/proxy/noneConnectsDirectly") {
+	Reference<S3BlobStoreEndpoint> s3 = openTestEndpoint("&proxy=none", std::string("agent-proxy.example.com:3128"));
+	ASSERT(!s3->useProxy);
+	return Void();
+}
+
+TEST_CASE("/backup/s3/proxy/keptInResourceURL") {
+	std::string url =
+	    openTestEndpoint("&proxy=url-proxy.example.com:3128")->getResourceURL("resource_name", "bucket=bucket_name");
+	ASSERT(url.find("proxy=url-proxy.example.com:3128") != std::string::npos);
+	return Void();
+}
+
+TEST_CASE("/backup/s3/proxy/emptyValueRejected") {
+	try {
+		openTestEndpoint("&proxy=");
+		ASSERT(false); // not reached
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+	}
+	return Void();
+}
+
+TEST_CASE("/backup/s3/proxy/invalidValueRejected") {
+	try {
+		openTestEndpoint("&proxy=no_port");
+		ASSERT(false); // not reached
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+	}
 	return Void();
 }
