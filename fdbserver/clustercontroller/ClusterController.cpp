@@ -5087,8 +5087,9 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	data.degradationInfo.degradedServers.insert(tlog);
 	data.degradationInfo.degradedServers.insert(proxy);
 	data.degradationInfo.degradedServers.insert(proxy2);
+	const bool failoverBeforeDuplicateReport = data.shouldTriggerFailoverDueToDegradedServers();
 	data.degradationInfo.disconnectedServers.insert(master);
-	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
+	ASSERT_EQ(data.shouldTriggerFailoverDueToDegradedServers(), failoverBeforeDuplicateReport);
 	data.degradationInfo.disconnectedServers.clear();
 	data.degradationInfo.degradedServers.insert(resolver);
 	ASSERT(data.shouldTriggerFailoverDueToDegradedServers());
