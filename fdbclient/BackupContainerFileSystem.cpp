@@ -1466,7 +1466,7 @@ public:
 	                                                         RestorableFileSet restorable) {
 		Version end = logs.begin()->beginVersion;
 		computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
-		if (end >= targetVersion) {
+		if (end > targetVersion) {
 			restorable.continuousBeginVersion = logs.begin()->beginVersion;
 			restorable.continuousEndVersion = end;
 			return Optional<RestorableFileSet>(restorable);
@@ -1681,8 +1681,7 @@ public:
 			// it is valid restore set and proceed
 			if (!logs.empty() && logs.front().beginVersion <= minKeyRangeVersion) {
 				auto result = getRestoreSetFromLogs(logs, restorable.targetVersion, restorable);
-				if (!useBulkDump ||
-				    (result.present() && result.get().continuousEndVersion > restorable.targetVersion)) {
+				if (!useBulkDump || result.present()) {
 					if (latestBulkDump) {
 						best = std::move(result);
 						continue;
@@ -3271,6 +3270,10 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 	ASSERT_EQ(desc.snapshots[0].restorable, true);
 	ASSERT_EQ(desc.contiguousLogEnd, v);
 
+	Version nextLogBegin = v;
+	ASSERT((co_await c->getRestoreSet(nextLogBegin - 1)).present());
+	ASSERT(!(co_await c->getRestoreSet(nextLogBegin)).present());
+
 	// writing random number of more continuous log files
 	int newNumLogFiles = deterministicRandom()->randomInt(2, 8);
 	numLogFiles += newNumLogFiles;
@@ -3282,6 +3285,10 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 		v += logSize;
 	}
 	co_await waitForAll(writes);
+
+	auto extended = co_await c->getRestoreSet(nextLogBegin);
+	ASSERT(extended.present());
+	ASSERT_EQ(extended.get().logs.back().beginVersion, nextLogBegin);
 
 	BackupFileList fileList1 = co_await c->dumpFileList();
 	printFileList(fileList1);
