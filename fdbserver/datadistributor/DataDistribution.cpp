@@ -444,6 +444,8 @@ public:
 	// consumer is a yield stream from producer. The RelocateShard is pushed into relocationProducer and popped from
 	// relocationConsumer (by DDQueue)
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
+	// Keep startup retries across DD restarts until a queue can read the recovered shard boundaries.
+	PromiseStream<RelocateShard> deferredRetries;
 	PromiseStream<BulkLoadShardRequest> triggerShardBulkLoading;
 	Reference<PhysicalShardCollection> physicalShardCollection;
 	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
@@ -3319,6 +3321,9 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                       .lock = self->lock,
 			                       .db = self->txnProcessor,
 			                       .teamCollections = tcis,
+			                       .trackedShards = shards,
+			                       .shardBoundariesReady = self->context->tracker->shardBoundariesReady.getFuture(),
+			                       .deferredRetries = self->deferredRetries,
 			                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
 			                       .physicalShardCollection = self->physicalShardCollection,
 			                       .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
