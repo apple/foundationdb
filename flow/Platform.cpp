@@ -4771,3 +4771,34 @@ TEST_CASE("/flow/Platform/getNetworkTraffic") {
 	return Void();
 }
 #endif
+
+#ifdef __linux__
+#include <sys/time.h>
+
+struct PhysicalTimeForCpuUsage {
+	timespec lastCalledWallTime;
+	timespec lastCalledCpuTime;
+	PhysicalTimeForCpuUsage() { refresh(); }
+
+	void refresh() {
+		clock_gettime(CLOCK_REALTIME, &lastCalledWallTime);
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &lastCalledCpuTime);
+	}
+};
+
+IntervalCpuTimeRecord getCpuTimeDuringInterval() {
+	static thread_local PhysicalTimeForCpuUsage lastUsed;
+
+	auto oldTime = lastUsed;
+	lastUsed.refresh();
+
+	auto wallTimeDiff =
+	    (lastUsed.lastCalledWallTime.tv_sec - oldTime.lastCalledWallTime.tv_sec) +
+	    static_cast<double>(lastUsed.lastCalledWallTime.tv_nsec - oldTime.lastCalledWallTime.tv_nsec) / 1e9;
+	auto cpuTimeDiff =
+	    (lastUsed.lastCalledCpuTime.tv_sec - oldTime.lastCalledCpuTime.tv_sec) +
+	    static_cast<double>(lastUsed.lastCalledCpuTime.tv_nsec - oldTime.lastCalledCpuTime.tv_nsec) / 1e9;
+
+	return IntervalCpuTimeRecord{ wallTimeDiff, cpuTimeDiff };
+}
+#endif

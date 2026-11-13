@@ -950,4 +950,17 @@ EXTERNC void setProfilingEnabled(int enabled);
 #define _MM_HINT_T0 0 /* dummy -- not used */
 #endif
 
+#ifdef __linux__
+// The code might be included by C code.
+typedef struct {
+	double intervalTime;
+	double cpuTime;
+} IntervalCpuTimeRecord;
+
+/// Gets the average CPU usage, which is defined by the CPU time spent by the current thread divided by the wall-clock time,
+/// between the current call and the previous call to this function.
+/// This is implemented using the standard C library instead of FDB's internal timing mechanisms.
+IntervalCpuTimeRecord getCpuTimeDuringInterval();
+#endif // __linux__
+
 #endif /* FLOW_PLATFORM_H */
