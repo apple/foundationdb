@@ -21,7 +21,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
@@ -32,6 +37,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -74,6 +80,86 @@ var _ = Describe("Testing FDB Pod client", func() {
 				Name: nodeName,
 			},
 		})).To(Succeed())
+	})
+
+	It("recovers from an API outage without discovery", func() {
+		var failedRequest atomic.Bool
+		var discoveryRequests atomic.Int32
+		patches := make(chan map[string]string, 1)
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			writer.Header().Set("Content-Type", "application/json")
+			metadata := metav1.PartialObjectMetadata{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1"},
+				ObjectMeta: metav1.ObjectMeta{ResourceVersion: "1"},
+			}
+			switch request.URL.Path {
+			case "/api/v1/namespaces/" + namespace + "/pods":
+				metadata.Kind, metadata.Name, metadata.Namespace = "Pod", podName, namespace
+			case "/api/v1/nodes":
+				metadata.Kind, metadata.Name = "Node", nodeName
+			case "/api/v1/namespaces/" + namespace + "/pods/" + podName:
+				if request.Method != http.MethodPatch {
+					http.Error(writer, "expected Pod patch", http.StatusMethodNotAllowed)
+					return
+				}
+				pod := &corev1.Pod{}
+				if err := json.NewDecoder(request.Body).Decode(pod); err != nil {
+					http.Error(writer, err.Error(), http.StatusBadRequest)
+					return
+				}
+				patches <- pod.Annotations
+				_ = json.NewEncoder(writer).Encode(pod)
+				return
+			default:
+				discoveryRequests.Add(1)
+				http.Error(writer, "API discovery is unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if failedRequest.CompareAndSwap(false, true) {
+				http.Error(writer, "API unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if strings.Contains(request.Header.Get("Accept"), "as=PartialObjectMetadata") {
+				metadata.APIVersion, metadata.Kind = "meta.k8s.io/v1", "PartialObjectMetadata"
+			}
+			encoder := json.NewEncoder(writer)
+			if request.URL.Query().Get("watch") == "true" {
+				if request.URL.Query().Get("sendInitialEvents") == "true" {
+					_ = encoder.Encode(metav1.WatchEvent{Type: "ADDED", Object: runtime.RawExtension{Object: &metadata}})
+					metadata.ObjectMeta = metav1.ObjectMeta{
+						ResourceVersion: "1",
+						Annotations:     map[string]string{metav1.InitialEventsAnnotationKey: "true"},
+					}
+					_ = encoder.Encode(metav1.WatchEvent{Type: "BOOKMARK", Object: runtime.RawExtension{Object: &metadata}})
+				}
+				writer.(http.Flusher).Flush()
+				<-request.Context().Done()
+				return
+			}
+			_ = encoder.Encode(metav1.PartialObjectMetadataList{
+				TypeMeta: metav1.TypeMeta{APIVersion: metadata.APIVersion, Kind: metadata.Kind + "List"},
+				ListMeta: metav1.ListMeta{ResourceVersion: "1"},
+				Items:    []metav1.PartialObjectMetadata{metadata},
+			})
+		}))
+		DeferCleanup(server.Close)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		DeferCleanup(cancel)
+
+		podClient, err := createPodClient(ctx, GinkgoLogr, true, func(namespace, podName, nodeName string) (client.WithWatch, cache.Cache, error) {
+			return setupCacheWithConfig(&rest.Config{Host: server.URL}, namespace, podName, nodeName)
+		})
+		Expect(err).NotTo(HaveOccurred())
+		podMetadata, err := podClient.getPodMetadata(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(podMetadata.Name).To(Equal(podName))
+		nodeMetadata, err := podClient.getNodeMetadata(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(nodeMetadata.Name).To(Equal(nodeName))
+		Expect(failedRequest.Load()).To(BeTrue())
+		Expect(podClient.updateAnnotationsOnPod(ctx, map[string]string{"foundationdb.org/test": "ready"})).To(Succeed())
+		Expect(patches).To(Receive(HaveKeyWithValue("foundationdb.org/test", "ready")))
+		Expect(discoveryRequests.Load()).To(BeZero())
 	})
 
 	When("the kubernetesClient was started", func() {
