@@ -3483,12 +3483,14 @@ public:
 	// transaction system in the primary data center.
 	bool shouldTriggerRecoveryDueToDegradedServers() {
 		const bool ccExcluded = id_worker[clusterControllerProcessId].priorityInfo.isExcluded;
+		const int unhealthyServerCount = degradationInfo.unhealthyServerCount();
 		TraceEvent(SevInfo, "ShouldTriggerRecoveryDueToDegradedServers")
 		    .detail("DegradedServersSize", degradationInfo.degradedServers.size())
 		    .detail("DisconnectedServersSize", degradationInfo.disconnectedServers.size())
+		    .detail("UnhealthyServerCount", unhealthyServerCount)
 		    .detail("CCExcluded", ccExcluded);
 
-		if (degradationInfo.unhealthyServerCount() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
+		if (unhealthyServerCount > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
 			return false;
 		}
 
