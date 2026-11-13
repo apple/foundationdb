@@ -484,6 +484,12 @@ TEST_CASE("/backup/containers/localdir/FailedRenameCleanup") {
 #endif
 
 TEST_CASE("/backup/containers/localdir/AbandonedWriteCleanup") {
+#ifdef _WIN32
+	// The native Windows backend requires unbuffered I/O and cannot open a local backup writer.
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+#endif
 	const std::string dir = abspath(joinPath(params.getDataDir(), deterministicRandom()->randomUniqueID().toString()));
 	auto container = makeReference<BackupContainerLocalDirectory>("file://" + dir, Optional<std::string>(), 0);
 	Reference<IBackupFile> writer = co_await container->writeFile("log");

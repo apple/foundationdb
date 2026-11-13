@@ -67,6 +67,7 @@ public:
 		}
 		virtual ~Part() { etag.cancel(); }
 		Future<std::string> etag;
+		Future<std::string> uploadRequest;
 		int number;
 		UnsentPacketQueue content;
 		std::string checksumString; // Contains either MD5 or SHA256 based on use_sha256
@@ -150,9 +151,9 @@ public:
 	Future<std::string> doPartUpload(Part* p) {
 		p->finalizeChecksum();
 		std::string upload_id = co_await getUploadID();
-		std::string etag = co_await m_bstore->uploadPart(
+		p->uploadRequest = m_bstore->uploadPart(
 		    m_bucket, m_object, upload_id, p->number, &p->content, p->length, p->checksumString);
-		co_return etag;
+		co_return co_await p->uploadRequest;
 	}
 
 	Future<Void> doFinishUpload(int64_t totalSize) {
@@ -184,6 +185,7 @@ public:
 		// the upload ID so it is ready
 		Optional<std::string> checksumSHA256 =
 		    co_await m_bstore->finishMultiPartUpload(m_bucket, m_object, m_upload_id.get(), partSet, totalSize);
+		m_upload_id = Future<std::string>();
 
 		// Log the checksum if present - this is just a hash of the multipart structure, not the object content
 		if (checksumSHA256.present()) {
@@ -226,14 +228,43 @@ public:
 	int64_t debugFD() const override { return -1; }
 
 	~AsyncFileBlobStoreWrite() override {
-		m_upload_id.cancel();
 		m_finished.cancel();
-		m_parts.clear(); // Contains futures
+		if (m_upload_id.isValid()) {
+			for (const auto& part : m_parts) {
+				part->etag.cancel();
+			}
+			abortAbandonedUpload(m_bstore, m_bucket, m_object, std::move(m_upload_id), std::move(m_parts));
+		}
+		m_parts.clear(); // Release any part upload slots before destroying the lock.
 	}
 
 	std::string getFilename() const override { return m_object; }
 
 private:
+	static Future<Void> abortAbandonedUpload(Reference<IBlobStoreEndpoint> endpoint,
+	                                         std::string bucket,
+	                                         std::string object,
+	                                         Future<std::string> uploadID,
+	                                         std::vector<Reference<Part>> parts,
+	                                         Uncancellable = {}) {
+		try {
+			std::string id = co_await uploadID;
+			// The shared error signal can end an etag wait before its PUT has stopped using the part buffer.
+			for (const auto& part : parts) {
+				if (part->uploadRequest.isValid()) {
+					co_await ready(part->uploadRequest);
+				}
+			}
+			parts.clear();
+			co_await endpoint->abortMultiPartUpload(bucket, object, id);
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "AsyncFileBlobStoreAbortError")
+			    .errorUnsuppressed(e)
+			    .detail("Bucket", bucket)
+			    .detail("Object", object);
+		}
+	}
+
 	Reference<IBlobStoreEndpoint> m_bstore;
 	std::string m_bucket;
 	std::string m_object;

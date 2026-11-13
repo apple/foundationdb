@@ -384,6 +384,9 @@ public:
 	                                                            std::string const& uploadID,
 	                                                            MultiPartSetT const& parts,
 	                                                            int64_t totalSize = 0) = 0;
+	virtual Future<Void> abortMultiPartUpload(std::string const& bucket,
+	                                         std::string const& object,
+	                                         std::string const& uploadID) = 0;
 
 	// Get bucket contents via a stream, since listing large buckets will take many serial blob requests.
 	// If a delimiter is passed then common prefixes will be read in parallel, recursively, depending on recurseFilter.
