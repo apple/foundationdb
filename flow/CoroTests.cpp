@@ -31,8 +31,10 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <ranges>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
@@ -2209,6 +2211,66 @@ void assertNoThrowOnCancelDestroyedAfterFirstWait(NoThrowOnCancelRecorder const&
 	ASSERT_EQ(recorder.count(NoThrowOnCancelEvent::AfterWait), 0);
 }
 
+template <class Result, class NextWait>
+Result dropLastObserverWhileRunning(NoThrowOnCancelRecorder& recorder,
+                                    Future<Void> start,
+                                    std::optional<Result>& observer,
+                                    NextWait nextWait,
+                                    NoThrowOnCancel = {}) {
+	recorder.record(NoThrowOnCancelEvent::Start);
+	NoThrowOnCancelLifetimeTracker tracker(recorder);
+	try {
+		co_await start;
+		observer.reset();
+		recorder.record(NoThrowOnCancelEvent::WaitReturned);
+		if (nextWait.isValid()) {
+			co_await nextWait;
+			recorder.record(NoThrowOnCancelEvent::AfterWait);
+		}
+	} catch (Error&) {
+		recorder.record(NoThrowOnCancelEvent::CatchBlock);
+	}
+	co_return;
+}
+
+template <class Result>
+void checkDropLastObserverWhileRunning() {
+	auto check = [](auto nextWait) {
+		NoThrowOnCancelRecorder recorder;
+		Promise<Void> start;
+		std::optional<Result> observer;
+		observer.emplace(dropLastObserverWhileRunning(recorder, start.getFuture(), observer, std::move(nextWait)));
+		ASSERT(!observer->isReady());
+		start.send(Void());
+		ASSERT(!observer.has_value());
+		assertNoThrowOnCancelDestroyedAfterFirstWait(recorder);
+	};
+	Promise<Void> pending;
+	check(Future<Void>());
+	check(Future<Void>(Void()));
+	check(pending.getFuture());
+	check(delayedAsyncResultVoid(Void()));
+	check(delayedAsyncResultVoid(pending.getFuture()));
+	ASSERT_EQ(pending.getFutureReferenceCount(), 0);
+}
+
+template <class Result>
+void checkCancellationDiscardsReturnedValue() {
+	auto producer = [](Future<Void> start, Result& result, NoThrowOnCancel = {}) -> Result {
+		co_await start;
+		result.cancel();
+		co_return LifetimeTracked{};
+	};
+	const int initialLiveCount = LifetimeTracked::liveCount;
+	Promise<Void> start;
+	Result result;
+	result = producer(start.getFuture(), result);
+	start.send(Void());
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), error_code_actor_cancelled);
+	ASSERT_EQ(LifetimeTracked::liveCount, initialLiveCount);
+}
+
 template <typename T>
 Future<Void> simple_await_test(std::stringstream& ss, Future<T> f) {
 	ss << "start. ";
@@ -2950,6 +3012,18 @@ TEST_CASE("/flow/coro/noThrowOnCancel/normalCompletionValue") {
 	return Void();
 }
 
+TEST_CASE("/flow/coro/noThrowOnCancel/dropLastObserverWhileRunning") {
+	checkDropLastObserverWhileRunning<Future<Void>>();
+	checkDropLastObserverWhileRunning<AsyncResult<Void>>();
+	return Void();
+}
+
+TEST_CASE("/flow/coro/noThrowOnCancel/reentrantCancelDiscardsReturnedValue") {
+	checkCancellationDiscardsReturnedValue<Future<LifetimeTracked>>();
+	checkCancellationDiscardsReturnedValue<AsyncResult<LifetimeTracked>>();
+	return Void();
+}
+
 TEST_CASE("/flow/coro/noThrowOnCancel/awaitedFutureErrorRunsCatch") {
 	NoThrowOnCancelRecorder recorder;
 	Promise<Void> signal;
@@ -3008,6 +3082,88 @@ TEST_CASE("/flow/coro/noThrowOnCancel/futureStreamCancel") {
 	ASSERT(f.isReady() && f.isError() && f.getError().code() == error_code_actor_cancelled);
 	ASSERT(stream.getFutureReferenceCount() == 0);
 	assertNoThrowOnCancelDestroyedAtWait(recorder);
+	return Void();
+}
+
+namespace {
+class OnCopy {
+public:
+	explicit OnCopy(std::function<void()> action) : action(std::move(action)) {}
+	OnCopy(const OnCopy& other) : action(other.action) { action(); }
+	OnCopy(OnCopy&&) noexcept = default;
+	OnCopy& operator=(const OnCopy&) = default;
+	OnCopy& operator=(OnCopy&&) noexcept = default;
+
+private:
+	std::function<void()> action;
+};
+
+template <class Result>
+void checkCancellationDuringStreamDelivery() {
+	auto consume = [](FutureStream<OnCopy> input, std::string& events) -> Result {
+		ScopeExit cleanup([&events] { events += "cleanup"; });
+		try {
+			co_await input;
+			events += "received ";
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_actor_cancelled);
+			events += "cancelled ";
+			throw;
+		}
+	};
+
+	std::string events;
+	PromiseStream<OnCopy> stream;
+	std::optional<Result> waiter(consume(stream.getFuture(), events));
+	const OnCopy value([&] {
+		waiter.reset();
+		events += "copied ";
+	});
+	stream.send(value);
+	ASSERT_EQ(events, "copied cancelled cleanup"s);
+	ASSERT(!waiter.has_value());
+	ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+}
+} // namespace
+
+TEST_CASE("/flow/coro/cancelDuringStreamDelivery") {
+	checkCancellationDuringStreamDelivery<Future<Void>>();
+	checkCancellationDuringStreamDelivery<AsyncResult<Void>>();
+	return Void();
+}
+
+TEST_CASE("/flow/coro/noThrowOnCancel/cancelDuringStreamDelivery") {
+	auto consume = [](FutureStream<OnCopy> input, NoThrowOnCancel = {}) -> Future<Void> {
+		co_await input;
+		ASSERT(false);
+	};
+	PromiseStream<OnCopy> stream;
+	auto waiter = consume(stream.getFuture());
+	const OnCopy value([&] {
+		waiter.cancel();
+		stream.sendError(end_of_stream());
+		ASSERT(!waiter.isReady());
+	});
+	stream.send(value);
+	ASSERT(waiter.isError());
+	ASSERT_EQ(waiter.getError().code(), error_code_actor_cancelled);
+	ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+
+	PromiseStream<OnCopy> throwingStream;
+	auto failedWaiter = consume(throwingStream.getFuture());
+	const OnCopy throwingValue([&] {
+		throwingStream.sendError(end_of_stream());
+		throw io_error();
+	});
+	try {
+		throwingStream.send(throwingValue);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+	ASSERT(failedWaiter.isError());
+	ASSERT_EQ(failedWaiter.getError().code(), error_code_io_error);
+	ASSERT_EQ(throwingStream.getFuture().getError().code(), error_code_end_of_stream);
 	return Void();
 }
 
@@ -3182,6 +3338,104 @@ TEST_CASE("/flow/coro/raceStreamSuccess") {
 	co_return;
 }
 
+namespace {
+struct RaceStreamItem {
+	int value;
+	std::function<void()> onCopy;
+
+	explicit RaceStreamItem(int value, std::function<void()> onCopy = {}) : value(value), onCopy(std::move(onCopy)) {}
+	RaceStreamItem(const RaceStreamItem& other) : value(other.value), onCopy(other.onCopy) {
+		if (onCopy) {
+			onCopy();
+		}
+	}
+	RaceStreamItem(RaceStreamItem&&) noexcept = default;
+};
+} // namespace
+
+TEST_CASE("/flow/coro/raceStreamDropLastObserverDuringCopy") {
+	PromiseStream<RaceStreamItem> winner;
+	Promise<Void> loser;
+	auto raced = race(winner.getFuture(), loser.getFuture());
+	const RaceStreamItem item(1, [&] { raced = {}; });
+	winner.send(item);
+	ASSERT(!raced.isValid());
+	ASSERT_EQ(winner.getFutureReferenceCount(), 0);
+	ASSERT_EQ(loser.getFutureReferenceCount(), 0);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceStreamCancelDuringCopy") {
+	PromiseStream<RaceStreamItem> winner;
+	Promise<Void> loser;
+	auto raced = race(winner.getFuture(), loser.getFuture());
+	const RaceStreamItem item(1, [&] { raced.cancel(); });
+	winner.send(item);
+	ASSERT(raced.isError());
+	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);
+	ASSERT_EQ(winner.getFutureReferenceCount(), 0);
+	ASSERT_EQ(loser.getFutureReferenceCount(), 0);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceStreamNestedSendsDuringCopy") {
+	PromiseStream<RaceStreamItem> winner;
+	PromiseStream<int> loser;
+	auto raced = race(winner.getFuture(), loser.getFuture());
+	const RaceStreamItem first(1, [&] {
+		loser.send(3);
+		winner.send(RaceStreamItem(2));
+	});
+	winner.send(first);
+	ASSERT(raced.canGet());
+	ASSERT_EQ(raced.get().index(), 0);
+	ASSERT_EQ(std::get<0>(raced.get()).value, 1);
+	ASSERT_EQ(winner.getFuture().pop().value, 2);
+	ASSERT_EQ(loser.getFuture().pop(), 3);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceStreamThrowDuringCopy") {
+	PromiseStream<RaceStreamItem> winner;
+	Promise<Void> loser;
+	auto raced = race(winner.getFuture(), loser.getFuture());
+	const RaceStreamItem item(1, [] { throw io_error(); });
+	winner.send(item);
+	ASSERT(raced.isError());
+	ASSERT_EQ(raced.getError().code(), error_code_io_error);
+	ASSERT_EQ(winner.getFutureReferenceCount(), 0);
+	ASSERT_EQ(loser.getFutureReferenceCount(), 0);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceFutureThrowDuringCopyPreservesOtherWaiters") {
+	Promise<RaceStreamItem> winner;
+	auto source = winner.getFuture();
+	int observed = 0;
+	auto otherWaiter = Choose().When(source, [&](const RaceStreamItem& item) { observed = item.value; }).run();
+	// The most recently registered Future callback runs first.
+	auto raced = race(source);
+	winner.send(RaceStreamItem(17, [&] {
+		ASSERT_EQ(observed, 0);
+		throw io_error();
+	}));
+	ASSERT(raced.isError());
+	ASSERT_EQ(raced.getError().code(), error_code_io_error);
+	ASSERT(otherWaiter.canGet());
+	ASSERT_EQ(observed, 17);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceFutureResetPromiseDuringValueConstruction") {
+	Promise<RaceStreamItem> winner;
+	auto raced = race(winner.getFuture());
+	const RaceStreamItem item(17, [&] { winner.reset(); });
+	winner.send(item);
+	ASSERT(raced.canGet());
+	ASSERT_EQ(std::get<0>(raced.get()).value, 17);
+	return Void();
+}
+
 TEST_CASE("/flow/coro/raceThreadFutureStreamSuccess") {
 	ThreadReturnPromiseStream<int> intStream;
 	Promise<std::string> stringPromise;
@@ -3221,6 +3475,25 @@ TEST_CASE("/flow/coro/raceAsyncResultReady") {
 	return Void();
 }
 
+TEST_CASE("/flow/coro/raceReadyKeepsSourceAliveDuringCopy") {
+	auto check = [](auto source) {
+		using Source = decltype(source);
+		auto ready = [](RaceStreamItem item) -> Source { co_return item; };
+		source = ready(RaceStreamItem(17, [&source, lifetime = Future<Void>(Never())] {
+			// Each copy of the payload holds one reference, including the source the race is copying from.
+			const int live = lifetime.getFutureReferenceCount();
+			ASSERT(source.isValid());
+			source = Source{};
+			ASSERT_EQ(lifetime.getFutureReferenceCount(), live);
+		}));
+		auto raced = race(std::move(source));
+		ASSERT_EQ(std::get<0>(raced.get()).value, 17);
+	};
+	check(Future<RaceStreamItem>{});
+	check(AsyncResult<RaceStreamItem>{});
+	return Void();
+}
+
 TEST_CASE("/flow/coro/raceAsyncResultSuccess") {
 	Promise<Void> signal;
 	Promise<std::string> stringPromise;
@@ -3231,6 +3504,218 @@ TEST_CASE("/flow/coro/raceAsyncResultSuccess") {
 	ASSERT_EQ(result.index(), 0);
 	ASSERT_EQ(std::get<0>(result), 19);
 	co_return;
+}
+
+namespace {
+struct ThrowOnRaceMove {
+	void (*throwError)();
+	explicit ThrowOnRaceMove(void (*throwError)()) : throwError(throwError) {}
+	ThrowOnRaceMove(const ThrowOnRaceMove&) = default;
+	ThrowOnRaceMove(ThrowOnRaceMove&& other) { other.throwError(); }
+};
+
+void checkRaceAsyncResultThrowDuringMove(void (*throwError)(), int expectedCode) {
+	auto producer = [](Future<Void> start, void (*throwError)()) -> AsyncResult<ThrowOnRaceMove> {
+		co_await start;
+		const ThrowOnRaceMove item(throwError);
+		co_return item; // Copy into producer storage. Moving into the race is the operation that throws.
+	};
+	Promise<Void> start;
+	auto raced = race(producer(start.getFuture(), throwError));
+	start.send(Void());
+	ASSERT(raced.isError());
+	ASSERT_EQ(raced.getError().code(), expectedCode);
+}
+} // namespace
+
+TEST_CASE("/flow/coro/raceReadyThrowDuringMove") {
+	const ThrowOnRaceMove item([] { throw io_error(); });
+	Future<ThrowOnRaceMove> source(item);
+	try {
+		(void)race(source); // Copies into the variant, then throws while moving it into the result Future.
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+	ASSERT(source.canGet());
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceAsyncResultThrowDuringMove") {
+	checkRaceAsyncResultThrowDuringMove([] { throw io_error(); }, error_code_io_error);
+	return Void();
+}
+
+// Both the simulated (/) and real-cluster (noSim/) workloads treat SystemError as a failure.
+TEST_CASE("standalone/flow/coro/raceAsyncResultThrowDuringMove") {
+	checkRaceAsyncResultThrowDuringMove([] { throw std::runtime_error("move failed"); }, error_code_unknown_error);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceAsyncResultLoserCleanup") {
+	auto sendOnExit = [](Future<Void> signal, PromiseStream<int> stream, Promise<Void>& winner) -> AsyncResult<Void> {
+		ScopeExit cleanup([&] {
+			winner.reset();
+			stream.send(17);
+		});
+		co_await signal;
+	};
+
+	for (Error outcome : { Error(), io_error(), broken_promise() }) {
+		Promise<Void> pending;
+		PromiseStream<int> cleanupStream;
+		Promise<Void> winner;
+		auto loser = sendOnExit(pending.getFuture(), cleanupStream, winner);
+		// The race owns the only winning Future. Loser cleanup resets its only Promise during dispatch.
+		auto raced = race(std::move(loser), cleanupStream.getFuture(), winner.getFuture());
+		if (outcome.code() == error_code_broken_promise) {
+			winner.reset();
+		} else if (outcome.isValid()) {
+			winner.sendError(outcome);
+		} else {
+			winner.send(Void());
+		}
+		if (outcome.isValid()) {
+			ASSERT(raced.isError());
+			ASSERT_EQ(raced.getError().code(), outcome.code());
+		} else {
+			ASSERT(raced.canGet());
+			ASSERT_EQ(raced.get().index(), 2);
+		}
+		ASSERT(winner.canBeSet());
+		ASSERT_EQ(pending.getFutureReferenceCount(), 0);
+		ASSERT_EQ(cleanupStream.getFuture().pop(), 17);
+	}
+	return Void();
+}
+
+namespace {
+template <class Handle>
+AsyncResult<Void> takeReplacementOnCancel(Handle& handle, const Handle& expected, Handle& saved) {
+	ScopeExit cleanup([&] {
+		// Only move a live reference. The old state's last reference is already being released.
+		if (handle == expected) {
+			saved = std::move(handle);
+		}
+	});
+	co_await Future<Void>(Never());
+}
+} // namespace
+
+TEST_CASE("/flow/coro/raceReplaceLastObserverDuringLoserCleanup") {
+	for (bool move : { false, true }) {
+		Future<std::variant<Void>> raced, saved;
+		Future<std::variant<Void>> expected = Never();
+		auto replacement = expected;
+		raced = race(takeReplacementOnCancel(raced, expected, saved));
+		if (move) {
+			raced = std::move(replacement);
+		} else {
+			raced = replacement;
+		}
+		ASSERT(saved == expected);
+		ASSERT(!raced.isValid());
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceReplaceAsyncResultDuringLoserCleanup") {
+	std::optional<AsyncResult<int>> outer;
+	AsyncResult<int> saved;
+	auto loser = [](std::optional<AsyncResult<int>>& outer, AsyncResult<int>& saved) -> AsyncResult<Void> {
+		ScopeExit cleanup([&] {
+			if (outer->canGet()) {
+				saved = std::move(*outer);
+				outer.reset();
+			}
+		});
+		co_await Future<Void>(Never());
+	};
+	auto waitForLoser = [](AsyncResult<Void> input) -> AsyncResult<int> {
+		co_await race(std::move(input));
+		co_return 0;
+	};
+	outer.emplace(waitForLoser(loser(outer, saved)));
+	*outer = immediateAsyncResultInt(17);
+	ASSERT(!outer.has_value());
+	ASSERT(saved.canGet());
+	ASSERT_EQ(saved.get(), 17);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceReplaceStreamSenderDuringLoserCleanup") {
+	for (bool move : { false, true }) {
+		PromiseStream<int> sender, expected, saved;
+		auto replacement = expected;
+		auto original = sender.getFuture();
+		auto raced = race(original, takeReplacementOnCancel(sender, expected, saved));
+		if (move) {
+			sender = std::move(replacement);
+		} else {
+			sender = replacement;
+		}
+		ASSERT(raced.isError());
+		ASSERT_EQ(raced.getError().code(), error_code_broken_promise);
+		ASSERT(saved == expected);
+		saved.send(17);
+		ASSERT_EQ(expected.getFuture().pop(), 17);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceReplaceStreamReaderDuringLoserCleanup") {
+	for (bool move : { false, true }) {
+		PromiseStream<int> oldSender, newSender;
+		auto reader = oldSender.getFuture();
+		auto expected = newSender.getFuture();
+		auto replacement = expected;
+		FutureStream<int> saved;
+		oldSender.send(1);
+		auto raced = race(oldSender.onEmpty(), takeReplacementOnCancel(reader, expected, saved));
+		oldSender = {};
+		// The last reader now owns the buffered queue. Releasing it breaks onEmpty and cancels the loser.
+		ASSERT(!raced.isReady());
+		if (move) {
+			reader = std::move(replacement);
+		} else {
+			reader = replacement;
+		}
+		ASSERT(raced.isError());
+		ASSERT_EQ(raced.getError().code(), error_code_broken_promise);
+		ASSERT(saved == expected);
+		ASSERT(!reader.isValid());
+		newSender.send(17);
+		ASSERT_EQ(saved.pop(), 17);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceRunningNoThrowOnCancelAsyncResultLoses") {
+	bool producerCleanedAfterSend = false;
+	Promise<Void> resumeProducer;
+	Promise<Void> winner;
+	Promise<Void> pending;
+	auto producer = [](Future<Void> start,
+	                   Promise<Void> other,
+	                   Future<Void> next,
+	                   bool& cleanedAfterSend,
+	                   NoThrowOnCancel) -> AsyncResult<Void> {
+		bool sendReturned = false;
+		ScopeExit cleanup([&] { cleanedAfterSend = sendReturned; });
+		co_await start;
+		other.send(Void());
+		sendReturned = true;
+		co_await next;
+	};
+
+	auto loser = producer(resumeProducer.getFuture(), winner, pending.getFuture(), producerCleanedAfterSend, {});
+	auto raced = race(std::move(loser), winner.getFuture());
+	resumeProducer.send(Void());
+	ASSERT(raced.canGet());
+	ASSERT_EQ(raced.get().index(), 1);
+	ASSERT(producerCleanedAfterSend);
+	ASSERT_EQ(pending.getFutureReferenceCount(), 0);
+	return Void();
 }
 
 TEST_CASE("/flow/coro/raceAsyncResultError") {

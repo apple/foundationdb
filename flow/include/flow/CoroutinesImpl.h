@@ -22,6 +22,7 @@
 #define FLOW_COROUTINESIMPL_H
 
 #include "flow/FlowThread.h"
+#include "flow/ScopeExit.h"
 #include "flow/flow.h"
 
 template <class T>
@@ -44,6 +45,28 @@ struct AwaitCancelHandler {
 	virtual ~AwaitCancelHandler() = default;
 	virtual void cancelWait() = 0;
 };
+
+template <class Promise>
+bool readyOnCancellation(Promise* promise) {
+	// Destructive cancellation must reach await_suspend, even for an already-ready input.
+	if constexpr (Promise::noThrowOnCancel) {
+		return false;
+	} else {
+		promise->waitState() = ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK;
+		return true;
+	}
+}
+
+template <class Promise>
+bool finishCancellationAtSuspend(Promise* promise) {
+	if constexpr (Promise::noThrowOnCancel) {
+		if (actorWaitStateIsCancelled(promise->waitState())) {
+			promise->finishCancellation();
+			return true;
+		}
+	}
+	return false;
+}
 
 // Pass this as the first argument to a coroutine to record the exact frame
 // size that its promise allocator receives. The argument is consumed during
@@ -210,10 +233,18 @@ struct NoThrowOnCancelCoroActor final : Actor<std::conditional_t<std::is_void_v<
 	template <class U>
 	void set(U&& value) {
 		new (&SAV<ValType>::value()) ValType(std::forward<U>(value));
-		SAV<ValType>::error_state = Error(SAV<ValType>::SET_ERROR_CODE);
+		if (actorWaitStateIsCancelled(waitState())) {
+			// The value constructor itself can synchronously request cancellation.
+			SAV<ValType>::error_state = actor_cancelled();
+			destruct(SAV<ValType>::value());
+		} else {
+			SAV<ValType>::error_state = Error(SAV<ValType>::SET_ERROR_CODE);
+		}
 	}
 
-	void setError(Error const& e) { SAV<ValType>::error_state = e; }
+	void setError(Error const& e) {
+		SAV<ValType>::error_state = actorWaitStateIsCancelled(waitState()) ? actor_cancelled() : e;
+	}
 
 	void setCancelHandler(AwaitCancelHandler* handler) { cancelHandler = handler; }
 	void clearCancelHandler(AwaitCancelHandler* handler) {
@@ -235,9 +266,15 @@ struct NoThrowOnCancelCoroActor final : Actor<std::conditional_t<std::is_void_v<
 			return;
 		}
 
-		// Detaching a waiter or destroying the frame can synchronously reenter cancellation.
+		// A running coroutine can lose its last observer inside a synchronous callback.
+		// Mark cancellation before detaching a waiter, which can also reenter cancel().
 		Actor<ValType>::actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
+		if (cancelHandler) {
+			finishCancellation();
+		}
+	}
 
+	void finishCancellation() {
 		if (cancelHandler) {
 			// The handler object is stored in the coroutine frame, so unregister
 			// it from its wait source before destroying the frame below.
@@ -368,32 +405,31 @@ public:
 			return;
 		}
 
-		if (noThrowOnCancel) {
-			if (producerCancelHandler) {
-				// The handler object is inside producerHandle's coroutine frame.
-				// Clear the wait source first so it cannot resume freed storage.
-				auto handler = producerCancelHandler;
-				producerCancelHandler = nullptr;
-				handler->cancelWait();
-			}
-			auto h = producerHandle;
-			producerHandle = {};
-			producerWaitState = nullptr;
-			// Hold the consumer-visible state, but discard the producer frame
-			// instead of resuming it through actor_cancelled().
-			h.destroy();
-			setError(actor_cancelled());
-			complete();
-			delRef();
-			return;
-		}
-
 		auto prevWaitState = *producerWaitState;
 		*producerWaitState = ACTOR_WAIT_STATE_CANCELLED;
-		if (actorWaitStateIsWaiting(prevWaitState)) {
+		if (noThrowOnCancel) {
+			if (!actorWaitStateIsCancelled(prevWaitState) && producerCancelHandler) {
+				finishCancellation();
+			}
+		} else if (actorWaitStateIsWaiting(prevWaitState)) {
 			auto h = producerHandle;
 			h.resume();
 		}
+	}
+
+	void finishCancellation() {
+		if (producerCancelHandler) {
+			auto handler = producerCancelHandler;
+			producerCancelHandler = nullptr;
+			handler->cancelWait();
+		}
+		auto h = producerHandle;
+		producerHandle = {};
+		producerWaitState = nullptr;
+		h.destroy();
+		setError(actor_cancelled());
+		complete();
+		delRef();
 	}
 
 	void complete() {
@@ -469,13 +505,15 @@ struct AwaitableAsyncResult : AwaitCancelHandler {
 	[[nodiscard]] bool await_ready() const {
 		ASSERT(result.resultState);
 		if (actorWaitStateIsCancelled(pt->waitState())) {
-			pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
-			return true;
+			return readyOnCancellation(pt);
 		}
 		return result.resultState->isReady();
 	}
 
 	void await_suspend(n_coroutine::coroutine_handle<> h) {
+		if (finishCancellationAtSuspend(pt)) {
+			return;
+		}
 		ASSERT(result.resultState);
 		pt->setHandle(h);
 		pt->waitState() = ACTOR_WAIT_STATE_WAITING;
@@ -498,7 +536,7 @@ struct AwaitableAsyncResult : AwaitCancelHandler {
 			if (result.resultState) {
 				result.resultState->clearContinuation();
 			}
-		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
+		case ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK:
 			throw actor_cancelled();
 		}
 
@@ -589,19 +627,16 @@ template <class Awaiter, class ValueType>
 struct AwaitableResume<Awaiter, ValueType, /* IsStream = */ true, /* ReturnsExplicitVoid = */ false> {
 	ValueType await_resume() {
 		auto self = static_cast<Awaiter*>(this);
-		if (self->pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING) {
-			if (self->future.isError()) {
-				throw self->future.getError();
-			}
-			return self->future.pop();
+		if (self->pt->waitState() != ACTOR_WAIT_STATE_NOT_WAITING) {
+			self->resumeImpl();
 		}
-		if (self->resumeImpl()) {
-			if (self->future.isError()) {
-				throw self->future.getError();
-			}
-			return self->future.pop();
+		if (self->store.isSet()) {
+			return std::move(self->store).get();
 		}
-		return std::move(self->store).get();
+		if (self->future.isError()) {
+			throw self->future.getError();
+		}
+		return self->future.pop();
 	}
 };
 
@@ -615,45 +650,72 @@ public:
 	[[maybe_unused]] [[nodiscard]] bool await_ready() const {
 		auto* self = static_cast<const Awaiter*>(this);
 		if (actorWaitStateIsCancelled(self->pt->waitState())) {
-			self->pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
-			return true;
+			return readyOnCancellation(self->pt);
 		}
 		return self->future.isReady();
 	}
 
 	[[maybe_unused]] void await_suspend(n_coroutine::coroutine_handle<> handle) {
 		auto* self = static_cast<Awaiter*>(this);
+		if (finishCancellationAtSuspend(self->pt)) {
+			return;
+		}
 		self->pt->setHandle(handle);
 		self->pt->waitState() = ACTOR_WAIT_STATE_WAITING;
 
 		auto callbackFuture = self->getCallbackFuture();
 		callbackFuture.addCallbackAndClear(self);
 		self->pt->setCancelHandler(this);
+		// Registering a tracked stream can release a reference. Finishing cancellation here can destroy the frame.
+		finishCancellationAtSuspend(self->pt);
 	}
 
 	// NoThrowOnCancel destroys the coroutine frame instead of resuming this
 	// awaiter, so detach its callback before destroying the frame.
 	void cancelWait() override { static_cast<Awaiter*>(this)->remove(); }
 
-	bool resumeImpl() {
+	void resumeImpl() {
 		auto* self = static_cast<Awaiter*>(this);
 		self->pt->clearCancelHandler(this);
 		switch (self->pt->waitState()) {
 		case ACTOR_WAIT_STATE_CANCELLED:
 			self->remove();
-		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
-			// await_ready() observed cancellation before callback registration.
+		case ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK:
 			throw actor_cancelled();
 		}
 
-		bool wasReady = self->pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING;
 		if (actorWaitStateIsWaiting(self->pt->waitState())) {
-			self->remove();
 			self->pt->waitState() = ACTOR_WAIT_STATE_NOT_WAITING;
+			self->remove();
 		}
-		return wasReady;
 	}
 };
+
+template <class Awaiter, class Value>
+void deliverStreamValue(Awaiter& awaiter, Value&& value) {
+	auto* promise = awaiter.pt;
+	// Detach before the payload constructor can send another item or cancel this producer.
+	awaiter.resumeImpl();
+	ScopeExit finish([promise] {
+		if (actorWaitStateIsCancelled(promise->waitState())) {
+			if constexpr (std::remove_pointer_t<decltype(promise)>::noThrowOnCancel) {
+				promise->finishCancellation();
+				return;
+			}
+			promise->waitState() = ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK;
+		}
+		promise->resume();
+	});
+	try {
+		awaiter.store.set(std::forward<Value>(value));
+	} catch (const Error& error) {
+		awaiter.store.setError(error);
+		throw;
+	} catch (...) {
+		awaiter.store.setError(unknown_error());
+		throw;
+	}
+}
 
 // Awaiter for `Future<T>` and `FutureStream<T>` values transformed through a
 // coroutine promise.
@@ -681,15 +743,17 @@ struct AwaitableFuture
 
 	void fire(FutureValue const& value) override {
 		if constexpr (IsStream) {
-			store.set(value);
+			deliverStreamValue(*this, value);
+		} else {
+			pt->resume();
 		}
-		pt->resume();
 	}
 	void fire(FutureValue&& value) override {
 		if constexpr (IsStream) {
-			store.set(std::move(value));
+			deliverStreamValue(*this, std::move(value));
+		} else {
+			pt->resume();
 		}
-		pt->resume();
 	}
 
 	void error(Error error) override {
@@ -786,14 +850,8 @@ struct ThreadAwaitableFutureStream
 
 	ThreadAwaitableFutureStream(const FutureType& f, PromiseType* pt) : future(f), pt(pt) {}
 
-	void fire(FutureValue const& value) override {
-		store.set(value);
-		pt->resume();
-	}
-	void fire(FutureValue&& value) override {
-		store.set(std::move(value));
-		pt->resume();
-	}
+	void fire(FutureValue const& value) override { deliverStreamValue(*this, value); }
+	void fire(FutureValue&& value) override { deliverStreamValue(*this, std::move(value)); }
 
 	void error(Error error) override {
 		store.setError(error);
@@ -920,6 +978,7 @@ struct CoroPromise;
 
 template <class Derived, class T, bool ReturnsExplicitVoid>
 struct CoroPromiseBase : CoroReturn<T, Derived, ReturnsExplicitVoid> {
+	static constexpr bool noThrowOnCancel = false;
 	using promise_type = Derived;
 	using ReturnValue = std::conditional_t<std::is_void_v<T>, Void, T>;
 	using ReturnFutureType = Future<ReturnValue>;
@@ -1063,6 +1122,7 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, false>
 template <class T, bool IsCancellable, bool ReturnsExplicitVoid>
 struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>
   : CoroPromiseBase<CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>, T, ReturnsExplicitVoid> {
+	static constexpr bool noThrowOnCancel = true;
 	using promise_type = CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>;
 	using Base = CoroPromiseBase<promise_type, T, ReturnsExplicitVoid>;
 	using ActorType = coro::NoThrowOnCancelCoroActor<T>;
@@ -1106,6 +1166,7 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>
 
 	void setCancelHandler(AwaitCancelHandler* handler) { actor()->setCancelHandler(handler); }
 	void clearCancelHandler(AwaitCancelHandler* handler) { actor()->clearCancelHandler(handler); }
+	void finishCancellation() { actor()->finishCancellation(); }
 };
 
 template <class T, bool IsCancellable, bool ReturnsExplicitVoid, bool NoThrowOnCancel>
@@ -1114,6 +1175,7 @@ struct AsyncResultPromise
                       AsyncResultPromise<T, IsCancellable, ReturnsExplicitVoid, NoThrowOnCancel>,
                       ReturnsExplicitVoid> {
 	using promise_type = AsyncResultPromise<T, IsCancellable, ReturnsExplicitVoid, NoThrowOnCancel>;
+	static constexpr bool noThrowOnCancel = NoThrowOnCancel;
 	using ReturnValue = std::conditional_t<std::is_void_v<T>, Void, T>;
 	using ReturnAsyncResultType = AsyncResult<T>;
 	using State = AsyncResultState<ReturnValue>;
@@ -1151,6 +1213,15 @@ struct AsyncResultPromise
 			void await_resume() const noexcept {}
 
 			bool await_suspend(n_coroutine::coroutine_handle<>) const noexcept {
+				if constexpr (NoThrowOnCancel) {
+					if (actorWaitStateIsCancelled(*state->producerWaitState)) {
+						state->error = actor_cancelled();
+						if (state->hasValue) {
+							state->hasValue = false;
+							destruct(state->value());
+						}
+					}
+				}
 				state->complete();
 				state->delRef();
 				return false;
@@ -1174,6 +1245,7 @@ struct AsyncResultPromise
 	void resume() { producerHandle.resume(); }
 
 	int8_t& waitState() { return producerWaitState; }
+	void finishCancellation() { state->finishCancellation(); }
 	void setCancelHandler(AwaitCancelHandler* handler) { state->producerCancelHandler = handler; }
 	void clearCancelHandler(AwaitCancelHandler* handler) {
 		if (state->producerCancelHandler == handler) {
@@ -1269,6 +1341,7 @@ struct GeneratorPromise {
 
 template <class T, bool ReturnsExplicitVoid = false>
 struct AsyncGeneratorPromise {
+	static constexpr bool noThrowOnCancel = false;
 	using promise_type = AsyncGeneratorPromise<T, ReturnsExplicitVoid>;
 
 	static void* operator new(size_t s) { return allocateFast(int(s)); }

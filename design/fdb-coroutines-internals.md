@@ -257,7 +257,7 @@ int8_t actor_wait_state;
 | > 0 | `ACTOR_WAIT_STATE_WAITING` (1) | Coroutine is suspended at a `co_await`; a callback is registered on some Future's SAV that will call `handle.resume()` when fired |
 | 0 | `ACTOR_WAIT_STATE_NOT_WAITING` | Coroutine is running (between `co_await` points) or has completed |
 | -1 | `ACTOR_WAIT_STATE_CANCELLED` | Cancellation requested |
-| -2 | `ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK` | Cancellation detected during `await_ready()` before the awaiter registered a callback |
+| -2 | `ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK` | Cancellation must be delivered at `await_resume()` and the awaiter has no registered callback |
 
 The `coroutine_handle` encodes the suspension point, so a suspended C++
 coroutine uses the single waiting value 1.
@@ -412,10 +412,10 @@ Inherits from `Callback<T>` (or `SingleCallback<T>` for streams), which means
 the awaiter itself is the callback node that gets inserted into the Future's
 callback list.
 
-**`await_ready()`**: Returns `true` if the Future is already resolved (skip
-suspension). Also checks if the actor has been cancelled — if so, sets
-`CANCELLED_DURING_READY_CHECK` and returns `true` to proceed to
-`await_resume()` where the cancellation is handled.
+**`await_ready()`** checks cancellation before testing whether the Future is
+ready. Ordinary cancellation sets `CANCELLED_NO_CALLBACK` and proceeds to
+`await_resume()` to throw. A cancelled `NoThrowOnCancel` coroutine proceeds
+to `await_suspend()` so its frame can be destroyed safely.
 
 **`await_suspend(handle)`**:
 1. Stores the coroutine handle via `pt->setHandle(h)`
@@ -429,20 +429,17 @@ awaited Future is resolved — someone called `promise.send(value)` or
 `promise.sendError(err)`, and `SAV::send()` walked its callback list calling
 `fire()` on each node. This happens synchronously on whatever call stack
 resolved the Future (FDB is cooperative single-threaded — there is no
-scheduler). For streams, `fire()` first stores the value in a local
-`AwaitableFutureStore` (since the stream may yield further values). The
-awaiter's `fire()` then calls `pt->resume()` → `handle.resume()`, which
-resumes the coroutine at its suspend point. From the coroutine's perspective,
-control returns from the `co_await` expression.
+scheduler). For streams, `fire()` first detaches the callback so a nested
+send or cancellation cannot resume the coroutine during payload construction.
+After construction, it delivers deferred cancellation or resumes with the
+stored value. If construction throws, the awaiter stores the error for the
+consumer and rethrows the original exception to the stream sender. A pending
+`race()` instead reports a construction error through its result future so
+the sender can continue notifying other waiters.
 
-**`resumeImpl()`**: Called at the start of `await_resume()`. Checks
-`actor_wait_state`:
-- If cancelled: detaches from the callback list and throws
-  `actor_cancelled()`
-- If still waiting (future wasn't ready yet when we entered await_resume via
-  the non-ready-check path): detaches from callback list, resets wait state
-- Returns whether the future was already ready (affects how the value is
-  retrieved for streams)
+**`resumeImpl()`** detaches a registered callback and resets the wait state.
+For ordinary cancellation it throws `actor_cancelled()`, skipping detachment
+when the state is `CANCELLED_NO_CALLBACK`.
 
 **`await_resume()`**: Implemented via the `AwaitableResume` CRTP mixin.
 Calls `resumeImpl()`, then returns the value from the resolved Future.
@@ -524,9 +521,8 @@ unwinds through the coroutine body — running destructors, entering catch
 blocks — until it reaches `unhandled_exception()`, which stores the error on
 the SAV.
 
-If the coroutine is not waiting (between co_await points, which shouldn't
-happen in cooperative scheduling), the flag is just set. The next
-`await_ready()` will detect it.
+A synchronous callback can request cancellation while the coroutine is running
+between awaits. In that case the next `await_ready()` observes the flag.
 
 ### `Uncancellable` coroutines
 
@@ -542,27 +538,13 @@ Uses `NoThrowOnCancelCoroActor<T>` instead of `CoroActor`. Key differences:
    (via `new ActorType()` in the promise). This is necessary because cancel
    destroys the frame while the SAV must survive for Future observers.
 
-2. **`cancel()` destroys the frame directly** instead of resuming:
-
-```cpp
-void cancel() override {
-    if (!canBeSet()) return;
-
-    if (cancelHandler) {
-        // Detach the awaiter's callback before destroying the frame
-        cancelHandler->cancelWait();
-    }
-
-    destroyFrame();  // handle.destroy() — RAII destructors run
-
-    if (futures) {
-        sendErrorAndDelPromiseRef(actor_cancelled());
-    } else {
-        promises = 0;
-        delete this;
-    }
-}
-```
+2. **Cancellation requires a safe suspension point.** A registered wait can be
+   detached and its frame destroyed immediately. If the coroutine is executing,
+   `cancel()` records the request. The next Flow await forces suspension, even
+   for a ready input, so the frame can be destroyed before installing a new
+   waiter. A cancellation requested before or during return-value construction
+   discards that value. Once `co_return` stores the value in the Future, a
+   later cancellation from a local destructor leaves the value intact.
 
 3. **`final_suspend` returns `false`** from `await_suspend`. After completing
    the SAV and clearing the handle, the frame auto-destructs (the coroutine was
@@ -603,9 +585,9 @@ which manages `producerHandle` and `producerWaitState` directly rather than
 inheriting from Actor.
 
 Cancellation for AsyncResult coroutines goes through
-`AsyncResultState::cancelProducer()`, which mirrors the Actor cancel logic:
-either resumes the producer to throw `actor_cancelled()` or (with
-`noThrowOnCancel`) destroys the producer frame directly.
+`AsyncResultState::cancelProducer()`. A suspended producer normally resumes
+and throws `actor_cancelled()`. A `NoThrowOnCancel` producer follows the same
+safe-destruction rules as a `Future` coroutine.
 
 ---
 
@@ -704,11 +686,13 @@ the appropriate promise type.
 
 ### Cancellation (NoThrowOnCancel)
 
-1. Last `Future<T>` dropped → `delFutureRef()` → `cancel()` on the actor
-2. `cancel()` calls `cancelHandler->cancelWait()` to detach the awaiter
-3. `cancel()` calls `handle.destroy()` — frame is destroyed, RAII runs
-4. `cancel()` sends `actor_cancelled()` to any remaining Futures via SAV
-5. Actor (heap-allocated) survives until all Future references are dropped
+1. An explicit cancellation or the last `Future<T>` drop calls `cancel()`.
+2. The actor records cancellation. If an awaiter is registered, it detaches
+   the callback and destroys the suspended frame immediately. If stream
+   delivery is constructing a value, destruction waits for construction to
+   finish. A running coroutine reaches its next Flow await or completion first.
+3. Frame destruction runs local destructors. Remaining Future observers receive
+   `actor_cancelled()` through the separately allocated SAV.
 
 ### Refcount flow
 
