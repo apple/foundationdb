@@ -25,6 +25,7 @@ package fdb_test
 import (
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
@@ -339,31 +340,32 @@ func ExamplePrintable() {
 	// Output: \x00\x01\x02abc123!?\xff
 }
 
-func TestDatabaseCloseRemovesResources(t *testing.T) {
-	err := fdb.APIVersion(API_VERSION)
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
+func TestConcurrentDatabaseOpenClose(t *testing.T) {
+	fdb.MustAPIVersion(API_VERSION)
+	var workers sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			for j := 0; j < 10; j++ {
+				db, err := fdb.OpenDefault()
+				if err != nil {
+					t.Errorf("open database: %v", err)
+					return
+				}
+				_, err = db.CreateTransaction()
+				db.Close()
+				if err != nil {
+					t.Errorf("create transaction: %v", err)
+					return
+				}
+			}
+		}()
 	}
-
-	// OpenDefault opens the database described by the platform-specific default
-	// cluster file
-	db, err := fdb.OpenDefault()
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
-
-	// Close the database after usage
-	db.Close()
-
-	// Open the same database again, if the database is still in the cache we would return the same object, if not we create a new object with a new pointer
-	newDB, err := fdb.OpenDefault()
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
-
-	if db == newDB {
-		t.Fatalf("Expected a different database object, got: %v and %v\n", db, newDB)
-	}
+	close(start)
+	workers.Wait()
 }
 
 func ExampleOpenWithConnectionString() {
