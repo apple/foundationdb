@@ -1122,6 +1122,12 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					Optional<Value> val3 = co_await tx->get(rebalanceDDIgnoreKey);
 					ASSERT(val3.present() &&
 					       BinaryReader::fromStringRef<uint8_t>(val3.get(), Unversioned()) == ddIgnoreValue);
+					auto maintenance = SpecialKeySpace::getManagementApiCommandRange("maintenance");
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->clear(maintenance);
+					RangeResult rows =
+					    co_await tx->getRange(singleKeyRange(healthyZone.first.withPrefix(maintenance.begin)), 1);
+					ASSERT(rows.empty());
 					tx->reset();
 					break;
 				} catch (Error& e) {

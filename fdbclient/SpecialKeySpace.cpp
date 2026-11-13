@@ -784,9 +784,9 @@ RangeResult rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr, c
 		return res;
 	// If ryw enabled, we update it with writes from the transaction
 	RangeResult result;
-	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
-	    ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
-	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
+	// Sets cover single keys, but a clear can extend past either end of the read.
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().intersectingRanges(kr);
+	auto iter = ranges.begin();
 	auto iter2 = res.begin();
 	result.arena().dependsOn(res.arena());
 	while (iter != ranges.end() || iter2 != res.end()) {
