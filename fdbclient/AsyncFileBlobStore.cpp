@@ -19,6 +19,7 @@
  */
 
 #include "AsyncFileBlobStore.h"
+#include "fdbclient/S3BlobStore.h"
 #include "flow/UnitTest.h"
 
 Future<int64_t> AsyncFileBlobStoreRead::size() const {
@@ -76,4 +77,148 @@ TEST_CASE("/backup/throttling") {
 	printf("Speed limit was %d, measured speed was %d\n", limit, speed);
 	// Host scheduling can delay completions; only exceeding the rate limit is an error.
 	ASSERT(speed <= limit * 1.01);
+}
+
+namespace {
+
+class MultipartTestEndpoint final : public S3BlobStoreEndpoint {
+public:
+	MultipartTestEndpoint() : S3BlobStoreEndpoint("localhost", "80", "test", {}, {}, {}) {
+		knobs.multipart_min_part_size = 4;
+		knobs.concurrent_writes_per_file = 3;
+	}
+
+	Future<std::string> beginMultiPartUpload(const std::string&, const std::string&) override {
+		std::string id = std::to_string(++uploadsStarted);
+		parts.emplace(id, std::set<unsigned int>{});
+		return id;
+	}
+
+	Future<std::string> uploadPart(const std::string&,
+	                               const std::string&,
+	                               const std::string& id,
+	                               unsigned int number,
+	                               UnsentPacketQueue*,
+	                               int,
+	                               const std::string&) override {
+		if (id == "1" && number == 2) {
+			return secondPart.getFuture();
+		}
+		if (id == "1" && number == 3) {
+			return map(thirdPart.getFuture(), [this, id, number](Void) {
+				parts.at(id).insert(number);
+				return std::to_string(number);
+			});
+		}
+		parts.at(id).insert(number);
+		return std::to_string(number);
+	}
+
+	Future<Optional<std::string>> finishMultiPartUpload(const std::string&,
+	                                                    const std::string&,
+	                                                    const std::string& id,
+	                                                    const MultiPartSetT&,
+	                                                    int64_t) override {
+		ASSERT_EQ(parts.at(id).size(), 3);
+		published = id;
+		parts.erase(id);
+		return Optional<std::string>();
+	}
+
+	Future<Void> abortMultiPartUpload(const std::string& bucket,
+	                                  const std::string& object,
+	                                  const std::string& id) override {
+		ASSERT_EQ(bucket, "bucket");
+		ASSERT_EQ(object, "log");
+		ASSERT_EQ(parts.at(id).count(1), 1);
+		ASSERT_EQ(parts.at(id).count(2), 0);
+		ASSERT_EQ(parts.at(id).count(3), thirdPart.isSet() ? 1 : 0);
+		aborted.push_back(id);
+		parts.erase(id);
+		Future<Void> response = abortResponse;
+		if (abortCalled.canBeSet()) {
+			abortCalled.send(Void());
+		}
+		return response;
+	}
+
+	Future<Void> deleteObject(const std::string&, const std::string&) override {
+		published.clear();
+		return Void();
+	}
+
+	int uploadsStarted = 0;
+	std::map<std::string, std::set<unsigned int>> parts;
+	std::vector<std::string> aborted;
+	std::string published = "previous";
+	Promise<std::string> secondPart;
+	Promise<Void> thirdPart;
+	Promise<Void> abortCalled;
+	Future<Void> abortResponse = Void();
+};
+
+} // namespace
+
+TEST_CASE("/backup/blobstore/AbortAbandonedMultipartUpload") {
+	auto endpoint = makeReference<MultipartTestEndpoint>();
+	auto writer = makeReference<AsyncFileBlobStoreWrite>(endpoint, "bucket", "log");
+	const std::string contents = "123456789012";
+	co_await writer->write(contents.data(), contents.size(), 0);
+	// All three parts have been dispatched by append. Finishing must wait for their acknowledgements.
+	auto finish = writer->sync();
+	ASSERT(!finish.isReady());
+	ASSERT(endpoint->parts.at("1") == std::set<unsigned int>{ 1 });
+	endpoint->secondPart.sendError(io_timeout());
+	auto result = co_await coro::errorOr(finish);
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), error_code_io_timeout);
+	writer.clear();
+
+	// The third PUT still owns its request buffer and can store a part at the remote endpoint.
+	// Wait for it before aborting the failed upload. Leave the previously published object alone.
+	ASSERT(endpoint->aborted.empty());
+	endpoint->thirdPart.send(Void());
+	co_await timeoutError(endpoint->abortCalled.getFuture(), 1.0);
+	ASSERT_EQ(endpoint->aborted, std::vector<std::string>{ "1" });
+	ASSERT(endpoint->parts.empty());
+	ASSERT_EQ(endpoint->published, "previous");
+	auto retry = makeReference<AsyncFileBlobStoreWrite>(endpoint, "bucket", "log");
+	co_await retry->write(contents.data(), contents.size(), 0);
+	co_await retry->sync();
+	retry.clear();
+	ASSERT_EQ(endpoint->published, "2");
+	ASSERT(endpoint->parts.empty());
+	ASSERT_EQ(endpoint->aborted, std::vector<std::string>{ "1" });
+}
+
+TEST_CASE("/backup/blobstore/AbortAbandonedMultipartUploadWithStalledPart") {
+	auto endpoint = makeReference<MultipartTestEndpoint>();
+	endpoint->knobs.request_timeout_min = 1;
+	endpoint->knobs.connect_timeout = 1;
+	Promise<Void> abortResponse;
+	endpoint->abortResponse = abortResponse.getFuture();
+	auto writer = makeReference<AsyncFileBlobStoreWrite>(endpoint, "bucket", "log");
+	const std::string contents = "123456789012";
+	co_await writer->write(contents.data(), contents.size(), 0);
+	auto finish = writer->sync();
+	endpoint->secondPart.sendError(io_timeout());
+	auto failure = co_await coro::errorOr(finish);
+	ASSERT(failure.isError());
+	ASSERT_EQ(failure.getError().code(), error_code_io_timeout);
+	writer.clear();
+
+	// The third PUT can keep receiving HTTP 429 responses after its writer has gone away.
+	co_await timeoutError(endpoint->abortCalled.getFuture(), 5.0);
+	ASSERT_EQ(endpoint->aborted, std::vector<std::string>{ "1" });
+	ASSERT_EQ(endpoint->published, "previous");
+	ASSERT(endpoint->parts.empty());
+	ASSERT_EQ(endpoint->thirdPart.getFutureReferenceCount(), 0);
+
+	// A throttled abort must eventually release the endpoint as well.
+	endpoint->abortResponse = Future<Void>();
+	const double deadline = now() + 5.0;
+	while (abortResponse.getFutureReferenceCount() && now() < deadline) {
+		co_await delay(0.1);
+	}
+	ASSERT_EQ(abortResponse.getFutureReferenceCount(), 0);
 }

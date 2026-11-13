@@ -185,7 +185,7 @@ public:
 
 	Future<Void> abortMultiPartUpload(std::string const& bucket,
 	                                  std::string const& object,
-	                                  std::string const& uploadID);
+	                                  std::string const& uploadID) override;
 	Future<Void> putObjectTags(std::string const& bucket,
 	                           std::string const& object,
 	                           std::map<std::string, std::string> const& tags);
