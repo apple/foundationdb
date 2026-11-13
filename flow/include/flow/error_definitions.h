@@ -171,6 +171,7 @@ ERROR( finish_move_keys_too_many_retries, 1252, "finishMoveKeys exceeded retry l
 ERROR( start_move_keys_too_many_retries, 1253, "startMoveKeys exceeded retry limit" )
 ERROR( cdc_proxy_failed, 1254, "Cluster recovery terminating because a CDCProxy failed" )
 ERROR( cdc_tlog_peek_reply_too_large, 1255, "TLog CDC peek reply exceeds configured byte limit" )
+ERROR( bulkload_range_under_backup, 1256, "BulkLoad range is covered by a running backup or DR; stop it before loading" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
