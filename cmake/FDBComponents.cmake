@@ -29,14 +29,66 @@ endif()
 set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
 # Statically link OpenSSL to FDB, see
 #    https://cmake.org/cmake/help/v3.24/module/FindOpenSSL.html
-# Without the flags, OpenSSL is dynamically linked.
 set(OPENSSL_USE_STATIC_LIBS TRUE)
 if (WIN32)
   set(OPENSSL_MSVC_STATIC_RT ON)
 endif()
 # SSL requires ZLIB
 find_package(ZLIB REQUIRED)
-find_package(OpenSSL REQUIRED)
+find_package(OpenSSL 3.5.2...<3.6.0 QUIET)
+if(OpenSSL_FOUND)
+  message(STATUS "Found OpenSSL ${OpenSSL_VERSION} : ${OPENSSL_SSL_LIBRARY}")
+else()
+  include(ExternalProject)
+  set(OpenSSL_FOUND TRUE)
+  set(OpenSSL_VERSION "3.5.9")
+  set(OPENSSL_VERSION "3.5.9") # some other FindXXX uses this?
+  set(OPENSSL_SOURCE_DIR  ${CMAKE_CURRENT_BINARY_DIR}/openssl-src)
+  set(OPENSSL_INSTALL_DIR ${CMAKE_CURRENT_BINARY_DIR}/openssl-usr)
+
+  unset(OPENSSL_INCLUDE_DIR    CACHE)
+  unset(OPENSSL_SSL_LIBRARY    CACHE)
+  unset(OPENSSL_CRYPTO_LIBRARY CACHE)
+  set(OPENSSL_INCLUDE_DIR    ${OPENSSL_INSTALL_DIR}/include         CACHE PATH     "")
+  set(OPENSSL_SSL_LIBRARY    ${OPENSSL_INSTALL_DIR}/lib/libssl.a    CACHE FILEPATH "")
+  set(OPENSSL_CRYPTO_LIBRARY ${OPENSSL_INSTALL_DIR}/lib/libcrypto.a CACHE FILEPATH "")
+
+  message(STATUS "Building OpenSSL ${OpenSSL_VERSION}")
+  ExternalProject_Add(
+    OpenSSL
+    URL "https://github.com/openssl/openssl/releases/download/openssl-${OpenSSL_VERSION}/openssl-${OpenSSL_VERSION}.tar.gz"
+    URL_HASH SHA256=603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
+    SOURCE_DIR ${OPENSSL_SOURCE_DIR}
+    CONFIGURE_COMMAND
+      ${OPENSSL_SOURCE_DIR}/config
+      --prefix=${OPENSSL_INSTALL_DIR}
+      --openssldir=${OPENSSL_INSTALL_DIR}
+      --libdir=lib
+      --api=1.1.1
+      no-shared
+      CC=${CMAKE_C_COMPILER}
+      CXX=${CMAKE_CXX_COMPILER}
+    BUILD_COMMAND make build_sw
+    TEST_COMMAND ""
+    INSTALL_COMMAND make install_sw
+    INSTALL_DIR ${OPENSSL_INSTALL_DIR}
+    BUILD_BYPRODUCTS
+      ${OPENSSL_SSL_LIBRARY}
+      ${OPENSSL_CRYPTO_LIBRARY}
+  )
+  file(MAKE_DIRECTORY ${OPENSSL_INCLUDE_DIR})
+
+  add_library(OpenSSL::SSL STATIC IMPORTED GLOBAL)
+  set_property(TARGET OpenSSL::SSL PROPERTY IMPORTED_LOCATION ${OPENSSL_SSL_LIBRARY})
+  set_property(TARGET OpenSSL::SSL PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${OPENSSL_INCLUDE_DIR})
+  set_property(TARGET OpenSSL::SSL PROPERTY INTERFACE_LINK_LIBRARIES OpenSSL::Crypto)
+  add_dependencies(OpenSSL::SSL OpenSSL)
+
+  add_library(OpenSSL::Crypto STATIC IMPORTED GLOBAL)
+  set_property(TARGET OpenSSL::Crypto PROPERTY IMPORTED_LOCATION ${OPENSSL_CRYPTO_LIBRARY})
+  set_property(TARGET OpenSSL::Crypto PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${OPENSSL_INCLUDE_DIR})
+  add_dependencies(OpenSSL::Crypto OpenSSL)
+endif()
 add_compile_options(-DHAVE_OPENSSL)
 
 ################################################################################
@@ -312,7 +364,7 @@ endif()
 
 ################################################################################
 
-set(WITH_GRPC ON CACHE BOOL "Build FDB with gRPC support")
+set(WITH_GRPC OFF CACHE BOOL "Build FDB with gRPC support")
 
 if (WITH_GRPC)
   # Setup search paths.

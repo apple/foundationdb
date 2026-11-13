@@ -5,7 +5,7 @@ project(awssdk-download NONE)
 # EC2 instance metadata (which requires an http client) etc.
 # The s3 client and even AWS request signing is re-implemented by FDB.
 
-set(AWSSDK_COMPILER_FLAGS "-fPIC")
+set(AWSSDK_COMPILER_FLAGS "-fPIC -I${OPENSSL_INCLUDE_DIR}")
 if(APPLE OR USE_LIBCXX)
   string(APPEND AWSSDK_COMPILER_FLAGS " -stdlib=libc++ -nostdlib++")
 endif()
@@ -26,6 +26,7 @@ ExternalProject_Add(awssdk_project
   # it seems advice.detachedHead breaks something which causes aws sdk to always be rebuilt.
   # This option forces to cmake to build the aws sdk only once and never attempt to update it
   UPDATE_DISCONNECTED ON
+  DEPENDS OpenSSL
   PATCH_COMMAND # enable s2n for macOS too
     sed -i.bak -e "s/UNIX AND NOT APPLE AND NOT BYO_CRYPTO/UNIX AND NOT BYO_CRYPTO/"
     crt/aws-crt-cpp/CMakeLists.txt
@@ -43,6 +44,10 @@ ExternalProject_Add(awssdk_project
   -DAWS_SDK_WARNINGS_ARE_ERRORS=OFF # newer compilers warn about code in this (older) sdk version
   -DUSE_CRT_HTTP_CLIENT=ON
   -DUSE_OPENSSL=ON
+  -Dcrypto_INCLUDE_DIR=${OPENSSL_INCLUDE_DIR}
+  -DLibCrypto_INCLUDE_DIR=${OPENSSL_INCLUDE_DIR}
+  -DLibCrypto_STATIC_LIBRARY=${OPENSSL_CRYPTO_LIBRARY}
+  -DLibCrypto_SHARED_LIBRARY=""
   TEST_COMMAND ""
   # the sdk build produces a ton of artifacts, with their own dependency tree, so there is a very specific dependency order they must be linked in
   BUILD_BYPRODUCTS
