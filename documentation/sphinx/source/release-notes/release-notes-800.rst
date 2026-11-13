@@ -33,6 +33,11 @@ Unreleased.
   numerically, allowing it to start with ``runAsNonRoot: true`` when
   ``runAsUser`` is not specified.
   `(PR #14248) <https://github.com/apple/foundationdb/pull/14248>`_
+* Backup log tasks now run at task priority 2 once a backup's snapshot has
+  completed, ahead of other backups' initial snapshot tasks. Backup agents
+  older than this change do not run priority 2 tasks, so do not downgrade
+  backup agents while a backup is running.
+  `(PR #14499) <https://github.com/apple/foundationdb/pull/14499>`_
 
 8.0.0
 =====
