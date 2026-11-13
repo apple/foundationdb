@@ -1565,6 +1565,23 @@ struct UnitTestsFunc : InstructionFunc {
 		}
 		API::selectAPIVersion(fdb->getAPIVersion());
 
+		const StringRef packed = "\x14\x33twelve bytes"_sr;
+		auto expectTruncated = [](const Tuple& tuple) {
+			try {
+				tuple.getVersionstamp(1);
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT_EQ(e.code(), error_code_invalid_versionstamp_size);
+			}
+		};
+		for (int end = 2; end < packed.size(); ++end) {
+			auto tuple = Tuple::unpack(packed.substr(0, end));
+			expectTruncated(tuple);
+			tuple.append("another field"_sr);
+			expectTruncated(tuple);
+		}
+		ASSERT(Tuple::unpack(packed).getVersionstamp(1) == TupleVersionstamp(packed.substr(2)));
+
 		const uint64_t locationCacheSize = 100001;
 		const uint64_t maxWatches = 10001;
 		const uint64_t timeout = 60ULL * 1000;
