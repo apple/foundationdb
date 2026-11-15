@@ -4922,6 +4922,8 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	ASSERT_EQ(data.shouldTriggerRecoveryDueToDegradedServers(), SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH >= 2);
 	data.degradationInfo.disconnectedServers.insert(resolver);
 	ASSERT_EQ(data.shouldTriggerRecoveryDueToDegradedServers(), SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH >= 3);
+	data.degradationInfo.disconnectedServers.erase(master);
+	ASSERT_EQ(data.shouldTriggerRecoveryDueToDegradedServers(), SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH >= 3);
 	data.degradationInfo.disconnectedServers.clear();
 	data.degradationInfo.degradedServers.clear();
 	data.degradationInfo.disconnectedServers.insert(master);
@@ -5090,6 +5092,8 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	const bool failoverBeforeDuplicateReport = data.shouldTriggerFailoverDueToDegradedServers();
 	data.degradationInfo.disconnectedServers.insert(master);
 	ASSERT_EQ(data.shouldTriggerFailoverDueToDegradedServers(), failoverBeforeDuplicateReport);
+	data.degradationInfo.disconnectedServers = { resolver };
+	ASSERT(data.shouldTriggerFailoverDueToDegradedServers());
 	data.degradationInfo.disconnectedServers.clear();
 	data.degradationInfo.degradedServers.insert(resolver);
 	ASSERT(data.shouldTriggerFailoverDueToDegradedServers());
