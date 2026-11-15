@@ -645,6 +645,31 @@ heap
 
 Enables heap profiling for the specified process.
 
+rangeconfig
+-----------
+
+The ``rangeconfig`` command shows or changes the configuration options of key ranges. These options are hints to data distribution. They do not change the shard map directly.
+
+``rangeconfig show [includeDefault]``
+
+Prints the range configuration as JSON. Ranges with no configured options are not shown, unless ``includeDefault`` is given.
+
+``rangeconfig update <BEGINKEY> <ENDKEY> [OPTION...]``
+
+Applies the given options to the key range from ``BEGINKEY`` to ``ENDKEY``. Options that are not given keep their current setting for the range.
+
+``rangeconfig set <BEGINKEY> <ENDKEY> [OPTION...]``
+
+Makes the key range have exactly the given configuration. Options that are not given are unset for the range.
+
+The options are:
+
+* ``default`` resets the range to have no options set. Used with ``set``, it clears all options for the range.
+* ``replication <N>`` sets the replication factor for the range. A factor lower than the cluster's replication level is treated as the cluster's replication level.
+* ``teamID <N>`` indicates that shards in ranges with different team IDs should be assigned to different storage teams. Shards with the same team ID can share a storage team, but nothing enforces this.
+
+``rangeconfig`` requires the end key to be greater than the begin key.
+
 reset
 -----
 
