@@ -379,6 +379,9 @@ struct YCSBKVStoreWorkload : YCSBBase {
 	}
 
 	Future<Void> runMeasured() {
+		if (zipfian) {
+			co_await zipfian->init();
+		}
 		if (dropCaches) {
 			// Reopening empties the engine's own cache (SQLite's pages are evicted once its file closes)
 			co_await closeStore(false);

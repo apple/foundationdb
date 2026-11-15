@@ -81,6 +81,9 @@ struct YCSBWorkload : YCSBBase {
 		if (testDuration == 0) {
 			co_return;
 		}
+		if (zipfian) {
+			co_await zipfian->init();
+		}
 		TraceEvent("YCSBWorkloadGenInsertionOrder").log();
 		insertionOrder.reserve(nodeCount);
 		for (uint64_t i = 0; i < nodeCount; i++) {

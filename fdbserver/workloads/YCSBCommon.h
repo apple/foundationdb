@@ -46,12 +46,26 @@ public:
 	  : base_(min), items_(max - min + 1), theta_(theta), alpha_(1.0 / (1.0 - theta)) {
 		ASSERT(items_ > 0);
 		ASSERT(theta > 0 && theta < 1);
-		double const zeta2Theta = zeta(2, theta);
-		zetaN_ = zeta(items_, theta);
-		eta_ = (1 - std::pow(2.0 / items_, 1 - theta)) / (1 - zeta2Theta / zetaN_);
+	}
+
+	// Summing zeta over every item takes seconds for a large dataset, which would block the run loop long enough for
+	// the tester to be considered failed, so it's computed here with yields rather than in the constructor
+	Future<Void> init() {
+		double sum = 0;
+		for (int64_t i = 0; i < items_; ++i) {
+			sum += 1 / std::pow(i + 1, theta_);
+			if (i % ZETA_YIELD_INTERVAL == ZETA_YIELD_INTERVAL - 1) {
+				co_await yield(TaskPriority::Low);
+			}
+		}
+		zetaN_ = sum;
+		double const zeta2Theta = 1 + std::pow(2.0, -theta_);
+		eta_ = (1 - std::pow(2.0 / items_, 1 - theta_)) / (1 - zeta2Theta / zetaN_);
+		initialized_ = true;
 	}
 
 	int64_t next() const {
+		ASSERT(initialized_);
 		double const u = deterministicRandom()->random01();
 		double const uz = u * zetaN_;
 		if (uz < 1.0) {
@@ -65,20 +79,15 @@ public:
 	}
 
 private:
-	static double zeta(int64_t n, double theta) {
-		double sum = 0;
-		for (int64_t i = 0; i < n; ++i) {
-			sum += 1 / std::pow(i + 1, theta);
-		}
-		return sum;
-	}
+	static constexpr int64_t ZETA_YIELD_INTERVAL = 1'000'000;
 
 	int64_t base_;
 	int64_t items_;
 	double theta_;
 	double alpha_;
-	double zetaN_;
-	double eta_;
+	double zetaN_{ 0 };
+	double eta_{ 0 };
+	bool initialized_{ false };
 };
 
 // Shared options and key/value layout for the YCSB workloads. Rows are KVWorkload keys, so datasets that must not
