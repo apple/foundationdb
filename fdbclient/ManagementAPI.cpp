@@ -2930,6 +2930,24 @@ Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr) {
 	co_return Optional<BulkLoadJobState>();
 }
 
+Future<bool> isRangeUnderBulkLoadJob(Reference<ReadYourWritesTransaction> tr, KeyRange range) {
+	Key beginKey = range.begin;
+	while (beginKey < range.end) {
+		RangeResult ranges = co_await krmGetRanges(tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, range.end));
+		for (int i = 0; i + 1 < static_cast<int>(ranges.size()); ++i) {
+			if (!ranges[i].value.empty() && decodeBulkLoadJobState(ranges[i].value).isValid()) {
+				co_return true;
+			}
+		}
+		// A page ends early at a row limit; its last key is where the next page resumes.
+		if (ranges.size() < 2) {
+			break;
+		}
+		beginKey = ranges.back().key;
+	}
+	co_return false;
+}
+
 Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 	Transaction tr(cx);
 	Optional<BulkLoadJobState> aliveJob;
@@ -3043,15 +3061,34 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 			// range would record any earlier clear of it but never the loaded data.
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult logRanges = co_await tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
+			std::set<UID> loggingUids;
 			for (const auto& kv : logRanges) {
 				Key logEnd = logRangesDecodeValue(kv.value);
-				KeyRange logRange = KeyRangeRef(logRangesDecodeKey(kv.key), logEnd);
+				UID logUid;
+				KeyRange logRange = KeyRangeRef(logRangesDecodeKey(kv.key, &logUid), logEnd);
+				loggingUids.insert(logUid);
 				if (logRange.intersects(jobState.getJobRange())) {
 					TraceEvent(SevWarnAlways, "SubmitBulkLoadJobFailed")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .detail("Reason", "Job range is covered by a running backup or DR")
 					    .detail("LogRange", logRange)
+					    .detail("SubmitJob", jobState.toString());
+					throw bulkload_range_under_backup();
+				}
+			}
+			// A backup or DR is recorded here when submitted, but registers its log range only when its start task
+			// runs. Its range is not yet known, so refuse for the whole window.
+			RangeResult submittedBackups =
+			    co_await tr.getRange(prefixRange(backupLatestVersionsPrefix), CLIENT_KNOBS->TOO_MANY);
+			for (const auto& kv : submittedBackups) {
+				UID destUid = BinaryReader::fromStringRef<UID>(
+				    kv.key.removePrefix(backupLatestVersionsPrefix).substr(0, sizeof(UID)), Unversioned());
+				if (!loggingUids.contains(destUid)) {
+					TraceEvent(SevWarnAlways, "SubmitBulkLoadJobFailed")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("Reason", "A submitted backup or DR has not yet registered its log range")
 					    .detail("SubmitJob", jobState.toString());
 					throw bulkload_range_under_backup();
 				}

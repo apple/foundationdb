@@ -2617,6 +2617,31 @@ public:
 			}
 		}
 
+		// Bulkload ingests files without committing mutations, so the DR would never copy data that a running load
+		// adds to the source. The source is a separate cluster, so this check is not atomic with the submit.
+		bool underBulkLoad = false;
+		auto srcTr = makeReference<ReadYourWritesTransaction>(backupAgent->taskBucket->src);
+		while (true) {
+			Error err;
+			try {
+				srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				srcTr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				for (const auto& range : backupRanges) {
+					if (co_await isRangeUnderBulkLoadJob(srcTr, range)) {
+						underBulkLoad = true;
+						break;
+					}
+				}
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await srcTr->onError(err);
+		}
+		if (underBulkLoad) {
+			throw backup_range_under_bulkload();
+		}
+
 		if (backupAction == DatabaseBackupAgent::PreBackupAction::VERIFY) {
 			// Make sure all of the ranges are empty before we backup into them.
 			std::vector<Future<RangeResult>> backupIntoResults;

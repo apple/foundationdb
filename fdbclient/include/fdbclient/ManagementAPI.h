@@ -254,6 +254,9 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 // Return the existing BulkLoad job metadata (if any)
 Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr);
 
+// True if a BulkLoad job is submitted over any part of the range. The transaction must be able to read system keys.
+Future<bool> isRangeUnderBulkLoadJob(Reference<ReadYourWritesTransaction> tr, KeyRange range);
+
 // Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
 // the metadata.
 Future<int> setBulkDumpMode(Database cx, int mode);

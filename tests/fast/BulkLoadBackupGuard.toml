@@ -1,5 +1,6 @@
-# A running backup must make bulkload fail (bulkload_range_under_backup): bulkload ingests files without
-# committing mutations, so the backup would record the clear before the load but never the loaded data.
+# A backup and a bulkload job must exclude each other (bulkload_range_under_backup, backup_range_under_bulkload):
+# bulkload ingests files without committing mutations, so the backup would record the clear before the load
+# but never the loaded data.
 [configuration]
 storageEngineExcludeTypes = ["ssd-sharded-rocksdb"] #FIXME: remove after allowing to do bulkloading with fetchKey and shardedrocksdb
 
