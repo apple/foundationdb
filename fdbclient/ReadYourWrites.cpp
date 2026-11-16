@@ -1392,6 +1392,14 @@ public:
 				co_return;
 			}
 
+			auto& flushedRanges = ryw->nativeWriteRanges;
+			if (!flushedRanges.empty()) {
+				// Commit appends the remaining conflicts and sorts the native array in place. Keep the flushed
+				// descriptors in a separate array; their key bytes already belong to the retained arena.
+				VectorRef<KeyRangeRef> saved;
+				saved.append(flushedRanges.arena(), flushedRanges.begin(), flushedRanges.size());
+				flushedRanges.contents() = saved;
+			}
 			ryw->writeRangeToNativeTransaction(KeyRangeRef(StringRef(), allKeys.end));
 
 			auto conflictRanges = ryw->readConflicts.ranges();
@@ -2107,9 +2115,9 @@ RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRang
 	} else {
 		for (const auto& range : tr.writeConflictRanges())
 			writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()), "1"_sr);
-		for (const auto& range : nativeWriteRanges)
-			writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 	}
+	for (const auto& range : nativeWriteRanges)
+		writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 
 	for (const auto& k : versionStampKeys) {
 		KeyRange range;
@@ -2193,6 +2201,7 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 		addWriteConflict = AddConflictRange::False;
 		if (!options.readYourWritesDisabled) {
 			writeRangeToNativeTransaction(range);
+			nativeWriteRanges = tr.writeConflictRanges();
 			rywState->writes.addUnmodifiedAndUnreadableRange(range);
 		}
 		// k is the unversionstamped key provided by the user.  If we've filled in a minimum bound
@@ -2752,6 +2761,21 @@ void ReadYourWritesTransaction::debugTrace(BaseTraceEvent&& event) {
 
 void ReadYourWritesTransaction::debugPrint(std::string const& message) {
 	debugMessages.push_back(message);
+}
+
+TEST_CASE("/fdbclient/ReadYourWrites/writeConflictRangesAfterVersionstampedKey") {
+	auto db = DatabaseContext::create(
+	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
+	ReadYourWritesTransaction tr(db);
+	tr.clear(KeyRangeRef("a"_sr, "c"_sr));
+	tr.atomicOp("b0123456789\x01\x00\x00\x00"_sr, "v"_sr, MutationRef::SetVersionstampedKey);
+	tr.setVersion(100);
+
+	auto ranges = tr.getWriteConflictRangeIntersecting(writeConflictRangeKeysRange);
+	ASSERT_EQ(ranges.size(), 2);
+	ASSERT_EQ(ranges[0], KeyValueRef(writeConflictRangeKeysRange.begin.withSuffix("a"_sr), "1"_sr));
+	ASSERT_EQ(ranges[1], KeyValueRef(writeConflictRangeKeysRange.begin.withSuffix("c"_sr), "0"_sr));
+	return Void();
 }
 
 TEST_CASE("/fdbclient/ReadYourWrites/resolveKeySelectorSkipsClearedKey") {
