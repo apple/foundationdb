@@ -22,7 +22,7 @@
 #define FDBCLIENT_WRITEMAP_H
 #pragma once
 
-#include <deque>
+#include <vector>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/VersionedMap.h"
@@ -40,42 +40,42 @@ struct RYWMutation {
 	bool operator!=(const RYWMutation& r) const { return !(*this == r); }
 };
 
-// Operations after the first are kept in a buffer that copies of the stack share. Each copy sees only the first
-// `extraCount` entries, so a copy can push onto the buffer's tail in place while older copies (e.g. the entries
-// seen by WriteMap iterator snapshots) keep their prefix. Entries a copy can see are never modified in place
-// while the buffer is shared.
-struct OperationBuffer : ReferenceCounted<OperationBuffer>, FastAllocated<OperationBuffer> {
-	std::deque<RYWMutation> operations;
-};
-
 class OperationStack {
 private:
-	RYWMutation singletonOperation;
-	Reference<OperationBuffer> extraOperations;
-	int extraCount = 0;
+	// Entries below the top, shared by copies of the stack and only ever appended to. Each copy sees only its first
+	// historyCount entries, so pushing onto the newest copy appends in place while older copies (iterator snapshots)
+	// keep their view. A reference to an entry is invalidated by a push onto any copy. A transaction's write map lives
+	// on one thread, so the shared entries need no synchronization.
+	struct History : ReferenceCounted<History> {
+		std::vector<RYWMutation> entries;
+	};
+	Reference<History> history;
+	int historyCount = 0;
+	RYWMutation topOperation;
 	bool defaultConstructed;
-
-	// Makes extraOperations safe to modify past its first `keep` entries.
-	void prepareExtraOperations(int keep);
 
 public:
 	OperationStack() { defaultConstructed = true; } // Don't use this!
 	explicit OperationStack(RYWMutation initialEntry) {
 		defaultConstructed = false;
-		singletonOperation = initialEntry;
+		topOperation = initialEntry;
 	}
+	// No move operations: a moved-from stack would keep a stale historyCount.
+	OperationStack(const OperationStack&) = default;
+	OperationStack& operator=(const OperationStack&) = default;
+
 	void reset(RYWMutation initialEntry);
 	void poppush(RYWMutation entry);
 	void push(RYWMutation entry);
 	bool isDependent() const;
 
-	const RYWMutation& top() const {
-		return extraCount ? extraOperations->operations[extraCount - 1] : singletonOperation;
-	}
+	const RYWMutation& top() const { return topOperation; }
 
-	const RYWMutation& at(int n) const { return (n == 0) ? singletonOperation : extraOperations->operations[n - 1]; }
+	const RYWMutation& operator[](int n) const { return at(n); }
 
-	int size() const { return defaultConstructed ? 0 : extraCount + 1; }
+	const RYWMutation& at(int n) const { return n < historyCount ? history->entries[n] : topOperation; }
+
+	int size() const { return defaultConstructed ? 0 : historyCount + 1; }
 
 	bool operator==(const OperationStack& r) const;
 };
@@ -96,13 +96,13 @@ struct WriteMapEntry {
 	bool is_unreadable;
 
 	WriteMapEntry(KeyRef const& key,
-	              OperationStack&& stack,
+	              OperationStack const& stack,
 	              FollowingKeysCleared following_keys_cleared,
 	              FollowingKeysConflict following_keys_conflict,
 	              IsConflict is_conflict,
 	              FollowingKeysUnreadable following_keys_unreadable,
 	              IsUnreadable is_unreadable)
-	  : key(key), stack(std::move(stack)), following_keys_cleared(following_keys_cleared),
+	  : key(key), stack(stack), following_keys_cleared(following_keys_cleared),
 	    following_keys_conflict(following_keys_conflict), is_conflict(is_conflict),
 	    following_keys_unreadable(following_keys_unreadable), is_unreadable(is_unreadable) {}
 

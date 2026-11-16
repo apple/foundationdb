@@ -860,6 +860,170 @@ TEST_CASE("/fdbclient/WriteMap/atomicOpsSequentialEquivalence") {
 	return Void();
 }
 
+// Copies of an OperationStack share storage: appending to the newest copy must not change older copies, and
+// pushing onto or replacing the top of a stale or shared copy must not change the others.
+TEST_CASE("/fdbclient/WriteMap/operationStackCopiesAreSnapshots") {
+	Arena arena;
+	auto op = [&](char c) { return RYWMutation(StringRef(arena, std::string(1, c)), MutationRef::AppendIfFits); };
+
+	OperationStack s(op('a'));
+	s.push(op('b'));
+	s.push(op('c'));
+	OperationStack snapshot = s;
+	s.push(op('d'));
+	ASSERT(s.size() == 4 && s.top() == op('d'));
+	ASSERT(snapshot.size() == 3 && snapshot.top() == op('c'));
+	ASSERT(snapshot.at(0) == op('a') && snapshot.at(1) == op('b') && snapshot.at(2) == op('c'));
+
+	OperationStack fork = snapshot;
+	fork.push(op('e'));
+	ASSERT(fork.size() == 4 && fork.top() == op('e') && fork.at(2) == op('c'));
+	ASSERT(s.size() == 4 && s.top() == op('d'));
+	ASSERT(snapshot.size() == 3 && snapshot.top() == op('c'));
+
+	OperationStack other = s;
+	s.poppush(op('x'));
+	ASSERT(s.top() == op('x') && s.size() == 4);
+	ASSERT(other.top() == op('d') && other.size() == 4);
+
+	// A stale copy that replaced its top must not pick up the entry another copy pushed at that position.
+	OperationStack stale = s;
+	stale.poppush(op('y'));
+	s.push(op('z'));
+	stale.push(op('w'));
+	ASSERT(stale.size() == 5 && stale.at(3) == op('y') && stale.top() == op('w'));
+	ASSERT(s.size() == 5 && s.at(3) == op('x') && s.top() == op('z'));
+
+	OperationStack single(op('a'));
+	OperationStack singleCopy = single;
+	single.poppush(op('y'));
+	ASSERT(single.top() == op('y') && singleCopy.top() == op('a'));
+	return Void();
+}
+
+// An iterator is a snapshot of the write map: later appends to the same key are not visible through it.
+TEST_CASE("/fdbclient/WriteMap/iteratorSnapshotIgnoresLaterAppends") {
+	Arena arena;
+	WriteMap writes = WriteMap(&arena);
+	ValueRef a = StringRef(arena, "a"_sr);
+	ValueRef b = StringRef(arena, "b"_sr);
+	ValueRef c = StringRef(arena, "c"_sr);
+	writes.mutate("k"_sr, MutationRef::AppendIfFits, a, true);
+	WriteMap::iterator before(&writes);
+	writes.mutate("k"_sr, MutationRef::AppendIfFits, b, true);
+	WriteMap::iterator middle(&writes);
+	writes.mutate("k"_sr, MutationRef::AppendIfFits, c, true);
+	WriteMap::iterator after(&writes);
+
+	before.skip("k"_sr);
+	middle.skip("k"_sr);
+	after.skip("k"_sr);
+	ASSERT(before.op().size() == 1);
+	ASSERT(middle.op().size() == 2);
+	ASSERT(after.op().size() == 3);
+
+	ValueRef base = StringRef(arena, "x"_sr);
+	ASSERT(WriteMap::coalesceUnder(before.op(), base, arena).value.get() == "xa"_sr);
+	ASSERT(WriteMap::coalesceUnder(middle.op(), base, arena).value.get() == "xab"_sr);
+	ASSERT(WriteMap::coalesceUnder(after.op(), base, arena).value.get() == "xabc"_sr);
+	return Void();
+}
+
+// Replacing the top entry of a multi-entry stack must not change iterator snapshots taken earlier.
+TEST_CASE("/fdbclient/WriteMap/iteratorSnapshotIgnoresLaterTopReplacement") {
+	Arena arena;
+	WriteMap writes = WriteMap(&arena);
+	auto littleEndian = [&](int v) {
+		std::string bytes(2, '\0');
+		bytes[0] = (char)v;
+		return ValueRef(StringRef(arena, bytes));
+	};
+	writes.mutate("k"_sr, MutationRef::AddValue, littleEndian(1), true);
+	writes.mutate("k"_sr, MutationRef::Max, littleEndian(1), true);
+	WriteMap::iterator before(&writes);
+	// Same type and length as the top entry, so it is merged into it.
+	writes.mutate("k"_sr, MutationRef::Max, littleEndian(2), true);
+	WriteMap::iterator after(&writes);
+
+	before.skip("k"_sr);
+	after.skip("k"_sr);
+	ASSERT(before.op().size() == 2 && after.op().size() == 2);
+	ASSERT(before.op().top().value.get() == littleEndian(1));
+	ASSERT(after.op().top().value.get() == littleEndian(2));
+	return Void();
+}
+
+// Random copies, pushes, top replacements and resets must leave every other stack equal to its plain-vector model.
+TEST_CASE("/fdbclient/WriteMap/operationStackRandomOperations") {
+	Arena arena;
+	int counter = 0;
+	auto next = [&]() {
+		std::string value = std::to_string(counter++);
+		return std::make_pair(RYWMutation(StringRef(arena, value), MutationRef::AppendIfFits), value);
+	};
+	auto verify = [&](OperationStack const& stack, std::vector<std::string> const& model) {
+		ASSERT(stack.size() == model.size());
+		for (int i = 0; i < stack.size(); i++) {
+			ASSERT(stack.at(i).value.get().toString() == model[i]);
+		}
+		ASSERT(stack.top().value.get().toString() == model.back());
+	};
+
+	std::vector<OperationStack> stacks;
+	std::vector<std::vector<std::string>> models;
+	auto [first, firstValue] = next();
+	stacks.push_back(OperationStack(first));
+	models.push_back({ firstValue });
+
+	for (int iter = 0; iter < 3000; iter++) {
+		int i = deterministicRandom()->randomInt(0, stacks.size());
+		switch (deterministicRandom()->randomInt(0, 6)) {
+		case 0:
+			stacks.push_back(stacks[i]);
+			models.push_back(models[i]);
+			break;
+		case 1:
+		case 2: {
+			auto [mutation, value] = next();
+			stacks[i].push(mutation);
+			models[i].push_back(value);
+			break;
+		}
+		case 3: {
+			auto [mutation, value] = next();
+			stacks[i].poppush(mutation);
+			models[i].back() = value;
+			break;
+		}
+		case 4: {
+			auto [mutation, value] = next();
+			stacks[i].reset(mutation);
+			models[i] = { value };
+			break;
+		}
+		default:
+			if (stacks.size() > 1) {
+				stacks.erase(stacks.begin() + i);
+				models.erase(models.begin() + i);
+			}
+			break;
+		}
+		if (stacks.size() > 12) {
+			int drop = deterministicRandom()->randomInt(0, stacks.size());
+			stacks.erase(stacks.begin() + drop);
+			models.erase(models.begin() + drop);
+		}
+		for (int k = 0; k < 2; k++) {
+			int check = deterministicRandom()->randomInt(0, stacks.size());
+			verify(stacks[check], models[check]);
+		}
+	}
+	for (int i = 0; i < stacks.size(); i++) {
+		verify(stacks[i], models[i]);
+	}
+	return Void();
+}
+
 TEST_CASE("/fdbclient/WriteMap/random") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);

@@ -22,65 +22,47 @@
 
 void OperationStack::reset(RYWMutation initialEntry) {
 	defaultConstructed = false;
-	singletonOperation = initialEntry;
-	extraOperations.clear();
-	extraCount = 0;
-}
-
-void OperationStack::prepareExtraOperations(int keep) {
-	if (!extraOperations) {
-		extraOperations = makeReference<OperationBuffer>();
-	} else if (extraOperations->isSoleOwner()) {
-		extraOperations->operations.resize(keep);
-	} else if (extraOperations->operations.size() != keep) {
-		auto copy = makeReference<OperationBuffer>();
-		copy->operations.assign(extraOperations->operations.begin(), extraOperations->operations.begin() + keep);
-		extraOperations = copy;
-	}
+	topOperation = initialEntry;
+	history.clear();
+	historyCount = 0;
 }
 
 void OperationStack::poppush(RYWMutation entry) {
-	if (extraCount) {
-		prepareExtraOperations(extraCount - 1);
-		extraOperations->operations.push_back(entry);
-	} else {
-		singletonOperation = entry;
-	}
+	topOperation = entry;
 }
 
 void OperationStack::push(RYWMutation entry) {
 	if (defaultConstructed) {
-		singletonOperation = entry;
+		topOperation = entry;
 		defaultConstructed = false;
-	} else {
-		prepareExtraOperations(extraCount);
-		extraOperations->operations.push_back(entry);
-		++extraCount;
+		return;
 	}
+	if (!history) {
+		history = makeReference<History>();
+	} else if ((int)history->entries.size() != historyCount) {
+		// Another copy already extended the shared entries past this stack's view.
+		auto prefix = makeReference<History>();
+		prefix->entries.assign(history->entries.begin(), history->entries.begin() + historyCount);
+		history = prefix;
+	}
+	history->entries.push_back(topOperation);
+	++historyCount;
+	topOperation = entry;
 }
 
 bool OperationStack::isDependent() const {
 	if (!size())
 		return false;
-	return singletonOperation.type != MutationRef::SetValue && singletonOperation.type != MutationRef::ClearRange &&
-	       singletonOperation.type != MutationRef::SetVersionstampedValue &&
-	       singletonOperation.type != MutationRef::SetVersionstampedKey;
+	const RYWMutation& bottom = at(0);
+	return bottom.type != MutationRef::SetValue && bottom.type != MutationRef::ClearRange &&
+	       bottom.type != MutationRef::SetVersionstampedValue && bottom.type != MutationRef::SetVersionstampedKey;
 }
 
 bool OperationStack::operator==(const OperationStack& r) const {
 	if (size() != r.size())
 		return false;
 
-	if (size() == 0)
-		return true;
-
-	if (singletonOperation != r.singletonOperation)
-		return false;
-
-	if (size() == 1)
-		return true;
-
-	for (int i = 1; i < size(); i++) {
+	for (int i = 0; i < size(); i++) {
 		if (at(i) != r.at(i))
 			return false;
 	}
