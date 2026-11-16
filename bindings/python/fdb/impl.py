@@ -1082,7 +1082,7 @@ class FutureString(LazyFuture):
     def __ne__(self, rhs):
         return not self == rhs
 
-    def __nonzero__(self):
+    def __bool__(self):
         return bool(self.value)
 
     def __int__(self):
