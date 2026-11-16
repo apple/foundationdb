@@ -314,7 +314,6 @@ struct BulkDumpProgress {
 	int64_t completedBytes;
 	double elapsedSeconds;
 	double startTime; // For computing current throughput
-	std::vector<BulkLoadStalledTask> stalledTasks;
 
 	BulkDumpProgress()
 	  : totalTasks(0), completeTasks(0), runningTasks(0), errorTasks(0), completedBytes(0), elapsedSeconds(0),
