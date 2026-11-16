@@ -102,7 +102,7 @@ void WriteMap::mutate(KeyRef key, MutationRef::Type operation, ValueRef param, b
 			PTreeImpl::insert(writes,
 			                  ver,
 			                  WriteMapEntry(key,
-			                                std::move(op),
+			                                op,
 			                                FollowingKeysCleared::True,
 			                                FollowingKeysConflict(following_conflict),
 			                                IsConflict(is_conflict),
@@ -558,7 +558,7 @@ static ValueRef applyAppendIfFitsRun(Optional<ValueRef> const& existing,
 	}
 	for (int i = begin; i < end; ++i) {
 		ValueRef operand = stack.at(i).value.get();
-		if (appendIfFitsApplies(offset, operand.size()) && operand.size() > 0) {
+		if (appendIfFitsApplies(offset, operand.size()) && !operand.empty()) {
 			memcpy(buf + offset, operand.begin(), operand.size());
 			offset += operand.size();
 		}
