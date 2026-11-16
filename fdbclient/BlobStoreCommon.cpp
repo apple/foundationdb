@@ -319,9 +319,9 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 		if (prefix != "blobstore"_sr)
 			throw format("Invalid blobstore URL prefix '%s'", prefix.toString().c_str());
 
-		Optional<std::string> proxyHost, proxyPort;
+		BlobStoreEndpointParams params;
 		if (proxy.present()) {
-			parseProxy(proxy.get(), proxyHost, proxyPort);
+			parseProxy(proxy.get(), params.proxyHost, params.proxyPort);
 		}
 
 		Optional<StringRef> cred;
@@ -341,16 +341,13 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 		if (host.empty())
 			throw std::string("host cannot be empty");
 
-		StringRef service = h.eat();
+		params.host = host.toString();
+		params.service = h.eat().toString();
 
 		std::string region;
 		std::string gcsProjectId;
 		std::string provider = "s3";
-		Optional<std::string> serverSideEncryption;
-		Optional<std::string> proxyParameter;
 
-		BlobKnobs knobs;
-		HTTP::Headers extraHeaders;
 		std::string query = t.toString();
 		auto parsedQuery = boost::urls::parse_query(query);
 		if (!parsedQuery) {
@@ -376,7 +373,7 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 					             originalValue.toString().c_str(),
 					             name.toString().c_str());
 				}
-				std::string& fieldValue = extraHeaders[headerFieldName.toString()];
+				std::string& fieldValue = params.extraHeaders[headerFieldName.toString()];
 				// RFC 2616 section 4.2 says header field names can repeat but only if it is valid to concatenate
 				// their values with comma separation
 				if (!fieldValue.empty()) {
@@ -408,7 +405,7 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 					throw std::string("'server_side_encryption' (or 'sse') parameter cannot be empty.  Use sse=none to "
 					                  "send no server-side encryption header.");
 				}
-				serverSideEncryption = value.toString();
+				params.serverSideEncryption = value.toString();
 				continue;
 			}
 
@@ -418,12 +415,12 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 				if (value.empty()) {
 					throw std::string("'proxy' parameter cannot be empty.  Use proxy=none to connect directly.");
 				}
-				proxyParameter = value.toString();
-				if (proxyParameter.get() == "none") {
-					proxyHost.reset();
-					proxyPort.reset();
+				params.proxyParameter = value.toString();
+				if (params.proxyParameter.get() == "none") {
+					params.proxyHost.reset();
+					params.proxyPort.reset();
 				} else {
-					parseProxy(proxyParameter.get(), proxyHost, proxyPort);
+					parseProxy(params.proxyParameter.get(), params.proxyHost, params.proxyPort);
 				}
 				continue;
 			}
@@ -432,7 +429,7 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 			// First try setting a dummy value (all knobs are currently numeric) just to see if this parameter is
 			// known. If it is, then we will set it to a good value or throw below, so the dummy set has no bad
 			// side effects.
-			bool known = knobs.set(name, 0);
+			bool known = params.knobs.set(name, 0);
 
 			// If the parameter is not known then throw unless there is an ignored_parameters set to add it to
 			if (!known) {
@@ -452,35 +449,15 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 				throw format("%s is not a valid value for %s", s.c_str(), name.toString().c_str());
 
 			// It should not be possible for this set to fail now since the dummy set above had to have worked.
-			ASSERT(knobs.set(name, ivalue));
+			ASSERT(params.knobs.set(name, ivalue));
 		}
 
 		if (resourceFromURL != nullptr)
 			*resourceFromURL = resource.toString();
 
-		if (provider == "gcs") {
-			return makeReference<GCSBlobStoreEndpoint>(host.toString(),
-			                                           service.toString(),
-			                                           proxyHost,
-			                                           proxyPort,
-			                                           cred,
-			                                           gcsProjectId,
-			                                           knobs,
-			                                           extraHeaders,
-			                                           serverSideEncryption,
-			                                           proxyParameter);
-		}
-
-		return makeReference<S3BlobStoreEndpoint>(host.toString(),
-		                                          service.toString(),
-		                                          region,
-		                                          proxyHost,
-		                                          proxyPort,
-		                                          cred,
-		                                          knobs,
-		                                          extraHeaders,
-		                                          serverSideEncryption,
-		                                          proxyParameter);
+		if (provider == "gcs")
+			return makeReference<GCSBlobStoreEndpoint>(params, cred, gcsProjectId);
+		return makeReference<S3BlobStoreEndpoint>(params, region, cred);
 
 	} catch (std::string& err) {
 		if (error != nullptr)

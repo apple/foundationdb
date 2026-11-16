@@ -98,6 +98,15 @@ type monitor struct {
 	// that are not running have no entry. Access is guarded by mutex.
 	processVersions map[int]api.Version
 
+	// processBinaries stores the binary path and the start time of each running subprocess. It has the same entries
+	// as processVersions. Access is guarded by mutex.
+	processBinaries map[int]processBinary
+
+	// stagedVersions is the formatted list of staged versions that was listed last. It is only meaningful if
+	// stagedVersionsKnown is set. Access is guarded by mutex.
+	stagedVersions      string
+	stagedVersionsKnown bool
+
 	// pruneMutex serializes the pruning of the shared binary directory.
 	pruneMutex sync.Mutex
 
@@ -123,6 +132,12 @@ type monitor struct {
 	// binaryRetryBackoff returns the wait time before the given retry attempt. If nil getBinaryRetryBackoff is used.
 	// This is used to overwrite the default retry mechanism in unit-tests.
 	binaryRetryBackoff func(attempt int) time.Duration
+}
+
+// processBinary describes the binary a running subprocess was started from and when.
+type processBinary struct {
+	path      string
+	startTime time.Time
 }
 
 type httpConfig struct {
@@ -170,6 +185,7 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 	reg.MustRegister(collectors.NewGoCollector())
 	monitorMetrics := registerMetrics(reg)
 	mon.metrics = monitorMetrics
+	go func() { mon.watchBinaries(ctx) }()
 	promHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
 
 	// Add Prometheus support
@@ -561,7 +577,8 @@ func (monitor *monitor) runProcess(processNumber int) {
 		logger.Info("Subprocess started", "PID", pid)
 
 		monitor.updateProcessID(processNumber, pid)
-		monitor.setProcessVersion(processNumber, config.Version)
+		monitor.setProcessVersion(processNumber, config.Version, config.BinaryPath, startTime)
+		monitor.metrics.registerRunningBinary(processNumber, config.Version.String(), config.BinaryPath)
 		// Once the last process has switched to the desired version no bounce is pending and the binaries of all
 		// other versions are unused.
 		monitor.pruneSharedBinaries()
@@ -596,7 +613,8 @@ func (monitor *monitor) runProcess(processNumber int) {
 		processDuration := time.Since(startTime)
 		logger.Info("Subprocess terminated", "exitCode", exitCode, "PID", pid, "lastExecutionDurationSeconds", processDuration.String())
 		monitor.updateProcessID(processNumber, -1)
-		monitor.setProcessVersion(processNumber, nil)
+		monitor.setProcessVersion(processNumber, nil, "", time.Time{})
+		monitor.metrics.unregisterRunningBinary(processNumber)
 
 		// Only backoff if the exit code is non-zero.
 		if exitCode != 0 {

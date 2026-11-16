@@ -27,16 +27,9 @@
 // GCS XML API uses the same protocol. Only auth headers and credential handling differ.
 class GCSBlobStoreEndpoint : public S3BlobStoreEndpoint {
 public:
-	GCSBlobStoreEndpoint(std::string const& host,
-	                     std::string const& service,
-	                     Optional<std::string> const& proxyHost,
-	                     Optional<std::string> const& proxyPort,
+	GCSBlobStoreEndpoint(BlobStoreEndpointParams const& params,
 	                     Optional<StringRef> const& creds,
-	                     std::string const& projectId,
-	                     BlobKnobs const& knobs = BlobKnobs(),
-	                     HTTP::Headers extraHeaders = HTTP::Headers(),
-	                     Optional<std::string> const& serverSideEncryption = Optional<std::string>(),
-	                     Optional<std::string> const& proxyParameter = Optional<std::string>());
+	                     std::string const& projectId);
 
 	// OAuth2 Bearer token instead of SigV4
 	void setRequestHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers) override;
