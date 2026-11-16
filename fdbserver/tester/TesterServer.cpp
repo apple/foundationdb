@@ -201,30 +201,71 @@ Future<Void> databaseWarmer(Database cx) {
 
 namespace {
 
-// Tries indefinitely to commit a simple, self conflicting transaction
-Future<Void> pingDatabase(Database cx) {
+// Progress of one liveness ping. Owned by the caller so that it can still be read after the ping's timeout cancels it.
+struct PingState {
+	int attempts = 0;
+	const char* phase = "grv";
+	double attemptStart = 0;
+	// Durations of the phases of the latest attempt.
+	double grvSeconds = 0;
+	double readSeconds = 0;
+	double commitSeconds = 0;
+	Key key;
+};
+
+// The storage servers the client's location cache holds for `key`; empty until the key's location has been looked up.
+// It does no I/O, so it answers even while the cluster is not.
+std::string cachedStorageAddresses(Database cx, KeyRef key) {
+	std::string list;
+	Optional<KeyRangeLocationInfo> location = cx->getCachedLocation(key);
+	if (location.present()) {
+		for (int i = 0; i < location.get().locations->size(); ++i) {
+			list += (i ? "," : "") + location.get().locations->getInterface(i).address().toString();
+		}
+	}
+	return list;
+}
+
+// Tries indefinitely to commit a simple, self conflicting transaction. The phases are timed separately, and a ping
+// error also traces which storage servers hold its key, so a failed ping shows where it stalled.
+Future<Void> pingDatabase(Database cx, PingState* state) {
 	Transaction tr(cx);
 	while (true) {
-		bool needsErrorHandling = false;
 		Error caughtError;
+		state->phase = "grv";
+		state->key = Key(StringRef("/Liveness/" + deterministicRandom()->randomUniqueID().toString()));
+		state->attemptStart = now();
+		state->grvSeconds = state->readSeconds = state->commitSeconds = 0;
+		++state->attempts;
 
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> v =
-			    co_await tr.get(StringRef("/Liveness/" + deterministicRandom()->randomUniqueID().toString()));
+			co_await tr.getReadVersion();
+			double afterGrv = now();
+			state->grvSeconds = afterGrv - state->attemptStart;
+			state->phase = "read";
+			Optional<Value> v = co_await tr.get(state->key);
+			double afterRead = now();
+			state->readSeconds = afterRead - afterGrv;
+			state->phase = "commit";
 			tr.makeSelfConflicting();
 			co_await tr.commit();
+			state->commitSeconds = now() - afterRead;
 			co_return;
 		} catch (Error& e) {
-			TraceEvent("PingingDatabaseTransactionError").error(e);
+			TraceEvent("PingingDatabaseTransactionError")
+			    .error(e)
+			    .detail("Phase", state->phase)
+			    .detail("Key", state->key)
+			    .detail("Attempt", state->attempts)
+			    .detail("AttemptSeconds", now() - state->attemptStart)
+			    .detail("StorageAddresses", cachedStorageAddresses(cx, state->key));
 			caughtError = e;
-			needsErrorHandling = true;
 		}
-
-		if (needsErrorHandling) {
-			co_await tr.onError(caughtError);
-		}
+		// A stall in the back-off is not a stall of the phase that failed.
+		state->phase = "retry";
+		co_await tr.onError(caughtError);
 	}
 }
 
@@ -233,22 +274,34 @@ Future<Void> pingDatabase(Database cx) {
 Future<Void> testDatabaseLiveness(Database cx, double databasePingDelay, std::string context, double startDelay) {
 	co_await delay(startDelay);
 	while (true) {
-		Error caughtError;
+		PingState ping;
 
 		try {
 			double start = now();
 			auto traceMsg = "PingingDatabaseLiveness_" + context;
 			TraceEvent(traceMsg.c_str()).log();
-			co_await timeoutError(pingDatabase(cx), databasePingDelay);
+			co_await timeoutError(pingDatabase(cx, &ping), databasePingDelay);
 			double pingTime = now() - start;
 			ASSERT(pingTime > 0);
-			TraceEvent(("PingingDatabaseLivenessDone_" + context).c_str()).detail("TimeTaken", pingTime);
+			TraceEvent(("PingingDatabaseLivenessDone_" + context).c_str())
+			    .detail("TimeTaken", pingTime)
+			    .detail("Attempts", ping.attempts)
+			    .detail("GrvSeconds", ping.grvSeconds)
+			    .detail("ReadSeconds", ping.readSeconds)
+			    .detail("CommitSeconds", ping.commitSeconds);
 			co_await delay(databasePingDelay - pingTime);
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
-				TraceEvent(SevError, ("PingingDatabaseLivenessError_" + context).c_str())
-				    .error(e)
-				    .detail("PingDelay", databasePingDelay);
+				// The event keeps the pointer to its type name until it is logged, past the end of this statement.
+				std::string errorType = "PingingDatabaseLivenessError_" + context;
+				TraceEvent event(SevError, errorType.c_str());
+				event.error(e).detail("PingDelay", databasePingDelay);
+				if (ping.attempts > 0) {
+					event.detail("Phase", ping.phase)
+					    .detail("Attempts", ping.attempts)
+					    .detail("AttemptSeconds", now() - ping.attemptStart)
+					    .detail("StorageAddresses", cachedStorageAddresses(cx, ping.key));
+				}
 			}
 			throw;
 		}
