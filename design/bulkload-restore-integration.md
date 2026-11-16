@@ -602,7 +602,7 @@ fdbbackup status -d <backup_url>
 
 #New fields in output:
 #Snapshot Mode : bulkdump | rangefile | both
-#BulkLoad Compatible : yes | no
+#BulkLoad Ready : yes | no
 ```
 
 **Restore Status Enhancements:**

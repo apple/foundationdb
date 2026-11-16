@@ -4185,7 +4185,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 
 		// CRITICAL: Set bulkDumpJobId on the backup CONFIG so that status checks
 		// and restore operations can find it. Without this, the backup status shows
-		// "BulkLoad Compatible: no" and bulkload restore fails with "Missing backup data".
+		// "BulkLoad Ready: no" and bulkload restore fails with "Missing backup data".
 		if (!jobId.empty()) {
 			config.bulkDumpJobId().set(tr, jobId);
 		}
@@ -8579,10 +8579,10 @@ public:
 					}
 					doc.setKey("SnapshotMode", snapshotModeText);
 
-					// Check if backup is BulkLoad compatible: keyed off bulkDumpSnapshotEndVersion, the marker
+					// Check if backup is BulkLoad ready: keyed off bulkDumpSnapshotEndVersion, the marker
 					// that the dumped data exists, rather than the job id, which only names the job.
 					Optional<Version> bulkDumpSnapshotEnd = co_await config.bulkDumpSnapshotEndVersion().get(tr);
-					doc.setKey("BulkLoadCompatible", bulkDumpSnapshotEnd.present());
+					doc.setKey("BulkLoadReady", bulkDumpSnapshotEnd.present());
 
 					// If using bulkdump mode, get bulkdump progress
 					if (snapshotModeValue == 1 || snapshotModeValue == 2) {
@@ -8744,14 +8744,14 @@ public:
 					    co_await config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
 					statusText += format("Mutation Log Type: %s\n", mutationLogTypeToString(mutationLogType).c_str());
 
-					// Check if backup is BulkLoad compatible (has bulkdump_data/).
+					// Check if backup is BulkLoad ready (has bulkdump_data/).
 					// In rangefile mode no bulkdump task ever runs, so the answer is
 					// always "no" and the line carries no information — skip it.
 					// Keyed off bulkDumpSnapshotEndVersion, the marker that the dumped data exists, rather than
 					// the job id, which only names the job.
 					if (snapshotModeValue != 0) {
 						Optional<Version> bulkDumpSnapshotEnd = co_await config.bulkDumpSnapshotEndVersion().get(tr);
-						statusText += format("BulkLoad Compatible: %s\n", bulkDumpSnapshotEnd.present() ? "yes" : "no");
+						statusText += format("BulkLoad Ready: %s\n", bulkDumpSnapshotEnd.present() ? "yes" : "no");
 					}
 
 					bool showBulkDump = (snapshotModeValue == 1 || snapshotModeValue == 2);
