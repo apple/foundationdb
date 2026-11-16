@@ -61,6 +61,9 @@ public:
 		       e.code() == error_code_bulkload_manifest_decode_error;
 	}
 
+	// A bulkdump snapshot manifest holds only the job ID and a single key range, so it is far smaller than this.
+	static constexpr int64_t kMaxBulkDumpManifestSize = 1 << 20;
+
 	// Returns the bulkdump job id recorded in a keyspace snapshot, or empty if the snapshot has none or
 	// cannot be read. The job id is only in the snapshot's JSON body -- the filename carries the snapshot
 	// type but not the id -- and it is what locates the SST tree under bulkdump_data/<jobId>/.
@@ -74,7 +77,7 @@ public:
 		try {
 			Reference<IAsyncFile> f = co_await bc->readFile(snapshot.fileName);
 			int64_t size = co_await f->size();
-			if (restoring && size > (1 << 20)) {
+			if (restoring && size > kMaxBulkDumpManifestSize) {
 				// A bulkdump descriptor contains only the job ID and a single key range.
 				throw restore_corrupted_data();
 			}
@@ -82,13 +85,13 @@ public:
 			// rangefile manifest lists every range file and can reach hundreds of megabytes. Size is the
 			// only cheap discriminator available: the snapshot filename carries the type suffix solely in
 			// 'both' mode, so a plain bulkdump snapshot is indistinguishable from a rangefile one by name.
-			// Refusing to read anything over a chunk keeps expire from pulling in a huge manifest just to
-			// discover it has no job id.
-			if (!restoring && size > CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE) {
+			// Refusing to read anything over kMaxBulkDumpManifestSize keeps expire from pulling in a huge
+			// manifest just to discover it has no job id.
+			if (!restoring && size > kMaxBulkDumpManifestSize) {
 				TraceEvent("BackupContainerExpireSkipLargeSnapshotManifest")
 				    .detail("Snapshot", snapshot.fileName)
 				    .detail("Size", size)
-				    .detail("Limit", CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE);
+				    .detail("Limit", kMaxBulkDumpManifestSize);
 				co_return std::string();
 			}
 			auto buf = std::make_shared<std::string>(size, '\0');
