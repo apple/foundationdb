@@ -2,7 +2,7 @@
 //
 // This source file is part of the FoundationDB open source project
 //
-// Copyright 2021-2024 Apple Inc. and the FoundationDB project authors
+// Copyright 2021-2026 Apple Inc. and the FoundationDB project authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,9 @@ import (
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/prometheus/client_golang/prometheus"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/json"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -51,7 +53,7 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 		})
 
 		JustBeforeEach(func() {
-			mon.updateCustomEnvironmentFromNodeMetadata()
+			Expect(mon.updateCustomEnvironmentFromNodeMetadata(context.Background())).To(Succeed())
 		})
 
 		When("no node metadata is present", func() {
@@ -63,15 +65,17 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 
 		When("node metadata is present", func() {
 			BeforeEach(func() {
-				mon.podClient.nodeMetadata = &metav1.PartialObjectMetadata{
+				mon.podClient.nodeName = "test-node"
+				mon.podClient.Client = fake.NewFakeClient(&corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-node",
 						Labels: map[string]string{
 							// Examples are taken from: https://kubernetes.io/docs/reference/labels-annotations-taints/
 							"topology.kubernetes.io/zone": "us-east-1c",
 							"kubernetes.io/hostname":      "ip-172-20-114-199.ec2.internal",
 						},
 					},
-				}
+				})
 			})
 
 			It("should add the new entries", func() {
@@ -89,12 +93,13 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 				logger:            GinkgoLogr,
 				customEnvironment: map[string]string{"testing": "testing"},
 				podClient: &kubernetesClient{
-					nodeMetadata: &metav1.PartialObjectMetadata{
+					nodeName: "test-node",
+					Client: fake.NewFakeClient(&corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:   "test-node",
 							Labels: map[string]string{"topology.kubernetes.io/zone": "us-east-1c"},
 						},
-					},
+					}),
 				},
 			}
 
@@ -105,7 +110,7 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 					defer wg.Done()
 					defer GinkgoRecover()
 					for j := 0; j < 200; j++ {
-						mon.updateCustomEnvironmentFromNodeMetadata()
+						Expect(mon.updateCustomEnvironmentFromNodeMetadata(context.Background())).To(Succeed())
 					}
 				}()
 				go func() {
@@ -161,16 +166,25 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 			Expect(os.WriteFile(fdbserverPath, []byte("fdbserver"), 0700)).NotTo(HaveOccurred())
 			configurationFilePath = path.Join(tmpDir, "config.json")
 			mon = &monitor{
-				logger:                  GinkgoLogr,
-				configFile:              configurationFilePath,
-				customEnvironment:       map[string]string{},
-				podClient:               &kubernetesClient{},
+				logger:            GinkgoLogr,
+				configFile:        configurationFilePath,
+				customEnvironment: map[string]string{},
+				podClient: &kubernetesClient{
+					podName:   "test-pod",
+					namespace: "test",
+					Client: fake.NewFakeClient(&corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "test-pod",
+							Namespace: "test",
+						},
+					}),
+				},
 				currentContainerVersion: defaultVersion,
 			}
 		})
 
 		JustBeforeEach(func() {
-			configuration, configurationBytes, readErr = mon.readConfiguration()
+			configuration, configurationBytes, readErr = mon.readConfiguration(context.Background())
 		})
 
 		When("the configuration file is empty", func() {
@@ -283,15 +297,15 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 
 			When("the pod has the isolate annotation set to true", func() {
 				BeforeEach(func() {
-					mon.podClient = &kubernetesClient{
-						podMetadata: &metav1.PartialObjectMetadata{
-							ObjectMeta: metav1.ObjectMeta{
-								Annotations: map[string]string{
-									api.IsolateProcessGroupAnnotation: "true",
-								},
+					Expect(mon.podClient.Client.Update(context.Background(), &corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "test-pod",
+							Namespace: "test",
+							Annotations: map[string]string{
+								api.IsolateProcessGroupAnnotation: "true",
 							},
 						},
-					}
+					})).To(Succeed())
 				})
 
 				It("should return the configuration with runServers set to false", func() {
@@ -395,10 +409,17 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 				configFile:        configurationFilePath,
 				customEnvironment: map[string]string{},
 				// No processes are started, this test only covers loading the configuration.
-				processCount:            0,
-				processIDs:              make([]int, 1),
-				metrics:                 registerMetrics(prometheus.NewRegistry()),
-				podClient:               &kubernetesClient{Logger: GinkgoLogr},
+				processCount: 0,
+				processIDs:   make([]int, 1),
+				metrics:      registerMetrics(prometheus.NewRegistry()),
+				podClient: &kubernetesClient{
+					podName:   "test-pod",
+					namespace: "test",
+					Logger:    GinkgoLogr,
+					Client: fake.NewFakeClient(&corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "test"},
+					}),
+				},
 				currentContainerVersion: currentVersion,
 				binaryRetryBackoff: func(int) time.Duration {
 					attempts.Add(1)
