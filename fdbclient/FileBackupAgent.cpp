@@ -4044,6 +4044,28 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				// Store job ID for monitoring
 				Params.bulkDumpJobId().set(task, bulkDumpJob.getJobId().toString());
 
+				// Also record it on the config now rather than only on completion, so that status and any
+				// operator tooling can name the job while it is still running. Restorability is reported
+				// from bulkDumpSnapshotEndVersion, which is set only once the dump finishes, so an id
+				// present here does not imply the data exists yet.
+				{
+					Transaction idTr(cx);
+					std::string runningJobId = bulkDumpJob.getJobId().toString();
+					while (true) {
+						Error err;
+						try {
+							idTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							idTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+							config.bulkDumpJobId().set(&idTr, runningJobId);
+							co_await idTr.commit();
+							break;
+						} catch (Error& e) {
+							err = e;
+						}
+						co_await idTr.onError(err);
+					}
+				}
+
 				// Monitor BulkDump progress - timeout is configurable for large datasets
 				bool completed = co_await monitorBulkDumpJobCompletion(cx,
 				                                                       bulkDumpJob.getJobId(),
@@ -4182,13 +4204,6 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 		// This is used by getLatestRestorableVersion() for mode=BOTH to ensure both
 		// rangefile and bulkdump data exist before marking backup as restorable
 		config.bulkDumpSnapshotEndVersion().set(tr, snapshotVersion);
-
-		// CRITICAL: Set bulkDumpJobId on the backup CONFIG so that status checks
-		// and restore operations can find it. Without this, the backup status shows
-		// "BulkLoad Ready: no" and bulkload restore fails with "Missing backup data".
-		if (!jobId.empty()) {
-			config.bulkDumpJobId().set(tr, jobId);
-		}
 
 		// Set firstSnapshotEndVersion if not already set, BUT only if we're NOT in
 		// mode=BOTH. In mode=BOTH, firstSnapshotEndVersion tracks the rangefile snapshot
