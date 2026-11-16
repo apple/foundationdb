@@ -31,12 +31,13 @@
 # 4. Polls 'status json' until tag A is running and tag B has an error.
 #    The wait outlasts the 120s expiry of the agent's last good status
 #    document, so an agent that stops publishing loses tag A as well.
-# 5. Aborts B and polls until tag A is running and tag B is aborted with no
-#    error, since status doesn't open the containers of finished backups.
+# 5. Aborts B and polls until tag A is running and tag B is aborted and still
+#    has an error, since status opens the containers of finished backups too.
 #
-# Always runs against MockS3Server, bound to 127.0.0.2 (Linux routes all of
-# 127/8 to loopback): the client guesses a region for 127.0.0.1, localhost, and
-# real S3 domains, so B's URL would parse there.
+# Runs only against MockS3Server, bound to 127.0.0.2. We use this IP address
+# because we don't want the client correctly guessing the region (which it
+# would for 127.0.0.1, any localhost, and any S3 domains). This is to induce
+# the parsing of the URL failing (missing region= param).
 #
 # Usage:
 #   s3_backup_status_bad_url_test.sh <source_dir> <build_dir> [scratch_dir]
@@ -120,10 +121,10 @@ function a_running_and_b_has_error {
     jq -e --arg t "${TAG_B}" '(.tags[$t].error // "") | length > 0' <<< "${1}" &> /dev/null
 }
 
-# An aborted backup's container is never opened, even if encrypted, so it reports no error.
+# An aborted backup's container is still opened, so it keeps reporting the error.
 function a_running_and_b_aborted {
   tag_is_running "${1}" "${TAG_A}" &&
-    jq -e --arg t "${TAG_B}" '.tags[$t].current_status == "has been aborted" and (.tags[$t] | has("error") | not)' \
+    jq -e --arg t "${TAG_B}" '.tags[$t].current_status == "has been aborted" and ((.tags[$t].error // "") | length > 0)' \
       <<< "${1}" &> /dev/null
 }
 
@@ -182,7 +183,7 @@ function test_status_with_bad_url {
 
   log "Wait for status json to show ${TAG_A} running and ${TAG_B} aborted"
   if ! wait_for_layers a_running_and_b_aborted 180; then
-    report_layers_failure "aborted without an error"
+    report_layers_failure "aborted with an error"
     return 1
   fi
   return 0
@@ -212,6 +213,13 @@ fi
 if ! source "${cwd}/backup_tests_common.sh"; then
   echo "Failed to source backup_tests_common.sh" >&2
   exit 1
+fi
+
+# macOS only puts 127.0.0.1 on loopback, so MockS3Server can't bind 127.0.0.2.
+# 66 is this test's SKIP_RETURN_CODE in fdbbackup/CMakeLists.txt.
+if [[ "${OSTYPE}" == "darwin"* ]]; then
+  log "Skipping: needs 127.0.0.2 on loopback, which macOS doesn't have"
+  exit 66
 fi
 
 if (( $# < 2 )) || (( $# > 3 )); then
