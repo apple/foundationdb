@@ -1,5 +1,12 @@
 testClass = "Backup"
 
+# Exercise file/block continuations and transaction-byte limits.
+[[knobs]]
+backup_rangefile_block_size = 4096
+restore_dispatch_addtask_size = 2
+restore_dispatch_tx_size = 4096
+restore_write_tx_size = 4096
+
 [configuration]
 
 [[test]]
@@ -18,5 +25,3 @@ simBackupAgents = 'BackupToFile'
     backupAfter = 10.0
     restoreAfter = 60.0
     backupRangesCount = -1
-
-

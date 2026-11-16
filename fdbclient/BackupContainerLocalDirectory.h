@@ -56,6 +56,8 @@ public:
 
 	Future<Void> deleteContainer(int* pNumDeleted) final;
 
+	std::string getLocation() const final;
+
 private:
 	std::string m_path;
 };

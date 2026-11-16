@@ -1,0 +1,25 @@
+# Exercises getEstimatedRangeSizeBytes paging through shard locations in many
+# batches (#11384). Forces many small shards (as in DDPipelineSaturation.toml)
+# and pins STORAGE_METRICS_LARGE_RANGE_SHARD_LIMIT to 3, so a range covering the
+# whole database needs many getKeyServersLocations round trips. Besides the
+# workload's usual loose bounds check, subrangeCount makes it verify that the
+# whole-range estimate equals the sum of the estimates of disjoint subranges,
+# which fails if a batch is dropped or counted twice.
+#
+# The sharded RocksDB engine is excluded for the same reason as in
+# DDPipelineSaturation.toml: it does not cope with the shard explosion.
+[configuration]
+storageEngineExcludeTypes = [5]
+
+[[knobs]]
+storage_metrics_large_range_shard_limit = 3
+min_shard_bytes = 10000
+shard_bytes_per_sqrt_bytes = 0
+
+[[test]]
+testTitle = 'GetEstimatedRangeSizePagedTest'
+
+    [[test.workload]]
+    testName = 'GetEstimatedRangeSize'
+    nodeCount = 20000
+    subrangeCount = 7

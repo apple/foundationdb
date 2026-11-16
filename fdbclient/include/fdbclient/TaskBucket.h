@@ -215,6 +215,19 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return finish(tr, task); });
 	}
 
+	// Update a persisted parameter without moving the lease key. Hold task->extendMutex through commit
+	// so the ownership check and write address the same lease.
+	Future<Void> updateTaskParam(Reference<ReadYourWritesTransaction> tr,
+	                             Reference<Task> task,
+	                             Key param,
+	                             Value value) {
+		Key paramKey = timeouts.get(task->timeoutVersion).get(task->key).pack(param);
+		return map(keepRunning(tr, task), [=](Void) {
+			tr->set(paramKey, value);
+			return Void();
+		});
+	}
+
 	// Extend the task's timeout as if it just started and also save any parameter changes made to the task
 	Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr,
 	                              Reference<Task> task,
@@ -296,8 +309,8 @@ private:
 
 	// Available task subspaces.  Priority 0, the default, will be under available which is backward
 	// compatible with pre-priority TaskBucket processes.  Priority 1 and higher will be in
-	// available_prioritized.  Currently only priority level 1 is allowed but adding more levels
-	// in the future is possible and simple.
+	// available_prioritized.  Priority levels up to TASKBUCKET_MAX_PRIORITY are allowed.  A process only
+	// scans levels up to its own TASKBUCKET_MAX_PRIORITY, so tasks at a higher level are invisible to it.
 	Subspace available;
 	Subspace available_prioritized;
 	Subspace timeouts;

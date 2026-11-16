@@ -542,7 +542,7 @@ public:
 		}
 	}
 
-	// Called on every db commit.
+	// Invalidate snapshots after writes become visible.
 	void update() {
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS ||
 		    SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
@@ -1316,6 +1316,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
+			// Pooled iterators hold snapshots taken before the external files became visible.
+			readIterPool->update();
 			a.done.send(Void());
 		}
 
@@ -3045,8 +3047,13 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/IngestSSTFileVisibility") {
 
 	fileSetMap->emplace_back(allKeys, fileSet); // Use emplace_back for std::vector
 
-	// Ingest the SST file using the populated map
+	const KeyRange range = singleKeyRange("test_key"_sr);
+	RangeResult before = co_await kvStore->readRange(range, 10, 1000, {});
+	ASSERT(before.empty());
 	co_await kvStore->ingestSSTFiles(fileSetMap);
+	RangeResult after = co_await kvStore->readRange(range, 10, 1000, {});
+	ASSERT_EQ(after.size(), 1);
+	ASSERT(after[0].key == "test_key"_sr && after[0].value == "test_value"_sr);
 
 	// Verify the key is visible
 	Optional<Value> value = co_await kvStore->readValue("test_key"_sr, Optional<ReadOptions>());
