@@ -1,0 +1,21 @@
+[configuration]
+config = 'triple'
+# No fearless/multi-region configs: RangeDigest is region-agnostic (SS-local fold + additive combine),
+# and multi-region (usable_regions=2, two_satellite_*) configs are prone to QuietDatabaseNeverFullyRecovered
+# quiescence timeouts unrelated to the audit. Multi-region audit paths are covered by ValidateStorage.
+generateFearless = false
+machineCount = 18
+
+[[test]]
+testTitle = 'RangeDigestValidation'
+useDB = true
+
+    # Modest dataset so it fits the simulation `memory` storage engine and stays cheap across the
+    # Joshua matrix. Shard spread is best-effort here (some seeds keep a single shard); the strict
+    # multi-shard/throughput exercise is a dedicated run with larger nodeCount/valueBytes +
+    # strictShardCheck=true. Correctness (root == independent computation, determinism) is validated
+    # at any shard count.
+    [[test.workload]]
+    testName = 'RangeDigestValidation'
+    nodeCount = 10000
+    valueBytes = 100

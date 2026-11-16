@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbrpc/simulator.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
@@ -47,6 +46,7 @@
 #include "FileBackupAgentFileFormat.h"
 #include "flow/network.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/Util.h"
 
 #include <cinttypes>
@@ -71,7 +71,7 @@ std::atomic<int> g_bulkDumpTaskCompleteCount(0);
 std::atomic<int> g_bulkLoadRestoreTaskCompleteCount(0);
 
 // Helper function to monitor BulkDump job completion
-// Returns true if the job completed, false if it stopped making progress for timeoutDuration.
+// Returns true if the job completed, false if it failed or stopped making progress for timeoutDuration.
 //
 // The budget is a no-progress window, not a total duration. A dump advances one bounded slice per
 // scheduling round (the SS returns after SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST batches and the
@@ -103,9 +103,15 @@ Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeout
 				// A sample that fails carries no information: leave the window running rather than
 				// letting a transient read error either fail the backup or extend its deadline.
 				try {
-					size_t completeCount = co_await getBulkDumpCompleteTaskCount(cx, currentJob.get().getJobRange());
-					if (completeCount > lastCompleteCount) {
-						lastCompleteCount = completeCount;
+					BulkDumpTaskCounts counts = co_await getBulkDumpTaskCounts(cx, currentJob.get().getJobRange());
+					if (counts.error > 0) {
+						TraceEvent(SevWarn, "BulkDumpJobFailed")
+						    .detail("BulkDumpJobId", jobId)
+						    .detail("ErrorTasks", counts.error);
+						co_return false;
+					}
+					if (counts.complete > lastCompleteCount) {
+						lastCompleteCount = counts.complete;
 						lastProgressTime = now();
 					}
 				} catch (Error& e) {
@@ -266,12 +272,82 @@ Key FileBackupAgent::getPauseKey() {
 	return backupAgent.taskBucket->getPauseKey();
 }
 
+Optional<std::string> FileBackupAgent::bulkLoadRestoreRefusal(Key tagName,
+                                                              Standalone<VectorRef<KeyRangeRef>> ranges,
+                                                              Key addPrefix,
+                                                              Key removePrefix,
+                                                              OnlyApplyMutationLogs onlyApplyMutationLogs,
+                                                              Optional<std::string> encryptionKeyFileName,
+                                                              bool useRangeFileRestore) {
+	if (useRangeFileRestore) {
+		return {};
+	}
+
+	// Same one-range limit as bulkdump: the bulkload job that ingests the SSTs carries a single range.
+	// BulkLoadRestoreTaskFunc indexes range 0 on the strength of this check.
+	KeyRangeMap<int> restoreRangeSet;
+	for (auto& range : ranges) {
+		restoreRangeSet.insert(range, 1);
+	}
+	restoreRangeSet.coalesce(allKeys);
+	int rangeCount = 0;
+	for (auto& restoreRange : restoreRangeSet.ranges()) {
+		if (restoreRange.value()) {
+			++rangeCount;
+		}
+	}
+	if (rangeCount != 1) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadRangeCount")
+		    .detail("TagName", tagName)
+		    .detail("RangeCount", rangeCount);
+		return fmt::format("--mode bulkload requires exactly one key range, but {} remain after coalescing "
+		                   "adjacent ranges. Use --mode rangefile, or run one restore per range.",
+		                   rangeCount);
+	}
+
+	// Mirror of the backup-side rejection. A bulkload restore ingests the snapshot via SST, which is
+	// precisely the range data --incremental declines, and StartFullRestoreTaskFunc picks the bulkload
+	// branch without consulting the flag. Accepting the pair would restore the whole snapshot the
+	// caller asked to skip, then overwrite their setting so even status misreports it.
+	if (onlyApplyMutationLogs) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadIncremental").detail("TagName", tagName);
+		return std::string("--incremental cannot be combined with --mode bulkload; bulkload restores the "
+		                   "snapshot that --incremental skips. Use --mode rangefile for a logs-only restore.");
+	}
+
+	// Mirror of the backup-side encryption refusal. Nothing on the SST path can decrypt, so a
+	// bulkload restore of an encrypted backup cannot work; refusing here says so plainly instead of
+	// failing later with an abort that blames the backup for having no bulkdump data.
+	if (encryptionKeyFileName.present()) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadEncryption").detail("TagName", tagName);
+		return std::string("--encryption-key-file cannot be combined with --mode bulkload; the SST files a "
+		                   "bulkload restore ingests are not encrypted. Use --mode rangefile.");
+	}
+
+	// A bulkload restore ingests SST files into the key range they were dumped from and has no way to
+	// rewrite keys, so a prefix cannot reach the snapshot. Log replay applies it regardless, so
+	// accepting the pair would split the result across two key spaces: snapshot at the original
+	// keys, mutations at the prefixed ones.
+	if (!addPrefix.empty() || !removePrefix.empty()) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadPrefix")
+		    .detail("TagName", tagName)
+		    .detail("AddPrefix", addPrefix)
+		    .detail("RemovePrefix", removePrefix);
+		return std::string("--add-prefix and --remove-prefix cannot be combined with --mode bulkload; the SST "
+		                   "files it ingests cannot be rewritten to a new prefix, so only the mutation log would "
+		                   "be prefixed and the restored data would be split across two key spaces. Use --mode "
+		                   "rangefile.");
+	}
+	return {};
+}
+
 Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap* tagsMap,
                                                          Reference<ReadYourWritesTransaction> tr,
                                                          Snapshot snapshot) {
 	Key prefix = tagsMap->prefix; // Copying it here as tagsMap lifetime is not tied to this actor
 	TagMap::RangeResultType tagPairs = co_await tagsMap->getRange(tr, std::string(), {}, 1e6, snapshot);
 	std::vector<KeyBackedTag> results;
+	results.reserve(tagPairs.results.size());
 	for (auto& p : tagPairs.results)
 		results.push_back(KeyBackedTag(p.first, prefix));
 	co_return results;
@@ -281,64 +357,72 @@ KeyBackedTag::KeyBackedTag(std::string tagName, StringRef tagMapPrefix)
   : KeyBackedProperty<UidAndAbortedFlagT>(TagUidMap(tagMapPrefix).getProperty(tagName)), tagName(tagName),
     tagMapPrefix(tagMapPrefix) {}
 
-// Lists all backups and find if any partitioned backup is running.
-Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr) {
+namespace {
+struct RunningBackup {
+	std::string tagName;
+	BackupConfig config;
+};
+} // namespace
+
+// Returns the tag and config of every backup whose state is runnable, read in the caller's transaction.
+static Future<std::vector<RunningBackup>> getRunningBackups(Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
 
-	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
+	std::vector<Future<Optional<UidAndAbortedFlagT>>> uids;
+	uids.reserve(tags.size());
 	for (const auto& tag : tags) {
-		futures.push_back(tag.get(tr));
+		uids.push_back(tag.get(tr));
 	}
+	co_await waitForAll(uids);
 
-	co_await waitForAll(futures);
-	int i = 0;
-	for (i = 0; i < futures.size(); i++) {
-		if (futures[i].get().present()) {
-			Optional<MutationLogType> mutationLogType;
-			EBackupState eState;
-			BackupConfig config(futures[i].get().get().first);
+	std::vector<RunningBackup> backups;
+	std::vector<Future<EBackupState>> states;
+	for (int i = 0; i < uids.size(); i++) {
+		if (uids[i].get().present()) {
+			backups.push_back(RunningBackup{ tags[i].tagName, BackupConfig(uids[i].get().get().first) });
+			states.push_back(backups.back().config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN));
+		}
+	}
+	co_await waitForAll(states);
 
-			co_await (store(eState, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
-			          store(mutationLogType, config.mutationLogType().get(tr)));
-			if (FileBackupAgent::isRunnable(eState) &&
-			    mutationLogType.orDefault(MutationLogType::DEFAULT) == MutationLogType::PARTITIONED_LOG) {
-				co_return true;
-			}
+	std::vector<RunningBackup> running;
+	for (int i = 0; i < backups.size(); i++) {
+		if (FileBackupAgent::isRunnable(states[i].get())) {
+			running.push_back(std::move(backups[i]));
+		}
+	}
+	co_return running;
+}
+
+// Returns true if a runnable backup uses the given mutation log type.
+static Future<bool> anyBackupRunningWithLogType(Reference<ReadYourWritesTransaction> tr, MutationLogType logType) {
+	std::vector<RunningBackup> backups = co_await getRunningBackups(tr);
+	for (auto& backup : backups) {
+		Optional<MutationLogType> mutationLogType = co_await backup.config.mutationLogType().get(tr);
+		if (mutationLogType.orDefault(MutationLogType::DEFAULT) == logType) {
+			co_return true;
 		}
 	}
 	co_return false;
 }
 
-// Lists all backups and find if any range-partitioned backup is running.
-Future<bool> anyRangePartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
-
-	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
-	for (const auto& tag : tags) {
-		futures.push_back(tag.get(tr));
-	}
-
-	co_await waitForAll(futures);
-	int i = 0;
-	for (i = 0; i < futures.size(); i++) {
-		if (futures[i].get().present()) {
-			Optional<MutationLogType> mutationLogType;
-			EBackupState eState;
-			BackupConfig config(futures[i].get().get().first);
-
-			co_await (store(eState, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
-			          store(mutationLogType, config.mutationLogType().get(tr)));
-			if (FileBackupAgent::isRunnable(eState) &&
-			    mutationLogType.orDefault(MutationLogType::DEFAULT) == MutationLogType::RANGE_PARTITIONED_LOG) {
-				co_return true;
-			}
+Future<Optional<std::string>> FileBackupAgent::findRunningBackupAtLocation(Reference<ReadYourWritesTransaction> tr,
+                                                                           Reference<IBackupContainer> bc,
+                                                                           std::string excludeTag) {
+	std::vector<RunningBackup> backups = co_await getRunningBackups(tr);
+	std::string location = bc->getLocation();
+	for (auto& backup : backups) {
+		if (backup.tagName == excludeTag) {
+			continue;
+		}
+		Optional<Reference<IBackupContainer>> other = co_await backup.config.backupContainer().get(tr);
+		if (other.present() && other.get() && other.get()->getLocation() == location) {
+			co_return backup.tagName;
 		}
 	}
-	co_return false;
+	co_return Optional<std::string>();
 }
 
 class RestoreConfig : public KeyBackedTaskConfig {
@@ -395,18 +479,13 @@ public:
 	KeyBackedBinaryValue<int64_t> bulkLoadTotalTasks() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
-		return getRestoreRangesOrDefault_impl(this, tr);
-	}
-
-	static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig* self,
-	                                                                    Reference<ReadYourWritesTransaction> tr) {
 		std::vector<KeyRange> ranges;
 		int batchSize = buggify() ? 1 : CLIENT_KNOBS->RESTORE_RANGES_READ_BATCH;
 		Optional<KeyRange> begin;
 		Arena arena;
 		while (true) {
 			KeyBackedSet<KeyRange>::RangeResultType rangeResult =
-			    co_await self->restoreRangeSet().getRange(tr, begin, {}, batchSize);
+			    co_await restoreRangeSet().getRange(tr, begin, {}, batchSize);
 			ranges.insert(ranges.end(), rangeResult.results.begin(), rangeResult.results.end());
 			if (!rangeResult.more) {
 				break;
@@ -417,10 +496,9 @@ public:
 
 		// fall back to original fields if the new field is empty
 		if (ranges.empty()) {
-			std::vector<KeyRange> _ranges = co_await self->restoreRanges().getD(tr);
-			ranges = _ranges;
+			ranges = co_await restoreRanges().getD(tr);
 			if (ranges.empty()) {
-				KeyRange range = co_await self->restoreRange().getD(tr);
+				KeyRange range = co_await restoreRange().getD(tr);
 				ranges.push_back(range);
 			}
 		}
@@ -571,26 +649,75 @@ public:
 		           });
 	}
 
-	static Future<Version> getCurrentVersion_impl(RestoreConfig* self, Reference<ReadYourWritesTransaction> tr) {
-		ERestoreState status = co_await self->stateEnum().getD(tr);
+	Future<Version> getCurrentVersion(Reference<ReadYourWritesTransaction> tr) {
+		ERestoreState status = co_await stateEnum().getD(tr);
 		Version version = -1;
 		if (status == ERestoreState::RUNNING) {
-			version = co_await self->getApplyBeginVersion(tr);
+			version = co_await getApplyBeginVersion(tr);
 		} else if (status == ERestoreState::COMPLETED) {
-			version = co_await self->restoreVersion().getD(tr);
+			version = co_await restoreVersion().getD(tr);
 		}
 		co_return version;
 	}
 
-	Future<Version> getCurrentVersion(Reference<ReadYourWritesTransaction> tr) {
-		return getCurrentVersion_impl(this, tr);
+	// Everything the status renderers need, read once. The text and JSON renderers are pure functions
+	// over this, so every read is issued before the first suspension.
+	struct StatusSnapshot {
+		UID uid;
+		std::string tag;
+		std::string stateText;
+		ERestoreState state;
+		bool useRangeFile;
+
+		int64_t fileCount;
+		int64_t fileBlockCount;
+		int64_t fileBlocksDispatched;
+		int64_t fileBlocksFinished;
+		int64_t bytesWritten;
+
+		int64_t submittedTasks;
+		int64_t triggeredTasks;
+		int64_t runningTasks;
+		int64_t totalTasks;
+
+		Version currentVersion;
+		Version applyLag;
+		Version firstConsistentVersion;
+		Version restoreVersion;
+		Version readVersion;
+
+		std::pair<std::string, Version> lastError;
+
+		std::vector<KeyRange> ranges;
+		Key addPrefix;
+		Key removePrefix;
+		Key url;
+		bool bulkLoadComplete;
+		MutationLogType mutationLogType;
+	};
+
+	static Future<StatusSnapshot> getStatusSnapshot_impl(RestoreConfig restore,
+	                                                     Reference<ReadYourWritesTransaction> tr);
+	Future<StatusSnapshot> getStatusSnapshot(Reference<ReadYourWritesTransaction> tr) {
+		return getStatusSnapshot_impl(*this, tr);
 	}
+
+	static std::string renderProgressText(const StatusSnapshot& s);
+	static std::string renderFullStatusText(const StatusSnapshot& s);
+	static JsonBuilderObject renderStatusJSON(const StatusSnapshot& s);
+	static std::pair<const char*, const char*> statusPhases(const StatusSnapshot& s);
+	static double avgBytesPerTask(const StatusSnapshot& s);
 
 	static Future<std::string> getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getProgress(Reference<ReadYourWritesTransaction> tr) { return getProgress_impl(*this, tr); }
 
 	static Future<std::string> getFullStatus_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getFullStatus(Reference<ReadYourWritesTransaction> tr) { return getFullStatus_impl(*this, tr); }
+
+	static Future<JsonBuilderObject> getStatusJSON_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
+	Future<JsonBuilderObject> getStatusJSON(Reference<ReadYourWritesTransaction> tr) {
+		return getStatusJSON_impl(*this, tr);
+	}
 };
 
 using RestoreFile = RestoreConfig::RestoreFile;
@@ -669,7 +796,7 @@ Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulk
 // through the restore API. The commit retries because an unpersisted ABORTED loses both properties.
 Future<Void> abortBulkLoadRestore(Database cx, RestoreConfig restore, std::string message) {
 	co_await restore.logError(cx, restore_bulkload_failed(), message);
-	Reference<ReadYourWritesTransaction> abortTr(new ReadYourWritesTransaction(cx));
+	auto abortTr = makeReference<ReadYourWritesTransaction>(cx);
 	while (true) {
 		Error err;
 		try {
@@ -814,7 +941,7 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 				int64_t blocksDispatched =
 				    totalBlocks > 0 ? (totalBlocks * (completed + inProgress)) / total : (completed + inProgress);
 
-				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				auto tr = makeReference<ReadYourWritesTransaction>(cx);
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				if (lockAware) {
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -859,7 +986,8 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 	}
 }
 
-Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
+Future<RestoreConfig::StatusSnapshot> RestoreConfig::getStatusSnapshot_impl(RestoreConfig restore,
+                                                                            Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -868,7 +996,6 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 	Future<int64_t> fileBlocksDispatched = restore.filesBlocksDispatched().getD(tr);
 	Future<int64_t> fileBlocksFinished = restore.fileBlocksFinished().getD(tr);
 	Future<int64_t> bytesWritten = restore.bytesWritten().getD(tr);
-	Future<StringRef> status = restore.stateText(tr);
 	Future<Version> currentVersion = restore.getCurrentVersion(tr);
 	Future<Version> lag = restore.getApplyVersionLag(tr);
 	Future<Version> firstConsistentVersion = restore.firstConsistentVersion().getD(tr);
@@ -879,122 +1006,218 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 	Future<int64_t> runningTasks = restore.bulkLoadRunningTasks().getD(tr);
 	Future<int64_t> totalTasks = restore.bulkLoadTotalTasks().getD(tr);
 	Future<Optional<bool>> useRangeFileRestore = restore.useRangeFileRestore().get(tr);
-
-	UID uid = restore.getUid();
-	co_await (success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
-	          success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(currentVersion) &&
-	          success(lag) && success(firstConsistentVersion) && success(tag) && success(lastError) &&
-	          success(submittedTasks) && success(triggeredTasks) && success(runningTasks) && success(totalTasks) &&
-	          success(useRangeFileRestore));
-
-	bool useRangeFile = !useRangeFileRestore.get().present() || useRangeFileRestore.get().get();
-
-	std::string errstr = "None";
-	if (lastError.get().second != 0) {
-		errstr = format("'%s' %" PRId64 "s ago.\n",
-		                lastError.get().first.c_str(),
-		                (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
-	}
-
-	TraceEvent("FileRestoreProgress")
-	    .detail("RestoreUID", uid)
-	    .detail("Tag", tag.get())
-	    .detail("State", status.get().toString())
-	    .detail("FileCount", fileCount.get())
-	    .detail("FileBlocksFinished", fileBlocksFinished.get())
-	    .detail("FileBlocksTotal", fileBlockCount.get())
-	    .detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
-	    .detail("SubmittedTasks", submittedTasks.get())
-	    .detail("TriggeredTasks", triggeredTasks.get())
-	    .detail("RunningTasks", runningTasks.get())
-	    .detail("TotalTasks", totalTasks.get())
-	    .detail("BytesWritten", bytesWritten.get())
-	    .detail("CurrentVersion", currentVersion.get())
-	    .detail("FirstConsistentVersion", firstConsistentVersion.get())
-	    .detail("ApplyLag", lag.get());
-
-	std::string progressStr;
-	if (useRangeFile) {
-		progressStr = format("Tag: %s  UID: %s  State: %s\n",
-		                     tag.get().c_str(),
-		                     uid.toString().c_str(),
-		                     status.get().toString().c_str());
-		progressStr += format(" Blocks: %lld/%lld complete\n", fileBlocksFinished.get(), fileBlockCount.get());
-		progressStr += format(" Files: %lld\n", fileCount.get());
-		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(bytesWritten.get()).c_str());
-		progressStr += format(" Apply version lag: %s\n", versionToString(lag.get()).c_str());
-	} else {
-		progressStr = format("Tag: %s  UID: %s  State: %s\n",
-		                     tag.get().c_str(),
-		                     uid.toString().c_str(),
-		                     status.get().toString().c_str());
-		progressStr += format(" Tasks submitted: %lld  triggered: %lld  running: %lld\n",
-		                      submittedTasks.get(),
-		                      triggeredTasks.get(),
-		                      runningTasks.get());
-		progressStr += format(" Tasks triggered: %lld / %lld total\n", triggeredTasks.get(), totalTasks.get());
-		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(bytesWritten.get()).c_str());
-		double avgBytesPerTask = triggeredTasks.get() > 0 ? (double)bytesWritten.get() / triggeredTasks.get() : 0;
-		if (avgBytesPerTask > 0) {
-			progressStr += format(" Avg bytes/task: %s\n", formatBytesHumanReadable((int64_t)avgBytesPerTask).c_str());
-		}
-	}
-
-	co_return progressStr;
-}
-
-Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
 	Future<std::vector<KeyRange>> ranges = restore.getRestoreRangesOrDefault(tr);
 	Future<Key> addPrefix = restore.addPrefix().getD(tr);
 	Future<Key> removePrefix = restore.removePrefix().getD(tr);
 	Future<Key> url = restore.sourceContainerURL().getD(tr);
 	Future<Version> restoreVersion = restore.restoreVersion().getD(tr);
-	Future<std::string> progress = restore.getProgress(tr);
 	Future<ERestoreState> restoreState = restore.stateEnum().getD(tr);
-	Future<Optional<bool>> useRangeFileRestore = restore.useRangeFileRestore().get(tr);
 	Future<Optional<bool>> bulkLoadComplete = restore.bulkLoadComplete().get(tr);
+	Future<MutationLogType> mutationLogType =
+	    restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
+	Future<Version> readVersion = tr->getReadVersion();
 
-	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
-	co_await (success(ranges) && success(addPrefix) && success(removePrefix) && success(url) &&
-	          success(restoreVersion) && success(progress) && success(restoreState) && success(useRangeFileRestore) &&
-	          success(bulkLoadComplete));
+	UID uid = restore.getUid();
+	co_await (success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
+	          success(fileBlocksFinished) && success(bytesWritten) && success(currentVersion) && success(lag) &&
+	          success(firstConsistentVersion) && success(tag) && success(lastError) && success(submittedTasks) &&
+	          success(triggeredTasks) && success(runningTasks) && success(totalTasks) && success(useRangeFileRestore) &&
+	          success(ranges) && success(addPrefix) && success(removePrefix) && success(url) &&
+	          success(restoreVersion) && success(restoreState) && success(bulkLoadComplete) &&
+	          success(mutationLogType) && success(readVersion));
 
-	std::string returnStr;
-	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
-	for (auto& range : ranges.get()) {
+	StatusSnapshot s;
+	s.uid = uid;
+	s.tag = tag.get();
+	s.state = restoreState.get();
+	s.stateText = FileBackupAgent::restoreStateText(s.state).toString();
+	s.useRangeFile = !useRangeFileRestore.get().present() || useRangeFileRestore.get().get();
+	s.fileCount = fileCount.get();
+	s.fileBlockCount = fileBlockCount.get();
+	s.fileBlocksDispatched = fileBlocksDispatched.get();
+	s.fileBlocksFinished = fileBlocksFinished.get();
+	s.bytesWritten = bytesWritten.get();
+	s.submittedTasks = submittedTasks.get();
+	s.triggeredTasks = triggeredTasks.get();
+	s.runningTasks = runningTasks.get();
+	s.totalTasks = totalTasks.get();
+	s.currentVersion = currentVersion.get();
+	s.applyLag = lag.get();
+	s.firstConsistentVersion = firstConsistentVersion.get();
+	s.restoreVersion = restoreVersion.get();
+	s.readVersion = readVersion.get();
+	s.lastError = lastError.get();
+	s.ranges = ranges.get();
+	s.addPrefix = addPrefix.get();
+	s.removePrefix = removePrefix.get();
+	s.url = url.get();
+	s.bulkLoadComplete = bulkLoadComplete.get().present() && bulkLoadComplete.get().get();
+	s.mutationLogType = mutationLogType.get();
+
+	TraceEvent("FileRestoreProgress")
+	    .detail("RestoreUID", s.uid)
+	    .detail("Tag", s.tag)
+	    .detail("State", s.stateText)
+	    .detail("FileCount", s.fileCount)
+	    .detail("FileBlocksFinished", s.fileBlocksFinished)
+	    .detail("FileBlocksTotal", s.fileBlockCount)
+	    .detail("FileBlocksInProgress", s.fileBlocksDispatched - s.fileBlocksFinished)
+	    .detail("SubmittedTasks", s.submittedTasks)
+	    .detail("TriggeredTasks", s.triggeredTasks)
+	    .detail("RunningTasks", s.runningTasks)
+	    .detail("TotalTasks", s.totalTasks)
+	    .detail("BytesWritten", s.bytesWritten)
+	    .detail("CurrentVersion", s.currentVersion)
+	    .detail("FirstConsistentVersion", s.firstConsistentVersion)
+	    .detail("ApplyLag", s.applyLag);
+
+	co_return s;
+}
+
+std::string RestoreConfig::renderProgressText(const StatusSnapshot& s) {
+	std::string progressStr =
+	    format("Tag: %s  UID: %s  State: %s\n", s.tag.c_str(), s.uid.toString().c_str(), s.stateText.c_str());
+	if (s.useRangeFile) {
+		progressStr += format(" Blocks: %lld/%lld complete\n", s.fileBlocksFinished, s.fileBlockCount);
+		progressStr += format(" Files: %lld\n", s.fileCount);
+		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(s.bytesWritten).c_str());
+		progressStr += format(" Apply version lag: %s\n", versionToString(s.applyLag).c_str());
+	} else {
+		progressStr += format(" Tasks submitted: %lld  triggered: %lld  running: %lld\n",
+		                      s.submittedTasks,
+		                      s.triggeredTasks,
+		                      s.runningTasks);
+		progressStr += format(" Tasks triggered: %lld / %lld total\n", s.triggeredTasks, s.totalTasks);
+		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(s.bytesWritten).c_str());
+		double avg = avgBytesPerTask(s);
+		if (avg > 0) {
+			progressStr += format(" Avg bytes/task: %s\n", formatBytesHumanReadable((int64_t)avg).c_str());
+		}
+	}
+	return progressStr;
+}
+
+// {snapshot, mutation log} phase, or {nullptr, nullptr} when the state has no phase to report.
+std::pair<const char*, const char*> RestoreConfig::statusPhases(const StatusSnapshot& s) {
+	if (s.state == ERestoreState::COMPLETED) {
+		return { "complete", "complete" };
+	}
+	if (s.state != ERestoreState::RUNNING) {
+		return { nullptr, nullptr };
+	}
+	if (s.useRangeFile) {
+		return { "in_progress", "in_progress" };
+	}
+	return { s.bulkLoadComplete ? "complete" : "in_progress", s.bulkLoadComplete ? "in_progress" : "not_started" };
+}
+
+// Average bytes per triggered task, or 0 when there is none to report. The quotient is a double because an integer
+// one rounds a sub-one average to zero, which would wrongly suppress the field.
+double RestoreConfig::avgBytesPerTask(const StatusSnapshot& s) {
+	return s.triggeredTasks > 0 ? (double)s.bytesWritten / s.triggeredTasks : 0;
+}
+
+std::string RestoreConfig::renderFullStatusText(const StatusSnapshot& s) {
+	std::string returnStr = format("%s  URL: %s", renderProgressText(s).c_str(), s.url.toString().c_str());
+	for (auto& range : s.ranges) {
 		returnStr += format("  Range: '%s'-'%s'", printable(range.begin).c_str(), printable(range.end).c_str());
 	}
 	returnStr += format("  AddPrefix: '%s'  RemovePrefix: '%s'  Version: %lld",
-	                    printable(addPrefix.get()).c_str(),
-	                    printable(removePrefix.get()).c_str(),
-	                    restoreVersion.get());
+	                    printable(s.addPrefix).c_str(),
+	                    printable(s.removePrefix).c_str(),
+	                    s.restoreVersion);
 
-	// Add enhanced status fields for BulkLoad integration
-	bool usingBulkLoad = useRangeFileRestore.get().present() && !useRangeFileRestore.get().get();
-	std::string snapshotMethod = usingBulkLoad ? "bulkload" : "rangefile";
-	returnStr += format("  Snapshot Method: %s", snapshotMethod.c_str());
+	returnStr += format("  Snapshot Method: %s", s.useRangeFile ? "rangefile" : "bulkload");
+	returnStr += format("  Mutation Log Type: %s", mutationLogTypeToString(s.mutationLogType).c_str());
 
-	// Add phase status information
-	ERestoreState currentState = restoreState.get();
-	bool bulkLoadDone = bulkLoadComplete.get().present() && bulkLoadComplete.get().get();
-
-	if (currentState == ERestoreState::RUNNING) {
-		if (usingBulkLoad) {
-			std::string snapshotPhase = bulkLoadDone ? "complete" : "in_progress";
-			returnStr += format("  Snapshot Phase: %s", snapshotPhase.c_str());
-			std::string mutationPhase = bulkLoadDone ? "in_progress" : "not_started";
-			returnStr += format("  Mutation Log Phase: %s", mutationPhase.c_str());
-		} else {
-			returnStr += "  Snapshot Phase: in_progress  Mutation Log Phase: in_progress";
-		}
-	} else if (currentState == ERestoreState::COMPLETED) {
-		returnStr += "  Snapshot Phase: complete  Mutation Log Phase: complete";
+	auto [snapshotPhase, mutationLogPhase] = statusPhases(s);
+	if (snapshotPhase != nullptr) {
+		returnStr += format("  Snapshot Phase: %s  Mutation Log Phase: %s", snapshotPhase, mutationLogPhase);
 	}
 
-	co_return returnStr;
+	return returnStr;
+}
+
+JsonBuilderObject RestoreConfig::renderStatusJSON(const StatusSnapshot& s) {
+	JsonBuilderObject doc;
+	doc.setKey("Tag", s.tag);
+	doc.setKey("UID", s.uid.toString());
+	doc.setKey("State", s.stateText);
+	doc.setKey("SnapshotMethod", s.useRangeFile ? "rangefile" : "bulkload");
+	doc.setKey("MutationLogType", mutationLogTypeToString(s.mutationLogType));
+	doc.setKey("URL", s.url.toString());
+
+	JsonBuilderArray rangeList;
+	for (auto& range : s.ranges) {
+		JsonBuilderObject r;
+		r.setKey("Begin", printable(range.begin));
+		r.setKey("End", printable(range.end));
+		rangeList.push_back(r);
+	}
+	doc.setKey("Ranges", rangeList);
+
+	doc.setKey("AddPrefix", printable(s.addPrefix));
+	doc.setKey("RemovePrefix", printable(s.removePrefix));
+	doc.setKey("RestoreVersion", s.restoreVersion);
+	doc.setKey("CurrentVersion", s.currentVersion);
+	doc.setKey("FirstConsistentVersion", s.firstConsistentVersion);
+	doc.setKey("BytesWritten", s.bytesWritten);
+
+	// The two snapshot engines report progress in different units; emit only the one that applies so a
+	// consumer cannot mistake an absent counter for a zeroed one.
+	if (s.useRangeFile) {
+		JsonBuilderObject blocks;
+		blocks.setKey("Finished", s.fileBlocksFinished);
+		blocks.setKey("Total", s.fileBlockCount);
+		blocks.setKey("InProgress", s.fileBlocksDispatched - s.fileBlocksFinished);
+		doc.setKey("Blocks", blocks);
+		doc.setKey("FileCount", s.fileCount);
+		doc.setKey("ApplyVersionLag", s.applyLag);
+	} else {
+		JsonBuilderObject tasks;
+		tasks.setKey("Submitted", s.submittedTasks);
+		tasks.setKey("Triggered", s.triggeredTasks);
+		tasks.setKey("Running", s.runningTasks);
+		tasks.setKey("Total", s.totalTasks);
+		doc.setKey("Tasks", tasks);
+		// Emitted as an integer to match the rest of the document: JsonBuilder renders doubles with "%g",
+		// which would lose precision on a large average.
+		double avg = avgBytesPerTask(s);
+		if (avg > 0) {
+			doc.setKey("AvgBytesPerTask", (int64_t)avg);
+		}
+	}
+
+	auto [snapshotPhase, mutationLogPhase] = statusPhases(s);
+	if (snapshotPhase != nullptr) {
+		doc.setKey("SnapshotPhase", snapshotPhase);
+		doc.setKey("MutationLogPhase", mutationLogPhase);
+	}
+
+	if (s.lastError.second != 0) {
+		JsonBuilderObject err;
+		err.setKey("Message", s.lastError.first);
+		err.setKey("SecondsAgo", (s.readVersion - s.lastError.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+		doc.setKey("LastError", err);
+	}
+
+	return doc;
+}
+
+Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
+	StatusSnapshot s = co_await getStatusSnapshot_impl(restore, tr);
+	co_return renderProgressText(s);
+}
+
+Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
+	StatusSnapshot s = co_await getStatusSnapshot_impl(restore, tr);
+	co_return renderFullStatusText(s);
+}
+
+Future<JsonBuilderObject> RestoreConfig::getStatusJSON_impl(RestoreConfig restore,
+                                                            Reference<ReadYourWritesTransaction> tr) {
+	StatusSnapshot s = co_await getStatusSnapshot_impl(restore, tr);
+	co_return renderStatusJSON(s);
 }
 
 // two buffers are alternatively serving data and reading data from file
@@ -1866,7 +2089,7 @@ static Future<Key> addBackupTask(StringRef name,
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	Key doneKey = co_await completionKey.get(tr, taskBucket);
-	Reference<Task> task(new Task(name, version, doneKey, priority));
+	auto task = makeReference<Task>(name, version, doneKey, priority);
 
 	// Bind backup config to new task
 	// allow this new task to find the config(keyspace) of the parent task
@@ -2006,7 +2229,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		if (range.empty())
 			co_return false;
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		BackupConfig backup(task);
 		bool usedFile = false;
 
@@ -2084,7 +2307,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
 	                             Reference<Task> task) {
-		Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
+		auto lock = makeReference<FlowLock>(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 
 		co_await checkTaskVersion(cx, task, BackupRangeTaskFunc::name, BackupRangeTaskFunc::version);
 
@@ -2131,9 +2354,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		                                ReadLowPriority(CLIENT_KNOBS->BACKUP_READS_USE_LOW_PRIORITY));
 		std::unique_ptr<IRangeFileWriter> rangeFile;
 		BackupConfig backup(task);
-		Arena arena;
-
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but
 		// if bc is false then clearly the backup is no longer in progress
@@ -2202,7 +2422,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				Version snapshotBeginVersion{ 0 };
 				int64_t snapshotRangeFileCount{ 0 };
 
-				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				auto tr = makeReference<ReadYourWritesTransaction>(cx);
 				while (true) {
 					Error err;
 					try {
@@ -2370,11 +2590,11 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
 	                             Reference<Task> task) {
-		Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
+		auto lock = makeReference<FlowLock>(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 		co_await checkTaskVersion(cx, task, name, version);
 
 		double startTime = timer();
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		// The shard map will use 3 values classes.  Exactly SKIP, exactly DONE, then any number >= NOT_DONE_MIN
 		// which will mean not done. This is to enable an efficient coalesce() call to squash adjacent ranges which
@@ -2950,7 +3170,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
 	                             Reference<Task> task) {
-		Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
+		auto lock = makeReference<FlowLock>(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 
 		co_await checkTaskVersion(cx, task, BackupLogRangeTaskFunc::name, BackupLogRangeTaskFunc::version);
 
@@ -2960,7 +3180,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		BackupConfig config(task);
 		Reference<IBackupContainer> bc;
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3330,8 +3550,9 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 
 		Reference<TaskFuture> logDispatchBatchFuture = futureBucket->future(tr);
 
-		// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag
-		int priority = latestSnapshotEndVersion.present() ? 1 : 0;
+		// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag.
+		// Priority 2 also puts them ahead of other backups' initial snapshot range tasks (priority 1).
+		int priority = latestSnapshotEndVersion.present() ? 2 : 0;
 
 		if (!mutationLogType.present() || mutationLogType.get() == MutationLogType::DEFAULT) {
 			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will
@@ -3506,9 +3727,8 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 	                             Reference<Task> task) {
 		BackupConfig config(task);
 		Reference<IBackupContainer> bc;
-		DatabaseConfiguration dbConfig;
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		// Read the entire range file map into memory, then walk it backwards from its last entry to produce a list
 		// of non overlapping key range files
@@ -3523,7 +3743,6 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				co_await taskBucket->keepRunning(tr, task);
-				dbConfig = co_await getDatabaseConfiguration(cx);
 
 				if (!bc) {
 					// Backup container must be present if we're still here
@@ -3809,12 +4028,10 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					// Enable BulkDump mode at the DD level before submitting the job
 					co_await setBulkDumpMode(cx, 1);
 
-					// Configure BulkDump job for the full keyspace
-					// BulkDump/BulkLoad requires the load range to be a subset of the dump range.
-					// Using normalKeys for both ensures compatibility regardless of user-specified ranges.
+					// submitBackup rejects a multi-range bulkdump, so the caller's coverage is this one range.
 					// Store data under data/<container>/bulkdump_data/ to be consistent with backup container layout
 					std::string bulkDumpRoot = getBackupDataPath(bc->getURL(), "bulkdump_data");
-					bulkDumpJob = createBulkDumpJob(normalKeys, bulkDumpRoot, BulkLoadType::SST, transportMethod);
+					bulkDumpJob = createBulkDumpJob(backupRanges[0], bulkDumpRoot, BulkLoadType::SST, transportMethod);
 
 					// Submit the BulkDump job
 					co_await submitBulkDumpJob(cx, bulkDumpJob);
@@ -3851,7 +4068,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
 					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT)
 					    .detail("Reason",
-					            "BulkDump made no progress within the timeout; backup would not be "
+					            "BulkDump failed or made no progress within the timeout; backup would not be "
 					            "bulkload-restorable");
 					Params.timeoutOccurred().set(task, true);
 					throw backup_error();
@@ -3885,33 +4102,37 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 
 					// Build beginEndKeys from backup ranges
 					std::vector<std::pair<Key, Key>> beginEndKeys;
+					beginEndKeys.reserve(backupRanges.size());
 					for (const auto& range : backupRanges) {
 						beginEndKeys.emplace_back(range.begin, range.end);
 					}
 
-					// Create BulkDump snapshot metadata
-					// Note: totalBytes and totalKeys are set to 0 here. Unlike traditional range file backups
-					// which accumulate fileSize from each RangeSlice, BulkDump writes its data to manifest files
-					// in the backup container (one per shard). To get accurate byte/key counts, we would need to:
-					//   1. List all manifest files under bc->getURL()/bulkDumpJobId/
-					//   2. Read each BulkLoadManifest and call getTotalBytes()/getKeyCount()
-					//   3. Aggregate the totals
-					// For now, zeros are acceptable since the critical field is bulkDumpJobId which BulkLoad
-					// uses to locate the data. TODO: Fix. The byte counts are informational for status display.
-					SnapshotMetadata metadata =
-					    SnapshotMetadata::bulkDump(bulkDumpJob.getJobId().toString(), snapshotVersion, 0, 0);
+					// Storage servers choose a read version for each SST batch independently.
+					auto batches =
+					    co_await BackupContainerFileSystem::readBulkDumpRanges(bc, bulkDumpJob.getJobId().toString());
+					if (batches.front().range.begin != backupRanges.front().begin ||
+					    batches.back().range.end != backupRanges.front().end) {
+						throw backup_error();
+					}
+					auto bounds = std::minmax_element(batches.begin(), batches.end(), [](const auto& a, const auto& b) {
+						return a.version < b.version;
+					});
+					SnapshotMetadata metadata = SnapshotMetadata::bulkDump(
+					    bulkDumpJob.getJobId().toString(), bounds.first->version, bounds.second->version, 0);
+					Params.snapshotVersion().set(task, metadata.endVersion);
 
 					// Write the snapshot file - empty file list since BulkDump uses job manifests, not range files
 					co_await bc->writeKeyspaceSnapshotFile({}, // No individual range files for BulkDump
 					                                       beginEndKeys,
-					                                       0, // See comment above about totalBytes
+					                                       0, // BulkDump descriptors do not list individual SST sizes.
 					                                       IncludeKeyRangeMap::False,
 					                                       metadata);
 
 					TraceEvent("BulkDumpTaskWroteSnapshot")
 					    .detail("BackupUID", config.getUid())
 					    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
-					    .detail("SnapshotVersion", snapshotVersion)
+					    .detail("BeginVersion", metadata.beginVersion)
+					    .detail("EndVersion", metadata.endVersion)
 					    .detail("RangeCount", backupRanges.size());
 				}
 
@@ -4036,7 +4257,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 	                             Reference<Task> task) {
 		co_await checkTaskVersion(cx, task, StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version);
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		BackupConfig config(task);
 		Future<Optional<MutationLogType>> mutationLogType;
 		while (true) {
@@ -4062,7 +4283,38 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			}
 		}
 
-		// Get start version after backup worker are enabled
+		// Wait for backupPartitionListKey to appear before reading the backup's start version. Not strictly
+		// required for restore correctness (restore uses snapshotBeginVersion, which is set later in _finish
+		// via initNewSnapshot; by then workers are up via backupStartedKey/allWorkerStarted coordination, so
+		// snapshotBeginVersion >= PartitionMap version). But this keeps Params.beginVersion in backupStartedKey
+		// honest about when workers actually start capturing mutations.
+		if (mutationLogType.get().present() && mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
+			while (true) {
+				Error err;
+				Future<Void> watchFuture;
+				try {
+					tr->reset();
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+					Optional<Value> partitionList = co_await tr->get(backupPartitionListKey);
+					if (partitionList.present()) {
+						break;
+					}
+
+					tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(1));
+					watchFuture = tr->watch(backupPartitionListKey);
+					co_await tr->commit();
+					co_await watchFuture;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr->onError(err);
+			}
+		}
+
+		// Get a start version to pass as backup's start version in UID of backup in backupStartedKey after backup
+		// workers are enabled.
 		while (true) {
 			Error err;
 			try {
@@ -4080,7 +4332,37 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			co_await tr->onError(err);
 		}
 
-		// Set the "backupStartedKey" and wait for all backup worker started
+		// Coordinate between BackupAgent and BackupWorkers using two paired keys, so neither gets stuck if a watch is
+		// silently lost.
+		//
+		//   - backupStartedKey: BackupAgent writes the new UID; BackupWorkers watch this key. Tells workers a new
+		//   backup exists.
+		//   - BackupConfig(uid).allWorkerStarted: workers set this once they've all registered the backup; BackupAgent
+		//   watches it. Tells BackupAgent it's safe to snapshot.
+		//
+		// Why both are needed: each side needs to know the other has acted before proceeding. If only one key existed,
+		// a lost watch on EITHER side would leave one party stuck — BackupAgent snapshotting too early (worker hasn't
+		// registered yet -> gap, backup not restorable) or BackupAgent never snapshotting (worker registered but
+		// BackupAgent has no signal). With both keys, each side has a separate signal it can poll/retry, so a lost
+		// watch only delays progress, never breaks it.
+		//
+		// Watch-loss recovery:
+		//   (1) Worker misses its watch on backupStartedKey:
+		//       Workers never register the backup, so allWorkerStarted is never set.
+		//       BackupAgent's task times out, gets reassigned, re-reads backupStartedKey, keeps
+		//       the original version and waits again.
+		//
+		//   (2) BackupAgent misses its watch on allWorkerStarted:
+		//       Workers already set the key, but BackupAgent stays parked. Task times out and
+		//       retries; the new exec finds allWorkerStarted already true, skips the watch, and
+		//       the snapshot reads at the cluster's current version when it actually runs.
+		//
+		// beginVersion (stored in backupStartedKey) stays the same across retries — it's a
+		// logical marker, not where the snapshot reads. The snapshot task does its own
+		// getReadVersion() when it runs, so the actual snapshot version moves forward across
+		// retries. Restorability depends on the snapshot version: by the time the snapshot
+		// runs, workers have already registered the backup and their mutation logs cover the
+		// snapshot's range, so the backup is restorable.
 		tr->reset();
 		while (true) {
 			Future<Void> watchFuture;
@@ -4104,11 +4386,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 					ids = decodeBackupStartedValue(started.get().get());
 				}
 
-				// First range-partitioned backup on this cluster: ask DD to compute the partition list.
-				if (ids.empty() && mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
-					tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(1));
-				}
-
+				// Add this backup's UID and start version to backupStartedKey.
 				const UID uid = config.getUid();
 				auto it = std::find_if(
 				    ids.begin(), ids.end(), [uid](const std::pair<UID, Version>& p) { return p.first == uid; });
@@ -4117,21 +4395,16 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				} else {
 					Params.beginVersion().set(task, it->second);
 				}
-
 				tr->set(backupStartedKey, encodeBackupStartedValue(ids));
 
-				// Only PartitionedLog workers set BackupConfig.allWorkerStarted, so watch it for that mutation log
-				// type.
-				const bool isPartitionedLog = mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG;
-
 				// The task may be restarted. Set the watch if started key has NOT been set.
-				if (isPartitionedLog && !taskStarted.get().present()) {
+				if (!taskStarted.get().present()) {
 					watchFuture = tr->watch(config.allWorkerStarted().key);
 				}
 
 				co_await keepRunning;
 				co_await tr->commit();
-				if (isPartitionedLog && !taskStarted.get().present()) {
+				if (!taskStarted.get().present()) {
 					co_await watchFuture;
 				}
 				co_return;
@@ -4300,78 +4573,27 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 		{
 			Error savedError;
 			try {
-				// Open backup container for metadata access
-				Reference<IBackupContainer> bcRef = IBackupContainer::openContainer(backupUrl, {}, {}, 0);
-
 				// Get restore ranges using a transaction
-				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				auto tr = makeReference<ReadYourWritesTransaction>(cx);
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				// Take the container from the restore config rather than reopening it from the bare URL:
+				// the config's codec round-trips the proxy, encryption key file and block size the caller
+				// supplied, and reopening dropped all three. Losing the proxy made a proxied container
+				// unreadable here, and the resulting abort blamed the backup for having no bulkdump data.
+				Reference<IBackupContainer> bcRef = co_await restore.sourceContainer().getOrThrow(tr);
+
 				std::vector<KeyRange> restoreRanges = co_await restore.getRestoreRangesOrDefault(tr);
 
-				// If bulkDumpJobId is empty, read it from the snapshot file metadata
 				if (bulkDumpJobId.empty()) {
-					// Use the backup container we already opened to find the snapshot file for our restore version
-					auto* bcfsPtr = dynamic_cast<BackupContainerFileSystem*>(bcRef.getPtr());
-					if (bcfsPtr != nullptr) {
-						Reference<BackupContainerFileSystem> bcfs =
-						    Reference<BackupContainerFileSystem>::addRef(bcfsPtr);
-						std::vector<KeyspaceSnapshotFile> snapshots = co_await bcfs->listKeyspaceSnapshots();
-						int snapIdx = snapshots.size() - 1;
-						while (snapIdx >= 0 && bulkDumpJobId.empty()) {
-							// For BulkDump snapshots: beginVersion == endVersion == snapshotVersion
-							// Accept any snapshot that is at or before our restore version
-							if (snapshots[snapIdx].endVersion <= restoreVersion) {
-								// Read the snapshot file to get bulkDumpJobId
-								std::string snapFileName = snapshots[snapIdx].fileName;
-								Reference<IAsyncFile> snapFile = co_await bcfs->readFile(snapFileName);
-								int64_t snapSize = co_await snapFile->size();
-								Standalone<StringRef> snapBuf = makeString(snapSize);
-								int bytesRead = co_await snapFile->read(mutateString(snapBuf), snapSize, 0);
-								if (bytesRead == snapSize) {
-									json_spirit::mValue json;
-									if (json_spirit::read_string(snapBuf.toString(), json)) {
-										JSONDoc doc(json);
-										std::string jobId;
-										if (doc.tryGet("bulkDumpJobId", jobId) && !jobId.empty()) {
-											bulkDumpJobId = jobId;
-											TraceEvent("BulkLoadRestoreFoundJobId")
-											    .detail("RestoreUID", restore.getUid())
-											    .detail("BulkDumpJobId", bulkDumpJobId)
-											    .detail("SnapshotFile", snapFileName);
-										}
-									}
-								}
-							}
-							snapIdx--;
-						}
-					}
+					// A restore dispatched before per-range versions were recorded cannot safely resume.
+					co_await abortBulkLoadRestore(
+					    cx, restore, "Restart the bulkload restore to initialize its SST versions");
+					throw restore_bulkload_failed();
 				}
-
-				// Create BulkLoad job from the BulkDump data
-				// BulkDump stores data under data/<container>/bulkdump_data/ subdirectory.
-				// DD appends the jobId via getBulkLoadJobRoot(jobRoot, jobId) when accessing files.
 				std::string jobRoot = getBackupDataPath(backupUrl, "bulkdump_data");
-				UID dumpJobUid;
-				if (!bulkDumpJobId.empty()) {
-					dumpJobUid = UID::fromString(bulkDumpJobId);
-				} else {
-					// No BulkDump job ID found - this is a permanent error for BulkLoad restore.
-					// Abort the restore immediately instead of retrying forever.
-					TraceEvent(SevError, "BulkLoadRestoreNoBulkDumpJobId")
-					    .detail("RestoreUID", restore.getUid())
-					    .detail("BackupUrl", backupUrl)
-					    .detail("Action", "Aborting restore - backup is not BulkLoad compatible");
-					co_await restore.logError(
-					    cx, restore_missing_data(), "BulkLoad restore failed: backup has no bulkdump data", nullptr);
-					// Abort the restore by setting state to ABORTED
-					Reference<ReadYourWritesTransaction> abortTr(new ReadYourWritesTransaction(cx));
-					abortTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					abortTr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					restore.stateEnum().set(abortTr, ERestoreState::ABORTED);
-					co_await abortTr->commit();
-					throw restore_missing_data();
-				}
+				UID dumpJobUid = UID::fromString(bulkDumpJobId);
 
 				// Verify BulkDump dataset completeness before proceeding
 				bool datasetComplete = co_await verifyBulkDumpDatasetCompleteness(bcRef, bulkDumpJobId);
@@ -4383,9 +4605,12 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 					    .detail("BackupUrl", backupUrl)
 					    .detail("Action", "Aborting restore - bulkdump dataset is incomplete");
 					co_await restore.logError(
-					    cx, restore_missing_data(), "BulkLoad restore failed: bulkdump dataset incomplete", nullptr);
+					    cx,
+					    restore_missing_data(),
+					    "BulkLoad restore failed: bulkdump dataset incomplete; retry with --mode rangefile",
+					    nullptr);
 					// Abort the restore by setting state to ABORTED
-					Reference<ReadYourWritesTransaction> abortTr(new ReadYourWritesTransaction(cx));
+					auto abortTr = makeReference<ReadYourWritesTransaction>(cx);
 					abortTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					abortTr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					restore.stateEnum().set(abortTr, ERestoreState::ABORTED);
@@ -4400,9 +4625,16 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				BulkLoadTransportMethod loadTransportMethod =
 				    isBlobstoreUrl(backupUrl) ? BulkLoadTransportMethod::BLOBSTORE : BulkLoadTransportMethod::CP;
 
-				// BulkLoad range must match the BulkDump range (normalKeys)
-				// The actual restore ranges will be applied via mutation log replay
-				BulkLoadJobState bulkLoadJob = createBulkLoadJob(dumpJobUid, normalKeys, jobRoot, loadTransportMethod);
+				// submitRestore rejects a multi-range bulkload, so range 0 is the caller's whole request.
+				//
+				// TODO(BulkLoad): reject a restore range the backup never covered. Until the ranges were
+				// plumbed through, dump and load were both normalKeys, so an out-of-range request could not
+				// arise; now it submits a job over a range with no manifests and loads nothing rather than
+				// failing. The dump's actual coverage is the "ranges" array of the keyspace snapshot
+				// (written at BackupContainerFileSystem.cpp:236-243), i.e. the same JSONDoc parsed above for
+				// bulkDumpJobId, so the containment check needs no extra read.
+				BulkLoadJobState bulkLoadJob =
+				    createBulkLoadJob(dumpJobUid, restoreRanges[0], jobRoot, loadTransportMethod);
 
 				TraceEvent("BulkLoadRestoreJobCreated")
 				    .detail("RestoreUID", restore.getUid())
@@ -4528,18 +4760,6 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 			restore.fileBlocksFinished().set(tr, totalBlocks);
 		}
 
-		// Set firstConsistentVersion if not already set
-		// For BulkLoad restore, this is the snapshot version from the BulkDump
-		Version firstConsistentVer =
-		    co_await restore.firstConsistentVersion().getD(tr, Snapshot::False, invalidVersion);
-		if (firstConsistentVer == invalidVersion) {
-			// Get the restore version as the first consistent version
-			Version restoreVer = co_await restore.restoreVersion().getD(tr, Snapshot::False, invalidVersion);
-			if (restoreVer != invalidVersion) {
-				restore.firstConsistentVersion().set(tr, restoreVer);
-			}
-		}
-
 		TraceEvent("BulkLoadRestoreTaskFinished")
 		    .detail("RestoreUID", restore.getUid())
 		    .detail("TotalBlocks", totalBlocks)
@@ -4560,7 +4780,7 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 	                           TaskCompletionKey completionKey,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		Reference<Task> task(new Task(BulkLoadRestoreTaskFunc::name, BulkLoadRestoreTaskFunc::version, doneKey));
+		auto task = makeReference<Task>(BulkLoadRestoreTaskFunc::name, BulkLoadRestoreTaskFunc::version, doneKey);
 
 		// Set task parameters
 		Params.restoreVersion().set(task, restoreVersion);
@@ -4622,7 +4842,7 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 	                           TaskCompletionKey completionKey,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		Reference<Task> task(new Task(RestoreCompleteTaskFunc::name, RestoreCompleteTaskFunc::version, doneKey));
+		auto task = makeReference<Task>(RestoreCompleteTaskFunc::name, RestoreCompleteTaskFunc::version, doneKey);
 
 		// Get restore config from parent task and bind it to new task
 		co_await RestoreConfig(parentTask).toTask(tr, task);
@@ -4670,6 +4890,52 @@ struct RestoreFileTaskFuncBase : RestoreTaskFuncBase {
 	}
 };
 
+// Optional observer for the deterministic writer recovery simulation. The size limit applies only to
+// writer transactions, so task setup and unrelated cluster activity retain their normal limits.
+struct RestoreWriterTestState {
+	int rejections = 0;
+	int commits = 0;
+	int committedRecords = 0;
+	int lastRejectedLimit = 0;
+	int lastCommittedLimit = 0;
+	std::vector<int> batchLimits;
+	std::vector<int> batchCommits;
+
+	void beginBatch(int limit) {
+		if (lastCommittedLimit) {
+			ASSERT_EQ(limit, lastCommittedLimit);
+		}
+		batchLimits.push_back(limit);
+		batchCommits.push_back(0);
+	}
+
+	Future<Void> commit(Reference<ReadYourWritesTransaction> tr, int limit, int records) {
+		ASSERT(g_network->isSimulated());
+		int64_t sizeLimit = 4096;
+		tr->setOption(FDBTransactionOptions::SIZE_LIMIT, StringRef((uint8_t*)&sizeLimit, sizeof(sizeLimit)));
+		try {
+			co_await tr->commit();
+		} catch (Error& e) {
+			if (e.code() == error_code_transaction_too_large) {
+				++rejections;
+				lastRejectedLimit = limit;
+			}
+			throw;
+		}
+		ASSERT_GT(rejections, 0);
+		ASSERT_LT(limit, lastRejectedLimit);
+		if (lastCommittedLimit) {
+			ASSERT_LE(limit, lastCommittedLimit);
+		}
+		lastCommittedLimit = limit;
+		++commits;
+		committedRecords += records;
+		if (!batchCommits.empty()) {
+			++batchCommits.back();
+		}
+	}
+};
+
 struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	static struct : InputParams {
 		// The range of data that the (possibly empty) data represented, which is set if it intersects the target
@@ -4699,7 +4965,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	static Future<Void> _execute(Database cx,
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
-	                             Reference<Task> task) {
+	                             Reference<Task> task,
+	                             RestoreWriterTestState* test = nullptr) {
 		RestoreConfig restore(task);
 
 		RestoreFile rangeFile = Params.inputFile().get(task);
@@ -4715,7 +4982,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		    .detail("ReadOffset", readOffset)
 		    .detail("ReadLen", readLen);
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Future<Reference<IBackupContainer>> bc;
 		Future<std::vector<KeyRange>> restoreRanges;
 		Future<Key> addPrefix;
@@ -4757,8 +5024,6 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			}
 			throw;
 		}
-		Arena arena;
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 
 		// First and last key are the range for this file
 		KeyRange fileRange;
@@ -4806,8 +5071,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 			int start = 0;
 			int end = data.size();
-			int dataSizeLimit =
-			    buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+			int dataSizeLimit = !test && buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6)
+			                                       : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 			tr->reset();
 			while (true) {
@@ -4815,6 +5080,11 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					// With RYW the clear below is split into one clear per gap between the sets, doubling the
+					// storage mutations. Without it the clear stays one mutation, applied before the sets.
+					if (CLIENT_KNOBS->RESTORE_RANGE_DISABLE_RYW) {
+						tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+					}
 
 					int i = start;
 					int txBytes = 0;
@@ -4835,7 +5105,21 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 					                 : data[start].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()),
 					    (iend == end) ? fileRange.end
 					                  : data[iend].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()));
-					tr->clear(trRange);
+					// A clear in the same transaction as the sets makes the storage server split it around every
+					// set. A span with no keys has nothing to remove, so skip the clear; a span that has keys (a
+					// re-applied block, the validation prefix, an overlapping file) is cleared as before. The read is
+					// not a snapshot read, and the span stays in the write conflict set either way, so two
+					// transactions cannot both see an overlapping span empty and both skip the clear.
+					bool clearSpan = true;
+					if (CLIENT_KNOBS->RESTORE_RANGE_READ_BEFORE_CLEAR) {
+						RangeResult existing = co_await tr->getRange(trRange, 1);
+						clearSpan = !existing.empty();
+					}
+					if (clearSpan) {
+						tr->clear(trRange);
+					} else {
+						tr->addWriteConflictRange(trRange);
+					}
 
 					for (; i < iend; ++i) {
 						tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
@@ -4852,7 +5136,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 					co_await checkLock;
 
-					co_await tr->commit();
+					co_await (test ? test->commit(tr, dataSizeLimit, i - start) : tr->commit());
 
 					TraceEvent("FileRestoreCommittedRange")
 					    .suppressFor(60)
@@ -4881,10 +5165,12 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.code() == error_code_transaction_too_large)
+				if (err.code() == error_code_transaction_too_large && dataSizeLimit > 1) {
 					dataSizeLimit /= 2;
-				else
+					tr->reset();
+				} else {
 					co_await tr->onError(err);
+				}
 			}
 		}
 		if (!originalFileRanges.empty()) {
@@ -4928,7 +5214,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	                           TaskCompletionKey completionKey,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		Reference<Task> task(new Task(RestoreRangeTaskFunc::name, RestoreRangeTaskFunc::version, doneKey));
+		auto task = makeReference<Task>(RestoreRangeTaskFunc::name, RestoreRangeTaskFunc::version, doneKey);
 
 		// Create a restore config from the current task and bind it to the new task.
 		co_await RestoreConfig(parentTask).toTask(tr, task);
@@ -5037,6 +5323,10 @@ void AccumulatedMutations::addChunk(int chunkNumber, const KeyValueRef& kv) {
 }
 
 bool AccumulatedMutations::isComplete() const {
+	return getCompleteMutations().present();
+}
+
+Optional<StringRef> AccumulatedMutations::getCompleteMutations() const {
 	if (lastChunkNumber >= 0) {
 		StringRefReader reader(serializedMutations, restore_corrupted_data());
 
@@ -5046,10 +5336,12 @@ bool AccumulatedMutations::isComplete() const {
 		}
 
 		uint32_t vLen = reader.consume<uint32_t>();
-		return vLen == reader.remainder().size();
+		if (vLen == reader.remainder().size()) {
+			return StringRef(serializedMutations);
+		}
 	}
 
-	return false;
+	return {};
 }
 
 // Returns true if a complete chunk contains any MutationRefs which intersect with any
@@ -5117,7 +5409,8 @@ std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, c
 
 		// If the mutations are incomplete or match one of the ranges, include in results.
 		if (!m.isComplete() || m.matchesAnyRange(filters)) {
-			output.insert(output.end(), m.kvs.begin(), m.kvs.end());
+			const auto& chunks = m.getChunks();
+			output.insert(output.end(), chunks.begin(), chunks.end());
 		}
 	}
 
@@ -5134,7 +5427,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 	static Future<Void> _execute(Database cx,
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
-	                             Reference<Task> task) {
+	                             Reference<Task> task,
+	                             RestoreWriterTestState* test = nullptr) {
 		RestoreConfig restore(task);
 
 		RestoreFile logFile = Params.inputFile().get(task);
@@ -5151,7 +5445,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		    .detail("ReadOffset", readOffset)
 		    .detail("ReadLen", readLen);
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Reference<IBackupContainer> bc;
 		std::vector<KeyRange> ranges;
 
@@ -5188,8 +5482,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		int start = 0;
 		int end = dataFiltered.size();
-		int dataSizeLimit =
-		    buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+		int dataSizeLimit = !test && buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6)
+		                                       : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 		tr->reset();
 		while (true) {
@@ -5218,7 +5512,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				// Add to bytes written count
 				restore.bytesWritten().atomicOp(tr, txBytes, MutationRef::Type::AddValue);
 
-				co_await tr->commit();
+				co_await (test ? test->commit(tr, dataSizeLimit, i - start) : tr->commit());
 
 				TraceEvent("FileRestoreCommittedLog")
 				    .suppressFor(60)
@@ -5243,10 +5537,12 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.code() == error_code_transaction_too_large)
+			if (err.code() == error_code_transaction_too_large && dataSizeLimit > 1) {
 				dataSizeLimit /= 2;
-			else
+				tr->reset();
+			} else {
 				co_await tr->onError(err);
+			}
 		}
 	}
 
@@ -5274,7 +5570,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 	                           TaskCompletionKey completionKey,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		Reference<Task> task(new Task(RestoreLogDataTaskFunc::name, RestoreLogDataTaskFunc::version, doneKey));
+		auto task = makeReference<Task>(RestoreLogDataTaskFunc::name, RestoreLogDataTaskFunc::version, doneKey);
 
 		// Create a restore config from the current task and bind it to the new task.
 		// RestoreConfig(parentTask) creates prefix of : fileRestorePrefixRange.begin/uid->config/[uid]
@@ -5498,22 +5794,26 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	}
 
 	// Writes backup mutations to the database
-	static Future<Void> writeMutations(Database cx,
-	                                   std::vector<Standalone<VectorRef<KeyValueRef>>> mutations,
-	                                   Key mutationLogPrefix,
-	                                   Reference<Task> task,
-	                                   Reference<TaskBucket> taskBucket) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	static Future<int> writeMutations(Database cx,
+	                                  std::vector<Standalone<VectorRef<KeyValueRef>>> mutations,
+	                                  Key mutationLogPrefix,
+	                                  Reference<Task> task,
+	                                  Reference<TaskBucket> taskBucket,
+	                                  int txBytesLimit,
+	                                  RestoreWriterTestState* test = nullptr) {
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Standalone<VectorRef<KeyValueRef>> oldFormatMutations;
 		int mutationIndex = 0;
 		int mutationCount = 0;
 		int txBytes = 0;
-		int txBytesLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 		for (const auto& data : mutations) {
 			oldFormatMutations.append(oldFormatMutations.arena(), data.begin(), data.size());
 		}
 		int totalMutation = oldFormatMutations.size();
+		if (test && totalMutation > 0) {
+			test->beginBatch(txBytesLimit);
+		}
 
 		// multiple transactions are needed, so this has to be in a _execute method rather than
 		// a _finish method
@@ -5540,7 +5840,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 					++mutationCount;
 				}
 				co_await taskBucket->keepRunning(tr, task);
-				co_await tr->commit();
+				co_await (test ? test->commit(tr, txBytesLimit, mutationCount) : tr->commit());
 
 				int64_t oldBytes = Params.bytesWritten().get(task);
 				Params.bytesWritten().set(task, oldBytes + txBytes);
@@ -5550,23 +5850,26 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				    .detail("TotalMutation", totalMutation)
 				    .detail("Bytes", txBytes);
 				mutationIndex += mutationCount; // update mutationIndex after the commit succeeds
+				tr->reset();
 				continue;
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.code() == error_code_transaction_too_large) {
+			if (err.code() == error_code_transaction_too_large && txBytesLimit > 1 && mutationCount > 1) {
 				txBytesLimit /= 2;
+				tr->reset();
 			} else {
 				co_await tr->onError(err);
 			}
 		}
-		co_return;
+		co_return txBytesLimit;
 	}
 
 	static Future<Void> _execute(Database cx,
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
-	                             Reference<Task> task) {
+	                             Reference<Task> task,
+	                             RestoreWriterTestState* test = nullptr) {
 		RestoreConfig restore(task);
 
 		int64_t maxTagID = Params.maxTagID().get(task);
@@ -5574,7 +5877,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		Version begin = Params.beginVersion().get(task);
 		Version end = Params.endVersion().get(task);
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Reference<IBackupContainer> bc;
 		std::vector<KeyRange> ranges; // this is the actual KV, not version
 		while (true) {
@@ -5644,6 +5947,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		Future<Void> reader = readLogData(mutationStream, iterators, begin, end);
 
 		std::vector<Standalone<VectorRef<KeyValueRef>>> mutations;
+		int txBytesLimit = std::max(1, CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE);
 		int64_t totalBytes = 0;
 		Standalone<VectorRef<KeyValueRef>> oneVersionData;
 		while (true) {
@@ -5654,8 +5958,9 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 
 				// batching mutations from multiple versions together before writing to the database
 				int64_t bytes = oneVersionData.expectedSize();
-				if (totalBytes + bytes > CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE) {
-					co_await writeMutations(cx, mutations, restore.mutationLogPrefix(), task, taskBucket);
+				if (totalBytes + bytes > txBytesLimit) {
+					txBytesLimit = co_await writeMutations(
+					    cx, mutations, restore.mutationLogPrefix(), task, taskBucket, txBytesLimit, test);
 					mutations.clear();
 					totalBytes = 0;
 				}
@@ -5667,7 +5972,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			}
 			if (err.code() == error_code_end_of_stream) {
 				if (!mutations.empty()) {
-					co_await writeMutations(cx, mutations, restore.mutationLogPrefix(), task, taskBucket);
+					txBytesLimit = co_await writeMutations(
+					    cx, mutations, restore.mutationLogPrefix(), task, taskBucket, txBytesLimit, test);
 				}
 				break;
 			} else {
@@ -5715,8 +6021,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	                           TaskCompletionKey completionKey,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		Reference<Task> task(
-		    new Task(RestoreLogDataPartitionedTaskFunc::name, RestoreLogDataPartitionedTaskFunc::version, doneKey));
+		auto task = makeReference<Task>(
+		    RestoreLogDataPartitionedTaskFunc::name, RestoreLogDataPartitionedTaskFunc::version, doneKey);
 
 		// Create a restore config from the current task and bind it to the new task.
 		// RestoreConfig(parentTask) createsa prefix of : fileRestorePrefixRange.begin/uid->config/[uid]
@@ -5751,29 +6057,209 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 StringRef RestoreLogDataPartitionedTaskFunc::name = "restore_log_data_partitioned"_sr;
 REGISTER_TASKFUNC(RestoreLogDataPartitionedTaskFunc);
 
-// each task can be partitioned to smaller ranges because commit proxy would
-// only start to commit alog/ prefix mutations to original prefix when
-// the final version is set, but do it in a single task for now for simplicity
+// Runs the actual writers against a database, including the partitioned reader's batch handoff.
+Future<Void> testRestoreWriterRecovery(Database cx) {
+	ASSERT(g_network->isSimulated());
+	ASSERT_EQ(CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE, 16384);
+	constexpr int recordCount = 96;
+	const int blockSize = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+	KeyRange dataRange = KeyRangeRef("restore-writer/"_sr, "restore-writer0"_sr);
+	for (int writer = 0; writer < 3; ++writer) {
+		RestoreConfig restore(deterministicRandom()->randomUniqueID());
+		Reference<IBackupContainer> bc = IBackupContainer::openContainer(
+		    "file://" + abspath("simfdb/restore-writer-" + restore.getUid().toString()), {}, {}, 0);
+		co_await bc->create();
+		Reference<IBackupFile> file;
+		StringRef taskName;
+		if (writer == 0) {
+			taskName = RestoreRangeTaskFunc::name;
+			file = co_await bc->writeRangeFile(1, 0, 1, blockSize);
+		} else if (writer == 1) {
+			taskName = RestoreLogDataTaskFunc::name;
+			file = co_await bc->writeLogFile(1, recordCount + 1, blockSize);
+		} else {
+			taskName = RestoreLogDataPartitionedTaskFunc::name;
+			file = co_await bc->writeTaggedLogFile(1, recordCount + 1, blockSize, 0, 1);
+			co_await file->append((uint8_t*)&PARTITIONED_MLOG_VERSION, sizeof(PARTITIONED_MLOG_VERSION));
+		}
+		fileBackup::RangeFileWriter rangeWriter(file, blockSize);
+		fileBackup::LogFileWriter logWriter(file, blockSize);
+		std::map<Key, Value> expected;
+		if (writer == 0) {
+			co_await rangeWriter.writeKey(dataRange.begin);
+		}
+		for (int i = 0; i < recordCount; ++i) {
+			Key key = StringRef(format("restore-writer/%04d", i));
+			Value value = StringRef(std::string(512, 'a' + i % 26));
+			if (writer == 0) {
+				co_await rangeWriter.writeKV(key, value);
+				expected[key] = value;
+			} else {
+				Standalone<VectorRef<VersionedMutation>> versionMutations;
+				VersionedMutation vm;
+				vm.version = i + 1;
+				vm.subsequence = 0;
+				vm.mutation = MutationRef(MutationRef::SetValue, key, value);
+				versionMutations.push_back_deep(versionMutations.arena(), vm);
+				auto oldFormat = generateOldFormatMutations(vm.version, { versionMutations });
+				ASSERT_EQ(oldFormat.size(), 1);
+				expected[oldFormat[0].key.withPrefix(restore.mutationLogPrefix())] = oldFormat[0].value;
+				if (writer == 1) {
+					co_await logWriter.writeKV(oldFormat[0].key, oldFormat[0].value);
+				} else {
+					BinaryWriter mutation(AssumeVersion(g_network->protocolVersion()));
+					mutation << vm.mutation;
+					BinaryWriter header(Unversioned());
+					header << bigEndian64(vm.version) << bigEndian32(vm.subsequence)
+					       << bigEndian32(mutation.getLength());
+					co_await file->append(header.getData(), header.getLength());
+					co_await file->append(mutation.getData(), mutation.getLength());
+				}
+			}
+		}
+		if (writer == 0) {
+			co_await rangeWriter.writeKey(dataRange.end);
+			co_await rangeWriter.finish();
+		}
+		co_await file->finish();
+		ASSERT_LT(file->size(), blockSize);
+		if (writer == 0) {
+			// A bare range file is not a complete backup; deletion requires a snapshot manifest or log.
+			std::vector<std::string> snapshotFiles{ file->getFileName() };
+			std::vector<std::pair<Key, Key>> snapshotRanges{ { dataRange.begin, dataRange.end } };
+			co_await bc->writeKeyspaceSnapshotFile(
+			    snapshotFiles, snapshotRanges, file->size(), IncludeKeyRangeMap::True);
+		}
+		RestoreFile input{ 1, file->getFileName(), writer == 0, blockSize, file->size(), recordCount + 1, 0, 1 };
+		auto task = makeReference<Task>(taskName, 1);
+		RestoreFileTaskFuncBase::InputParams::inputFile().set(task, input);
+		RestoreFileTaskFuncBase::InputParams::readOffset().set(task, 0);
+		RestoreFileTaskFuncBase::InputParams::readLen().set(task, file->size());
+		RestoreLogDataPartitionedTaskFunc::Params.logs().set(task, { input });
+		RestoreLogDataPartitionedTaskFunc::Params.maxTagID().set(task, 0);
+		RestoreLogDataPartitionedTaskFunc::Params.beginVersion().set(task, 1);
+		RestoreLogDataPartitionedTaskFunc::Params.endVersion().set(task, recordCount + 1);
+		RestoreLogDataPartitionedTaskFunc::Params.bytesWritten().set(task, 0);
+		KeyBackedTaskConfig::TaskParams.uid().set(task, restore.getUid());
+		Key taskPrefix = "writer-tasks/"_sr.withPrefix(restore.mutationLogPrefix());
+		auto taskBucket = makeReference<TaskBucket>(Subspace(taskPrefix), AccessSystemKeys::True);
+		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			restore.sourceContainer().set(tr, bc);
+			restore.restoreRange().set(tr, dataRange);
+			restore.bytesWritten().set(tr, 0);
+			taskBucket->addTask(
+			    tr, task, restore.sourceContainer().key, TupleCodec<Reference<IBackupContainer>>::pack(bc));
+			return Future<Void>(Void());
+		});
+		// An unknown commit result can leave the task leased; retry until its lease expires and it is requeued.
+		while (true) {
+			task = co_await taskBucket->getOne(cx);
+			if (task) {
+				break;
+			}
+			co_await delay(1.0);
+		}
+		RestoreWriterTestState test;
+		if (writer == 0) {
+			while (true) {
+				try {
+					co_await RestoreRangeTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+					break;
+				} catch (Error& e) {
+					// The direct call bypasses TaskBucket's retry of transient errors injected by the range decoder.
+					// Only restart before writing, so retries cannot hide a writer failure or duplicate the counters.
+					if (test.commits != 0 ||
+					    (e.code() != error_code_http_request_failed && e.code() != error_code_connection_failed &&
+					     e.code() != error_code_timed_out && e.code() != error_code_lookup_failed)) {
+						throw;
+					}
+				}
+				co_await delay(1.0);
+			}
+		} else if (writer == 1) {
+			co_await RestoreLogDataTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+		} else {
+			co_await RestoreLogDataPartitionedTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+			ASSERT_GE(test.batchLimits.size(), 3);
+			ASSERT_EQ(test.batchLimits.front(), CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE);
+			ASSERT_GT(test.batchCommits.front(), 1);
+			for (int i = 1; i < test.batchLimits.size(); ++i) {
+				ASSERT_EQ(test.batchLimits[i], test.lastCommittedLimit);
+				ASSERT_GT(test.batchCommits[i], 0);
+			}
+		}
+		ASSERT_GT(test.rejections, 0);
+		ASSERT_GT(test.commits, 1);
+		ASSERT_EQ(test.committedRecords, recordCount);
+		KeyRange outputRange = writer == 0 ? dataRange : prefixRange(restore.mutationLogPrefix());
+		co_await taskBucket->clear(cx);
+		RangeResult rows = co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			return tr->getRange(outputRange, recordCount + 1);
+		});
+		ASSERT(!rows.more);
+		ASSERT_EQ(rows.size(), expected.size());
+		int i = 0;
+		for (const auto& [key, value] : expected) {
+			ASSERT_EQ(rows[i].key, key);
+			ASSERT_EQ(rows[i].value, value);
+			++i;
+		}
+		// A successful cleanup with an unknown commit result must not retry verification against deleted data.
+		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->clear(outputRange);
+			restore.clear(tr);
+			return Void();
+		});
+		co_await bc->deleteContainer();
+		TraceEvent("RestoreWriterRecoveryTestPassed")
+		    .detail("Writer", writer)
+		    .detail("Rejections", test.rejections)
+		    .detail("Commits", test.commits)
+		    .detail("Batches", test.batchLimits.size())
+		    .detail("ReducedLimit", test.lastCommittedLimit);
+	}
+}
+
+// Dispatch each version batch across bounded transactions. Commit proxies apply the loaded mutations only after
+// all range and log tasks in the batch complete.
 struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 	static StringRef name;
-	static constexpr uint32_t version = 1;
+	// Version 2 adds a range-file cursor. Older agents must not run continuation tasks because they would
+	// dispatch the range files again from the beginning of the version batch.
+	static constexpr uint32_t version = 2;
 	StringRef getName() const override { return name; };
 
 	static struct {
 		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
 		static TaskParam<Version> firstVersion() { return __FUNCTION__sr; }
 		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
+		// The version window stays fixed across dispatch transactions. This cursor identifies the next
+		// snapshot block within it; a version alone cannot distinguish files or blocks at the same version.
+		static TaskParam<Version> beginRangeVersion() { return __FUNCTION__sr; }
+		static TaskParam<std::string> beginRangeFile() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> beginRangeBlock() { return __FUNCTION__sr; }
+		static TaskParam<int> dispatchTaskLimit() { return __FUNCTION__sr; }
 	} Params;
 
-	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
-	                            Reference<TaskBucket> taskBucket,
-	                            Reference<FutureBucket> futureBucket,
-	                            Reference<Task> task) {
+	static Future<Void> dispatch(Reference<ReadYourWritesTransaction> tr,
+	                             Reference<TaskBucket> taskBucket,
+	                             Reference<FutureBucket> futureBucket,
+	                             Reference<Task> task,
+	                             int taskBatchSize) {
 		RestoreConfig restore(task);
 
 		Version beginVersion = Params.beginVersion().get(task);
 		Version firstVersion = Params.firstVersion().get(task);
 		Version endVersion = Params.endVersion().get(task);
+		// Version 1 tasks have no cursor and start a new batch. A cursor marks a continuation which is joined
+		// to the existing batch future until all range-file blocks have been dispatched.
+		bool addingToExistingBatch = Params.beginRangeVersion().exists(task);
+		Version beginRangeVersion = Params.beginRangeVersion().getOrDefault(task, beginVersion);
+		std::string beginRangeFile = Params.beginRangeFile().getOrDefault(task);
+		int64_t beginRangeBlock = Params.beginRangeBlock().getOrDefault(task);
 		Reference<IBackupContainer> _bc = co_await restore.sourceContainer().getOrThrow(tr);
 		Reference<IBackupContainer> bc = getBackupContainerWithProxy(_bc);
 		Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
@@ -5800,7 +6286,9 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait
-		if (applyLag > (buggify() ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
+		// This requeue path has no cursor or completion dependency. Continuations must preserve both,
+		// so apply backpressure only before starting a new version batch.
+		if (!addingToExistingBatch && applyLag > (buggify() ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
 			// Wait a small amount of time and then re-add this same task.
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 			co_await RestoreDispatchPartitionedTaskFunc::addTask(
@@ -5816,27 +6304,10 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			co_return;
 		}
 
-		// Get a batch of files.  We're targeting batchSize blocks(30k) being dispatched so query for batchSize(150)
-		// files (each of which is 0 or more blocks).
-		// lets say files have [10, 20), [20, 30) then if our range is [15, 25], we need to include both files,
-		// because [15, 20] is included in the first file, and [20, 25] is included in the second file
-		// say we have b and e
-		// as a result, the first file(inclusive): largest file whose begin <= b,
-		// the last file(exclusive): smallest file whose begin > e
-		// because of the encoding, version comes before the type of files(log or range),
-		// begin needs to start from the beginning --
-		// if we have a 3 files, (log,100,200), (range, 180), (log, 200, 300), then if we want to restore[190, 250]
-		// it would stop at (range, 180) and not looking at (log, 100, 200)
-		Optional<RestoreConfig::RestoreFile> beginLogInclude = Optional<RestoreConfig::RestoreFile>{};
-		// because of the encoding of RestoreFile, we use greaterThanOrEqual(end + 1) instead of greaterThan(end)
-		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result
-		// in a end+1
-		Optional<RestoreConfig::RestoreFile> endLogExclude = co_await restore.logFileSet().seekGreaterOrEqual(
-		    tr, RestoreConfig::RestoreFile({ endVersion + 1, "", false }));
-		RestoreConfig::FileSetT::RangeResultType logFiles =
-		    co_await restore.logFileSet().getRange(tr, beginLogInclude, endLogExclude, fileLimit);
-		Optional<RestoreConfig::RestoreFile> beginRangeInclude = co_await restore.rangeFileSet().seekGreaterOrEqual(
-		    tr, RestoreConfig::RestoreFile({ beginVersion, "", true }));
+		// Use the saved cursor as an inclusive key even past the last file. A seek returning no entry
+		// would turn into an unbounded getRange start and redispatch files from the beginning.
+		Optional<RestoreConfig::RestoreFile> beginRangeInclude =
+		    Optional<RestoreConfig::RestoreFile>({ beginRangeVersion, beginRangeFile, true });
 		// greaterThanOrEqual(end + 1) instead of greaterThan(end)
 		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result
 		// in a end+1
@@ -5844,30 +6315,24 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		    tr, RestoreConfig::RestoreFile({ endVersion + 1, "", true }));
 		RestoreConfig::FileSetT::RangeResultType rangeFiles =
 		    co_await restore.rangeFileSet().getRange(tr, beginRangeInclude, endRangeExclude, fileLimit);
-		int64_t maxTagID = 0;
-		std::vector<RestoreConfig::RestoreFile> logs;
 		std::vector<RestoreConfig::RestoreFile> ranges;
-		for (const auto& f : logFiles.results) {
-			if (f.endVersion > beginVersion) {
-				// skip all files whose endVersion is smaller or equal to beginVersion
-				logs.push_back(f);
-				maxTagID = std::max(maxTagID, f.tagId);
-			}
-		}
 		for (const auto& f : rangeFiles.results) {
 			// the getRange might get out-of-bound range file because log files need them to work
 			if (f.version >= beginVersion && f.version < endVersion) {
 				ranges.push_back(f);
 			}
 		}
-		// allPartsDone will be set once all block tasks in the current batch are finished.
-		// create a new future for the new batch
-		Reference<TaskFuture> allPartsDone = futureBucket->future(tr);
-		restore.batchFuture().set(tr, allPartsDone->pack());
-
-		// if there are no files, if i am not the last batch, then on to the next batch
-		// if there are no files and i am the last batch, then just wait for applying to finish
-		// do we need this files.results.size() == 0 at all?
+		// All dispatch transactions for this version window share one completion future. Each continuation
+		// also joins it, so workers finishing one chunk cannot release the batch while more blocks remain
+		// undispatched. Creating a new future here would separate those dependencies.
+		Reference<TaskFuture> allPartsDone;
+		if (addingToExistingBatch) {
+			Key fKey = co_await restore.batchFuture().getD(tr);
+			allPartsDone = makeReference<TaskFuture>(futureBucket, fKey);
+		} else {
+			allPartsDone = futureBucket->future(tr);
+			restore.batchFuture().set(tr, allPartsDone->pack());
+		}
 		if (beginVersion > restoreVersion) {
 			if (applyLag == 0) {
 				// i am the last batch
@@ -5899,12 +6364,11 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			co_return;
 		}
 
-		// if we reach here, this batch is not empty(i.e. we have range and/or mutation files in this)
-		// Start moving through the file list and queuing up blocks.  Only queue up to RESTORE_DISPATCH_ADDTASK_SIZE
-		// blocks per Dispatch task and target batchSize total per batch but a batch must end on a complete version
-		// boundary so exceed the limit if necessary to reach the end of a version of files.
+		// Queue a bounded number of range-file blocks in this transaction. The version batch remains open across
+		// continuation tasks, so the next batch cannot advance the apply version until every block is finished.
 		std::vector<Future<Key>> addTaskFutures;
 		int i = 0;
+		int blocksDispatched = 0;
 		// need to process all range files, keep using the same RestoreRangeTaskFunc as non-partitioned restore.
 		// this can be done first, because they are not overlap within a restore uid
 		// each task will read the file, restore those key to their original keys after clear that range
@@ -5915,8 +6379,12 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// after each RestoreDispatchPartitionedTaskFunc, keyVersionMap will be clear if mutation version is larger.
 		for (; i < ranges.size(); ++i) {
 			RestoreConfig::RestoreFile& f = ranges[i];
+			beginRangeVersion = f.version;
+			beginRangeFile = f.fileName;
 			// For each block of the file
-			for (int64_t j = 0; j < f.fileSize; j += f.blockSize) {
+			int64_t j = beginRangeBlock * f.blockSize;
+			bool txFull = false;
+			for (; j < f.fileSize && blocksDispatched < taskBatchSize && !txFull; j += f.blockSize) {
 				addTaskFutures.push_back(RestoreRangeTaskFunc::addTask(tr,
 				                                                       taskBucket,
 				                                                       task,
@@ -5924,23 +6392,83 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				                                                       j,
 				                                                       std::min<int64_t>(f.blockSize, f.fileSize - j),
 				                                                       TaskCompletionKey::joinWith(allPartsDone)));
+				++beginRangeBlock;
+				++blocksDispatched;
+				// addTask may yield before adding its metadata; wait so the size check includes those writes.
+				// This serializes task creation and may slow dispatch, but avoids accumulating unmeasured writes.
+				co_await addTaskFutures.back();
+				txFull = tr->getApproximateSize() >= CLIENT_KNOBS->RESTORE_DISPATCH_TX_SIZE;
+			}
+			if (j < f.fileSize) {
+				break;
+			}
+			// The next query must start after this file, including when the file was empty.
+			beginRangeFile += '\x00';
+			beginRangeBlock = 0;
+			if (blocksDispatched == taskBatchSize ||
+			    tr->getApproximateSize() >= CLIENT_KNOBS->RESTORE_DISPATCH_TX_SIZE) {
+				break;
 			}
 		}
-		addTaskFutures.push_back(RestoreLogDataPartitionedTaskFunc::addTask(
-		    tr, taskBucket, task, maxTagID, logs, beginVersion, endVersion, TaskCompletionKey::joinWith(allPartsDone)));
-		// even if file exsists, but they are empty, in this case just start the next batch
-
-		addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(tr,
-		                                                                     taskBucket,
-		                                                                     task,
-		                                                                     firstVersion,
-		                                                                     endVersion,
-		                                                                     nextEndVersion,
-		                                                                     TaskCompletionKey::noSignal(),
-		                                                                     allPartsDone));
+		if (!ranges.empty()) {
+			CODE_PROBE(true, "Partitioned restore dispatch continued");
+			// Query again from the saved cursor even if this page was fully consumed. An empty page proves all
+			// range files in the version batch have been dispatched, including batches with more than one page of
+			// files.
+			addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(
+			    tr,
+			    taskBucket,
+			    task,
+			    firstVersion,
+			    beginVersion,
+			    endVersion,
+			    TaskCompletionKey::joinWith(allPartsDone),
+			    Reference<TaskFuture>(),
+			    Optional<RestoreConfig::RestoreFile>({ beginRangeVersion, beginRangeFile, true }),
+			    beginRangeBlock));
+		} else {
+			// Log files are only needed after all snapshot blocks in this window have been dispatched.
+			// Include files starting before beginVersion if their end overlaps this window.
+			Optional<RestoreConfig::RestoreFile> beginLogInclude = Optional<RestoreConfig::RestoreFile>{};
+			// because of the encoding of RestoreFile, we use greaterThanOrEqual(end + 1) instead of greaterThan(end)
+			// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not
+			// result in a end+1
+			Optional<RestoreConfig::RestoreFile> endLogExclude = co_await restore.logFileSet().seekGreaterOrEqual(
+			    tr, RestoreConfig::RestoreFile({ endVersion + 1, "", false }));
+			RestoreConfig::FileSetT::RangeResultType logFiles =
+			    co_await restore.logFileSet().getRange(tr, beginLogInclude, endLogExclude, fileLimit);
+			int64_t maxTagID = 0;
+			std::vector<RestoreConfig::RestoreFile> logs;
+			for (const auto& f : logFiles.results) {
+				if (f.endVersion > beginVersion) {
+					// skip all files whose endVersion is smaller or equal to beginVersion
+					logs.push_back(f);
+					maxTagID = std::max(maxTagID, f.tagId);
+				}
+			}
+			addTaskFutures.push_back(
+			    RestoreLogDataPartitionedTaskFunc::addTask(tr,
+			                                               taskBucket,
+			                                               task,
+			                                               maxTagID,
+			                                               logs,
+			                                               beginVersion,
+			                                               endVersion,
+			                                               TaskCompletionKey::joinWith(allPartsDone)));
+			addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(tr,
+			                                                                     taskBucket,
+			                                                                     task,
+			                                                                     firstVersion,
+			                                                                     endVersion,
+			                                                                     nextEndVersion,
+			                                                                     TaskCompletionKey::noSignal(),
+			                                                                     allPartsDone));
+		}
 
 		co_await waitForAll(addTaskFutures);
-		co_await taskBucket->finish(tr, task);
+		// Add the next blocker before releasing this continuation's blocker, in case all block tasks finished.
+		Future<Void> setDone = addingToExistingBatch ? onDone->set(tr, taskBucket) : Void();
+		co_await (setDone && taskBucket->finish(tr, task));
 
 		TraceEvent("FileRestorePartitionDispatch")
 		    .detail("RestoreUID", restore.getUid())
@@ -5948,7 +6476,10 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		    .detail("EndVersion", endVersion)
 		    .detail("NextEndVersion", nextEndVersion)
 		    .detail("ApplyLag", applyLag)
-		    .detail("Decision", "dispatch_batch_complete");
+		    .detail("Decision", ranges.empty() ? "dispatch_batch_complete" : "dispatch_range_chunk")
+		    .detail("BlocksDispatched", blocksDispatched)
+		    .detail("TaskLimit", taskBatchSize)
+		    .detail("TransactionBytes", tr->getApproximateSize());
 
 		co_return;
 	}
@@ -5960,19 +6491,34 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 	                           Version beginVersion,
 	                           Version endVersion,
 	                           TaskCompletionKey completionKey = TaskCompletionKey::noSignal(),
-	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
+	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>(),
+	                           Optional<RestoreConfig::RestoreFile> rangeStart = Optional<RestoreConfig::RestoreFile>(),
+	                           int64_t beginRangeBlock = 0) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
 
 		// Use high priority for dispatch tasks that have to queue more blocks for the current batch
-		unsigned int priority = 0;
-		Reference<Task> task(new Task(
-		    RestoreDispatchPartitionedTaskFunc::name, RestoreDispatchPartitionedTaskFunc::version, doneKey, priority));
+		unsigned int priority = rangeStart.present() ? 1 : 0;
+		auto task = makeReference<Task>(
+		    RestoreDispatchPartitionedTaskFunc::name, RestoreDispatchPartitionedTaskFunc::version, doneKey, priority);
 
 		// Create a config from the parent task and bind it to the new task
 		co_await RestoreConfig(parentTask).toTask(tr, task);
 		Params.firstVersion().set(task, firstVersion);
 		Params.beginVersion().set(task, beginVersion);
 		Params.endVersion().set(task, endVersion);
+		// Preserve reductions for continuations and requeues of this window. Later windows may have smaller
+		// task metadata, so let them start with the configured limit again.
+		int taskLimit = CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
+		if (Params.beginVersion().getOrDefault(parentTask, invalidVersion) == beginVersion &&
+		    Params.endVersion().getOrDefault(parentTask, invalidVersion) == endVersion) {
+			taskLimit = Params.dispatchTaskLimit().getOrDefault(parentTask, taskLimit);
+		}
+		Params.dispatchTaskLimit().set(task, taskLimit);
+		if (rangeStart.present()) {
+			Params.beginRangeVersion().set(task, rangeStart.get().version);
+			Params.beginRangeFile().set(task, rangeStart.get().fileName);
+			Params.beginRangeBlock().set(task, beginRangeBlock);
+		}
 
 		if (!waitFor) {
 			co_return taskBucket->addTask(tr, task);
@@ -5982,21 +6528,241 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		co_return "OnSetAddTask"_sr;
 	}
 
+	// TaskBucket commits after finish() returns, outside the dispatcher's error handling. Own the commit
+	// here so oversized or expired transactions can rebuild a smaller dispatch. New tasks, their continuation cursor,
+	// and retirement of the current task must commit together to make retries safe.
+	static Future<Void> dispatchWithRetry(Database cx,
+	                                      Reference<TaskBucket> taskBucket,
+	                                      Reference<FutureBucket> futureBucket,
+	                                      Reference<Task> task,
+	                                      std::function<void(int)> beforeCommitForTest = {}) {
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
+		int taskBatchSize =
+		    std::max(1, Params.dispatchTaskLimit().getOrDefault(task, CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE));
+		// Dispatch commits also retire the task. Keep its timeout key stable until the commit is resolved.
+		co_await task->extendMutex.take();
+		FlowLock::Releaser releaser(task->extendMutex, 1);
+		while (true) {
+			Error err;
+			try {
+				taskBucket->setOptions(tr);
+				// A previous attempt may have committed despite returning commit_unknown_result.
+				if (co_await taskBucket->isFinished(tr, task)) {
+					co_return;
+				}
+				co_await taskBucket->keepRunning(tr, task);
+				Params.dispatchTaskLimit().set(task, taskBatchSize);
+				co_await dispatch(tr, taskBucket, futureBucket, task, taskBatchSize);
+				if (beforeCommitForTest) {
+					ASSERT(g_network->isSimulated());
+					beforeCommitForTest(taskBatchSize);
+				} else if (taskBatchSize > 1 && buggify()) {
+					throw transaction_too_large();
+				}
+				co_await tr->commit();
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			bool reduceTaskLimit = taskBatchSize > 1 && (err.code() == error_code_transaction_too_large ||
+			                                             err.code() == error_code_transaction_too_old);
+			if (reduceTaskLimit) {
+				// The failed transaction persisted neither tasks nor cursor. Rebuild from the current task's
+				// original cursor, with fewer blocks; the successor receives the new cursor only on commit.
+				// Serial task creation can also exhaust the transaction lifetime without hitting the byte limit.
+				int oldLimit = taskBatchSize;
+				taskBatchSize /= 2;
+				CODE_PROBE(err.code() == error_code_transaction_too_large,
+				           "Partitioned restore dispatch shrank after transaction_too_large");
+				CODE_PROBE(err.code() == error_code_transaction_too_old,
+				           "Partitioned restore dispatch shrank after transaction_too_old");
+				TraceEvent("FileRestorePartitionDispatchResize")
+				    .detail("RestoreUID", RestoreConfig(task).getUid())
+				    .detail("ErrorCode", err.code())
+				    .detail("OldTaskLimit", oldLimit)
+				    .detail("NewTaskLimit", taskBatchSize);
+			}
+			if (reduceTaskLimit && err.code() == error_code_transaction_too_large) {
+				tr->reset();
+			} else {
+				// Preserve the normal retry delay for transaction_too_old, including at the minimum task limit.
+				co_await tr->onError(err);
+			}
+			if (reduceTaskLimit) {
+				// Persist the smaller limit under the current lease so a handoff cannot restore the original batch.
+				// Keep the timeout key stable: an earlier dispatch may have committed with an unknown result.
+				Params.dispatchTaskLimit().set(task, taskBatchSize);
+				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> resizeTr) {
+					return taskBucket->updateTaskParam(
+					    resizeTr, task, Params.dispatchTaskLimit().key, TupleCodec<int>::pack(taskBatchSize));
+				});
+			}
+		}
+	}
+
 	Future<Void> execute(Database cx,
 	                     Reference<TaskBucket> tb,
 	                     Reference<FutureBucket> fb,
 	                     Reference<Task> task) override {
-		return Void();
-	};
+		return dispatchWithRetry(cx, tb, fb, task);
+	}
 	Future<Void> finish(Reference<ReadYourWritesTransaction> tr,
 	                    Reference<TaskBucket> tb,
 	                    Reference<FutureBucket> fb,
 	                    Reference<Task> task) override {
-		return _finish(tr, tb, fb, task);
-	};
+		// Dispatch and task retirement are committed together by execute().
+		return Void();
+	}
 };
 StringRef RestoreDispatchPartitionedTaskFunc::name = "restore_dispatch_partitioned"_sr;
 REGISTER_TASKFUNC(RestoreDispatchPartitionedTaskFunc);
+
+Future<Void> testRestoreDispatchRecovery(Database cx) {
+	ASSERT(g_network->isSimulated());
+	using Dispatch = RestoreDispatchPartitionedTaskFunc;
+	RestoreConfig restore(deterministicRandom()->randomUniqueID());
+	std::string tagName = "dispatch-recovery-" + restore.getUid().toString();
+	Reference<IBackupContainer> bc =
+	    IBackupContainer::openContainer("file://" + abspath("simfdb/" + tagName), {}, {}, 0);
+	Subspace testSpace("dispatch-recovery/"_sr.withPrefix(restore.mutationLogPrefix()));
+	auto taskBucket = makeReference<TaskBucket>(testSpace.get("tasks"_sr), AccessSystemKeys::True);
+	auto futureBucket = makeReference<FutureBucket>(testSpace.get("futures"_sr), AccessSystemKeys::True);
+	// Dispatch reads only this metadata; the range tasks are inspected without reading a backup file.
+	RestoreFile file{ 1, "range-file", true, 4096, 32LL * 4096 };
+	auto task = makeReference<Task>(Dispatch::name, Dispatch::version);
+	KeyBackedTaskConfig::TaskParams.uid().set(task, restore.getUid());
+	TaskBucket::setValidationCondition(
+	    task, restore.sourceContainer().key, TupleCodec<Reference<IBackupContainer>>::pack(bc));
+	Dispatch::Params.firstVersion().set(task, 1);
+	Dispatch::Params.beginVersion().set(task, 1);
+	Dispatch::Params.endVersion().set(task, 2);
+	Dispatch::Params.dispatchTaskLimit().set(task, 16);
+	co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		// Replacing the isolated setup also makes an unknown commit result safe to retry.
+		tr->clear(testSpace.range());
+		restore.sourceContainer().set(tr, bc);
+		restore.tag().set(tr, tagName);
+		makeRestoreTag(tagName).set(tr, { restore.getUid(), false });
+		restore.restoreVersion().set(tr, 2);
+		restore.rangeFileSet().insert(tr, file);
+		taskBucket->addTask(tr, task);
+		return Void();
+	});
+	while (true) {
+		task = co_await taskBucket->getOne(cx);
+		if (task) {
+			break;
+		}
+		co_await delay(1.0);
+	}
+	int rejectedLimit = 0;
+	int ageFailures = 0;
+	bool handedOff = false;
+	auto beforeCommit = [&](int limit) {
+		// Model persistent latency: retrying an expired chunk unchanged must fail this test promptly.
+		if (rejectedLimit) {
+			ASSERT_LT(limit, rejectedLimit);
+		}
+		if (limit > 4) {
+			rejectedLimit = limit;
+			++ageFailures;
+			throw transaction_too_old();
+		}
+		if (!handedOff) {
+			handedOff = true;
+			throw task_interrupted();
+		}
+	};
+	try {
+		co_await Dispatch::dispatchWithRetry(cx, taskBucket, futureBucket, task, beforeCommit);
+		ASSERT(false);
+	} catch (Error& e) {
+		if (e.code() != error_code_task_interrupted || !handedOff) {
+			throw;
+		}
+	}
+	// Drop the in-memory task and let a new owner reclaim its persisted parameters after the lease expires.
+	task.clear();
+	while (true) {
+		task = co_await taskBucket->getOne(cx);
+		if (task) {
+			break;
+		}
+		co_await delay(1.0);
+	}
+	ASSERT_LE(Dispatch::Params.dispatchTaskLimit().get(task), 4);
+	co_await Dispatch::dispatchWithRetry(cx, taskBucket, futureBucket, task, beforeCommit);
+	ASSERT_GT(ageFailures, 0);
+	int committedLimit = Dispatch::Params.dispatchTaskLimit().get(task);
+	ASSERT_LE(committedLimit, 4);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
+	while (true) {
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			ASSERT(co_await taskBucket->isFinished(tr, task));
+			ASSERT_EQ(co_await taskBucket->getTaskCount(tr), committedLimit + 1);
+			Subspace space = taskBucket->getAvailableSpace(1);
+			RangeResult rows = co_await tr->getRange(space.range(), 1000);
+			ASSERT(!rows.empty() && !rows.more);
+			auto continuation = makeReference<Task>();
+			Key key = space.unpack(rows[0].key).getString(0);
+			for (const auto& row : rows) {
+				Tuple tuple = space.unpack(row.key);
+				ASSERT_EQ(tuple.getString(0), key);
+				continuation->params[tuple.getString(1)] = row.value;
+			}
+			ASSERT_EQ(continuation->params[Task::reservedTaskParamKeyType], Dispatch::name);
+			ASSERT_EQ(Dispatch::Params.beginRangeVersion().get(continuation), file.version);
+			ASSERT_EQ(Dispatch::Params.beginRangeFile().get(continuation), file.fileName);
+			ASSERT_EQ(Dispatch::Params.beginRangeBlock().get(continuation), committedLimit);
+			ASSERT_EQ(Dispatch::Params.dispatchTaskLimit().get(continuation), committedLimit);
+			space = taskBucket->getAvailableSpace();
+			rows = co_await tr->getRange(space.range(), 1000);
+			ASSERT(!rows.more);
+			std::set<int64_t> offsets;
+			std::vector<Key> rangeDoneKeys;
+			for (const auto& row : rows) {
+				if (space.unpack(row.key).getString(1) == RestoreRangeTaskFunc::Params.readOffset().key) {
+					ASSERT(offsets.insert(TupleCodec<int64_t>::unpack(row.value)).second);
+				}
+				if (space.unpack(row.key).getString(1) == Task::reservedTaskParamKeyDone) {
+					rangeDoneKeys.push_back(row.value);
+				}
+			}
+			ASSERT_EQ(offsets.size(), committedLimit);
+			for (int i = 0; i < committedLimit; ++i) {
+				ASSERT(offsets.count(i * file.blockSize));
+			}
+			Key batchKey = co_await restore.batchFuture().getOrThrow(tr);
+			auto batch = futureBucket->unpack(batchKey);
+			ASSERT(!(co_await batch->isSet(tr)));
+			ASSERT_EQ(rangeDoneKeys.size(), committedLimit);
+			for (const auto& key : rangeDoneKeys) {
+				co_await futureBucket->unpack(key)->set(tr, taskBucket);
+			}
+			// Finishing every dispatched block must still leave the continuation holding the batch open.
+			ASSERT(!(co_await batch->isSet(tr)));
+			co_await futureBucket->unpack(continuation->params[Task::reservedTaskParamKeyDone])->set(tr, taskBucket);
+			ASSERT(co_await batch->isSet(tr));
+			break;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr->onError(err);
+	}
+	co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->clear(testSpace.range());
+		makeRestoreTag(tagName).clear(tr);
+		restore.clear(tr);
+		return Void();
+	});
+	TraceEvent("RestoreDispatchRecoveryTestPassed")
+	    .detail("AgeFailures", ageFailures)
+	    .detail("CommittedTaskLimit", committedLimit);
+}
 
 struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 	static StringRef name;
@@ -6356,8 +7122,8 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 
 		// Use high priority for dispatch tasks that have to queue more blocks for the current batch
 		auto priority = (remainingInBatch > 0) ? 1u : 0u;
-		Reference<Task> task(
-		    new Task(RestoreDispatchTaskFunc::name, RestoreDispatchTaskFunc::version, doneKey, priority));
+		auto task =
+		    makeReference<Task>(RestoreDispatchTaskFunc::name, RestoreDispatchTaskFunc::version, doneKey, priority);
 
 		// Create a config from the parent task and bind it to the new task
 		co_await RestoreConfig(parentTask).toTask(tr, task);
@@ -6420,6 +7186,32 @@ Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key t
 	}
 
 	co_return result;
+}
+
+Future<std::string> restoreStatusJSON(Reference<ReadYourWritesTransaction> tr, Key tagName) {
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+	std::vector<KeyBackedTag> tags;
+	if (tagName.empty()) {
+		tags = co_await getAllRestoreTags(tr);
+	} else {
+		tags.push_back(makeRestoreTag(tagName.toString()));
+	}
+
+	JsonBuilderObject doc;
+	doc.setKey("SchemaVersion", "1.0.0");
+
+	JsonBuilderArray restores;
+	for (int i = 0; i < tags.size(); ++i) {
+		UidAndAbortedFlagT u = co_await tags[i].getD(tr);
+		JsonBuilderObject restoreDoc = co_await RestoreConfig(u.first).getStatusJSON(tr);
+		restores.push_back(restoreDoc);
+	}
+	doc.setKey("Restores", restores);
+
+	co_return doc.getJson();
 }
 
 Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName) {
@@ -6505,13 +7297,14 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
 	                             Reference<Task> task) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		RestoreConfig restore(task);
 		Version restoreVersion{ 0 };
 		Version beginVersion{ 0 };
 		Reference<IBackupContainer> bc;
 		std::vector<KeyRange> ranges;
 		bool logsOnly{ false };
+		bool useRangeFileRestore{ true };
 		bool inconsistentSnapshotOnly{ false };
 
 		while (true) {
@@ -6525,6 +7318,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				restoreVersion = co_await restore.restoreVersion().getOrThrow(tr);
 				ranges = co_await restore.getRestoreRangesOrDefault(tr);
+				useRangeFileRestore = co_await restore.useRangeFileRestore().getD(tr, Snapshot::False, true);
 				logsOnly = co_await restore.onlyApplyMutationLogs().getD(tr, Snapshot::False, false);
 				inconsistentSnapshotOnly = co_await restore.inconsistentSnapshotOnly().getD(tr, Snapshot::False, false);
 				co_await taskBucket->keepRunning(tr, task);
@@ -6539,6 +7333,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				}
 				restore.stateEnum().set(tr, ERestoreState::STARTING);
 				restore.fileSet().clear(tr);
+				if (!useRangeFileRestore) {
+					restore.logFileSet().clear(tr);
+				}
 				restore.fileBlockCount().clear(tr);
 				restore.fileCount().clear(tr);
 				Reference<IBackupContainer> _bc = co_await restore.sourceContainer().getOrThrow(tr);
@@ -6578,17 +7375,22 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		}
 
 		Version firstConsistentVersion = invalidVersion;
-		if (beginVersion == invalidVersion) {
-			beginVersion = 0;
-		}
 		Standalone<VectorRef<KeyRangeRef>> keyRangesFilter;
 		for (auto const& r : ranges) {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
 		Optional<RestorableFileSet> restorable =
-		    co_await bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion);
-		if (!restorable.present())
+		    co_await bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion, !useRangeFileRestore);
+		if (!restorable.present()) {
+			if (!useRangeFileRestore) {
+				co_await restore.logError(cx,
+				                          restore_missing_data(),
+				                          "BulkLoad restore failed: backup has no restorable bulkdump data; "
+				                          "retry with --mode rangefile",
+				                          nullptr);
+			}
 			throw restore_missing_data();
+		}
 
 		// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
 		// Order does not matter, they will be put in order when written to the restoreFileMap below.
@@ -6621,7 +7423,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				}
 			}
 		} else {
-			// In logs-only (incremental) mode, the firstConsistentVersion should just be restore.beginVersion().
+			if (beginVersion == invalidVersion) {
+				beginVersion = 0;
+			}
 			firstConsistentVersion = beginVersion;
 		}
 		if (!inconsistentSnapshotOnly) {
@@ -6630,6 +7434,40 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    { f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.tagId, f.totalTags });
 				logFiles.push_back(
 				    { f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.tagId, f.totalTags });
+			}
+		}
+		if (!useRangeFileRestore) {
+			if (!inconsistentSnapshotOnly || restorable.get().snapshot.isSingleVersion()) {
+				firstConsistentVersion = restorable.get().snapshot.endVersion;
+			}
+			// Only log mutations newer than the SST covering their key may be applied.
+			// Initialize the map before dispatch can run, in bounded, retryable transactions.
+			const auto& batches = restorable.get().bulkDumpRanges;
+			tr->reset();
+			for (size_t i = 0; i < batches.size();) {
+				Error err;
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					co_await taskBucket->keepRunning(tr, task);
+					size_t next = i;
+					int bytes = 0;
+					for (; next < batches.size() && next - i < 32 && bytes < 1e6; ++next) {
+						const auto& batch = batches[next];
+						co_await krmSetRange(tr,
+						                     restore.applyMutationsMapPrefix(),
+						                     batch.range,
+						                     BinaryWriter::toValue(batch.version, Unversioned()));
+						bytes += batch.range.expectedSize() + sizeof(Version);
+					}
+					co_await tr->commit();
+					i = next;
+					tr->reset();
+					continue;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr->onError(err);
 			}
 		}
 		// First version for which log data should be applied
@@ -6641,7 +7479,21 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				if (logsOnly && !restorable.get().logs.empty()) {
+					// A container-wide description can reflect a different log layout from this interval.
+					const bool partitioned = restorable.get().logs.front().isPartitionedLog();
+					const auto layout =
+					    co_await restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
+					if (partitioned != (layout == MutationLogType::PARTITIONED_LOG)) {
+						restore.mutationLogType().set(
+						    tr, partitioned ? MutationLogType::PARTITIONED_LOG : MutationLogType::DEFAULT);
+					}
+				}
 				restore.firstConsistentVersion().set(tr, firstConsistentVersion);
+				if (!useRangeFileRestore) {
+					co_await taskBucket->keepRunning(tr, task);
+					restore.bulkDumpJobId().set(tr, restorable.get().bulkDumpJobId);
+				}
 				co_await tr->commit();
 				break;
 			} catch (Error& e) {
@@ -6814,6 +7666,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		mutationLogType = co_await restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
 		restoreVersion = co_await restore.restoreVersion().getOrThrow(tr);
 
+		// Set only on the bulkload path: the log dispatch below waits for the SST ingest to finish.
+		Reference<TaskFuture> bulkLoadDone;
+
 		if (!useRangeFileRestore) {
 			// Use BulkLoad for range data restoration, then apply logs
 			Reference<IBackupContainer> bc = co_await restore.sourceContainer().getOrThrow(tr);
@@ -6835,7 +7690,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			    .detail("RestoreVersion", restoreVersion);
 
 			// Create a future that BulkLoad will signal when done
-			Reference<TaskFuture> bulkLoadDone = futureBucket->future(tr);
+			bulkLoadDone = futureBucket->future(tr);
 
 			// Add BulkLoad task for range data
 			co_await BulkLoadRestoreTaskFunc::addTask(tr,
@@ -6845,12 +7700,22 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			                                          bc->getURL(),
 			                                          bulkDumpJobId,
 			                                          TaskCompletionKey::signal(bulkLoadDone));
+		}
 
-			// After BulkLoad completes, run RestoreDispatch to apply mutation logs
-			// Set onlyApplyMutationLogs so it only processes logs, not range files
-			restore.onlyApplyMutationLogs().set(tr, true);
-
-			// Add RestoreDispatch task that waits for BulkLoad to complete
+		// The log replay is independent of where the range data came from, so the dispatcher follows the
+		// container's log layout on both paths.
+		if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
+			Version endVersion =
+			    std::min(firstVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE, restoreVersion);
+			co_await RestoreDispatchPartitionedTaskFunc::addTask(tr,
+			                                                     taskBucket,
+			                                                     task,
+			                                                     firstVersion,
+			                                                     firstVersion,
+			                                                     endVersion,
+			                                                     TaskCompletionKey::noSignal(),
+			                                                     bulkLoadDone);
+		} else {
 			co_await RestoreDispatchTaskFunc::addTask(tr,
 			                                          taskBucket,
 			                                          task,
@@ -6861,16 +7726,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			                                          0,
 			                                          TaskCompletionKey::noSignal(),
 			                                          bulkLoadDone);
-		} else if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
-			// Traditional restore with partitioned logs
-			Version endVersion =
-			    std::min(firstVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE, restoreVersion);
-			co_await RestoreDispatchPartitionedTaskFunc::addTask(
-			    tr, taskBucket, task, firstVersion, firstVersion, endVersion);
-		} else {
-			// Traditional restore with non-partitioned logs
-			co_await RestoreDispatchTaskFunc::addTask(
-			    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE);
 		}
 
 		// Initialize apply mutations map.
@@ -6880,7 +7735,13 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			//  If this is an incremental restore, we need to set the applyMutationsMapPrefix
 			//  to the earliest log version so no mutations are missed
 			Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
-			co_await krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded);
+			std::vector<KeyRange> ranges = co_await restore.getRestoreRangesOrDefault(tr);
+			std::vector<Future<Void>> updateMap;
+			updateMap.reserve(ranges.size());
+			for (const auto& range : ranges) {
+				updateMap.push_back(krmSetRange(tr, restore.applyMutationsMapPrefix(), range, versionEncoded));
+			}
+			co_await waitForAll(updateMap);
 		}
 
 		co_await taskBucket->finish(tr, task);
@@ -6896,7 +7757,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		Reference<Task> task(new Task(StartFullRestoreTaskFunc::name, StartFullRestoreTaskFunc::version, doneKey));
+		auto task = makeReference<Task>(StartFullRestoreTaskFunc::name, StartFullRestoreTaskFunc::version, doneKey);
 
 		RestoreConfig restore(uid);
 		// Bind the restore config to the new task
@@ -6953,7 +7814,7 @@ public:
 		KeyBackedTag tag = makeBackupTag(tagName);
 
 		while (true) {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -7041,7 +7902,7 @@ public:
 		// PARTITIONED_LOG and RANGE_PARTITIONED_LOG backups are mutually exclusive: backup worker
 		// recruitment is determined by the active non-default type, so both cannot run concurrently.
 		if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
-			if (co_await anyRangePartitionedBackupRunning(tr)) {
+			if (co_await anyBackupRunningWithLogType(tr, MutationLogType::RANGE_PARTITIONED_LOG)) {
 				TraceEvent(SevError, "FBA_SubmitBackupMutationLogTypeConflict")
 				    .detail("TagName", tagName)
 				    .detail("RequestedType", mutationLogTypeToString(MutationLogType::PARTITIONED_LOG))
@@ -7052,7 +7913,7 @@ public:
 				throw backup_error();
 			}
 		} else if (mutationLogType == MutationLogType::RANGE_PARTITIONED_LOG) {
-			if (co_await anyPartitionedBackupRunning(tr)) {
+			if (co_await anyBackupRunningWithLogType(tr, MutationLogType::PARTITIONED_LOG)) {
 				TraceEvent(SevError, "FBA_SubmitBackupMutationLogTypeConflict")
 				    .detail("TagName", tagName)
 				    .detail("RequestedType", mutationLogTypeToString(MutationLogType::RANGE_PARTITIONED_LOG))
@@ -7067,6 +7928,67 @@ public:
 		BackupConfig config(deterministicRandom()->randomUniqueID());
 		UID uid = config.getUid();
 
+		KeyRangeMap<int> backupRangeSet;
+		for (auto& backupRange : backupRanges) {
+			backupRangeSet.insert(backupRange, 1);
+		}
+
+		backupRangeSet.coalesce(allKeys);
+		std::vector<KeyRange> normalizedRanges;
+
+		for (auto& backupRange : backupRangeSet.ranges()) {
+			if (backupRange.value()) {
+				normalizedRanges.push_back(KeyRange(KeyRangeRef(backupRange.range().begin, backupRange.range().end)));
+			}
+		}
+
+		// A bulkdump job carries exactly one key range and the cluster admits one bulk job at a time, so
+		// several disjoint ranges cannot be expressed as a single snapshot. Rejecting here is what keeps
+		// the restore honest: the dump would otherwise widen to normalKeys and a later bulkload restore
+		// would overwrite every key between the caller's ranges. BulkDumpTaskFunc indexes range 0 on the
+		// strength of this check.
+		if (snapshotMode != static_cast<int>(SnapshotMode::RANGEFILE) && normalizedRanges.size() != 1) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkDumpRangeCount")
+			    .detail("TagName", tagName)
+			    .detail("SnapshotMode", snapshotMode)
+			    .detail("RangeCount", normalizedRanges.size());
+			fprintf(stderr,
+			        "ERROR: --mode bulkdump and --mode both require exactly one key range, but %d remain after "
+			        "coalescing adjacent ranges. Use --mode rangefile, or run one backup per range.\n",
+			        static_cast<int>(normalizedRanges.size()));
+			throw backup_error();
+		}
+
+		// --incremental suppresses the snapshot entirely (StartFullBackupTaskFunc skips the whole snapshot
+		// block), so pairing it with a bulkdump mode asks for an SST snapshot and for no snapshot at once.
+		// Taken silently, it yields a log-only backup that no bulkload restore can use, and the operator
+		// only discovers that when the restore aborts much later.
+		if (snapshotMode != static_cast<int>(SnapshotMode::RANGEFILE) && incrementalBackupOnly) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkDumpIncremental")
+			    .detail("TagName", tagName)
+			    .detail("SnapshotMode", snapshotMode);
+			fprintf(stderr,
+			        "ERROR: --incremental cannot be combined with --mode bulkdump or --mode both; it suppresses "
+			        "the snapshot those modes should produce.\n");
+			throw backup_error();
+		}
+
+		// Encryption is applied by the container file wrappers, which the SST path does not go through:
+		// there is no encryption anywhere in BulkDumpUtil/BulkSstFiles. A bulkdump under an encryption
+		// key would encrypt the logs and the manifest and leave the bulk data in the clear, so an
+		// operator who believes the backup is encrypted would be wrong about most of its bytes. Refuse
+		// until the SST path can encrypt; see design/bulkload-restore-integration.md.
+		if (snapshotMode != static_cast<int>(SnapshotMode::RANGEFILE) && encryptionKeyFileName.present()) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkDumpEncryption")
+			    .detail("TagName", tagName)
+			    .detail("SnapshotMode", snapshotMode);
+			fprintf(stderr,
+			        "ERROR: --encryption-key-file cannot be combined with --mode bulkdump or --mode both; the "
+			        "SST files those modes produce are not encrypted, so the backup would be only partly "
+			        "encrypted. Use --mode rangefile.\n");
+			throw backup_error();
+		}
+
 		// This check will ensure that current backupUid is later than the last backup Uid
 		Standalone<StringRef> nowStr = BackupAgentBase::getCurrentTime();
 		std::string backupContainer = outContainer.toString();
@@ -7079,6 +8001,22 @@ public:
 
 		Reference<IBackupContainer> bc =
 		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName, encryptionBlockSize);
+
+		// Two backups writing the same files would corrupt each other. The tagName of the backup we are
+		// starting is skipped. It's okay to skip because if it were already running, backup_duplicate
+		// would have been thrown above.
+		Optional<std::string> conflictingTag = co_await FileBackupAgent::findRunningBackupAtLocation(tr, bc, tagName);
+		if (conflictingTag.present()) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupLocationInUse")
+			    .detail("TagName", tagName)
+			    .detail("ConflictingTag", conflictingTag.get())
+			    .detail("Location", bc->getLocation());
+			fprintf(stderr,
+			        "ERROR: The backup location is already in use by the running backup on tag `%s'.\n",
+			        printable(StringRef(conflictingTag.get())).c_str());
+			throw backup_error();
+		}
+
 		try {
 			// Use longer timeout for blobstore:// URLs in simulation to handle slow S3 mock operations
 			double createTimeout = (g_network->isSimulated() && isBlobstoreUrl(backupContainer)) ? 300.0 : 30.0;
@@ -7097,20 +8035,6 @@ public:
 			        "ERROR: The last backup `%s' happened in the future.\n",
 			        printable(lastBackupTimestamp.get()).c_str());
 			throw backup_error();
-		}
-
-		KeyRangeMap<int> backupRangeSet;
-		for (auto& backupRange : backupRanges) {
-			backupRangeSet.insert(backupRange, 1);
-		}
-
-		backupRangeSet.coalesce(allKeys);
-		std::vector<KeyRange> normalizedRanges;
-
-		for (auto& backupRange : backupRangeSet.ranges()) {
-			if (backupRange.value()) {
-				normalizedRanges.push_back(KeyRange(KeyRangeRef(backupRange.range().begin, backupRange.range().end)));
-			}
 		}
 
 		config.clear(tr);
@@ -7185,6 +8109,18 @@ public:
 	                                  Optional<std::string> encryptionKeyFileName,
 	                                  int encryptionBlockSize,
 	                                  bool useRangeFileRestore = true) {
+		if (auto refusal = FileBackupAgent::bulkLoadRestoreRefusal(tagName,
+		                                                           ranges,
+		                                                           addPrefix,
+		                                                           removePrefix,
+		                                                           onlyApplyMutationLogs,
+		                                                           encryptionKeyFileName,
+		                                                           useRangeFileRestore);
+		    refusal.present()) {
+			fprintf(stderr, "ERROR: %s\n", refusal.get().c_str());
+			throw restore_error();
+		}
+
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -7289,7 +8225,7 @@ public:
 	static Future<ERestoreState> waitRestore(Database cx, Key tagName, Verbose verbose) {
 		ERestoreState status;
 		while (true) {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 			Error err;
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -7422,8 +8358,9 @@ public:
 	}
 
 	static Future<Void> checkAndDisableBackupWorkers(Database cx) {
-		bool running = co_await runRYWTransaction(
-		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return anyPartitionedBackupRunning(tr); });
+		bool running = co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			return anyBackupRunningWithLogType(tr, MutationLogType::PARTITIONED_LOG);
+		});
 		if (!running) {
 			co_await disableBackupWorker(cx);
 		}
@@ -7432,7 +8369,7 @@ public:
 
 	static Future<Void> checkAndDisableRangePartitionedBackupWorkers(Database cx) {
 		bool running = co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<bool> {
-			bool r = co_await anyRangePartitionedBackupRunning(tr);
+			bool r = co_await anyBackupRunningWithLogType(tr, MutationLogType::RANGE_PARTITIONED_LOG);
 			if (!r) {
 				// Last range-partitioned backup just finished. Ask DD to clear the partition list.
 				tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(2));
@@ -7446,7 +8383,7 @@ public:
 	}
 
 	static Future<Void> changePause(FileBackupAgent* backupAgent, Database db, bool pause) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
+		auto tr = makeReference<ReadYourWritesTransaction>(db);
 
 		while (true) {
 			Error err;
@@ -7502,7 +8439,7 @@ public:
 	}
 
 	static Future<std::string> getStatusJSON(FileBackupAgent* backupAgent, Database cx, std::string tagName) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		while (true) {
 			Error err;
@@ -7543,10 +8480,13 @@ public:
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						Reference<IBackupContainer> bc;
 						TimestampedVersion latestRestorable;
+						MutationLogType mutationLogType;
 
 						co_await (
 						    store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))) &&
-						    store(bc, config.backupContainer().getOrThrow(tr)));
+						    store(bc, config.backupContainer().getOrThrow(tr)) &&
+						    store(mutationLogType,
+						          config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT)));
 						bc = fileBackup::getBackupContainerWithProxy(bc);
 
 						doc.setKey("Restorable", latestRestorable.present());
@@ -7561,6 +8501,7 @@ public:
 							doc.setKey("LatestRestorablePoint", o);
 						}
 						doc.setKey("DestinationURL", bc->getURL());
+						doc.setKey("MutationLogType", mutationLogTypeToString(mutationLogType));
 					}
 
 					if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
@@ -7669,30 +8610,9 @@ public:
 							bdDoc.setKey("RunningTasks", bdProgress.runningTasks);
 							bdDoc.setKey("ErrorTasks", bdProgress.errorTasks);
 							bdDoc.setKey("ProgressPercent", bdProgress.progressPercent());
-							bdDoc.setKey("TotalBytes", bdProgress.totalBytes);
 							bdDoc.setKey("CompletedBytes", bdProgress.completedBytes);
 							bdDoc.setKey("AvgBytesPerSecond", bdProgress.avgBytesPerSecond());
-							if (bdProgress.etaSeconds().present()) {
-								bdDoc.setKey("EstimatedSecondsRemaining", bdProgress.etaSeconds().get());
-							}
 							bdDoc.setKey("ElapsedSeconds", bdProgress.elapsedSeconds);
-
-							// Add stalled tasks if any
-							if (!bdProgress.stalledTasks.empty()) {
-								JsonBuilderArray stalledArray;
-								for (const auto& stalled : bdProgress.stalledTasks) {
-									JsonBuilderObject stalledDoc;
-									stalledDoc.setKey("TaskId", stalled.taskId.toString());
-									stalledDoc.setKey("Range", stalled.range.toString());
-									stalledDoc.setKey("StalledSeconds", stalled.stalledSeconds);
-									stalledDoc.setKey("RestartCount", stalled.restartCount);
-									if (!stalled.lastError.empty()) {
-										stalledDoc.setKey("LastError", stalled.lastError);
-									}
-									stalledArray.push_back(stalledDoc);
-								}
-								bdDoc.setKey("StalledTasks", stalledArray);
-							}
 
 							doc.setKey("BulkDumpProgress", bdDoc);
 						}
@@ -7710,6 +8630,7 @@ public:
 						errDoc.setKey("Message", msg.c_str());
 						errDoc.setKey("RelativeSeconds",
 						              (ver - recentReadVersion) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+						errorList.push_back(errDoc);
 					}
 					doc.setKey("Errors", errorList);
 				}
@@ -7726,7 +8647,7 @@ public:
 	                                     Database cx,
 	                                     ShowErrors showErrors,
 	                                     std::string tagName) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		std::string statusText;
 
 		while (true) {
@@ -7816,6 +8737,10 @@ public:
 					}
 					statusText += format("Snapshot Mode: %s\n", snapshotModeText.c_str());
 
+					MutationLogType mutationLogType =
+					    co_await config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
+					statusText += format("Mutation Log Type: %s\n", mutationLogTypeToString(mutationLogType).c_str());
+
 					// Check if backup is BulkLoad compatible (has bulkdump_data/).
 					// In rangefile mode no bulkdump task ever runs, so the answer is
 					// always "no" and the line carries no information — skip it.
@@ -7869,9 +8794,10 @@ public:
 								                     bdProgress.completeTasks,
 								                     bdProgress.totalTasks,
 								                     bdProgress.progressPercent());
-								statusText += format(
-								    " Bytes: %s\n",
-								    formatBytesProgress(bdProgress.completedBytes, bdProgress.totalBytes).c_str());
+								// Empty Optional, not {}: {} picks the int64_t overload and prints a "/ 0" total.
+								statusText +=
+								    format(" Bytes: %s\n",
+								           formatBytesProgress(bdProgress.completedBytes, Optional<int64_t>()).c_str());
 
 								double throughput = bdProgress.avgBytesPerSecond();
 								if (throughput > 0) {
@@ -7882,28 +8808,6 @@ public:
 									statusText +=
 									    format(" Elapsed: %s\n",
 									           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
-								}
-
-								if (bdProgress.etaSeconds().present()) {
-									statusText +=
-									    format(" ETA: %s\n",
-									           formatDurationHumanReadable((int)bdProgress.etaSeconds().get()).c_str());
-								}
-
-								if (!bdProgress.stalledTasks.empty()) {
-									statusText += format("\nWARNING: %zu stalled tasks (no progress > 60s):\n",
-									                     bdProgress.stalledTasks.size());
-									for (const auto& stalled : bdProgress.stalledTasks) {
-										statusText += format(" Task %s: %s, stalled %.0fs, %d restarts\n",
-										                     stalled.taskId.shortString().c_str(),
-										                     stalled.range.toString().c_str(),
-										                     stalled.stalledSeconds,
-										                     stalled.restartCount);
-										if (!stalled.lastError.empty()) {
-											statusText +=
-											    format("           Last error: %s\n", stalled.lastError.c_str());
-										}
-									}
 								}
 							} else {
 								statusText += " Status: pending\n";
@@ -8087,8 +8991,9 @@ public:
 		}
 
 		printf("Backup Description\n%s", desc.toString().c_str());
-		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present())
+		if (useRangeFileRestore && targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
 			targetVersion = desc.maxRestorableVersion.get();
+		}
 
 		if (targetVersion == invalidVersion && onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 			targetVersion = desc.contiguousLogEnd.get() - 1;
@@ -8098,8 +9003,8 @@ public:
 		if (!beginVersions.empty()) {
 			beginVersion = *std::min_element(beginVersions.begin(), beginVersions.end());
 		}
-		Optional<RestorableFileSet> restoreSet =
-		    co_await bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion);
+		Optional<RestorableFileSet> restoreSet = co_await bc->getRestoreSet(
+		    targetVersion, ranges, onlyApplyMutationLogs, beginVersion, !useRangeFileRestore);
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -8109,11 +9014,13 @@ public:
 			throw restore_invalid_version();
 		}
 
+		targetVersion = restoreSet.get().targetVersion;
+
 		if (verbose) {
 			printf("Restoring backup to version: %lld\n", (long long)targetVersion);
 		}
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
 			Error err;
 			try {
@@ -8168,7 +9075,6 @@ public:
 	                                     Key removePrefix) {
 		auto ryw_tr = makeReference<ReadYourWritesTransaction>(cx);
 		BackupConfig backupConfig;
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		while (true) {
 			Error err;
 			try {
@@ -8509,6 +9415,10 @@ Future<std::string> FileBackupAgent::restoreStatus(Reference<ReadYourWritesTrans
 	return fileBackup::restoreStatus(tr, tagName);
 }
 
+Future<std::string> FileBackupAgent::restoreStatusJSON(Reference<ReadYourWritesTransaction> tr, Key tagName) {
+	return fileBackup::restoreStatusJSON(tr, tagName);
+}
+
 Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, Verbose verbose) {
 	return FileBackupAgentImpl::waitRestore(cx, tagName, verbose);
 };
@@ -8588,4 +9498,47 @@ Future<EBackupState> FileBackupAgent::waitBackup(Database cx,
 
 Future<Void> FileBackupAgent::changePause(Database db, bool pause) {
 	return FileBackupAgentImpl::changePause(this, db, pause);
+}
+
+TEST_CASE("/backup/restore/bulkLoadRestoreRefusal") {
+	auto refusal = [](std::vector<KeyRange> ranges,
+	                  Key addPrefix,
+	                  Key removePrefix,
+	                  OnlyApplyMutationLogs onlyApplyMutationLogs,
+	                  Optional<std::string> encryptionKeyFileName,
+	                  bool useRangeFileRestore) {
+		Standalone<VectorRef<KeyRangeRef>> rangeRefs;
+		for (auto& range : ranges) {
+			rangeRefs.push_back_deep(rangeRefs.arena(), range);
+		}
+		return FileBackupAgent::bulkLoadRestoreRefusal("tag"_sr,
+		                                               rangeRefs,
+		                                               addPrefix,
+		                                               removePrefix,
+		                                               onlyApplyMutationLogs,
+		                                               encryptionKeyFileName,
+		                                               useRangeFileRestore)
+		    .orDefault("");
+	};
+	const std::vector<KeyRange> one = { KeyRangeRef("a"_sr, "b"_sr) };
+	const auto full = OnlyApplyMutationLogs::False, incremental = OnlyApplyMutationLogs::True;
+	const Optional<std::string> noKey, key = std::string("key");
+	const bool rangefile = true, bulkload = false;
+
+	ASSERT(refusal(one, "p"_sr, "a"_sr, full, noKey, rangefile).empty());
+	ASSERT(refusal(one, Key(), Key(), full, noKey, bulkload).empty());
+	ASSERT(refusal(one, "p"_sr, Key(), full, noKey, bulkload).starts_with("--add-prefix"));
+	ASSERT(refusal(one, Key(), "a"_sr, full, noKey, bulkload).starts_with("--add-prefix"));
+	ASSERT(refusal(one, "p"_sr, "a"_sr, full, noKey, bulkload).starts_with("--add-prefix"));
+
+	ASSERT(refusal(one, Key(), Key(), incremental, noKey, bulkload).starts_with("--incremental"));
+	ASSERT(refusal(one, Key(), Key(), full, key, bulkload).starts_with("--encryption-key-file"));
+	ASSERT(refusal(one, Key(), Key(), incremental, key, rangefile).empty());
+
+	const std::vector<KeyRange> adjacent = { KeyRangeRef("a"_sr, "b"_sr), KeyRangeRef("b"_sr, "c"_sr) };
+	const std::vector<KeyRange> disjoint = { KeyRangeRef("a"_sr, "b"_sr), KeyRangeRef("c"_sr, "d"_sr) };
+	ASSERT(refusal(adjacent, Key(), Key(), full, noKey, bulkload).empty());
+	ASSERT(refusal(disjoint, Key(), Key(), full, noKey, bulkload).starts_with("--mode bulkload"));
+
+	return Void();
 }

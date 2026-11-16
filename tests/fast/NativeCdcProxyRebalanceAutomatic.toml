@@ -1,0 +1,34 @@
+[configuration]
+config = 'single commit_proxies=1 grv_proxies=2'
+singleRegion = true
+datacenters = 1
+machineCount = 12
+statelessProcessClassesPerDC = 3
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 2
+cdc_proxy_rebalance_enabled = true
+# Leave time for the three registrations to establish one shared-tag group before the controller scans.
+cdc_proxy_rebalance_interval = 20.0
+
+[[test]]
+testTitle = 'NativeCdcProxyRebalanceAutomatic'
+useDB = true
+waitForQuiescenceEnd = false
+runFailureWorkloads = false
+connectionFailuresDisableDuration = 1000000
+timeout = 240
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 3
+    minStreamCount = 3
+    maxStreamCount = 3
+    keyCount = 4
+    writesPerRound = 1
+    rounds = 0
+    testProxyRebalanceAutomatic = true
+    operationTimeout = 150.0

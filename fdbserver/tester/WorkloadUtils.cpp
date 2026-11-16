@@ -118,7 +118,7 @@ Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 		idx += 16;
 	}
 	ASSERT(keyBytes >= 16);
-	emplaceIndex(data, idx, (int64_t)index);
+	emplaceIndex(data, idx, index);
 
 	return result;
 }

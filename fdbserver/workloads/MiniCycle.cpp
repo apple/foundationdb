@@ -74,6 +74,7 @@ struct MiniCycleWorkload : TestWorkload {
 
 	Future<bool> _check(Database cx, MiniCycleWorkload* self) {
 		std::vector<Future<Void>> cycleClients;
+		cycleClients.reserve(self->clientCount > 0 ? self->clientCount : 0);
 		for (int c = 0; c < self->clientCount; c++) {
 			cycleClients.push_back(
 			    timeout(self->cycleClient(cx->clone(), self, self->actorCount / self->transactionsPerSecond),
@@ -113,6 +114,7 @@ struct MiniCycleWorkload : TestWorkload {
 
 	Future<bool> _checkCycle(Database cx, MiniCycleWorkload* self, bool ok) {
 		std::vector<Future<bool>> checkClients;
+		checkClients.reserve(self->clientCount > 0 ? self->clientCount : 0);
 		for (int c = 0; c < self->clientCount; c++)
 			checkClients.push_back(self->cycleCheckClient(cx->clone(), self, ok));
 		bool ret = co_await allTrue(checkClients);

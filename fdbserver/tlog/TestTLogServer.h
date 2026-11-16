@@ -102,7 +102,7 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 
 	static Future<Void> peekCommitMessages(TLogTestContext* pTLogTestContext, uint16_t logGroupID, uint32_t tag);
 
-	explicit(false) TLogTestContext(TestTLogOptions& tLogOptions) : tLogOptions(tLogOptions), epoch(1) {}
+	explicit TLogTestContext(TestTLogOptions& tLogOptions) : tLogOptions(tLogOptions), epoch(1) {}
 
 	// paramaters
 	std::string diskQueueBasename;

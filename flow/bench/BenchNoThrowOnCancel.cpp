@@ -22,6 +22,7 @@
 
 #include "flow/ThreadHelper.h"
 #include "flow/flow.h"
+#include "flow/genericactors.h"
 
 #include <cstdint>
 #include <vector>
@@ -136,6 +137,64 @@ template <CancelImpl Impl, CancelScenario Scenario>
 void benchNoThrowOnCancel(benchmark::State& state) {
 	onMainThread([&state] { return benchNoThrowOnCancelActor<Impl, Scenario>(&state); }).blockUntilReady();
 }
+
+// YieldedAsyncMap with the pre-NoThrowOnCancel destroyOnCancelYield, as the throwing baseline.
+template <class K, class V>
+class ThrowingYieldedAsyncMap : public YieldedAsyncMap<K, V> {
+public:
+	Future<Void> onChange(K const& k) override {
+		auto& item = this->items[k];
+		if (item.value == this->defaultValue)
+			return destroyOnCancelYieldThrowing(this, k, item.change.getFuture());
+		return yieldedFuture(item.change.getFuture());
+	}
+
+	static Future<Void> destroyOnCancelYieldThrowing(ThrowingYieldedAsyncMap* self, K key, Future<Void> change) {
+		Future<Void> yielded = yieldedFuture(change);
+		try {
+			co_await yielded;
+			yielded = Future<Void>();
+			change = Future<Void>();
+		} catch (Error& e) {
+			yielded = Future<Void>();
+			if (e.code() == error_code_actor_cancelled && !self->destructing && change.getFutureReferenceCount() == 1 &&
+			    change.getPromiseReferenceCount() == 1) {
+				self->items.erase(key);
+			}
+			change = Future<Void>();
+			throw;
+		}
+	}
+};
+
+template <class Map>
+Future<Void> benchYieldedAsyncMapCancelActor(benchmark::State* state) {
+	Map yam;
+	while (state->KeepRunning()) {
+		Future<Void> f = yam.onChange(1);
+		ASSERT(!f.isReady());
+		benchmark::DoNotOptimize(f);
+		f.cancel();
+		benchmark::DoNotOptimize(f);
+		benchmark::ClobberMemory();
+	}
+	ASSERT_EQ(yam.count(1), 0);
+	state->SetItemsProcessed(state->iterations());
+	co_return;
+}
+
+template <class Map>
+void benchYieldedAsyncMapCancel(benchmark::State& state) {
+	onMainThread([&state] { return benchYieldedAsyncMapCancelActor<Map>(&state); }).blockUntilReady();
+}
+
+BENCHMARK_TEMPLATE(benchYieldedAsyncMapCancel, ThrowingYieldedAsyncMap<int, int>)
+    ->Name("YieldedAsyncMap/throwing/onChange_cancel")
+    ->ReportAggregatesOnly(true);
+
+BENCHMARK_TEMPLATE(benchYieldedAsyncMapCancel, YieldedAsyncMap<int, int>)
+    ->Name("YieldedAsyncMap/no_throw/onChange_cancel")
+    ->ReportAggregatesOnly(true);
 
 BENCHMARK_TEMPLATE(benchNoThrowOnCancel, CancelImpl::Throwing, CancelScenario::ConstructAndCancel)
     ->Name("NoThrowOnCancel/throwing/construct_and_cancel")

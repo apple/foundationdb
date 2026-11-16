@@ -59,7 +59,7 @@ To write to serverKeys/keyServers, this script must:
 1. Disable Data Distributor
 2. Take ownership of MoveKeysLock
 3. Update MoveKeysLock write key with each transaction
-This is exactly what FDB's internal code does (see MoveKeys.actor.cpp).
+This is exactly what FDB's internal code does (see fdbserver/core/MoveKeys.cpp).
 
 Usage:
     python3 restore_metadata.py --backup-dir DIR [--cluster-file PATH] --yes-i-am-sure

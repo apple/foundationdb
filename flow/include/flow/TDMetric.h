@@ -56,11 +56,12 @@ struct MetricNameRef {
 	int expectedSize() const { return type.expectedSize() + name.expectedSize(); }
 
 	inline int compare(MetricNameRef const& r) const {
-		int cmp;
-		if ((cmp = type.compare(r.type))) {
+		int cmp = type.compare(r.type);
+		if (cmp) {
 			return cmp;
 		}
-		if ((cmp = name.compare(r.name))) {
+		cmp = name.compare(r.name);
+		if (cmp) {
 			return cmp;
 		}
 		return id.compare(r.id);
@@ -172,7 +173,7 @@ struct MetricBatch {
 	MetricBatch() = default;
 
 	explicit MetricBatch(FDBScope* in) {
-		assert(in != nullptr);
+		ASSERT(in != nullptr);
 		scope.inserts = std::move(in->inserts);
 		scope.appends = std::move(in->appends);
 		scope.updates = std::move(in->updates);

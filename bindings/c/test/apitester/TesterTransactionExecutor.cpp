@@ -295,6 +295,7 @@ protected:
 
 	std::vector<fdb::Error::CodeType> retriedErrorCodes() {
 		std::vector<fdb::Error::CodeType> retriedErrorCodes;
+		retriedErrorCodes.reserve(retriedErrors.size());
 		for (auto e : retriedErrors) {
 			retriedErrorCodes.push_back(e.code());
 		}

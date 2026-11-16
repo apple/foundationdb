@@ -38,7 +38,6 @@ connectionFailuresDisableDuration = 90
     abortAndRestartAfter = 0.0
     stopDifferentialAfter = 0.0
     performRestore = true
-    backupRangesCount = -1
     # Database locking prevents Cycle from seeing cleared keys during restore.
     # The workload locks the database before clearing, and restore unlocks when done.
     skipDirtyRestore = false

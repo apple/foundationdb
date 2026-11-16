@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/FailureMonitor.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/Knobs.h"

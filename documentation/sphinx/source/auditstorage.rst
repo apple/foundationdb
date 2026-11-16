@@ -39,27 +39,32 @@ How to use?
 -----------
 Start new audit job
 
-``audit_storage [replica\|locationmetadata\|ssshard] [BeginKey] [EndKey]``
+``audit_storage [replica\|locationmetadata\|ssshard\|range_digest] [BeginKey] [EndKey]``
 
 For example, to check all replicas, we can run ``audit_storage replica "" \xff\xff``.
 
 List recent jobs
 
-``get_audit_status [replica\|locationmetadata\|ssshard] recent``
+``get_audit_status [replica\|locationmetadata\|ssshard\|range_digest] recent``
 
 Check a job progress
 
-``get_audit_status [replica\|locationmetadata\|ssshard] progress [AuditID]``
+``get_audit_status [replica\|locationmetadata\|ssshard\|range_digest] progress [AuditID]``
 
 Cancel an audit
 
-``audit_storage cancel [replica\|locationmetadata\|ssshard] [AuditID]``
+``audit_storage cancel [replica\|locationmetadata\|ssshard\|range_digest] [AuditID]``
 
-There three auditTypes:
+The auditTypes are:
 
 1. ``replica``: This audit checks the consistency of user data between replicas of all DCs. ``SSAuditStorageShardReplicaError`` trace event is generated if any inconsistency is detected.
 2. ``locationmetadata``: This audit checks the consistency between ``KeyServer`` and ``ServerKey`` space. ``DDDoAuditLocationMetadataError`` trace event is generated if any inconsistency is detected.
 3. ``ssshard``: This audit checks the consistency between ``KeyServer`` and storage server in-memory shard information. ``SSAuditStorageSsShardError`` trace event is generated if any inconsistency is detected.
+4. ``range_digest``: This audit computes a 256-bit content fingerprint of the key-value data, hashed locally by each storage server and combined into a single cluster root. It detects no inconsistency by itself; instead two roots are compared, most usefully before a backup and after the corresponding restore. Because the roots are combined by modular addition they depend only on the set of key-values and not on shard boundaries or storage server assignment, so the two sides remain comparable even though a restore lands data on a completely different layout.
+
+   The audit assumes a **quiescent** cluster: each server hashes at its own read version and each key-value must be folded exactly once, so reading during data movement yields a root that corresponds to no single snapshot.
+
+   ``get_audit_status range_digest id [AuditID]`` reports the combined cluster root as ``[Digest]``, with ``[KVCount]`` and ``[Bytes]``; it is final once ``[Phase]`` is ``Complete=2``. While the audit is running, ``get_audit_status range_digest progress [AuditID]`` additionally reports the per-range digests, which is how a mismatch between two roots is narrowed to the ranges responsible. That per-range detail is discarded when the audit completes, but the same values remain in the ``SSAuditRangeDigestComplete`` trace events.
 
 ``BeginKey`` and ``EndKey`` decide the scope of the consistency check of user data (replica). Note that the ``locationmetadata`` and ``ssshard`` always check the consistency on all key space no matter the user input. 
 

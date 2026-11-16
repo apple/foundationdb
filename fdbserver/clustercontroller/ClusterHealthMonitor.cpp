@@ -23,6 +23,7 @@
 
 #include "fmt/format.h"
 #include "fdbrpc/genericactors.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/WorkerEvents.h"

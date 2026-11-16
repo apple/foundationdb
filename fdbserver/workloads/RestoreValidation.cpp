@@ -154,129 +154,25 @@ struct RestoreValidationWorkload : TestWorkload {
 		while (true) {
 			Error err;
 			try {
-				// Trigger the audit_storage validate_restore command
 				AuditType auditType = AuditType::ValidateRestore;
-				Reference<IClusterConnectionRecord> clusterFile = cx->getConnectionRecord();
 
 				TraceEvent("RestoreValidationTriggeringAudit")
 				    .detail("AuditType", (int)auditType)
 				    .detail("Range", validationRange)
 				    .detail("RetryCount", auditRetryCount);
 
-				// Trigger the audit using ManagementAPI with timeout
-				// Use shorter timeout for scheduling (60s) to detect cluster issues early
-				UID auditId;
-				try {
-					UID scheduleResult = co_await timeoutError(
-					    auditStorage(clusterFile, validationRange, auditType, KeyValueStoreType::END, maxWaitTime),
-					    60.0);
-					auditId = scheduleResult;
-				} catch (Error& e) {
-					if (e.code() == error_code_timed_out) {
-						TraceEvent(SevWarn, "RestoreValidationAuditScheduleTimeout")
-						    .detail("RetryCount", auditRetryCount)
-						    .detail("MaxRetries", maxAuditRetries);
-						// Treat as retryable - cluster might be recovering
-						if (auditRetryCount < maxAuditRetries) {
-							throw audit_storage_failed();
-						} else {
-							throw;
-						}
-					}
-					throw;
-				}
-
-				TraceEvent("RestoreValidationAuditScheduled")
-				    .detail("AuditID", auditId)
-				    .detail("RetryCount", auditRetryCount);
-
-				// Monitor audit progress
 				double startTime = now();
-				double lastReportTime = startTime;
-				AuditPhase finalPhase = AuditPhase::Invalid;
+				AuditWaitOptions waitOptions;
+				waitOptions.pollIntervalSeconds = checkInterval;
+				waitOptions.maxWaitSeconds = maxWaitTime;
+				waitOptions.traceContext = "RestoreValidation";
+				AuditStorageState auditState =
+				    co_await auditStorageAndWait(cx, validationRange, auditType, KeyValueStoreType::END, waitOptions);
+				UID auditId = auditState.id;
+				AuditPhase finalPhase = auditState.getPhase();
 				std::string errorMessage;
-
-				while (true) {
-					co_await delay(checkInterval);
-
-					// Get audit status (newFirst=true to get latest states first)
-					// Add timeout to handle cluster recovery/instability
-					std::vector<AuditStorageState> auditStates;
-					try {
-						std::vector<AuditStorageState> states =
-						    co_await timeoutError(getAuditStates(cx, auditType, true), 60.0);
-						auditStates = states;
-					} catch (Error& e) {
-						if (e.code() == error_code_timed_out) {
-							// Cluster is likely recovering - check overall timeout and continue
-							if (now() - startTime > maxWaitTime) {
-								TraceEvent(SevError, "RestoreValidationTimeout")
-								    .detail("AuditID", auditId)
-								    .detail("ElapsedTime", now() - startTime)
-								    .detail("MaxWaitTime", maxWaitTime)
-								    .detail("Reason", "getAuditStates timed out");
-								throw timed_out();
-							}
-							continue; // Skip this iteration, try again
-						}
-						throw;
-					}
-
-					// Filter for our audit ID
-					bool foundOurAudit = false;
-					bool allComplete = true;
-					bool anyError = false;
-
-					for (const auto& auditState : auditStates) {
-						if (auditState.id == auditId) {
-							foundOurAudit = true;
-
-							if (auditState.getPhase() == AuditPhase::Running) {
-								allComplete = false;
-							} else if (auditState.getPhase() == AuditPhase::Error ||
-							           auditState.getPhase() == AuditPhase::Failed) {
-								anyError = true;
-								finalPhase = auditState.getPhase();
-								if (!auditState.error.empty()) {
-									errorMessage = auditState.error;
-								} else {
-									errorMessage = "Unknown error";
-								}
-							} else if (auditState.getPhase() == AuditPhase::Complete) {
-								finalPhase = AuditPhase::Complete;
-							}
-						}
-					}
-
-					if (!foundOurAudit) {
-						TraceEvent(SevWarn, "RestoreValidationNoAuditStates")
-						    .detail("AuditID", auditId)
-						    .detail("ElapsedTime", now() - startTime);
-					} else {
-						// Report progress periodically
-						if (now() - lastReportTime >= 10.0) {
-							TraceEvent("RestoreValidationProgress")
-							    .detail("AuditID", auditId)
-							    .detail("AllComplete", allComplete)
-							    .detail("AnyError", anyError)
-							    .detail("FinalPhase", (int)finalPhase)
-							    .detail("ElapsedTime", now() - startTime);
-							lastReportTime = now();
-						}
-
-						if (allComplete || anyError) {
-							break;
-						}
-					}
-
-					// Check timeout
-					if (now() - startTime > maxWaitTime) {
-						TraceEvent(SevError, "RestoreValidationTimeout")
-						    .detail("AuditID", auditId)
-						    .detail("ElapsedTime", now() - startTime)
-						    .detail("MaxWaitTime", maxWaitTime);
-						throw timed_out();
-					}
+				if (finalPhase == AuditPhase::Error || finalPhase == AuditPhase::Failed) {
+					errorMessage = auditState.error.empty() ? "Unknown error" : auditState.error;
 				}
 
 				// Verify the results

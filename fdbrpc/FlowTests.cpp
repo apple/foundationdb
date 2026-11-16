@@ -21,11 +21,14 @@
 // Unit tests for the Flow runtime and libraries
 
 #include <chrono>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 #include "flow/Arena.h"
 #include "flow/Error.h"
+#include "flow/ProcessEvents.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
@@ -38,6 +41,8 @@
 #include "flow/CoroUtils.h"
 
 void forceLinkFlowTests() {}
+
+extern bool g_crashOnError;
 
 TEST_CASE("/flow/buggifiedDelay") {
 	if (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0) {
@@ -111,18 +116,6 @@ void onReady(FutureStream<T>&& f, Func&& func, ErrFunc&& errFunc) {
 		f.addCallbackAndClear(new LambdaCallback<T, Func, ErrFunc, SingleCallback<T>>(std::forward<Func>(func),
 		                                                                              std::forward<ErrFunc>(errFunc)));
 	}
-}
-
-static Future<Void> emptyVoidActor(Uncancellable = Uncancellable()) {
-	co_return;
-}
-
-static Future<Void> emptyActor() {
-	return Void();
-}
-
-static Future<Void> oneWaitVoidActor(Future<Void> f, Uncancellable = Uncancellable()) {
-	co_await f;
 }
 
 static Future<Void> oneWaitActor(Future<Void> f) {
@@ -357,6 +350,112 @@ struct Int {
 		serializer(ar, value);
 	}
 };
+
+template <class T>
+SAV<T>* replyPromiseState(ReplyPromise<T>& promise) {
+	auto* rawState = promise.extractRawPointer();
+	promise = ReplyPromise<T>(rawState);
+	return rawState;
+}
+
+struct ReplyPromiseReuseRequest {
+	constexpr static FileIdentifier file_identifier = 1449982;
+	ReplyPromise<Int> reply;
+	SAV<Int>* defaultState;
+
+	ReplyPromiseReuseRequest() : defaultState(replyPromiseState(reply)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+class RpcExceptionObserver : NonCopyable {
+	const bool previousTraceProcessEvents;
+	const char* expectedException;
+	int observed = 0;
+	int unexpected = 0;
+	ProcessEvents::Event event;
+
+	void observe(const std::any& data) {
+		auto tracePtr = std::any_cast<BaseTraceEvent*>(&data);
+		if (!tracePtr || !*tracePtr) {
+			++unexpected;
+			return;
+		}
+		auto* trace = *tracePtr;
+		int errorCode = 0;
+		std::string exception;
+		if (!expectedException || observed != 0 || trace->getSeverity() != SevError ||
+		    !trace->getFields().tryGetInt("ErrorCode", errorCode) || errorCode != error_code_unknown_error ||
+		    !trace->getFields().tryGetValue("StdException", exception) || exception != expectedException) {
+			++unexpected;
+			return;
+		}
+		++observed;
+		// Preserve the real severity check, but identify only this deliberately injected exception to trace scanners.
+		trace->detail("ErrorIsInjectedFault", 1);
+	}
+
+public:
+	explicit RpcExceptionObserver(const char* expectedException = nullptr)
+	  : previousTraceProcessEvents(g_traceProcessEvents), expectedException(expectedException),
+	    event("TraceEvent::SystemError"_sr, [this](StringRef, const std::any& data, const Error&) { observe(data); }) {
+		g_traceProcessEvents = true;
+	}
+	~RpcExceptionObserver() { g_traceProcessEvents = previousTraceProcessEvents; }
+
+	void check(int expectedCount) const {
+		ASSERT_EQ(observed, expectedCount);
+		ASSERT_EQ(unexpected, 0);
+	}
+};
+
+template <bool ErrorReply>
+struct ThrowingRpcReply {
+	constexpr static FileIdentifier file_identifier = 1449983 + ErrorReply;
+	uint32_t value = 0;
+
+	static const char* exceptionMessage() {
+		return ErrorReply ? "RpcUnexpectedException/networkSenderErrorReply"
+		                  : "RpcUnexpectedException/networkSenderValue";
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+		if constexpr (is_fb_function<Ar>) {
+			// Vtable collection visits the reply alternative even when ErrorOr contains an error.
+			throw std::runtime_error(exceptionMessage());
+		}
+	}
+};
+
+Future<Void> checkNetworkSenderKnownErrors() {
+	RpcExceptionObserver observer;
+	ReplyPromise<Int> recipient;
+	Future<Int> received = recipient.getFuture();
+	Endpoint endpoint(FlowTransport::transport().getLocalAddresses(), recipient.getEndpoint().token);
+	ReplyPromise<Int> sender;
+	sender.loadRemoteEndpoint(endpoint);
+	sender.sendError(operation_failed());
+	ErrorOr<Int> result = co_await errorOr(timeoutError(received, 1.0));
+	ASSERT(result.isError() && result.getError().code() == error_code_operation_failed);
+	ASSERT_EQ(sender.getFutureReferenceCount(), 0);
+
+	ReplyPromise<Int> noReplyRecipient;
+	Future<Int> noReplyReceived = noReplyRecipient.getFuture();
+	Endpoint noReplyEndpoint(FlowTransport::transport().getLocalAddresses(), noReplyRecipient.getEndpoint().token);
+	ReplyPromise<Int> noReplySender;
+	noReplySender.loadRemoteEndpoint(noReplyEndpoint);
+	noReplySender.send(Never());
+	co_await orderedDelay(0, TaskPriority::DefaultPromiseEndpoint);
+	ASSERT(!noReplyReceived.isReady());
+	ASSERT_EQ(noReplySender.getFutureReferenceCount(), 0);
+	observer.check(0);
+}
+
 } // namespace flow_tests_details
 
 TEST_CASE("/flow/flow/nonserializable futures") {
@@ -428,10 +527,138 @@ TEST_CASE("/flow/flow/networked futures") {
 	return Void();
 }
 
+TEST_CASE("/fdbrpc/ReplyPromise/reuse state on deserialize") {
+	using flow_tests_details::Int;
+	const Endpoint remote({ NetworkAddress(IPAddress(0x01010101), 1) }, UID(1, 2));
+
+	{
+		ReplyPromise<Int> promise;
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) == original);
+		ASSERT(promise.getEndpoint() == remote);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(17));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 17);
+	}
+
+	{
+		ReplyPromise<Int> promise;
+		Future<Int> oldReply = promise.getFuture();
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) != original);
+		ASSERT(oldReply.isReady() && oldReply.isError() && oldReply.getError().code() == error_code_broken_promise);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(23));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 23);
+	}
+
+	{
+		ReplyPromise<Int> promise;
+		Endpoint local = promise.getEndpoint();
+		ASSERT(local.isValid());
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) != original);
+		ASSERT(promise.getEndpoint() == remote);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(31));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 31);
+	}
+
+	{
+		ReplyPromise<Int> promise(
+		    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) != original);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(41));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 41);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromise/reuse state binary deserialize") {
+	using flow_tests_details::ReplyPromiseReuseRequest;
+	ReplyPromiseReuseRequest request;
+	ProtocolVersion version = currentProtocolVersion();
+	version.removeObjectSerializerFlag();
+	BinaryWriter writer(IncludeVersion(version));
+	writer << request;
+
+	BinaryReader reader(writer.toValue(), IncludeVersion(version));
+	ReplyPromiseReuseRequest received;
+	reader >> received;
+	ASSERT(flow_tests_details::replyPromiseState(received.reply) == received.defaultState);
+	ASSERT(received.reply.getEndpoint().token == request.reply.getEndpoint().token);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromise/reuse state exact reply") {
+	RequestStream<flow_tests_details::ReplyPromiseReuseRequest> local;
+	FutureStream<flow_tests_details::ReplyPromiseReuseRequest> incoming = local.getFuture();
+	flow_tests_details::ReplyPromiseReuseRequest request;
+	Future<flow_tests_details::Int> reply = request.reply.getFuture();
+	{
+		RequestStream<flow_tests_details::ReplyPromiseReuseRequest> remote(local.getEndpoint());
+		remote.send(request);
+	}
+
+	flow_tests_details::ReplyPromiseReuseRequest received = co_await incoming;
+	ASSERT(flow_tests_details::replyPromiseState(received.reply) == received.defaultState);
+	received.reply.send(flow_tests_details::Int(59));
+	flow_tests_details::Int value = co_await reply;
+	ASSERT(value.value == 59);
+}
+
+TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/networkSenderValue") {
+	// Simulation counts SevError before the observer can mark an expected injection; crash-on-error must stay intact.
+	if (g_network->isSimulated() || g_crashOnError) {
+		return Void();
+	}
+	using Reply = flow_tests_details::ThrowingRpcReply<false>;
+	flow_tests_details::RpcExceptionObserver observer(Reply::exceptionMessage());
+	Endpoint endpoint(FlowTransport::transport().getLocalAddresses(), UID(1, 2));
+	ReplyPromise<Reply> reply;
+	reply.loadRemoteEndpoint(endpoint);
+	ASSERT_GT(reply.getFutureReferenceCount(), 0);
+	reply.send(Reply());
+	observer.check(1);
+	ASSERT_EQ(reply.getFutureReferenceCount(), 0);
+	return Void();
+}
+
+TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/networkSenderErrorReply") {
+	if (g_network->isSimulated() || g_crashOnError) {
+		return Void();
+	}
+	using Reply = flow_tests_details::ThrowingRpcReply<true>;
+	flow_tests_details::RpcExceptionObserver observer(Reply::exceptionMessage());
+	Endpoint endpoint(FlowTransport::transport().getLocalAddresses(), UID(1, 2));
+	ReplyPromise<Reply> reply;
+	reply.loadRemoteEndpoint(endpoint);
+	ASSERT_GT(reply.getFutureReferenceCount(), 0);
+	reply.sendError(operation_failed());
+	observer.check(1);
+	ASSERT_EQ(reply.getFutureReferenceCount(), 0);
+	return Void();
+}
+
+TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/networkSenderKnownErrors") {
+	if (g_network->isSimulated() || g_crashOnError) {
+		co_return;
+	}
+	co_await flow_tests_details::checkNetworkSenderKnownErrors();
+}
+
 TEST_CASE("/flow/flow/quorum") {
 	std::vector<Promise<int>> ps(5);
 	std::vector<Future<int>> fs;
 	std::vector<Future<Void>> qs;
+	fs.reserve(ps.size());
 	for (auto& p : ps)
 		fs.push_back(p.getFuture());
 
@@ -674,6 +901,7 @@ TEST_CASE("/flow/flow/yieldedFuture/progress") {
 	Future<Void> i = success(u);
 
 	std::vector<Future<Void>> v;
+	v.reserve(5);
 	for (int i = 0; i < 5; i++)
 		v.push_back(yieldedFuture(u));
 	auto numReady = [&v]() { return std::count_if(v.begin(), v.end(), [](Future<Void> v) { return v.isReady(); }); };
@@ -705,6 +933,7 @@ TEST_CASE("/flow/flow/yieldedFuture/random") {
 		Future<Void> i = success(u);
 
 		std::vector<Future<Void>> v;
+		v.reserve(25);
 		for (int i = 0; i < 25; i++)
 			v.push_back(yieldedFuture(u));
 		auto numReady = [&v]() {
@@ -753,6 +982,7 @@ TEST_CASE("/flow/perf/yieldedFuture") {
 	std::vector<Future<Void>> ys;
 
 	start = timer();
+	ys.reserve(N);
 	for (int i = 0; i < N; i++)
 		ys.push_back(yieldedFuture(f));
 	printf("yieldedFuture(f) create: %0.1f M/sec\n", N / 1e6 / (timer() - start));
@@ -785,301 +1015,114 @@ TEST_CASE("/flow/flow/chooseTwoActor") {
 	return Void();
 }
 
-TEST_CASE("#flow/flow/perf/actor patterns") {
-	double start;
-	int N = 1000000;
+TEST_CASE("/flow/flow/actor patterns/wait") {
+	Future<Void> ready = oneWaitActor(Void());
+	ASSERT(ready.isReady() && !ready.isError());
 
-	start = timer();
-	for (int i = 0; i < N; i++)
-		emptyVoidActor();
-	printf("emptyVoidActor(): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-
-	start = timer();
-	for (int i = 0; i < N; i++) {
-		emptyActor();
+	Promise<Void> input;
+	{
+		Future<Void> cancelled = oneWaitActor(input.getFuture());
+		ASSERT(!cancelled.isReady() && input.getFutureReferenceCount() > 0);
 	}
-	printf("emptyActor(): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-
-	Promise<Void> neverSet;
-	Future<Void> never = neverSet.getFuture();
-	Future<Void> already = Void();
-
-	start = timer();
-	for (int i = 0; i < N; i++)
-		oneWaitVoidActor(already);
-	printf("oneWaitVoidActor(already): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-
-	/*start = timer();
-	for (int i = 0; i < N; i++)
-	    oneWaitVoidActor(never);
-	printf("oneWaitVoidActor(never): %0.1f M/sec\n", N / 1e6 / (timer() - start));*/
+	ASSERT(input.getFutureReferenceCount() == 0);
 
 	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = oneWaitActor(already);
-			ASSERT(f.isReady());
-		}
-		printf("oneWaitActor(already): %0.1f M/sec\n", N / 1e6 / (timer() - start));
+		Future<Void> completed = oneWaitActor(input.getFuture());
+		ASSERT(!completed.isReady());
+		input.send(Void());
+		ASSERT(completed.isReady() && !completed.isError());
 	}
+	ASSERT(input.getFutureReferenceCount() == 0);
+	return Void();
+}
+
+TEST_CASE("/flow/flow/actor patterns/race") {
+	Promise<Void> pending;
+	{
+		Future<Void> ready = Void();
+		Future<Void> bothReady = chooseTwoActor(ready, ready);
+		Future<Void> firstReady = chooseTwoActor(ready, pending.getFuture());
+		Future<Void> secondReady = chooseTwoActor(pending.getFuture(), ready);
+		ASSERT(bothReady.isReady() && !bothReady.isError());
+		ASSERT(firstReady.isReady() && !firstReady.isError());
+		ASSERT(secondReady.isReady() && !secondReady.isError());
+	}
+	ASSERT(pending.getFutureReferenceCount() == 0);
 
 	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = oneWaitActor(never);
-			ASSERT(!f.isReady());
-		}
-		printf("(cancelled) oneWaitActor(never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
+		Future<Void> cancelled = chooseTwoActor(pending.getFuture(), pending.getFuture());
+		ASSERT(!cancelled.isReady() && pending.getFutureReferenceCount() > 0);
 	}
+	ASSERT(pending.getFutureReferenceCount() == 0);
 
 	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Promise<Void> p;
-			Future<Void> f = oneWaitActor(p.getFuture());
-			p.send(Void());
-			ASSERT(f.isReady());
-		}
-		printf("oneWaitActor(after): %0.1f M/sec\n", N / 1e6 / (timer() - start));
+		Future<Void> sharedInput = chooseTwoActor(pending.getFuture(), pending.getFuture());
+		ASSERT(!sharedInput.isReady());
+		pending.send(Void());
+		ASSERT(sharedInput.isReady() && !sharedInput.isError());
 	}
+	ASSERT(pending.getFutureReferenceCount() == 0);
+	return Void();
+}
 
+TEST_CASE("/flow/flow/actor patterns/composition") {
+	const int batchSize = 4;
+	for (bool lifo : { false, true }) {
+		Promise<Void> never;
+		std::vector<Promise<Void>> inputs(batchSize);
+		{
+			std::vector<Future<Void>> waits(batchSize);
+			std::vector<Future<Void>> sharedRaces(batchSize);
+			std::vector<Future<Void>> nestedRaces(batchSize);
+			std::vector<Future<Void>> firstOutputs(batchSize);
+			std::vector<Future<Void>> secondOutputs(batchSize);
+			for (int i = 0; i < batchSize; ++i) {
+				waits[i] = oneWaitActor(inputs[i].getFuture());
+				sharedRaces[i] = chooseTwoActor(inputs[i].getFuture(), inputs[i].getFuture());
+				nestedRaces[i] =
+				    chooseTwoActor(chooseTwoActor(inputs[i].getFuture(), never.getFuture()), never.getFuture());
+				Future<Void> fanout = chooseTwoActor(oneWaitActor(inputs[i].getFuture()), never.getFuture());
+				firstOutputs[i] = oneWaitActor(fanout);
+				secondOutputs[i] = oneWaitActor(fanout);
+				ASSERT(!waits[i].isReady() && !sharedRaces[i].isReady() && !nestedRaces[i].isReady() &&
+				       !firstOutputs[i].isReady() && !secondOutputs[i].isReady());
+			}
+			for (int i = 0; i < batchSize; ++i) {
+				const int index = lifo ? batchSize - 1 - i : i;
+				inputs[index].send(Void());
+				for (int j = 0; j < batchSize; ++j) {
+					const bool completed = lifo ? j >= index : j <= index;
+					ASSERT(waits[j].isReady() == completed && sharedRaces[j].isReady() == completed &&
+					       nestedRaces[j].isReady() == completed && firstOutputs[j].isReady() == completed &&
+					       secondOutputs[j].isReady() == completed);
+				}
+				ASSERT(!waits[index].isError() && !sharedRaces[index].isError() && !nestedRaces[index].isError() &&
+				       !firstOutputs[index].isError() && !secondOutputs[index].isError());
+			}
+		}
+		ASSERT(never.getFutureReferenceCount() == 0);
+		for (const auto& input : inputs) {
+			ASSERT(input.getFutureReferenceCount() == 0);
+		}
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/flow/actor patterns/global input") {
+	Promise<Void> original, replacement;
 	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			out[i] = oneWaitActor(pipe[i].getFuture());
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out[i].isReady());
-		}
-		printf("oneWaitActor(fifo): %0.1f M/sec\n", N / 1e6 / (timer() - start));
+		g_cheese = original.getFuture();
+		Future<Void> first = cheeseWaitActor();
+		g_cheese = replacement.getFuture();
+		Future<Void> second = cheeseWaitActor();
+		g_cheese = Future<Void>();
+		ASSERT(!first.isReady() && !second.isReady());
+		original.send(Void());
+		ASSERT(first.isReady() && !first.isError() && !second.isReady());
+		replacement.send(Void());
+		ASSERT(second.isReady() && !second.isError());
 	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			out[i] = oneWaitActor(pipe[i].getFuture());
-		}
-		for (int i = N - 1; i >= 0; i--) {
-			pipe[i].send(Void());
-			ASSERT(out[i].isReady());
-		}
-		printf("oneWaitActor(lifo): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = chooseTwoActor(already, already);
-			ASSERT(f.isReady());
-		}
-		printf("chooseTwoActor(already, already): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = chooseTwoActor(already, never);
-			ASSERT(f.isReady());
-		}
-		printf("chooseTwoActor(already, never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = chooseTwoActor(never, already);
-			ASSERT(f.isReady());
-		}
-		printf("chooseTwoActor(never, already): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = chooseTwoActor(never, never);
-			ASSERT(!f.isReady());
-		}
-		printf("(cancelled) chooseTwoActor(never, never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Promise<Void> p;
-			Future<Void> f = chooseTwoActor(p.getFuture(), never);
-			p.send(Void());
-			ASSERT(f.isReady());
-		}
-		printf("chooseTwoActor(after, never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			out[i] = chooseTwoActor(pipe[i].getFuture(), never);
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out[i].isReady());
-		}
-		printf("chooseTwoActor(fifo, never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			out[i] = chooseTwoActor(pipe[i].getFuture(), pipe[i].getFuture());
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out[i].isReady());
-		}
-		printf("chooseTwoActor(fifo, fifo): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			out[i] = chooseTwoActor(chooseTwoActor(pipe[i].getFuture(), never), never);
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out[i].isReady());
-		}
-		printf("chooseTwoActor^2((fifo, never), never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Promise<Void> p;
-			Future<Void> f = oneWaitActor(chooseTwoActor(p.getFuture(), never));
-			p.send(Void());
-			ASSERT(f.isReady());
-		}
-		printf("oneWaitActor(chooseTwoActor(after, never)): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			out[i] = oneWaitActor(chooseTwoActor(pipe[i].getFuture(), never));
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out[i].isReady());
-		}
-		printf("oneWaitActor(chooseTwoActor(fifo, never)): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Promise<Void> p;
-			Future<Void> f = chooseTwoActor(p.getFuture(), never);
-			Future<Void> a = oneWaitActor(f);
-			Future<Void> b = oneWaitActor(f);
-			p.send(Void());
-			ASSERT(f.isReady());
-		}
-		printf("2xoneWaitActor(chooseTwoActor(after, never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out1(N);
-		std::vector<Future<Void>> out2(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = chooseTwoActor(pipe[i].getFuture(), never);
-			out1[i] = oneWaitActor(f);
-			out2[i] = oneWaitActor(f);
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out2[i].isReady());
-		}
-		printf("2xoneWaitActor(chooseTwoActor(fifo, never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out1(N);
-		std::vector<Future<Void>> out2(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			Future<Void> f = chooseTwoActor(oneWaitActor(pipe[i].getFuture()), never);
-			out1[i] = oneWaitActor(f);
-			out2[i] = oneWaitActor(f);
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out2[i].isReady());
-		}
-		printf("2xoneWaitActor(chooseTwoActor(oneWaitActor(fifo), never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		std::vector<Promise<Void>> pipe(N);
-		std::vector<Future<Void>> out1(N);
-		std::vector<Future<Void>> out2(N);
-		start = timer();
-		for (int i = 0; i < N; i++) {
-			g_cheese = pipe[i].getFuture();
-			Future<Void> f = chooseTwoActor(cheeseWaitActor(), never);
-			g_cheese = f;
-			out1[i] = cheeseWaitActor();
-			out2[i] = cheeseWaitActor();
-		}
-		for (int i = 0; i < N; i++) {
-			pipe[i].send(Void());
-			ASSERT(out2[i].isReady());
-		}
-		printf("2xcheeseActor(chooseTwoActor(cheeseActor(fifo), never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		PromiseStream<int> data;
-		start = timer();
-		Future<int> sum = sumActor(data.getFuture());
-		for (int i = 0; i < N; i++)
-			data.send(1);
-		data.sendError(end_of_stream());
-		ASSERT(sum.get() == N);
-		printf("sumActor: %0.2f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
-	{
-		start = timer();
-		std::vector<Promise<Void>> ps(3);
-		std::vector<Future<Void>> fs(3);
-
-		for (int i = 0; i < N; i++) {
-			ps.clear();
-			ps.resize(3);
-			for (int j = 0; j < ps.size(); j++)
-				fs[j] = ps[j].getFuture();
-
-			Future<Void> q = quorum(fs, 2);
-			for (auto& p : ps)
-				p.send(Void());
-		}
-		printf("quorum(2/3): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-	}
-
+	ASSERT(original.getFutureReferenceCount() == 0 && replacement.getFutureReferenceCount() == 0);
 	return Void();
 }
 
@@ -1138,6 +1181,36 @@ TEST_CASE("/flow/flow/AsyncMap/randomized") {
 		yamr.randomOp();
 		co_await yield();
 	}
+}
+
+TEST_CASE("/flow/flow/AsyncMap/basic") {
+	Future<Void> pending;
+	{
+		AsyncMap<int, int> map;
+		map.set(10, 1);
+		ASSERT(map.get(10) == 1);
+		ASSERT(map.get(20) == 0);
+
+		Future<Void> first = map.onChange(10);
+		Future<Void> second = map.onChange(20);
+		pending = map.onChange(30);
+		ASSERT(!first.isReady() && !second.isReady() && !pending.isReady());
+
+		map.set(10, 0);
+		ASSERT(first.isReady() && !first.isError());
+		ASSERT(!second.isReady() && map.get(10) == 0);
+		map.set(20, 5);
+		ASSERT(second.isReady() && !second.isError() && map.get(20) == 5);
+
+		first = map.onChange(10);
+		second = map.onChange(20);
+		map.triggerRange(15, 25);
+		ASSERT(!first.isReady() && second.isReady() && !second.isError());
+		ASSERT(map.get(20) == 5);
+	}
+	ASSERT(pending.isReady() && pending.isError());
+	ASSERT(pending.getError().code() == error_code_broken_promise);
+	return Void();
 }
 
 TEST_CASE("/flow/flow/YieldedAsyncMap/basic") {
@@ -1452,7 +1525,7 @@ TEST_CASE("/flow/flow/FlowMutex") {
 					if (verbose) {
 						printf("Final wait in case error was injected by the last actor to finish\n");
 					}
-					co_await success(mutex.take());
+					co_await mutex.take();
 				}
 			} catch (Error& e) {
 				if (verbose) {
@@ -1596,7 +1669,7 @@ TEST_CASE("/fdbrpc/waitValueOrSignal/peerDisconnect") {
 	// peer->disconnect, and PeerHolder only touches outstandingReplies. Note that Peer construction
 	// also updates the global failure monitor status for fakeAddr.
 	NetworkAddress fakeAddr = NetworkAddress::parse("1.2.3.4:1234");
-	Reference<Peer> peer = makeReference<Peer>(nullptr, fakeAddr);
+	auto peer = makeReference<Peer>(nullptr, fakeAddr);
 
 	// Create a value future that never resolves (simulating a stuck RPC to unreachable storage server)
 	Promise<Void> neverReply;
@@ -1725,8 +1798,8 @@ TEST_CASE("/fdbrpc/waitValueOrSignal/retryOnDisconnect") {
 
 	NetworkAddress addr1 = NetworkAddress::parse("1.2.3.4:1234");
 	NetworkAddress addr2 = NetworkAddress::parse("1.2.3.5:1234");
-	Reference<Peer> peer1 = makeReference<Peer>(nullptr, addr1);
-	Reference<Peer> peer2 = makeReference<Peer>(nullptr, addr2);
+	auto peer1 = makeReference<Peer>(nullptr, addr1);
+	auto peer2 = makeReference<Peer>(nullptr, addr2);
 
 	int numAttempts = 0;
 

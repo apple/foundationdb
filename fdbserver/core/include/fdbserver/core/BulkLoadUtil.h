@@ -56,8 +56,6 @@ Future<Void> bulkLoadDownloadTaskFileSets(BulkLoadTransportMethod transportMetho
                                           std::string toLocalRoot,
                                           UID logId);
 
-Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, std::string byteSampleFileFullPath, UID logId);
-
 // Download job manifest file which is generated when dumping the data
 Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod transportMethod,
                                              std::string localJobManifestFilePath,

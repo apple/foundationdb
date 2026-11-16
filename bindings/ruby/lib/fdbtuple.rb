@@ -308,8 +308,8 @@ module FDB
       #   2) -0.0 == 0.0 in Ruby but not in our representation
       # It would be better to just take the floats and compare them, but
       # this way handles the edge cases correctly.
-      b1 = float_adjust([f1].pack(is_double ? ">G" : ">g"), 0, (is_double ? 8 : 4), true)
-      b2 = float_adjust([f2].pack(is_double ? ">G" : ">g"), 0, (is_double ? 8 : 4), true)
+      b1 = float_adjust([f1].pack(is_double ? "G" : "g"), 0, (is_double ? 8 : 4), true)
+      b2 = float_adjust([f2].pack(is_double ? "G" : "g"), 0, (is_double ? 8 : 4), true)
       b1 <=> b2
     end
 

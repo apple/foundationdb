@@ -26,7 +26,6 @@
 #include <map>
 #include <boost/preprocessor/facilities/is_empty.hpp>
 #include <boost/preprocessor/control/if.hpp>
-#include "flow/ActorContext.h"
 #include "flow/Platform.h"
 #include "flow/Knobs.h"
 #include "flow/FileIdentifier.h"
@@ -160,7 +159,7 @@ void assert_impl(char const* a_nm,
                  bool (*compare)(T const&, U const&),
                  char const* file,
                  int line) {
-	if (!compare(a, b)) {
+	if (!(compare(a, b) || isAssertDisabled(line))) [[unlikely]] {
 		throw internal_error_impl(a_nm, Traceable<T>::toString(a), opName, b_nm, Traceable<U>::toString(b), file, line);
 	}
 }

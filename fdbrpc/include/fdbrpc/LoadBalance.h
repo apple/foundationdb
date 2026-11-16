@@ -107,6 +107,12 @@ struct LoadBalanceRequestHooks {
 FDB_BOOLEAN_PARAM(AtMostOnce);
 FDB_BOOLEAN_PARAM(TriedAllOptions);
 
+inline const Future<Void>& neverSecondRequest() {
+	// Constructing the Future initializes allocator TLS first, so this Future is destroyed before allocator teardown.
+	static thread_local const Future<Void> result = Never();
+	return result;
+}
+
 // Stores state for a request made by the load balancer
 template <class Request, class Interface, class Multi, class Model, bool P>
 struct RequestData : NonCopyable {
@@ -262,22 +268,15 @@ struct RequestData : NonCopyable {
 		ASSERT(modelHolder->model);
 
 		QueueModel* model = modelHolder->model;
-		if (model->laggingRequestCount > FLOW_KNOBS->MAX_LAGGING_REQUESTS_OUTSTANDING ||
-		    model->laggingRequests.isReady()) {
-			model->laggingRequests.cancel();
-			model->laggingRequestCount = 0;
-			model->addActor = PromiseStream<Future<Void>>();
-			model->laggingRequests = actorCollection(model->addActor.getFuture(), &model->laggingRequestCount);
-		}
-
-		// We need to process the lagging request in order to update the queue model
-		Reference<ModelHolder> holderCapture = std::move(modelHolder);
-		auto triedAllOptionsCapture = triedAllOptions;
-		Future<Void> updateModel = map(response, [holderCapture, triedAllOptionsCapture](Reply result) {
-			checkAndProcessResultImpl(result, holderCapture, AtMostOnce::False, triedAllOptionsCapture);
-			return Void();
+		model->addLaggingRequest([this] {
+			// We need to process the lagging request in order to update the queue model
+			Reference<ModelHolder> holderCapture = std::move(modelHolder);
+			auto triedAllOptionsCapture = triedAllOptions;
+			return map(response, [holderCapture, triedAllOptionsCapture](Reply result) {
+				checkAndProcessResultImpl(result, holderCapture, AtMostOnce::False, triedAllOptionsCapture);
+				return Void();
+			});
 		});
-		model->addActor.send(updateModel);
 	}
 
 	~RequestData() {
@@ -314,7 +313,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alt
 	RequestData<Request, Interface, Multi, Model, P> secondRequestData(compareReplicas);
 
 	Optional<uint64_t> firstRequestEndpoint;
-	Future<Void> secondDelay = Never();
+	Future<Void> secondDelay = neverSecondRequest();
 
 	double startTime = now();
 
@@ -416,7 +415,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alt
 				secondDelay = delay(model->secondMultiplier * nextTime + FLOW_KNOBS->BASE_SECOND_REQUEST_TIME);
 			}
 		} else {
-			secondDelay = Never();
+			secondDelay = neverSecondRequest();
 		}
 	}
 
@@ -599,7 +598,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alt
 					firstRequestEndpoint = Optional<uint64_t>();
 					break;
 				} else {
-					secondDelay = Never();
+					secondDelay = neverSecondRequest();
 					if (model && model->secondBudget >= 1.0) {
 						model->secondMultiplier += FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_GROWTH;
 						model->secondBudget -= 1.0;
@@ -619,7 +618,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alt
 		if (nextAlt == startAlt)
 			triedAllOptions = TriedAllOptions::True;
 		resetReply(request, taskID);
-		secondDelay = Never();
+		secondDelay = neverSecondRequest();
 	}
 }
 

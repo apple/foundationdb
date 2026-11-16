@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/Subspace.h"
+#include "flow/UnitTest.h"
 
 Subspace::Subspace(Tuple const& tuple, StringRef const& rawPrefix) {
 	Standalone<StringRef> packed = tuple.pack();
@@ -71,7 +72,6 @@ KeyRange Subspace::range(Tuple const& tuple) const {
 	end.append(keyRange.arena(), tuple.pack().begin(), tuple.pack().size());
 	end.push_back(keyRange.arena(), uint8_t('\xff'));
 
-	// FIXME: test that this uses the keyRange arena and doesn't create another one
 	keyRange.KeyRangeRef::operator=(
 	    KeyRangeRef(StringRef(begin.begin(), begin.size()), StringRef(end.begin(), end.size())));
 	return keyRange;
@@ -87,4 +87,24 @@ Subspace Subspace::subspace(Tuple const& tuple) const {
 
 Subspace Subspace::get(Tuple const& tuple) const {
 	return subspace(tuple);
+}
+
+TEST_CASE("/fdbclient/Subspace/rangeOwnsMemory") {
+	Tuple t;
+	t.append("child"_sr);
+
+	KeyRange range;
+	{
+		Subspace parent("prefix"_sr);
+		range = parent.range(t);
+	}
+
+	// The returned range must be backed by its own arena, so it stays valid after the Subspace is gone.
+	Standalone<StringRef> packed = t.pack();
+	Key expectedBegin = Key("prefix"_sr).withSuffix(packed).withSuffix("\x00"_sr);
+	Key expectedEnd = Key("prefix"_sr).withSuffix(packed).withSuffix("\xff"_sr);
+	ASSERT(range.begin == expectedBegin);
+	ASSERT(range.end == expectedEnd);
+	ASSERT(range.arena().getSize() >= range.begin.size() + range.end.size());
+	return Void();
 }

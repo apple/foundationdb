@@ -277,6 +277,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			Error err;
 			try {
 				std::vector<Future<Optional<Value>>> futures;
+				futures.reserve(keys.size());
 
 				for (auto const& key : keys) {
 					futures.push_back(tr.get(key));

@@ -4,6 +4,9 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_consistencyscan SRCS ${FDBSERVER_C
 add_fdbserver_link_test(fdbserver_consistencyscanlinktest
   fdbserver_consistencyscan
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_consistencyscan_test consistencyscan
+  fdbserver_consistencyscan
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_consistencyscan)
 target_include_directories(fdbserver_consistencyscan

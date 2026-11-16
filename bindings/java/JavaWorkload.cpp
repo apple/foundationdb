@@ -27,6 +27,7 @@
 #include "com_apple_foundationdb_testing_WorkloadContext.h"
 
 #include <jni.h>
+#include <cstdlib>
 #include <set>
 #include <iostream>
 #include <boost/algorithm/string.hpp>
@@ -80,7 +81,6 @@ void printTrace(JNIEnv* env, jclass, jlong logger, jint severity, jstring messag
 	} else if (severity < 40) {
 		sev = FDBSeverity::WarnAlways;
 	} else {
-		assert(false);
 		std::abort();
 	}
 	log->trace(sev, msg, detailsMap);
@@ -423,6 +423,8 @@ struct JVM {
 		auto clazz = getClass("com/apple/foundationdb/testing/Promise");
 		auto res = env->NewObject(clazz, getMethod(clazz, "<init>", "(J)V"), reinterpret_cast<jlong>(p.get()));
 		checkException();
+		// Java's nativePromise now owns p; JavaPromise::send deletes it after fulfillment.
+		// NOLINTNEXTLINE(bugprone-unused-return-value)
 		p.release();
 		return res;
 	}

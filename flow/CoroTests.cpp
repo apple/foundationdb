@@ -21,6 +21,7 @@
 #include "flow/UnitTest.h"
 #include "flow/IAsyncFile.h"
 #include "flow/FlowThread.h"
+#include "flow/PriorityMultiLock.h"
 #include "flow/Trace.h"
 #include "flow/TLSConfig.h"
 
@@ -43,6 +44,76 @@
 void forceLinkCoroTests() {}
 
 using namespace std::literals::string_literals;
+
+Future<Void> holdPriorityMultiLock(Reference<PriorityMultiLock> pml, Future<Void> signal) {
+	Optional<PriorityMultiLock::Releaser> lock = pml->tryLock();
+	ASSERT(lock.present());
+	co_await signal;
+}
+
+TEST_CASE("/flow/coro/PriorityMultiLock/tryLock") {
+	auto pml = makeReference<PriorityMultiLock>(1, std::vector<int>{ 1, 1 });
+	Optional<PriorityMultiLock::Releaser> first = pml->tryLock(0);
+	ASSERT(first.present());
+	ASSERT_EQ(pml->getRunnersCount(), 1);
+	ASSERT_EQ(pml->getWaitersCount(), 0);
+
+	Optional<PriorityMultiLock::Releaser> unavailable = pml->tryLock(1);
+	ASSERT(!unavailable.present());
+	ASSERT_EQ(pml->getRunnersCount(), 1);
+	ASSERT_EQ(pml->getWaitersCount(), 0);
+
+	Future<PriorityMultiLock::Lock> waiter = pml->lock(1);
+	ASSERT(!waiter.isReady());
+	ASSERT_EQ(pml->getWaitersCount(), 1);
+	ASSERT(!pml->tryLock(1).present());
+	ASSERT_EQ(pml->getWaitersCount(), 1);
+	first.get().release();
+	PriorityMultiLock::Lock second = co_await waiter;
+	ASSERT_EQ(pml->getRunnersCount(1), 1);
+	ASSERT_EQ(pml->getWaitersCount(), 0);
+	second.release();
+	ASSERT_EQ(pml->getRunnersCount(), 0);
+
+	auto movePml = makeReference<PriorityMultiLock>(2, std::vector<int>{ 1 });
+	Optional<PriorityMultiLock::Releaser> movedFrom = movePml->tryLock();
+	PriorityMultiLock::Releaser moved = std::move(movedFrom.get());
+	ASSERT(!movedFrom.get().isLocked());
+	ASSERT(moved.isLocked());
+	Optional<PriorityMultiLock::Releaser> replaced = movePml->tryLock();
+	ASSERT_EQ(movePml->getRunnersCount(), 2);
+	moved.release();
+	ASSERT_EQ(movePml->getRunnersCount(), 1);
+	replaced.get().release();
+	ASSERT_EQ(movePml->getRunnersCount(), 0);
+
+	auto cancelPml = makeReference<PriorityMultiLock>(1, std::vector<int>{ 1 });
+	Promise<Void> never;
+	Future<Void> holder = holdPriorityMultiLock(cancelPml, never.getFuture());
+	Future<PriorityMultiLock::Lock> cancelWaiter = cancelPml->lock();
+	ASSERT(!cancelWaiter.isReady());
+	holder.cancel();
+	PriorityMultiLock::Lock afterCancel = co_await cancelWaiter;
+	ASSERT_EQ(cancelPml->getRunnersCount(), 1);
+	afterCancel.release();
+	ASSERT_EQ(cancelPml->getRunnersCount(), 0);
+
+	auto haltedPml = makeReference<PriorityMultiLock>(1, std::vector<int>{ 1 });
+	Optional<PriorityMultiLock::Releaser> halted = haltedPml->tryLock();
+	haltedPml->halt();
+	halted.reset();
+	ASSERT_EQ(haltedPml->getRunnersCount(), 0);
+	ASSERT(!haltedPml->tryLock().present());
+
+	pml->kill();
+	try {
+		pml->tryLock();
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_broken_promise);
+	}
+	co_return;
+}
 
 TEST_CASE("/flow/coro/buggifiedDelay") {
 	if (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0) {
@@ -125,6 +196,16 @@ Future<Void> chooseTwoActor(Future<Void> f, Future<Void> g) {
 
 Future<int> consumeOneActor(FutureStream<int> in) {
 	int i = co_await in;
+	co_return i;
+}
+
+Future<int> consumeTemporaryStream(PromiseStream<int>* in) {
+	int i = co_await in->getFuture();
+	co_return i;
+}
+
+Future<int> consumeReferencedStream(FutureStream<int>* in) {
+	int i = co_await *in;
 	co_return i;
 }
 
@@ -516,6 +597,7 @@ TEST_CASE("/flow/coro/yieldedFuture/progress") {
 	Future<Void> i = success(u);
 
 	std::vector<Future<Void>> v;
+	v.reserve(5);
 	for (int j = 0; j < 5; j++)
 		v.push_back(yieldedFuture(u));
 	auto numReady = [&v]() { return std::count_if(v.begin(), v.end(), [](Future<Void> v) { return v.isReady(); }); };
@@ -547,6 +629,7 @@ TEST_CASE("/flow/coro/yieldedFuture/random") {
 		Future<Void> i = success(u);
 
 		std::vector<Future<Void>> v;
+		v.reserve(25);
 		for (int j = 0; j < 25; j++)
 			v.push_back(yieldedFuture(u));
 		auto numReady = [&v]() {
@@ -595,6 +678,7 @@ TEST_CASE("/flow/coro/perf/yieldedFuture") {
 	std::vector<Future<Void>> ys;
 
 	start = timer();
+	ys.reserve(N);
 	for (int i = 0; i < N; i++)
 		ys.push_back(yieldedFuture(f));
 	printf("yieldedFuture(f) create: %0.1f M/sec\n", N / 1e6 / (timer() - start));
@@ -1106,6 +1190,90 @@ TEST_CASE("/flow/coro/YieldedAsyncMap/cancel2") {
 	y2.cancel();
 }
 
+// An error must reach every yielded waiter, including the ones doYield() defers along with the first.
+TEST_CASE("/flow/coro/yieldedFuture/errorReachesAllWaiters") {
+	// check_yield() is always true, so every waiter is deferred and one completes per tick.
+	auto yn = makeReference<YieldMockNetwork>();
+	yn->nextYield = 0;
+
+	Promise<Void> source;
+	std::vector<Future<Void>> waiters;
+	waiters.reserve(4);
+	for (int i = 0; i < 4; i++) {
+		waiters.push_back(yieldedFuture(source.getFuture()));
+	}
+	source.sendError(io_error());
+	for (auto& w : waiters) {
+		ASSERT(!w.isReady());
+	}
+	for (int i = 0; i < 4; i++) {
+		yn->tick();
+		for (int j = 0; j < 4; j++) {
+			ASSERT_EQ(waiters[j].isReady(), j <= i);
+		}
+		ASSERT(waiters[i].isError());
+		ASSERT_EQ(waiters[i].getError().code(), error_code_io_error);
+	}
+	co_return;
+}
+
+TEST_CASE("/flow/coro/YieldedAsyncMap/destroyedMapBreaksAllWaiters") {
+	auto yn = makeReference<YieldMockNetwork>();
+	yn->nextYield = 0;
+
+	auto yam = std::make_unique<YieldedAsyncMap<int, int>>();
+	std::vector<Future<Void>> waiters;
+	waiters.reserve(4);
+	for (int i = 0; i < 4; i++) {
+		waiters.push_back(yam->onChange(1));
+	}
+	yam.reset();
+	for (auto& w : waiters) {
+		ASSERT(!w.isReady());
+	}
+	for (int i = 0; i < 4; i++) {
+		yn->tick();
+		for (int j = 0; j < 4; j++) {
+			ASSERT_EQ(waiters[j].isReady(), j <= i);
+		}
+		ASSERT(waiters[i].isError());
+		ASSERT_EQ(waiters[i].getError().code(), error_code_broken_promise);
+	}
+	co_return;
+}
+
+// Cancelling one waiter must not disturb the others on the same key.
+TEST_CASE("/flow/coro/YieldedAsyncMap/cancelKeepsOtherWaiters") {
+	YieldedAsyncMap<int, int> yam;
+	Future<Void> y1 = yam.onChange(1);
+	Future<Void> y2 = yam.onChange(1);
+	y1.cancel();
+	ASSERT_EQ(yam.count(1), 1);
+	ASSERT(!y2.isReady());
+	yam.set(1, 1);
+	co_await y2;
+}
+
+// destroyOnCancelYield's erase-on-cancel guard is only for cancellation; real errors must reach the waiter.
+TEST_CASE("/flow/coro/YieldedAsyncMap/errorsPropagate") {
+	{
+		YieldedAsyncMap<int, int> yam;
+		Future<Void> y1 = yam.onChange(1);
+		yam.sendError(0, 10, io_error());
+		ErrorOr<Void> result = co_await coro::errorOr(y1);
+		ASSERT(result.isError());
+		ASSERT_EQ(result.getError().code(), error_code_io_error);
+	}
+	{
+		auto yam = std::make_unique<YieldedAsyncMap<int, int>>();
+		Future<Void> y1 = yam->onChange(1);
+		yam.reset();
+		ErrorOr<Void> result = co_await coro::errorOr(y1);
+		ASSERT(result.isError());
+		ASSERT_EQ(result.getError().code(), error_code_broken_promise);
+	}
+}
+
 TEST_CASE("/flow/coro/AsyncVar/basic") {
 	AsyncVar<int> av;
 	Future<Void> ch = av.onChange();
@@ -1400,6 +1568,65 @@ TEST_CASE("/flow/coro/PromiseStream/move2") {
 	ASSERT(movedTracker.copied == 0);
 }
 
+TEST_CASE("/flow/coro/FutureStream/rvalueAwait") {
+	{
+		PromiseStream<int> stream;
+		stream.send(41);
+		Future<int> result = consumeTemporaryStream(&stream);
+		ASSERT(result.isReady() && !result.isError() && result.get() == 41);
+		ASSERT(stream.isEmpty());
+	}
+
+	{
+		PromiseStream<int> stream;
+		Future<int> result = consumeTemporaryStream(&stream);
+		ASSERT(!result.isReady());
+		ASSERT_EQ(stream.getFutureReferenceCount(), 1);
+		stream.send(42);
+		ASSERT(result.isReady() && !result.isError() && result.get() == 42);
+		ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+	}
+
+	{
+		PromiseStream<int> stream;
+		stream.sendError(operation_failed());
+		Future<int> result = consumeTemporaryStream(&stream);
+		ASSERT(result.isReady() && result.isError() && result.getError().code() == error_code_operation_failed);
+		ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+	}
+
+	{
+		PromiseStream<int> stream;
+		Future<int> result = consumeTemporaryStream(&stream);
+		stream.sendError(operation_failed());
+		ASSERT(result.isReady() && result.isError() && result.getError().code() == error_code_operation_failed);
+		ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+	}
+
+	{
+		PromiseStream<int> stream;
+		Future<int> result = consumeTemporaryStream(&stream);
+		ASSERT_EQ(stream.getFutureReferenceCount(), 1);
+		result.cancel();
+		ASSERT(result.isReady() && result.isError() && result.getError().code() == error_code_actor_cancelled);
+		ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+	}
+
+	{
+		PromiseStream<int> stream;
+		FutureStream<int> input = stream.getFuture();
+		Future<int> result = consumeReferencedStream(&input);
+		ASSERT(!result.isReady());
+		ASSERT_EQ(stream.getFutureReferenceCount(), 2);
+		input = FutureStream<int>();
+		ASSERT_EQ(stream.getFutureReferenceCount(), 1);
+		stream.send(43);
+		ASSERT(result.isReady() && !result.isError() && result.get() == 43);
+		ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+	}
+	return Void();
+}
+
 TEST_CASE("/flow/coro/AsyncResult/move") {
 	{
 		Tracker tracker = co_await immediateAsyncResultTracker();
@@ -1475,6 +1702,7 @@ TEST_CASE("/flow/coro/quorumAsyncResultReady") {
 TEST_CASE("/flow/coro/quorumAsyncResultSuccess") {
 	std::vector<Promise<Void>> signals(3);
 	std::vector<AsyncResult<int>> results;
+	results.reserve(signals.size());
 	for (int i = 0; i < signals.size(); ++i) {
 		results.push_back(delayedAsyncResultInt(signals[i].getFuture(), i));
 	}
@@ -1531,6 +1759,7 @@ TEST_CASE("/flow/coro/quorumAsyncResultCancelsRemainingProducers") {
 	int completedCount = 0;
 	std::vector<Promise<Void>> signals(3);
 	std::vector<AsyncResult<int>> results;
+	results.reserve(signals.size());
 	for (int i = 0; i < signals.size(); ++i) {
 		results.push_back(trackedAsyncResultInt(signals[i].getFuture(), i, &cancelledCount, &completedCount));
 	}
@@ -1552,6 +1781,7 @@ TEST_CASE("/flow/coro/quorumAsyncResultDropCancelsProducers") {
 	std::vector<Promise<Void>> signals(2);
 	{
 		std::vector<AsyncResult<int>> results;
+		results.reserve(signals.size());
 		for (int i = 0; i < signals.size(); ++i) {
 			results.push_back(trackedAsyncResultInt(signals[i].getFuture(), i, &cancelledCount, &completedCount));
 		}
@@ -1741,6 +1971,7 @@ TEST_CASE("/flow/coro/getAllAsyncResultDropCancelsProducers") {
 	std::vector<Promise<Void>> signals(2);
 	{
 		std::vector<AsyncResult<int>> results;
+		results.reserve(signals.size());
 		for (int i = 0; i < signals.size(); ++i) {
 			results.push_back(trackedAsyncResultInt(signals[i].getFuture(), i, &cancelledCount, &completedCount));
 		}
@@ -1763,6 +1994,7 @@ TEST_CASE("/flow/coro/getAllAsyncResultMoveDropCancelsProducers") {
 	std::vector<Promise<Void>> signals(2);
 	{
 		std::vector<AsyncResult<int>> results;
+		results.reserve(signals.size());
 		for (int i = 0; i < signals.size(); ++i) {
 			results.push_back(trackedAsyncResultInt(signals[i].getFuture(), i, &cancelledCount, &completedCount));
 		}

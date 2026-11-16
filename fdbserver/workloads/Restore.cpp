@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
@@ -126,7 +124,6 @@ struct RestoreWorkload : TestWorkload {
 	Future<Void> _start(Database cx) {
 		FileBackupAgent backupAgent;
 		Future<Void> cp;
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		TraceEvent("RW_Arguments")
 		    .detail("BackupTag", printable(backupTag))
 		    .detail("PerformRestore", performRestore)
@@ -245,7 +242,7 @@ struct RestoreWorkload : TestWorkload {
 
 			// Ensure that there is no left over key within the backup subspace
 			while (true) {
-				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 				TraceEvent("RW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(backupTag));
 

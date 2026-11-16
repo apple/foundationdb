@@ -305,6 +305,7 @@ void WorkloadManager::schedulePrintStatistics(int timeIntervalMs) {
 std::vector<std::shared_ptr<IWorkload>> WorkloadManager::getActiveWorkloads() {
 	std::unique_lock<std::mutex> lock(mutex);
 	std::vector<std::shared_ptr<IWorkload>> res;
+	res.reserve(workloads.size());
 	for (const auto& iter : workloads) {
 		res.push_back(iter.second.ref);
 	}

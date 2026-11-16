@@ -195,7 +195,7 @@ Future<Void> replicaComparison(Req req,
 		co_return;
 	}
 
-	co_await store(src, fSource);
+	src = co_await fSource;
 
 	if (src.isError()) {
 		ASSERT_WE_THINK(false); // TODO: Change this into an ASSERT after getting enough test coverage.
@@ -368,13 +368,13 @@ struct LoadBalanceRequestHooks<Request,
 				// FIXME: optimize to avoid creating new netNotifiedQueue for each message
 				RequestStream<Request, P> tssRequestStream(tssData.get().endpoint);
 				Future<ErrorOr<REPLY_TYPE(Request)>> fTssResult = tssRequestStream.tryGetReply(request);
-				model->addActor.send(tssComparison(request,
-				                                   ssResponse,
-				                                   fTssResult,
-				                                   tssData.get(),
-				                                   stream->getEndpoint().token.first(),
-				                                   alternatives,
-				                                   channel));
+				model->addBackgroundActor(tssComparison(request,
+				                                        ssResponse,
+				                                        fTssResult,
+				                                        tssData.get(),
+				                                        stream->getEndpoint().token.first(),
+				                                        alternatives,
+				                                        channel));
 			}
 		}
 	}

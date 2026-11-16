@@ -32,52 +32,32 @@ public:
 
 	template <class TransactionT>
 	Future<Standalone<StringRef>> allocate(Reference<TransactionT> tr) {
-		return allocate(this, tr);
-	}
-
-	static int64_t windowSize(int64_t start) {
-		if (start < 255) {
-			return 64;
-		}
-		if (start < 65535) {
-			return 1024;
-		}
-
-		return 8192;
-	}
-
-private:
-	Subspace counters;
-	Subspace recent;
-
-	template <class TransactionT>
-	Future<Standalone<StringRef>> allocate(HighContentionPrefixAllocator* self, Reference<TransactionT> tr) {
 		int64_t start = 0;
 		int64_t window = 0;
 
 		while (true) {
 			typename TransactionT::template FutureT<RangeResult> rangeFuture =
-			    tr->getRange(self->counters.range(), 1, Snapshot::True, Reverse::True);
+			    tr->getRange(counters.range(), 1, Snapshot::True, Reverse::True);
 			RangeResult range = co_await safeThreadFutureToFuture(rangeFuture);
 
 			if (!range.empty()) {
-				start = self->counters.unpack(range[0].key).getInt(0);
+				start = counters.unpack(range[0].key).getInt(0);
 			}
 
 			bool windowAdvanced = false;
 			while (true) {
 				// if thread safety is needed, this should be locked {
 				if (windowAdvanced) {
-					tr->clear(KeyRangeRef(self->counters.key(), self->counters.get(start).key()));
+					tr->clear(KeyRangeRef(counters.key(), counters.get(start).key()));
 					tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
-					tr->clear(KeyRangeRef(self->recent.key(), self->recent.get(start).key()));
+					tr->clear(KeyRangeRef(recent.key(), recent.get(start).key()));
 				}
 
 				int64_t inc = 1;
-				tr->atomicOp(self->counters.get(start).key(), StringRef((uint8_t*)&inc, 8), MutationRef::AddValue);
+				tr->atomicOp(counters.get(start).key(), StringRef((uint8_t*)&inc, 8), MutationRef::AddValue);
 
 				typename TransactionT::template FutureT<Optional<Value>> countFuture =
-				    tr->get(self->counters.get(start).key(), Snapshot::True);
+				    tr->get(counters.get(start).key(), Snapshot::True);
 				// }
 
 				Optional<Value> countValue = co_await safeThreadFutureToFuture(countFuture);
@@ -104,11 +84,11 @@ private:
 
 				// if thread safety is needed, this should be locked {
 				typename TransactionT::template FutureT<RangeResult> latestCounterFuture =
-				    tr->getRange(self->counters.range(), 1, Snapshot::True, Reverse::True);
+				    tr->getRange(counters.range(), 1, Snapshot::True, Reverse::True);
 				typename TransactionT::template FutureT<Optional<Value>> candidateValueFuture =
-				    tr->get(self->recent.get(candidate).key());
+				    tr->get(recent.get(candidate).key());
 				tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
-				tr->set(self->recent.get(candidate).key(), ValueRef());
+				tr->set(recent.get(candidate).key(), ValueRef());
 				// }
 
 				co_await (success(safeThreadFutureToFuture(latestCounterFuture)) &&
@@ -116,7 +96,7 @@ private:
 
 				int64_t currentWindowStart = 0;
 				if (latestCounterFuture.get().size() > 0) {
-					currentWindowStart = self->counters.unpack(latestCounterFuture.get()[0].key).getInt(0);
+					currentWindowStart = counters.unpack(latestCounterFuture.get()[0].key).getInt(0);
 				}
 
 				if (currentWindowStart > start) {
@@ -124,10 +104,25 @@ private:
 				}
 
 				if (!candidateValueFuture.get().present()) {
-					tr->addWriteConflictRange(singleKeyRange(self->recent.get(candidate).key()));
+					tr->addWriteConflictRange(singleKeyRange(recent.get(candidate).key()));
 					co_return Tuple::makeTuple(candidate).pack();
 				}
 			}
 		}
 	}
+
+	static int64_t windowSize(int64_t start) {
+		if (start < 255) {
+			return 64;
+		}
+		if (start < 65535) {
+			return 1024;
+		}
+
+		return 8192;
+	}
+
+private:
+	Subspace counters;
+	Subspace recent;
 };

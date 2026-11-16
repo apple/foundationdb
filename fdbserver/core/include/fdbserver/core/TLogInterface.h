@@ -399,7 +399,8 @@ struct TLogQueuingMetricsReply {
 	int64_t instanceID; // changes if bytesDurable and bytesInput reset
 	int64_t bytesDurable{ 0 }, bytesInput{ 0 };
 	StorageBytes storageBytes;
-	Version v; // committed version
+	// Durable known-committed version. Recovery uses this to decide when old log history is safe to discard.
+	Version v;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

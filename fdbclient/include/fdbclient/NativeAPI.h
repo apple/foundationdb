@@ -559,7 +559,7 @@ Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
 // Gets checkpoint metadata for `ranges` at the specific version, with the particular format.
 // Returns a list of [range, checkpoint], where the `checkpoint` has data over `range`.
 // checkpoint_not_found() error will be returned if the specific checkpoint cannot be found.
-Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
+AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
     Database cx,
     std::vector<KeyRange> ranges,
     Version version,
@@ -576,18 +576,18 @@ inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	if (bytes == 0) {
 		return CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 	} else {
-		return CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE *
-		       ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1);
+		const uint64_t pages = (bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1;
+		return CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE * pages;
 	}
 }
 
 // Measured in bytes, rounded up to the nearest page size.
 inline uint64_t getReadOperationCost(uint64_t bytes) {
-	if (bytes == 0) {
-		return CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	} else {
-		return ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1) * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	const uint64_t pageSize = CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	if (bytes <= pageSize) {
+		return pageSize;
 	}
+	return ((bytes - 1) / pageSize + 1) * pageSize;
 }
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value

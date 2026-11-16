@@ -68,7 +68,7 @@
 
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
+#include "fdbserver/checkpoint/RocksDBCheckpointUtils.h"
 #include "RocksDBCommon.h"
 
 #include "flow/CoroUtils.h"
@@ -435,31 +435,7 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 	metaData.db_comparator_name = rocksCF.dbComparatorName;
 
 	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
-		rocksdb::LiveFileMetaData liveFileMetaData;
-		liveFileMetaData.relative_filename = fileMetaData.relative_filename;
-		liveFileMetaData.directory = fileMetaData.directory;
-		liveFileMetaData.file_number = fileMetaData.file_number;
-		liveFileMetaData.file_type = static_cast<rocksdb::FileType>(fileMetaData.file_type);
-		liveFileMetaData.size = fileMetaData.size;
-		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
-		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
-		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
-		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
-		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
-		liveFileMetaData.largestkey = fileMetaData.largestkey;
-		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
-		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
-		liveFileMetaData.num_entries = fileMetaData.num_entries;
-		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
-		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
-		liveFileMetaData.name = fileMetaData.name;
-		liveFileMetaData.db_path = fileMetaData.db_path;
-		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
-		liveFileMetaData.level = fileMetaData.level;
+		rocksdb::LiveFileMetaData liveFileMetaData = toRocksDBLiveFileMetaData(fileMetaData);
 		metaData.files.push_back(liveFileMetaData);
 	}
 
@@ -470,31 +446,7 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 	RocksDBColumnFamilyCheckpoint rocksCF;
 	rocksCF.dbComparatorName = metaData.db_comparator_name;
 	for (const rocksdb::LiveFileMetaData& fileMetaData : metaData.files) {
-		LiveFileMetaData liveFileMetaData;
-		liveFileMetaData.relative_filename = fileMetaData.relative_filename;
-		liveFileMetaData.directory = fileMetaData.directory;
-		liveFileMetaData.file_number = fileMetaData.file_number;
-		liveFileMetaData.file_type = static_cast<int>(fileMetaData.file_type);
-		liveFileMetaData.size = fileMetaData.size;
-		liveFileMetaData.temperature = static_cast<uint8_t>(fileMetaData.temperature);
-		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
-		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
-		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
-		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
-		liveFileMetaData.largestkey = fileMetaData.largestkey;
-		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
-		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
-		liveFileMetaData.num_entries = fileMetaData.num_entries;
-		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
-		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
-		liveFileMetaData.name = fileMetaData.name;
-		liveFileMetaData.db_path = fileMetaData.db_path;
-		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
-		liveFileMetaData.level = fileMetaData.level;
+		LiveFileMetaData liveFileMetaData = fromRocksDBLiveFileMetaData(fileMetaData);
 		rocksCF.sstFiles.push_back(liveFileMetaData);
 	}
 	checkpoint->setFormat(DataMoveRocksCF);
@@ -590,7 +542,7 @@ public:
 		}
 	}
 
-	// Called on every db commit.
+	// Invalidate snapshots after writes become visible.
 	void update() {
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS ||
 		    SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
@@ -1364,6 +1316,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
+			// Pooled iterators hold snapshots taken before the external files became visible.
+			readIterPool->update();
 			a.done.send(Void());
 		}
 
@@ -1432,6 +1386,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::ColumnFamilyOptions cfOptions = sharedState->getCfOptions();
 			std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+			descriptors.reserve(columnFamilies.size());
 			for (const std::string& name : columnFamilies) {
 				descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
 			}
@@ -1445,7 +1400,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			std::vector<rocksdb::ColumnFamilyHandle*> handles;
-			status = rocksdb::DB::Open(options, a.path, descriptors, &handles, &db);
+			std::unique_ptr<rocksdb::DB> dbPtr;
+			status = rocksdb::DB::Open(options, a.path, descriptors, &handles, &dbPtr);
+			db = dbPtr.release();
 			cfHandles.insert(handles.begin(), handles.end());
 
 			if (!status.ok()) {
@@ -1648,7 +1605,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				std::set<std::string> columnFamilies{ "default" };
 				columnFamilies.insert(SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY);
 				std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
-				for (const std::string name : columnFamilies) {
+				descriptors.reserve(columnFamilies.size());
+				for (const std::string& name : columnFamilies) {
 					descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, sharedState->getCfOptions() });
 				}
 				s = rocksdb::DestroyDB(a.path, sharedState->getOptions(), descriptors);
@@ -2211,9 +2169,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (self->closePromise.canBeSet()) {
 			self->closePromise.send(Void());
 		}
-		if (self->db != nullptr) {
-			delete self->db;
-		}
+		delete self->db;
 		delete self;
 	}
 
@@ -2576,7 +2532,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			for (const LiveFileMetaData& file : rocksCF.sstFiles) {
 				dirs.insert(file.db_path);
 			}
-			for (const std::string dir : dirs) {
+			for (const std::string& dir : dirs) {
 				platform::eraseDirectoryRecursive(dir);
 				TraceEvent("DeleteCheckpointRemovedDir", id)
 				    .detail("CheckpointID", checkpoint.checkpointID)
@@ -2717,15 +2673,11 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 		    .detail("RocksSequenceNumber", debugCheckpointSeq)
 		    .detail("CheckpointDir", checkpointDir);
 	} else {
-		if (checkpoint != nullptr) {
-			delete checkpoint;
-		}
+		delete checkpoint;
 		throw not_implemented();
 	}
 
-	if (checkpoint != nullptr) {
-		delete checkpoint;
-	}
+	delete checkpoint;
 	res.setState(CheckpointMetaData::Complete);
 	a.reply.send(res);
 }
@@ -3095,8 +3047,13 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/IngestSSTFileVisibility") {
 
 	fileSetMap->emplace_back(allKeys, fileSet); // Use emplace_back for std::vector
 
-	// Ingest the SST file using the populated map
+	const KeyRange range = singleKeyRange("test_key"_sr);
+	RangeResult before = co_await kvStore->readRange(range, 10, 1000, {});
+	ASSERT(before.empty());
 	co_await kvStore->ingestSSTFiles(fileSetMap);
+	RangeResult after = co_await kvStore->readRange(range, 10, 1000, {});
+	ASSERT_EQ(after.size(), 1);
+	ASSERT(after[0].key == "test_key"_sr && after[0].value == "test_value"_sr);
 
 	// Verify the key is visible
 	Optional<Value> value = co_await kvStore->readValue("test_key"_sr, Optional<ReadOptions>());

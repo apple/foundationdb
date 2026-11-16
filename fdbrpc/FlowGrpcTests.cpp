@@ -1,5 +1,5 @@
 /**
- * FlowGrpcTests.actor.cpp
+ * FlowGrpcTests.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -514,6 +514,19 @@ TEST_CASE("/fdbrpc/grpc/server_lifecycle_basic") {
 	} catch (Error& e) {
 		ASSERT(false);
 	}
+}
+
+TEST_CASE("/fdbrpc/grpc/stop_without_running_server") {
+	// Resume inside the run loop; GrpcServer requires the main thread.
+	co_await yield();
+
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50520"));
+	GrpcServer server(addr);
+	ASSERT(!server.hasStarted());
+
+	// No server has been built; stopping must be a no-op rather than dereference null.
+	server.deregisterRoleServicesSync(UID());
+	ASSERT(!server.hasStarted());
 }
 
 TEST_CASE("/fdbrpc/grpc/server_lifecycle_combine_register_into_one_start") {

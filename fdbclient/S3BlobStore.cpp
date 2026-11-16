@@ -20,6 +20,7 @@
 
 #include "fdbclient/S3BlobStore.h"
 
+#include <algorithm>
 #include <sstream>
 #include "fdbrpc/HTTP.h"
 #include "fdbclient/Knobs.h"
@@ -54,6 +55,8 @@
 #include "flow/CoroUtils.h"
 
 using namespace rapidxml;
+
+static constexpr const char* multipartUploadTokenHeader = "x-amz-meta-fdb-multipart-upload-token";
 
 std::string S3BlobStoreEndpoint::guessRegionFromDomain(std::string domain) {
 	// Special case for localhost/127.0.0.1 to prevent basic_string exception
@@ -94,27 +97,36 @@ static Optional<S3BlobStoreEndpoint::Credentials> parseS3Credentials(Optional<St
 	return S3BlobStoreEndpoint::Credentials{ key.toString(), secret.toString(), securityToken.toString() };
 }
 
-S3BlobStoreEndpoint::S3BlobStoreEndpoint(std::string const& host,
-                                         std::string const& service,
+S3BlobStoreEndpoint::S3BlobStoreEndpoint(BlobStoreEndpointParams const& params,
                                          std::string region,
-                                         Optional<std::string> const& proxyHost,
-                                         Optional<std::string> const& proxyPort,
-                                         Optional<StringRef> const& creds,
-                                         BlobKnobs const& knobs,
-                                         HTTP::Headers extraHeaders)
-  : IBlobStoreEndpoint(host,
-                       service,
-                       region.empty() ? guessRegionFromDomain(host) : region,
-                       proxyHost,
-                       proxyPort,
-                       knobs,
-                       extraHeaders),
+                                         Optional<StringRef> const& creds)
+  : IBlobStoreEndpoint(params, region.empty() ? guessRegionFromDomain(params.host) : region),
     credentials(parseS3Credentials(creds)), lookupKey(credentials.present() && credentials.get().key.empty()),
     lookupSecret(credentials.present() && credentials.get().secret.empty()) {
-	if (this->region.empty() && CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
+	if (this->region.empty() && knobs.aws_v4_header) {
 		throw std::string(
 		    "Failed to get region from host or parameter in url, region is required for aws v4 signature");
 	}
+}
+
+void S3BlobStoreEndpoint::rememberMultipartUploadToken(std::string const& uploadID, std::string const& token) {
+	if (!multipartUploadTokens.contains(uploadID) && multipartUploadTokens.size() == maxTrackedMultipartUploads) {
+		auto oldest =
+		    std::min_element(multipartUploadTokens.begin(),
+		                     multipartUploadTokens.end(),
+		                     [](auto const& a, auto const& b) { return a.second.sequence < b.second.sequence; });
+		multipartUploadTokens.erase(oldest);
+	}
+	multipartUploadTokens[uploadID] = { token, nextMultipartUploadSequence++ };
+}
+
+Optional<std::string> S3BlobStoreEndpoint::multipartUploadToken(std::string const& uploadID) const {
+	auto it = multipartUploadTokens.find(uploadID);
+	return it == multipartUploadTokens.end() ? Optional<std::string>() : Optional<std::string>(it->second.token);
+}
+
+void S3BlobStoreEndpoint::forgetMultipartUploadToken(std::string const& uploadID) {
+	multipartUploadTokens.erase(uploadID);
 }
 
 std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::string params) const {
@@ -431,7 +443,7 @@ void S3BlobStoreEndpoint::setRequestHeaders(std::string const& verb,
 	headers["Accept"] = "application/xml";
 	if (credentials.present() && !credentials.get().securityToken.empty())
 		headers["x-amz-security-token"] = credentials.get().securityToken;
-	if (CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
+	if (knobs.aws_v4_header) {
 		setV4AuthHeaders(verb, resource, headers);
 	} else {
 		setAuthHeaders(verb, resource, headers);
@@ -440,7 +452,7 @@ void S3BlobStoreEndpoint::setRequestHeaders(std::string const& verb,
 
 std::string S3BlobStoreEndpoint::normalizeResourceForRequest(std::string const& resource) {
 	std::vector<std::string> queryParameters;
-	std::string canonicalURI = awsCanonicalURI(resource, queryParameters, CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER);
+	std::string canonicalURI = awsCanonicalURI(resource, queryParameters, knobs.aws_v4_header);
 	if (!queryParameters.empty()) {
 		canonicalURI += "?";
 		for (size_t i = 0; i < queryParameters.size(); ++i) {
@@ -491,12 +503,15 @@ void S3BlobStoreEndpoint::simulateRequestFailure(std::string const& verb,
 	if (!g_network->isSimulated() || !buggify() || deterministicRandom()->random01() >= 0.1) {
 		return;
 	}
-	// Don't simulate token errors for multipart complete operations (POST with uploadId but no partNumber)
-	// because changing a successful 200 to 400 after the server has already completed and removed
-	// the upload causes the client to infinitely retry with a phantom upload ID.
+	// A completion response can be lost after the server commits and removes the upload ID.
+	// Model the next retry's NoSuchUpload response so reconciliation runs in simulation.
 	bool isMultipartComplete = verb == "POST" && resource.find("uploadId=") != std::string::npos &&
 	                           resource.find("partNumber=") == std::string::npos;
-	if (!isMultipartComplete) {
+	if (isMultipartComplete && r->code == 200 &&
+	    r->data.content.find("<CompleteMultipartUploadResult") != std::string::npos) {
+		r->code = 404;
+		r->data.content = "<Error><Code>NoSuchUpload</Code></Error>";
+	} else if (!isMultipartComplete) {
 		r->code = s3BadRequestCode;
 		simulatedTokenError = true;
 	}
@@ -546,7 +561,7 @@ Future<bool> S3BlobStoreEndpoint::preRetryCheck(std::string const& verb,
 	    .detail("OriginalResource", resource)
 	    .detail("DryrunResource", dryrunRequest->resource)
 	    .detail("Bucket", bucket)
-	    .detail("V4", CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER);
+	    .detail("V4", knobs.aws_v4_header);
 
 	co_await requestRate->getAllowance(1);
 	Future<Reference<HTTP::IncomingResponse>> dryrunResponse =
@@ -972,6 +987,15 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 	headers["Authorization"] = authorizationHeader;
 }
 
+void S3BlobStoreEndpoint::setServerSideEncryptionHeader(HTTP::Headers& headers) const {
+	// The URL's sse parameter wins over the knob, so any backup can turn the header off with sse=none.
+	const std::string& type =
+	    serverSideEncryption.present() ? serverSideEncryption.get() : CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
+	if (!type.empty() && type != "none") {
+		headers["x-amz-server-side-encryption"] = type;
+	}
+}
+
 void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers) {
 	if (!credentials.present()) {
 		return;
@@ -1088,8 +1112,7 @@ Future<Void> writeEntireFileFromBuffer_impl(Reference<S3BlobStoreEndpoint> bstor
 	} else {
 		headers["Content-MD5"] = contentHash;
 	}
-	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
-		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
+	bstore->setServerSideEncryptionHeader(headers);
 	Reference<HTTP::IncomingResponse> r =
 	    co_await bstore->doRequest("PUT", resource, headers, pContent, contentLen, { 200 });
 }
@@ -1173,8 +1196,10 @@ static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStoreEndpoi
 	std::string resource = bstore->constructResourcePath(bucket, object);
 	resource += "?uploads";
 	HTTP::Headers headers;
-	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
-		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
+	std::string token =
+	    (g_network->isSimulated() ? debugRandom() : nondeterministicRandom())->randomUniqueID().toString();
+	headers[multipartUploadTokenHeader] = token;
+	bstore->setServerSideEncryptionHeader(headers);
 	if (bstore->knobs.enable_object_integrity_check) {
 		// CRITICAL: Adding x-amz-checksum-algorithm to multipart initiation means ALL parts
 		// must include checksums and completion request must include ChecksumSHA256 tags.
@@ -1195,6 +1220,7 @@ static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStoreEndpoi
 		if (result != nullptr && strcmp(result->name(), "InitiateMultipartUploadResult") == 0) {
 			xml_node<>* id = result->first_node("UploadId");
 			if (id != nullptr) {
+				bstore->rememberMultipartUploadToken(id->value(), token);
 				co_return id->value();
 			}
 		}
@@ -1270,12 +1296,62 @@ Future<std::string> S3BlobStoreEndpoint::uploadPart(std::string const& bucket,
 	                       contentMD5);
 }
 
+enum class MultipartCompletionStatus { Success, NoSuchUpload, Failure };
+
+static MultipartCompletionStatus parseMultipartCompletionResponse(int code, std::string const& body) {
+	if (code == 404) {
+		return parseErrorCodeFromS3(body) == "NoSuchUpload" ? MultipartCompletionStatus::NoSuchUpload
+		                                                    : MultipartCompletionStatus::Failure;
+	}
+	if (code != 200) {
+		return MultipartCompletionStatus::Failure;
+	}
+
+	try {
+		std::string content = body; // rapidxml modifies its input
+		xml_document<> doc;
+		doc.parse<0>(content.data());
+		xml_node<>* result = doc.first_node();
+		if (result != nullptr && strcmp(result->name(), "CompleteMultipartUploadResult") == 0 &&
+		    result->first_node("ETag") != nullptr && result->first_node("ETag")->value_size() > 0) {
+			return MultipartCompletionStatus::Success;
+		}
+	} catch (const rapidxml::parse_error&) {
+	}
+	return parseErrorCodeFromS3(body) == "NoSuchUpload" ? MultipartCompletionStatus::NoSuchUpload
+	                                                    : MultipartCompletionStatus::Failure;
+}
+
+static bool multipartObjectMatches(HTTP::IncomingResponse const& response,
+                                   std::string const& token,
+                                   int64_t totalSize) {
+	if (response.code != 200) {
+		return false;
+	}
+	auto it = response.data.headers.find(multipartUploadTokenHeader);
+	return it != response.data.headers.end() && it->second == token &&
+	       (totalSize <= 0 || response.data.contentLen == totalSize);
+}
+
+static Future<bool> completedMultipartObjectMatches(Reference<S3BlobStoreEndpoint> bstore,
+                                                    std::string bucket,
+                                                    std::string object,
+                                                    std::string token,
+                                                    int64_t totalSize) {
+	co_await bstore->requestRateRead->getAllowance(1);
+	HTTP::Headers headers;
+	std::string resource = bstore->constructResourcePath(bucket, object);
+	Reference<HTTP::IncomingResponse> r =
+	    co_await bstore->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 });
+	co_return multipartObjectMatches(*r, token, totalSize);
+}
+
 Future<Optional<std::string>> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore,
                                                          std::string bucket,
                                                          std::string object,
                                                          std::string uploadID,
                                                          S3BlobStoreEndpoint::MultiPartSetT parts,
-                                                         int64_t /*totalSize*/) {
+                                                         int64_t totalSize) {
 	UnsentPacketQueue part_list; // NonCopyable state var so must be declared at top of actor
 	co_await bstore->requestRateWrite->getAllowance(1);
 
@@ -1295,18 +1371,64 @@ Future<Optional<std::string>> finishMultiPartUpload_impl(Reference<S3BlobStoreEn
 	HTTP::Headers headers;
 	PacketWriter pw(part_list.getWriteBuffer(manifest.size()), nullptr, Unversioned());
 	pw.serializeBytes(manifest);
-	Reference<HTTP::IncomingResponse> r =
-	    co_await bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), { 200 });
+	Optional<std::string> token = bstore->multipartUploadToken(uploadID);
+	Optional<Error> completionError;
+	MultipartCompletionStatus status = MultipartCompletionStatus::Failure;
+	Reference<HTTP::IncomingResponse> r;
+	try {
+		r = co_await bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), { 200, 404 });
+		status = parseMultipartCompletionResponse(r->code, r->data.content);
+		if (r->code == 200 && status != MultipartCompletionStatus::Success) {
+			// S3 returns 200 as soon as it begins processing CompleteMultipartUpload rather than when it
+			// succeeds, and reports the real outcome in the body.
+			TraceEvent("S3MultipartCompletionFalseSuccess")
+			    .setMaxEventLength(12000)
+			    .detail("Bucket", bucket)
+			    .detail("Object", object)
+			    .detail("UploadID", uploadID)
+			    .detail("ResponseCode", r->code)
+			    .detail("S3ErrorCode", parseErrorCodeFromS3(r->data.content))
+			    .setMaxFieldLength(10000)
+			    .detail("HttpResponseContent", r->data.content);
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled || e.code() == error_code_broken_promise) {
+			throw;
+		}
+		completionError = e;
+	}
 
-	// The XML response contains a ChecksumSHA256 field, but this is just a hash of the multipart
-	// structure, not the actual object content, so it's useless for integrity verification.
-	// We skip parsing it to avoid wasted CPU cycles.
+	if (status == MultipartCompletionStatus::Success) {
+		bstore->forgetMultipartUploadToken(uploadID);
+		co_return Optional<std::string>();
+	}
 
-	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then
-	// the next retry will see error 400.  That could be detected and handled gracefully by HEAD'ing the object before
-	// upload to get its (possibly nonexistent) eTag, then if an error 400 is seen then retrieve the eTag again and if
-	// it has changed then consider the finish complete.
-	co_return Optional<std::string>();
+	if (token.present() && (status == MultipartCompletionStatus::NoSuchUpload || completionError.present())) {
+		try {
+			if (co_await completedMultipartObjectMatches(bstore, bucket, object, token.get(), totalSize)) {
+				bstore->forgetMultipartUploadToken(uploadID);
+				TraceEvent("S3MultipartCompletionReconciled")
+				    .detail("Bucket", bucket)
+				    .detail("Object", object)
+				    .detail("UploadID", uploadID)
+				    .detail("ResponseCode", r.isValid() ? r->code : 0)
+				    .detail("S3ErrorCode", r.isValid() ? parseErrorCodeFromS3(r->data.content) : "")
+				    .detail("MultipartCompletionStatus", status)
+				    .detail("CompletionError", completionError.present() ? completionError.get().name() : "");
+				co_return Optional<std::string>();
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled || e.code() == error_code_broken_promise) {
+				throw;
+			}
+			// A failed HEAD cannot establish that the object belongs to this upload.
+		}
+	}
+
+	if (completionError.present()) {
+		throw completionError.get();
+	}
+	throw http_request_failed();
 }
 
 Future<Optional<std::string>> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucket,
@@ -1322,6 +1444,7 @@ Future<Void> abortMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore,
                                        std::string bucket,
                                        std::string object,
                                        std::string uploadID) {
+	bstore->forgetMultipartUploadToken(uploadID);
 	co_await bstore->requestRateWrite->getAllowance(1);
 
 	std::string resource = bstore->constructResourcePath(bucket, object);
@@ -1483,9 +1606,14 @@ Future<std::map<std::string, std::string>> S3BlobStoreEndpoint::getObjectTags(st
 TEST_CASE("/backup/s3/v4headers") {
 	std::string credStr = "AKIAIOSFODNN7EXAMPLE:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY:";
 	Optional<StringRef> creds = StringRef(credStr);
+	BlobStoreEndpointParams endpointParams;
+	endpointParams.host = "s3.amazonaws.com";
+	endpointParams.service = "443";
+	endpointParams.proxyHost = "proxy";
+	endpointParams.proxyPort = "port";
 	// GET without query parameters
 	{
-		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);
+		S3BlobStoreEndpoint s3(endpointParams, "amazonaws", creds);
 		std::string verb("GET");
 		std::string resource("/test.txt");
 		HTTP::Headers headers;
@@ -1500,7 +1628,7 @@ TEST_CASE("/backup/s3/v4headers") {
 
 	// GET with query parameters
 	{
-		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);
+		S3BlobStoreEndpoint s3(endpointParams, "amazonaws", creds);
 		std::string verb("GET");
 		std::string resource("/test/examplebucket?Action=DescribeRegions&Version=2013-10-15");
 		HTTP::Headers headers;
@@ -1515,7 +1643,8 @@ TEST_CASE("/backup/s3/v4headers") {
 
 	// POST
 	{
-		S3BlobStoreEndpoint s3("s3.us-west-2.amazonaws.com", "443", "us-west-2", "proxy", "port", creds);
+		endpointParams.host = "s3.us-west-2.amazonaws.com";
+		S3BlobStoreEndpoint s3(endpointParams, "us-west-2", creds);
 		std::string verb("POST");
 		std::string resource("/simple.json");
 		HTTP::Headers headers;
@@ -1531,6 +1660,25 @@ TEST_CASE("/backup/s3/v4headers") {
 		ASSERT(headers["Content-Type"] == "Application/x-amz-json-1.0");
 	}
 
+	return Void();
+}
+
+// The URL's v4 parameter, not the HTTP_REQUEST_AWS_V4_HEADER knob, decides how requests are signed.
+TEST_CASE("/backup/s3/v4/urlOverridesKnob") {
+	const bool v4 = !CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER;
+	std::string resource;
+	std::string error;
+	S3BlobStoreEndpoint::ParametersT parameters;
+	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(
+	    format("blobstore://key:secret@127.0.0.1:9000/resource_name?bucket=bucket_name&region=test_region&v4=%d", v4),
+	    {},
+	    &resource,
+	    &error,
+	    &parameters);
+	HTTP::Headers headers;
+	headers["Host"] = "127.0.0.1";
+	s3->setRequestHeaders("GET", "/bucket_name/object", headers);
+	ASSERT(headers["Authorization"].starts_with(v4 ? "AWS4-HMAC-SHA256 " : "AWS key:"));
 	return Void();
 }
 
@@ -1695,5 +1843,151 @@ TEST_CASE("/backup/s3/parseErrorCodeFromS3") {
 		ASSERT(parseErrorCodeFromS3("Internal Server Error").empty());
 	}
 
+	return Void();
+}
+
+TEST_CASE("/backup/s3/multipartCompletionResponse") {
+	const std::string success = "<CompleteMultipartUploadResult><ETag>\"etag\"</ETag>"
+	                            "</CompleteMultipartUploadResult>";
+	const std::string noSuchUpload = "<Error><Code>NoSuchUpload</Code></Error>";
+	const std::string invalidPart = "<Error><Code>InvalidPart</Code></Error>";
+	const std::string internalError = "<Error><Code>InternalError</Code></Error>";
+
+	ASSERT(parseMultipartCompletionResponse(200, success) == MultipartCompletionStatus::Success);
+	ASSERT(parseMultipartCompletionResponse(200, noSuchUpload) == MultipartCompletionStatus::NoSuchUpload);
+	ASSERT(parseMultipartCompletionResponse(200, invalidPart) == MultipartCompletionStatus::Failure);
+	ASSERT(parseMultipartCompletionResponse(200, internalError) == MultipartCompletionStatus::Failure);
+	ASSERT(parseMultipartCompletionResponse(404, noSuchUpload) == MultipartCompletionStatus::NoSuchUpload);
+	ASSERT(parseMultipartCompletionResponse(404, invalidPart) == MultipartCompletionStatus::Failure);
+	ASSERT(parseMultipartCompletionResponse(200, "<CompleteMultipartUploadResult/>") ==
+	       MultipartCompletionStatus::Failure);
+	ASSERT(parseMultipartCompletionResponse(200,
+	                                        "<CompleteMultipartUploadResult><ETag/></CompleteMultipartUploadResult>") ==
+	       MultipartCompletionStatus::Failure);
+	ASSERT(parseMultipartCompletionResponse(200, "<CompleteMultipartUploadResult") ==
+	       MultipartCompletionStatus::Failure);
+	return Void();
+}
+
+TEST_CASE("/backup/s3/multipartCompletionIdentity") {
+	HTTP::IncomingResponse response;
+	response.code = 404;
+	response.data.contentLen = 10;
+	response.data.headers[multipartUploadTokenHeader] = "our-upload";
+	ASSERT(!multipartObjectMatches(response, "our-upload", 10));
+
+	response.code = 200;
+	ASSERT(multipartObjectMatches(response, "our-upload", 10));
+	ASSERT(!multipartObjectMatches(response, "other-upload", 10));
+	ASSERT(!multipartObjectMatches(response, "our-upload", 11));
+	response.data.headers.erase(multipartUploadTokenHeader);
+	ASSERT(!multipartObjectMatches(response, "our-upload", 10));
+	return Void();
+}
+
+// passedProxy stands in for the proxy given to openContainer, such as the agent's --proxy.
+static Reference<S3BlobStoreEndpoint> openTestEndpoint(const std::string& extraParams,
+                                                       Optional<std::string> passedProxy = {}) {
+	std::string resource;
+	std::string error;
+	S3BlobStoreEndpoint::ParametersT parameters;
+	return S3BlobStoreEndpoint::fromString(
+	    "blobstore://127.0.0.1:9000/resource_name?bucket=bucket_name&region=test_region" + extraParams,
+	    passedProxy,
+	    &resource,
+	    &error,
+	    &parameters);
+}
+
+// Returns the x-amz-server-side-encryption header an upload would send, with the knob set to knobValue.
+static std::string sseHeaderForUpload(const std::string& knobValue, const std::string& extraParams) {
+	const std::string originalKnobValue = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
+	setClientKnob("blobstore_encryption_type", KnobValueRef::create(knobValue));
+	HTTP::Headers headers;
+	openTestEndpoint(extraParams)->setServerSideEncryptionHeader(headers);
+	setClientKnob("blobstore_encryption_type", KnobValueRef::create(originalKnobValue));
+	auto it = headers.find("x-amz-server-side-encryption");
+	return it == headers.end() ? "<not sent>" : it->second;
+}
+
+TEST_CASE("/backup/s3/sse/defaultsToKnob") {
+	ASSERT_EQ(sseHeaderForUpload("aws:kms", ""), std::string("aws:kms"));
+	return Void();
+}
+
+TEST_CASE("/backup/s3/sse/urlOverridesKnob") {
+	ASSERT_EQ(sseHeaderForUpload("AES256", "&sse=aws:kms"), std::string("aws:kms"));
+	return Void();
+}
+
+TEST_CASE("/backup/s3/sse/noneSendsNoHeader") {
+	ASSERT_EQ(sseHeaderForUpload("aws:kms", "&sse=none"), std::string("<not sent>"));
+	return Void();
+}
+
+TEST_CASE("/backup/s3/sse/longNameAccepted") {
+	ASSERT_EQ(sseHeaderForUpload("", "&server_side_encryption=aws:kms"), std::string("aws:kms"));
+	return Void();
+}
+
+TEST_CASE("/backup/s3/sse/keptInResourceURL") {
+	std::string url = openTestEndpoint("&sse=none")->getResourceURL("resource_name", "bucket=bucket_name");
+	ASSERT(url.find("sse=none") != std::string::npos);
+	return Void();
+}
+
+TEST_CASE("/backup/s3/sse/emptyValueRejected") {
+	try {
+		openTestEndpoint("&sse=");
+		ASSERT(false); // not reached
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+	}
+	return Void();
+}
+
+TEST_CASE("/backup/s3/proxy/defaultsToPassedProxy") {
+	Reference<S3BlobStoreEndpoint> s3 = openTestEndpoint("", std::string("agent-proxy.example.com:3128"));
+	ASSERT_EQ(s3->proxyHost.orDefault(""), std::string("agent-proxy.example.com"));
+	return Void();
+}
+
+TEST_CASE("/backup/s3/proxy/urlOverridesPassedProxy") {
+	Reference<S3BlobStoreEndpoint> s3 =
+	    openTestEndpoint("&proxy=url-proxy.example.com:3128", std::string("agent-proxy.example.com:3128"));
+	ASSERT_EQ(s3->proxyHost.orDefault(""), std::string("url-proxy.example.com"));
+	return Void();
+}
+
+TEST_CASE("/backup/s3/proxy/noneConnectsDirectly") {
+	Reference<S3BlobStoreEndpoint> s3 = openTestEndpoint("&proxy=none", std::string("agent-proxy.example.com:3128"));
+	ASSERT(!s3->useProxy);
+	return Void();
+}
+
+TEST_CASE("/backup/s3/proxy/keptInResourceURL") {
+	std::string url =
+	    openTestEndpoint("&proxy=url-proxy.example.com:3128")->getResourceURL("resource_name", "bucket=bucket_name");
+	ASSERT(url.find("proxy=url-proxy.example.com:3128") != std::string::npos);
+	return Void();
+}
+
+TEST_CASE("/backup/s3/proxy/emptyValueRejected") {
+	try {
+		openTestEndpoint("&proxy=");
+		ASSERT(false); // not reached
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+	}
+	return Void();
+}
+
+TEST_CASE("/backup/s3/proxy/invalidValueRejected") {
+	try {
+		openTestEndpoint("&proxy=no_port");
+		ASSERT(false); // not reached
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+	}
 	return Void();
 }

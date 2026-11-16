@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
@@ -28,6 +26,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
+#include "BackupSteps.h"
 #include "BulkSetup.h"
 #include "flow/IRandom.h"
 
@@ -37,7 +36,7 @@
 // mean a new test workload is warranted.  If the APIs are similar then why doesn't the old test work too?
 // In the mean time we are dealing with two heavily overlapping source files with tons of cut/paste
 // unmodified code:
-// diff -U 10 BackupCorrectness.actor.cpp BackupCorrectnessPartitioned.actor.cpp
+// diff -U 10 BackupCorrectness.cpp BackupCorrectnessPartitioned.cpp
 struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 	static constexpr auto NAME = "BackupAndRestorePartitionedCorrectness";
 	double backupAfter, restoreAfter, abortAndRestartAfter;
@@ -334,92 +333,8 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			    .detail("Tag", printable(tag))
 			    .detail("DifferentialAfter", stopDifferentialDelay);
 
-			try {
-				if (buggify()) {
-					KeyBackedTag backupTag = makeBackupTag(tag.toString());
-					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName);
-
-					// Wait until the backup is in a restorable state and get the status, URL, and UID atomically
-					Reference<IBackupContainer> lastBackupContainer;
-					UID lastBackupUID;
-					EBackupState resultWait = co_await backupAgent->waitBackup(
-					    cx, backupTag.tagName, StopWhenDone::False, &lastBackupContainer, &lastBackupUID);
-
-					TraceEvent("BARW_DoBackupWaitForRestorable", randomID)
-					    .detail("Tag", backupTag.tagName)
-					    .detail("Result", BackupAgentBase::getStateText(resultWait));
-
-					bool restorable = false;
-					if (lastBackupContainer) {
-						Future<BackupDescription> fdesc = lastBackupContainer->describeBackup();
-						co_await ready(fdesc);
-
-						if (!fdesc.isError()) {
-							BackupDescription desc = fdesc.get();
-							co_await desc.resolveVersionTimes(cx);
-							printf("BackupDescription:\n%s\n", desc.toString().c_str());
-							restorable = desc.maxRestorableVersion.present();
-						}
-					}
-
-					TraceEvent("BARW_LastBackupContainer", randomID)
-					    .detail("BackupTag", printable(tag))
-					    .detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
-					    .detail("LastBackupUID", lastBackupUID)
-					    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait))
-					    .detail("Restorable", restorable);
-
-					// Do not check the backup, if aborted
-					if (resultWait == EBackupState::STATE_ABORTED) {
-					}
-					// Ensure that a backup container was found
-					else if (!lastBackupContainer) {
-						TraceEvent(SevError, "BARW_MissingBackupContainer", randomID)
-						    .detail("LastBackupUID", lastBackupUID)
-						    .detail("BackupTag", printable(tag))
-						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait));
-						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %s\n",
-						       printable(tag).c_str(),
-						       BackupAgentBase::getStateText(resultWait));
-					}
-					// Check that backup is restorable
-					else if (!restorable) {
-						TraceEvent(SevError, "BARW_NotRestorable", randomID)
-						    .detail("LastBackupUID", lastBackupUID)
-						    .detail("BackupTag", printable(tag))
-						    .detail("BackupFolder", lastBackupContainer->getURL())
-						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait));
-						printf("BackupCorrectnessNotRestorable:  tag: %s\n", printable(tag).c_str());
-					}
-
-					// Abort the backup, if not the first backup because the second backup may have aborted the backup
-					// by now
-					if (startDelay) {
-						TraceEvent("BARW_DoBackupAbortBackup2", randomID)
-						    .detail("Tag", printable(tag))
-						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait))
-						    .detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
-						    .detail("Restorable", restorable);
-						co_await backupAgent->abortBackup(cx, tag.toString());
-					} else {
-						TraceEvent("BARW_DoBackupDiscontinueBackup", randomID)
-						    .detail("Tag", printable(tag))
-						    .detail("DifferentialAfter", stopDifferentialDelay);
-						co_await backupAgent->discontinueBackup(cx, tag);
-					}
-				}
-
-				else {
-					TraceEvent("BARW_DoBackupDiscontinueBackup", randomID)
-					    .detail("Tag", printable(tag))
-					    .detail("DifferentialAfter", stopDifferentialDelay);
-					co_await backupAgent->discontinueBackup(cx, tag);
-				}
-			} catch (Error& e) {
-				TraceEvent("BARW_DoBackupDiscontinueBackupException", randomID).error(e).detail("Tag", printable(tag));
-				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
-					throw;
-			}
+			co_await BackupSteps::endBackupAfterRestorable(
+			    cx, backupAgent, tag, randomID, "BARW_", startDelay != 0, stopDifferentialDelay);
 		}
 
 		// Wait for the backup to complete
@@ -476,7 +391,6 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 
 	Future<Void> _start(Database cx) {
 		FileBackupAgent backupAgent;
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		TraceEvent("BARW_Arguments")
 		    .detail("BackupTag", printable(backupTag))
 		    .detail("PerformRestore", performRestore)
@@ -634,7 +548,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 
 			// Ensure that there is no left over key within the backup subspace
 			while (true) {
-				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 				TraceEvent("BARW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(backupTag));
 

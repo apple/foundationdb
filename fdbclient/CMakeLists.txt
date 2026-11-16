@@ -83,7 +83,6 @@ target_include_directories(s3client PRIVATE
     "${CMAKE_BINARY_DIR}/fdbrpc/include"
     "${CMAKE_SOURCE_DIR}/contrib/md5/include"
     "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
-    "/opt/boost_1_86_0_clang/include"
 )
 
 target_link_libraries(s3client PRIVATE
@@ -170,7 +169,7 @@ add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS LinkTest.cpp)
 target_link_libraries(fdbclientlinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbclient>" rapidxml) # re-link rapidxml due to private link interface
 
 add_flow_target(EXECUTABLE NAME fdbclient_test SRCS fdbclient_test.cpp)
-set_target_properties(fdbclient_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
+register_fdb_unit_tests(fdbclient_test SIMULATION)
 target_link_libraries(fdbclient_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbclient>" rapidxml)
 
 if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when

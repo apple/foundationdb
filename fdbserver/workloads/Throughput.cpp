@@ -74,7 +74,7 @@ struct RWTransactor : ITransactor {
 		memset(data, '.', keyBytes);
 
 		double d = double(deterministicRandom()->randomInt(0, keyCount)) / keyCount;
-		emplaceIndex(data, 0, *(int64_t*)&d);
+		emplaceIndex(data, 0, std::bit_cast<int64_t>(d));
 
 		return result;
 	}

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <array>
 #include <cstdint>
 
 #include "fdbserver/coordinator/CoordinationServer.h"
@@ -581,10 +582,10 @@ struct LeaderRegisterCollection {
 
 	explicit LeaderRegisterCollection(OnDemandStore* pStore) : actors(false), pStore(pStore) {}
 
-	static Future<Void> init(LeaderRegisterCollection* self) {
-		if (!self->pStore->exists())
+	Future<Void> init() {
+		if (!pStore->exists())
 			co_return;
-		OnDemandStore& store = *self->pStore;
+		OnDemandStore& store = *pStore;
 		Future<Standalone<RangeResultRef>> forwardingInfoF = store->readRange(fwdKeys);
 		Future<Standalone<RangeResultRef>> forwardingTimeF = store->readRange(fwdTimeKeys);
 		co_await (success(forwardingInfoF) && success(forwardingTimeF));
@@ -594,11 +595,11 @@ struct LeaderRegisterCollection {
 			LeaderInfo forwardInfo;
 			forwardInfo.forward = true;
 			forwardInfo.serializedInfo = forwardingInfo[i].value;
-			self->forward[forwardingInfo[i].key.removePrefix(fwdKeys.begin)] = forwardInfo;
+			forward[forwardingInfo[i].key.removePrefix(fwdKeys.begin)] = forwardInfo;
 		}
 		for (int i = 0; i < forwardingTime.size(); i++) {
 			double time = BinaryReader::fromStringRef<double>(forwardingTime[i].value, Unversioned());
-			self->forwardStartTime[forwardingTime[i].key.removePrefix(fwdTimeKeys.begin)] = time;
+			forwardStartTime[forwardingTime[i].key.removePrefix(fwdTimeKeys.begin)] = time;
 		}
 	}
 
@@ -626,31 +627,26 @@ struct LeaderRegisterCollection {
 	// When the lead coordinator changes, store the new connection ID in the "fwd" keyspace.
 	// If a request arrives using an old connection id, resend it to the new coordinator using the stored connection id.
 	// Store when this change took place in the fwdTime keyspace.
-	static Future<Void> setForward(LeaderRegisterCollection* self,
-	                               KeyRef key,
-	                               ClusterConnectionString conn,
-	                               ForwardRequest req,
-	                               UID id) {
+	Future<Void> setForward(KeyRef key, ClusterConnectionString conn, ForwardRequest req, UID id) {
 		double forwardTime = now();
 		LeaderInfo forwardInfo;
 		forwardInfo.forward = true;
 		forwardInfo.serializedInfo = conn.toString();
-		self->forward[key] = forwardInfo;
-		self->forwardStartTime[key] = forwardTime;
-		OnDemandStore& store = *self->pStore;
+		forward[key] = forwardInfo;
+		forwardStartTime[key] = forwardTime;
+		OnDemandStore& store = *pStore;
 		store->set(KeyValueRef(key.withPrefix(fwdKeys.begin), conn.toString()));
 		store->set(KeyValueRef(key.withPrefix(fwdTimeKeys.begin), BinaryWriter::toValue(forwardTime, Unversioned())));
 		co_await store->commit();
 		// Do not process a forwarding request until after it has been made durable in case the coordinator restarts
-		self->getInterface(req.key, id).forward.send(req);
+		getInterface(req.key, id).forward.send(req);
 	}
 
 	LeaderElectionRegInterface& getInterface(KeyRef key, UID id) {
 		auto i = registerInterfaces.find(key);
 		if (i == registerInterfaces.end()) {
 			Key k = key;
-			Future<Void> a =
-			    wrap(this, k, LeaderRegister::run(makeReference<LeaderRegister>(registerInterfaces[k], k)), id);
+			Future<Void> a = wrap(k, LeaderRegister::run(makeReference<LeaderRegister>(registerInterfaces[k], k)), id);
 			if (a.isError())
 				throw a.getError();
 			ASSERT(!a.isReady());
@@ -661,7 +657,7 @@ struct LeaderRegisterCollection {
 		return i->value;
 	}
 
-	static Future<Void> wrap(LeaderRegisterCollection* self, Key key, Future<Void> actor, UID id) {
+	Future<Void> wrap(Key key, Future<Void> actor, UID id) {
 		Error e;
 		try {
 			// FIXME: Get worker ID here
@@ -674,7 +670,7 @@ struct LeaderRegisterCollection {
 				throw;
 			e = err;
 		}
-		self->registerInterfaces.erase(key);
+		registerInterfaces.erase(key);
 		if (e.code() != invalid_error_code)
 			throw e;
 	}
@@ -831,8 +827,7 @@ class LeaderServer {
 					    .detail("IncomingClusterKey", req.key);
 					req.reply.sendError(wrong_connection_file());
 				} else {
-					forwarders.add(LeaderRegisterCollection::setForward(
-					    &regs, req.key, ClusterConnectionString(req.conn.toString()), req, id));
+					forwarders.add(regs.setForward(req.key, ClusterConnectionString(req.conn.toString()), req, id));
 				}
 			}
 		}
@@ -852,7 +847,7 @@ public:
 	  : interf(interf), id(id), ccr(ccr), regs(pStore), forwarders(false) {}
 
 	Future<Void> run() {
-		co_await LeaderRegisterCollection::init(&regs);
+		co_await regs.init();
 		co_await race(serveCheckDescriptorMutableRequests(),
 		              serveOpenDatabaseRequests(),
 		              serveElectionResultRequests(),
@@ -872,6 +867,169 @@ Future<Void> leaderServer(LeaderElectionRegInterface interf,
                           Reference<IClusterConnectionRecord> ccr) {
 	LeaderServer server(interf, pStore, id, ccr);
 	co_await server.run();
+}
+
+static Future<bool> repairUninitializedCoordinatorQueue(std::string dataFolder) {
+	std::vector<Future<Reference<IAsyncFile>>> files;
+	files.reserve(2);
+	for (int i = 0; i < 2; ++i) {
+		files.push_back(IAsyncFileSystem::filesystem()->open(
+		    joinPath(dataFolder, format("%s%d.fdq", fileCoordinatorPrefix.c_str(), i)),
+		    IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED |
+		        IAsyncFile::OPEN_LOCK,
+		    0));
+	}
+	co_await waitForAllReady(files);
+	for (const auto& file : files) {
+		if (file.isError() && file.getError().code() != error_code_file_not_found) {
+			throw file.getError();
+		}
+	}
+	if (files[0].isError() == files[1].isError()) {
+		co_return false;
+	}
+	const int missing = files[0].isError() ? 0 : 1;
+	const int64_t survivingSize = co_await files[1 - missing].get()->size();
+	if (survivingSize != 0) {
+		co_return false;
+	}
+
+	Reference<IAsyncFile> part;
+	try {
+		part = co_await IAsyncFileSystem::filesystem()->open(
+		    joinPath(dataFolder, format("%s%d.fdq.part", fileCoordinatorPrefix.c_str(), missing)),
+		    IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED |
+		        IAsyncFile::OPEN_LOCK,
+		    0);
+	} catch (Error& e) {
+		if (e.code() == error_code_file_not_found) {
+			co_return false;
+		}
+		throw;
+	}
+	const int64_t partSize = co_await part->size();
+	if (partSize != 0) {
+		co_return false;
+	}
+
+	// The simulator can interrupt the two initial renames before either file receives data. A .part file also
+	// occurs during queue replacement, so this is only a simulation workaround, not a production recovery rule.
+	files.clear();
+	part.clear();
+	co_await IAsyncFileSystem::filesystem()->deleteFile(
+	    joinPath(dataFolder, format("%s%d.fdq", fileCoordinatorPrefix.c_str(), 1 - missing)), true);
+	TraceEvent(SevWarnAlways, "CoordinatorDiskQueueCreationInterrupted").detail("MissingFile", missing);
+	co_return true;
+}
+
+struct CoordinatorQueueTestFiles {
+	// Indexed by queue file number (0 or 1); nullptr means absent, "" means present but empty.
+	std::array<const char*, 2> finalFiles;
+	std::array<const char*, 2> partFiles;
+};
+
+static Future<Void> testCoordinatorQueueRepair(std::string folder, CoordinatorQueueTestFiles files, bool expectRepair) {
+	platform::createDirectory(folder);
+	std::array<const char*, 4> contents = {
+		files.finalFiles[0], files.finalFiles[1], files.partFiles[0], files.partFiles[1]
+	};
+	std::array<std::string, 4> paths;
+	for (int i = 0; i < 4; ++i) {
+		paths[i] = joinPath(folder, format("%s%d.fdq%s", fileCoordinatorPrefix.c_str(), i % 2, i < 2 ? "" : ".part"));
+		if (contents[i] != nullptr) {
+			Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(
+			    paths[i],
+			    IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
+			        IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO,
+			    0600);
+			const std::string value(contents[i]);
+			if (!value.empty()) {
+				co_await file->write(value.data(), value.size(), 0);
+			}
+			co_await file->sync();
+		}
+	}
+
+	const bool repaired = co_await repairUninitializedCoordinatorQueue(folder);
+	ASSERT(repaired == expectRepair);
+	if (repaired) {
+		contents[0] = nullptr;
+		contents[1] = nullptr;
+	}
+	for (int i = 0; i < 4; ++i) {
+		Reference<IAsyncFile> file;
+		try {
+			file = co_await IAsyncFileSystem::filesystem()->open(paths[i], IAsyncFile::OPEN_READONLY, 0);
+		} catch (Error& e) {
+			if (e.code() != error_code_file_not_found) {
+				throw;
+			}
+			ASSERT(contents[i] == nullptr);
+			continue;
+		}
+		ASSERT(contents[i] != nullptr);
+		const std::string expected(contents[i]);
+		const int64_t size = co_await file->size();
+		ASSERT(size == static_cast<int64_t>(expected.size()));
+		if (size != 0) {
+			std::string actual(expected.size(), '\0');
+			const int bytesRead = co_await file->read(actual.data(), actual.size(), 0);
+			ASSERT(bytesRead == static_cast<int>(expected.size()));
+			ASSERT(actual == expected);
+		}
+	}
+
+	if (repaired) {
+		{
+			OnDemandStore store(folder, deterministicRandom()->randomUniqueID(), fileCoordinatorPrefix);
+			const Optional<Value> value = co_await store->readValue("repair-test"_sr);
+			ASSERT(!value.present());
+			store->set(KeyValueRef("repair-test"_sr, "value"_sr));
+			co_await store->commit();
+			Future<Void> closed = store.onClosed();
+			store.close();
+			co_await closed;
+		}
+		{
+			OnDemandStore store(folder, deterministicRandom()->randomUniqueID(), fileCoordinatorPrefix);
+			const Optional<Value> value = co_await store->readValue("repair-test"_sr);
+			ASSERT(value == "value"_sr);
+			Future<Void> closed = store.onClosed();
+			store.close();
+			co_await closed;
+		}
+	}
+}
+
+TEST_CASE("/fdbserver/Coordination/incompleteQueue/repair") {
+	co_await testCoordinatorQueueRepair(joinPath(params.getDataDir(), "missing-0"),
+	                                    { .finalFiles = { nullptr, "" }, .partFiles = { "", nullptr } },
+	                                    true);
+	co_await testCoordinatorQueueRepair(joinPath(params.getDataDir(), "missing-1"),
+	                                    { .finalFiles = { "", nullptr }, .partFiles = { nullptr, "" } },
+	                                    true);
+}
+
+TEST_CASE("/fdbserver/Coordination/incompleteQueue/preserveFiles") {
+	co_await testCoordinatorQueueRepair(joinPath(params.getDataDir(), "both-missing"),
+	                                    { .finalFiles = { nullptr, nullptr }, .partFiles = { "", "" } },
+	                                    false);
+	co_await testCoordinatorQueueRepair(joinPath(params.getDataDir(), "both-present"),
+	                                    { .finalFiles = { "", "" }, .partFiles = { nullptr, nullptr } },
+	                                    false);
+	for (int missing = 0; missing < 2; ++missing) {
+		CoordinatorQueueTestFiles contents{ .finalFiles = { "", "" }, .partFiles = { nullptr, nullptr } };
+		contents.finalFiles[missing] = nullptr;
+		co_await testCoordinatorQueueRepair(
+		    joinPath(params.getDataDir(), format("missing-part-%d", missing)), contents, false);
+		contents.partFiles[missing] = "data";
+		co_await testCoordinatorQueueRepair(
+		    joinPath(params.getDataDir(), format("nonempty-part-%d", missing)), contents, false);
+		contents.partFiles[missing] = "";
+		contents.finalFiles[1 - missing] = "data";
+		co_await testCoordinatorQueueRepair(
+		    joinPath(params.getDataDir(), format("nonempty-final-%d", missing)), contents, false);
+	}
 }
 
 static Future<Void> coordinationServerOnce(std::string dataFolder,
@@ -959,7 +1117,12 @@ static Future<Void> coordinationServerOnce(std::string dataFolder,
 			co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "0.fdq"),
 			                                                    true);
 		}
-		if (repairedIncompleteQueue != nullptr) {
+		if (repairedIncompleteQueue != nullptr && fdbSimulationPolicyState().restarted) {
+			*repairedIncompleteQueue = true;
+		}
+	} else if (g_network->isSimulated() && err.code() == error_code_file_not_found) {
+		if (co_await repairUninitializedCoordinatorQueue(dataFolder)) {
+			ASSERT(repairedIncompleteQueue != nullptr);
 			*repairedIncompleteQueue = true;
 		}
 	}
@@ -985,7 +1148,7 @@ static Future<Void> restartCoordinationServer(std::string dataFolder, Reference<
 }
 
 Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
-	if (g_network->isSimulated() && fdbSimulationPolicyState().restarted) {
+	if (g_network->isSimulated()) {
 		return restartCoordinationServer(dataFolder, ccr);
 	}
 	return coordinationServerOnce(dataFolder, ccr, nullptr);

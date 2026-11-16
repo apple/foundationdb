@@ -143,6 +143,9 @@ public:
 	PTreeFinger(PTreeFinger&& f) { *this = f; }
 
 	PTreeFinger& operator=(PTreeFinger const& f) {
+		if (this == &f) {
+			return *this;
+		}
 		size_ = f.size_;
 		bound_sz_ = f.bound_sz_;
 		std::copy(f.entries_, f.entries_ + size_, entries_);
@@ -150,6 +153,9 @@ public:
 	}
 
 	PTreeFinger& operator=(PTreeFinger&& f) {
+		if (this == &f) {
+			return *this;
+		}
 		size_ = std::exchange(f.size_, 0);
 		bound_sz_ = f.bound_sz_;
 		std::copy(f.entries_, f.entries_ + size_, entries_);

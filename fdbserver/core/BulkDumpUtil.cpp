@@ -22,30 +22,29 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/S3Client.h"
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
-#include "fdbserver/core/StorageMetrics.h"
+#include "flow/UnitTest.h"
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
-                                 const BulkDumpState& bulkDumpState) {
-	StorageServerInterface targetServer;
+                                 const BulkDumpState& bulkDumpState,
+                                 const std::string& targetDcId) {
+	// The target server uploads the dumped files, so its DC must reach the destination.
+	// An empty targetDcId means the cluster has no region configuration.
+	auto targetDc = targetDcId.empty() ? locations.begin() : locations.find(targetDcId);
+	ASSERT(targetDc != locations.end() && !targetDc->second.empty());
+	StorageServerInterface targetServer =
+	    targetDc->second[deterministicRandom()->randomInt(0, targetDc->second.size())];
+
 	std::vector<UID> checksumServers;
-	int dcid = 0;
 	for (const auto& [_, dcServers] : locations) {
-		if (dcid == 0) {
-			const int idx = deterministicRandom()->randomInt(0, dcServers.size());
-			targetServer = dcServers[idx];
-		}
-		for (int i = 0; i < dcServers.size(); i++) {
-			if (dcServers[i].id() == targetServer.id()) {
-				ASSERT_WE_THINK(dcid == 0);
-			} else {
-				checksumServers.push_back(dcServers[i].id());
+		for (const auto& ssi : dcServers) {
+			if (ssi.id() != targetServer.id()) {
+				checksumServers.push_back(ssi.id());
 			}
 		}
-		dcid++;
 	}
 	return SSBulkDumpTask(targetServer, checksumServers, bulkDumpState);
 }
@@ -79,95 +78,6 @@ std::pair<BulkLoadFileSet, BulkLoadFileSet> getLocalRemoteFileSetSetting(Version
 	BulkLoadFileSet fileSetRemote(
 	    rootRemote, relativeFolder, manifestFileName, dataFileName, byteSampleFileName, BulkLoadChecksum());
 	return std::make_pair(fileSetLocal, fileSetRemote);
-}
-
-// Generate SST file given the input sortedKVS to the input filePath.
-// TODO(BulkDump): This copy of sortedKVS can be a slow task if data is large.
-void writeKVSToSSTFile(std::string filePath, std::map<Key, Value>& sortedKVS, UID logId) {
-	const std::string absFilePath = abspath(filePath);
-	// Check file
-	if (fileExists(absFilePath)) {
-		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
-		    .detail("Reason", "exist old File when writeKVSToSSTFile")
-		    .detail("DataFilePathLocal", absFilePath);
-		ASSERT_WE_THINK(false);
-		throw retry();
-	}
-	// Dump data to file
-	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
-	sstWriter->open(absFilePath);
-	for (const auto& [key, value] : sortedKVS) {
-		sstWriter->write(key, value); // assuming sorted
-	}
-	if (!sstWriter->finish()) {
-		// Unexpected: having data but failed to finish
-		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
-		    .detail("Reason", "failed to finish data sst writer when writeKVSToSSTFile")
-		    .detail("DataFilePath", absFilePath);
-		ASSERT_WE_THINK(false);
-		throw retry();
-	}
-	return;
-}
-
-Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
-                                                      std::shared_ptr<RangeDumpRawData> rangeDumpRawData,
-                                                      BulkLoadFileSet localFileSet,
-                                                      BulkLoadFileSet remoteFileSet,
-                                                      BulkLoadByteSampleSetting byteSampleSetting,
-                                                      Version dumpVersion,
-                                                      KeyRange dumpRange,
-                                                      BulkLoadType dumpType,
-                                                      BulkLoadTransportMethod transportMethod) {
-	// Step 1: Clean up local folder
-	resetFileFolder((abspath(localFileSet.getFolder())));
-
-	// Step 2: Dump data to file
-	bool containDataFile = false;
-	if (!rangeDumpRawData->kvs.empty()) {
-		writeKVSToSSTFile(abspath(localFileSet.getDataFileFullPath()), rangeDumpRawData->kvs, logId);
-		containDataFile = true;
-	} else {
-		ASSERT(rangeDumpRawData->sampled.empty());
-		containDataFile = false;
-	}
-
-	// Step 3: Dump sample to file
-	bool containByteSampleFile = false;
-	if (!rangeDumpRawData->sampled.empty()) {
-		writeKVSToSSTFile(abspath(localFileSet.getBytesSampleFileFullPath()), rangeDumpRawData->sampled, logId);
-		containByteSampleFile = true;
-	} else {
-		containByteSampleFile = false;
-	}
-
-	// Step 4: Generate manifest file
-	if (fileExists(abspath(localFileSet.getManifestFileFullPath()))) {
-		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
-		    .detail("Reason", "exist old manifestFile")
-		    .detail("ManifestFilePathLocal", abspath(localFileSet.getManifestFileFullPath()));
-		ASSERT_WE_THINK(false);
-		throw retry();
-	}
-	BulkLoadFileSet fileSetRemote(remoteFileSet.getRootPath(),
-	                              remoteFileSet.getRelativePath(),
-	                              remoteFileSet.getManifestFileName(),
-	                              containDataFile ? remoteFileSet.getDataFileName() : std::string(),
-	                              containByteSampleFile ? remoteFileSet.getByteSampleFileName() : std::string(),
-	                              BulkLoadChecksum());
-	BulkLoadManifest manifestMetadata(fileSetRemote,
-	                                  dumpRange.begin,
-	                                  dumpRange.end,
-	                                  dumpVersion,
-	                                  rangeDumpRawData->kvsBytes,
-	                                  rangeDumpRawData->kvs.size(),
-	                                  byteSampleSetting,
-	                                  dumpType,
-	                                  transportMethod);
-	std::string manifestStr = manifestMetadata.toString();
-	std::shared_ptr<std::string> manifest = std::make_shared<std::string>(std::move(manifestStr));
-	co_await writeBulkFileBytes(abspath(localFileSet.getManifestFileFullPath()), manifest);
-	co_return manifestMetadata;
 }
 
 // Validate the invariant of filenames. Source is the file stored locally. Destination is the file going to move to.
@@ -329,4 +239,53 @@ Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpSta
 		}
 		co_await tr.onError(err);
 	}
+}
+
+TEST_CASE("/BulkDumpUtil/getSSBulkDumpTask/TargetDc") {
+	auto makeServer = []() {
+		StorageServerInterface ssi;
+		ssi.uniqueID = deterministicRandom()->randomUniqueID();
+		return ssi;
+	};
+	auto inDc = [](const std::vector<StorageServerInterface>& dcServers, const UID& id) {
+		for (const auto& ssi : dcServers) {
+			if (ssi.id() == id) {
+				return true;
+			}
+		}
+		return false;
+	};
+	auto isChecksumServer = [](const std::vector<UID>& checksumServers, const UID& id) {
+		for (const auto& checksumServer : checksumServers) {
+			if (checksumServer == id) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	// "mr" sorts before "pv", so map order alone would always pick the remote region.
+	std::map<std::string, std::vector<StorageServerInterface>> locations;
+	locations["mr"] = { makeServer(), makeServer() };
+	locations["pv"] = { makeServer(), makeServer(), makeServer() };
+	const size_t totalServers = locations["mr"].size() + locations["pv"].size();
+
+	BulkDumpState jobState;
+
+	// The target is drawn from the requested DC, not from map order.
+	SSBulkDumpTask primaryTask = getSSBulkDumpTask(locations, jobState, "pv");
+	ASSERT(inDc(locations["pv"], primaryTask.targetServer.id()));
+	// Every other replica, in both DCs, becomes a checksum server, and the target never does.
+	ASSERT(primaryTask.checksumServers.size() == totalServers - 1);
+	ASSERT(!isChecksumServer(primaryTask.checksumServers, primaryTask.targetServer.id()));
+
+	SSBulkDumpTask remoteTask = getSSBulkDumpTask(locations, jobState, "mr");
+	ASSERT(inDc(locations["mr"], remoteTask.targetServer.id()));
+	ASSERT(remoteTask.checksumServers.size() == totalServers - 1);
+
+	// An empty targetDcId means no region configuration; any DC is acceptable.
+	SSBulkDumpTask anyTask = getSSBulkDumpTask(locations, jobState, "");
+	ASSERT(inDc(locations["mr"], anyTask.targetServer.id()) || inDc(locations["pv"], anyTask.targetServer.id()));
+
+	return Void();
 }

@@ -121,6 +121,7 @@ Future<Void> ResolutionBalancer::resolutionBalancing() {
 		while (!resolverChanges.get().empty())
 			co_await resolverChanges.onChange();
 		std::vector<Future<ResolutionMetricsReply>> futures;
+		futures.reserve(resolvers.size());
 		for (auto& p : resolvers)
 			futures.push_back(
 			    brokenPromiseToNever(p.metrics.getReply(ResolutionMetricsRequest(), TaskPriority::ResolutionMetrics)));

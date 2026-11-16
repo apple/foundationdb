@@ -91,6 +91,9 @@ private:
 
 		node(const node&) = delete; // delete
 		node& operator=(const node& other) {
+			if (this == &other) {
+				return *this;
+			}
 			m_is_leaf = other.m_is_leaf;
 			m_is_inline = other.m_is_inline;
 			m_inline_length = other.m_inline_length;
@@ -237,10 +240,7 @@ public:
 		iterator() : m_pointee(nullptr) {}
 		iterator(const iterator& r) : m_pointee(r.m_pointee) {}
 		explicit(false) iterator(node* p) : m_pointee(p) {}
-		iterator& operator=(const iterator& r) {
-			m_pointee = r.m_pointee;
-			return *this;
-		}
+		iterator& operator=(const iterator& r) = default;
 		~iterator() = default;
 
 		const iterator& operator++();

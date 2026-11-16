@@ -1,5 +1,5 @@
 /*
- * StreamCipher.actor.cpp
+ * StreamCipher.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,40 +23,12 @@
 #include "flow/IRandom.h"
 #include "flow/ITrace.h"
 #include "flow/UnitTest.h"
+#include "flow/network.h"
 #include <memory>
+#include <vector>
 
-UID StreamCipherKey::globalKeyId;
 std::unordered_map<UID, EVP_CIPHER_CTX*> StreamCipher::ctxs;
 std::unordered_map<UID, StreamCipherKey*> StreamCipherKey::cipherKeys;
-std::unique_ptr<StreamCipherKey> StreamCipherKey::globalKey;
-
-bool StreamCipherKey::isGlobalKeyPresent() {
-	return StreamCipherKey::globalKey.get() != nullptr;
-}
-
-void StreamCipherKey::allocGlobalCipherKey() {
-	if (StreamCipherKey::isGlobalKeyPresent()) {
-		return;
-	}
-	StreamCipherKey::globalKeyId = deterministicRandom()->randomUniqueID();
-	StreamCipherKey::globalKey = std::make_unique<StreamCipherKey>(AES_256_KEY_LENGTH);
-	StreamCipherKey::cipherKeys[StreamCipherKey::globalKeyId] = StreamCipherKey::globalKey.get();
-}
-
-void StreamCipherKey::initializeGlobalRandomTestKey() {
-	if (!StreamCipherKey::isGlobalKeyPresent()) {
-		StreamCipherKey::allocGlobalCipherKey();
-	}
-	StreamCipherKey::globalKey.get()->initializeRandomTestKey();
-}
-
-StreamCipherKey const* StreamCipherKey::getGlobalCipherKey() {
-	if (!StreamCipherKey::isGlobalKeyPresent()) {
-		StreamCipherKey::allocGlobalCipherKey();
-	}
-	ASSERT(StreamCipherKey::isGlobalKeyPresent());
-	return globalKey.get();
-}
 
 void StreamCipherKey::cleanup() noexcept {
 	for (const auto& [_cipherId, cipherKey] : cipherKeys) {
@@ -189,8 +161,8 @@ void forceLinkStreamCipherTests() {}
 // Tests both encryption and decryption of random data
 // using the StreamCipher class
 TEST_CASE("flow/StreamCipher") {
-	StreamCipherKey::initializeGlobalRandomTestKey();
-	StreamCipherKey const* key = StreamCipherKey::getGlobalCipherKey();
+	StreamCipherKey key(AES_256_KEY_LENGTH);
+	key.initializeRandomTestKey();
 
 	StreamCipher::IV iv;
 	deterministicRandom()->randomBytes(iv.data(), iv.size());
@@ -205,7 +177,7 @@ TEST_CASE("flow/StreamCipher") {
 	    .detail("PlaintextSize", plaintext.size())
 	    .detail("AESBlockSize", AES_BLOCK_SIZE);
 	{
-		EncryptionStreamCipher encryptor(key, iv);
+		EncryptionStreamCipher encryptor(&key, iv);
 		int index = 0;
 		int encryptedOffset = 0;
 		while (index < plaintext.size()) {
@@ -225,7 +197,7 @@ TEST_CASE("flow/StreamCipher") {
 	}
 
 	{
-		DecryptionStreamCipher decryptor(key, iv);
+		DecryptionStreamCipher decryptor(&key, iv);
 		int index = 0;
 		int decryptedOffset = 0;
 		const int payloadSize = ciphertext.size() - GCM_TAG_LEN;

@@ -126,6 +126,20 @@ if(NOT OPEN_FOR_IDE AND NOT USE_SANITIZER)
     DISABLE_LOG_DUMP
   )
 
+  add_fdbclient_test(
+    NAME python_native_cdc_tests
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/tests/native_cdc_tests.py
+            --cluster-file @CLUSTER_FILE@ --verbose
+  )
+  set_property(TEST python_native_cdc_tests APPEND PROPERTY ENVIRONMENT
+    "FDB_KNOB_enable_native_cdc=true")
+
+  add_fdbclient_test(
+    NAME python_native_cdc_legacy_api_tests
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/tests/native_cdc_tests.py
+            --cluster-file @CLUSTER_FILE@ --api-version 740 --verbose
+  )
+
   # FIXME Windows support
   set(PYPKG_TEST_DIR "${CMAKE_BINARY_DIR}/pypkg-test-venv")
   set(PYPKG_TEST_PY3 "${PYPKG_TEST_DIR}/bin/python3")

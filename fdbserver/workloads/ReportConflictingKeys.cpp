@@ -83,14 +83,13 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	// disable the default timeout setting
 	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
 
-	// Copied from tester.actor.cpp, added parameter to determine the key's length
 	Key keyForIndex(int n) {
 		double p = (double)n / nodeCount;
 		// 8 bytes for Cid_* suffix of each client
 		int paddingLen = keyBytes - 8 - keyPrefix.size();
 		// left padding by zero, each client has different prefix
 		Key prefixWithClientId = StringRef(format("Cid_%04d", clientId)).withPrefix(keyPrefix);
-		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p)).withPrefix(prefixWithClientId);
+		return StringRef(format("%0*llx", paddingLen, std::bit_cast<uint64_t>(p))).withPrefix(prefixWithClientId);
 	}
 
 	void addRandomReadConflictRange(ReadYourWritesTransaction* tr, std::vector<KeyRange>* readConflictRanges) {
@@ -134,8 +133,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 
 	Future<Void> conflictingClient(Database cx, ReportConflictingKeysWorkload* self) {
 
-		Reference<ReadYourWritesTransaction> tr1(new ReadYourWritesTransaction(cx));
-		Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
+		auto tr1 = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr2 = makeReference<ReadYourWritesTransaction>(cx);
 		std::vector<KeyRange> readConflictRanges;
 		std::vector<KeyRange> writeConflictRanges;
 

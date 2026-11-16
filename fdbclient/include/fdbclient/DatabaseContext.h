@@ -21,6 +21,7 @@
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
 #include "fdbclient/Notified.h"
+#include "fdbclient/ClientLocationCache.h"
 #include "flow/ApiVersion.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
@@ -31,6 +32,7 @@
 #include <compare>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -60,17 +62,6 @@ private:
 	DatabaseContext* cx;
 	StorageServerInfo(DatabaseContext* cx, StorageServerInterface const& interf, LocalityData const& locality)
 	  : ReferencedInterface<StorageServerInterface>(interf, locality), cx(cx) {}
-};
-
-struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
-	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
-	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
-	  : Locations(v) {}
-	LocationInfo(const LocationInfo&) = delete;
-	LocationInfo(LocationInfo&&) = delete;
-	LocationInfo& operator=(const LocationInfo&) = delete;
-	LocationInfo& operator=(LocationInfo&&) = delete;
-	Reference<Locations> locations() { return Reference<Locations>::addRef(this); }
 };
 
 using CommitProxyInfo = ModelInterface<CommitProxyInterface, ProxyCpuMetric>;
@@ -162,14 +153,6 @@ struct MutationAndVersionStream {
 struct EndpointFailureInfo {
 	double startTime = 0;
 	double lastRefreshTime = 0;
-};
-
-struct KeyRangeLocationInfo {
-	KeyRange range;
-	Reference<LocationInfo> locations;
-
-	KeyRangeLocationInfo() = default;
-	KeyRangeLocationInfo(KeyRange range, Reference<LocationInfo> locations) : range(range), locations(locations) {}
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
@@ -292,6 +275,9 @@ public:
 
 	// Increases reference count to the given watch. Returns the number of references to the watch.
 	int32_t increaseWatchRefCount(KeyRef key, const Version& version);
+
+	// Gets the number of entries in the watch reference count map
+	size_t getWatchRefCountEntryCount() const { return watchCounterMap.size(); }
 
 	// Decreases reference count to the given watch. If the reference count is dropped to 0, the watch metadata will be
 	// removed. Returns the number of references to the watch.
@@ -416,11 +402,14 @@ public:
 	ClientStatusUpdater clientStatusUpdater;
 
 	// Cache of location information
-	int locationCacheSize;
-	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
+	ClientLocationCache locationCache;
 	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
 
 	std::map<UID, StorageServerInfo*> server_interf;
+
+	// Periodically samples FlowTransport per-address connect-failed counts and evicts
+	// location-cache entries for any address whose count advanced (a dead/flapping peer).
+	Future<Void> locationCachePeerEvictor;
 
 	// map from ssid -> tss interface
 	std::unordered_map<UID, StorageServerInterface> tssMapping;

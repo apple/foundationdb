@@ -82,7 +82,7 @@ def take_movekeys_lock(db):
     Disable DD and take ownership of MoveKeysLock.
 
     Required before writing to serverKeys/keyServers. This is exactly what
-    FDB's internal code does (see MoveKeys.actor.cpp).
+    FDB's internal code does (see fdbserver/core/MoveKeys.cpp).
 
     Returns (our_owner_uid_bytes, previous_dd_mode_value) so the caller can
     restore the prior mode on release.

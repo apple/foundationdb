@@ -19,6 +19,8 @@
  */
 
 #include <algorithm>
+#include <limits>
+#include <unordered_set>
 
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
@@ -41,6 +43,8 @@
 #include "DDTeamCollection.h"
 #include "DataDistribution.h"
 #include "DDRelocationQueue.h"
+#include "NativeCdcBalancer.h"
+#include "NativeCdcRetagCleanup.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.h"
@@ -135,7 +139,7 @@ enum class DDAuditContext : uint8_t {
 };
 
 struct DDAudit {
-	explicit(false) DDAudit(AuditStorageState coreState)
+	explicit DDAudit(AuditStorageState coreState)
 	  : coreState(coreState), actors(true), foundError(false), auditStorageAnyChildFailed(false), retryCount(0),
 	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0), overallSkippedDoAuditCount(0),
 	    remainingBudgetForAuditTasks(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX), context(DDAuditContext::INVALID) {}
@@ -306,12 +310,13 @@ Future<Void> monitorBackupPartitionRequired(Database cx, KeyRangeMap<ShardTracke
 						tr.set(backupPartitionListKey, encodeBackupPartitionListValue(partitions));
 						tr.clear(backupPartitionRequiredKey);
 						co_await tr.commit();
-						TraceEvent("DDBackupPartitionsComputed", ddId).detail("NumPartitions", partitions.size());
+						TraceEvent("RangePartitionedBWPartitionsComputedByDD", ddId)
+						    .detail("NumPartitions", partitions.size());
 					} else {
 						tr.clear(backupPartitionListKey);
 						tr.clear(backupPartitionRequiredKey);
 						co_await tr.commit();
-						TraceEvent("DDBackupPartitionsCleared", ddId);
+						TraceEvent("RangePartitionedBWPartitionsClearedByDD", ddId);
 					}
 					break;
 				} catch (Error& e) {
@@ -381,9 +386,30 @@ struct DDBulkLoadJobManager {
 	bool isValid() const { return jobState.isValid(); }
 };
 
+// The window restarts whenever the skipped count falls below its lowest value so far, so a DC that is catching up
+// (e.g. after usable_regions goes from 1 to 2) is not failed while it is making progress.
+struct BulkDumpSkipTracker {
+	Optional<double> stalledSince;
+	size_t lowestSkipped = 0;
+
+	bool shouldFail(size_t skipped, double currentTime, double failAfterSec) {
+		if (skipped == 0) {
+			stalledSince.reset();
+			return false;
+		}
+		if (!stalledSince.present() || skipped < lowestSkipped) {
+			stalledSince = currentTime;
+			lowestSkipped = skipped;
+		}
+		return failAfterSec > 0 && currentTime - stalledSince.get() >= failAfterSec;
+	}
+};
+
 struct DDBulkDumpJobManager {
 	BulkDumpState jobState;
 	std::map<Key, BulkLoadManifest> taskManifestMap;
+	BulkDumpSkipTracker skipTracker;
+	bool failed = false; // set once an Error range is seen or written; stops scheduling
 
 	DDBulkDumpJobManager() = default;
 	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -430,6 +456,7 @@ public:
 	FlowLock auditStorageLocationMetadataLaunchingLock;
 	FlowLock auditStorageSsShardLaunchingLock;
 	FlowLock auditStorageRestoreLaunchingLock;
+	FlowLock auditStorageRangeDigestLaunchingLock;
 	Promise<Void> auditStorageInitialized;
 	bool auditStorageInitStarted;
 
@@ -444,6 +471,12 @@ public:
 	std::string bulkLoadFolder;
 
 	Optional<DDBulkLoadJobManager> bulkLoadJobManager;
+
+	// Bulkload tasks that have reached the terminal Error phase and have already been reported.
+	// scheduleBulkLoadTasks() rescans the task metadata every DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC and an
+	// Error-phase task is never erased, so without this the same failure is re-logged for the life of the
+	// cluster. Reset per DD generation, which is intended: a new DD should report the current state once.
+	std::unordered_set<UID> reportedErrorBulkLoadTasks;
 
 	bool bulkDumpEnabled = false;
 	ParallelismLimitor bulkDumpParallelismLimitor;
@@ -492,7 +525,8 @@ public:
 		                 lock,
 		                 configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
 		                 context->ddEnabledState.get(),
-		                 SkipDDModeCheck::False));
+		                 SkipDDModeCheck::False,
+		                 configuration));
 	}
 
 	void initDcInfo() {
@@ -500,6 +534,18 @@ public:
 		auto dcIds = getDataDistributorDcIds(configuration.regions, activePrimaryDcId);
 		primaryDcId = std::move(dcIds.primary);
 		remoteDcIds = std::move(dcIds.remote);
+	}
+
+	// The DC whose storage servers perform bulkdump uploads, or empty when the cluster has no
+	// region configuration. Resolved per scheduling pass rather than cached so it follows a failover.
+	std::string bulkDumpTargetDcId() const {
+		// With usable_regions == 1 the remote DC is configured but holds no storage servers.
+		const bool useRemote = SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION && configuration.usableRegions > 1;
+		const std::vector<Optional<Key>>& dcIds = useRemote ? remoteDcIds : primaryDcId;
+		if (!dcIds.empty() && dcIds[0].present()) {
+			return dcIds[0].get().toString();
+		}
+		return std::string();
 	}
 
 	Future<Void> waitDataDistributorEnabled() const {
@@ -636,9 +682,25 @@ public:
 			    .setMaxFieldLength(-1)
 			    .detail("Conf", self->configuration.toString());
 
+			// Resolve the effective shard-location-metadata encoding target for
+			// this DD incarnation: DatabaseConfiguration is authoritative, with
+			// the legacy SHARD_ENCODE_LOCATION_METADATA knob as the fallback
+			// only when shard_metadata_format is UNSET. Publish it on
+			// ddEnabledState so every downstream write/move path reads one
+			// resolved value instead of the raw knob.
+			bool shardEncodeLocationMetadata = self->configuration.shardMetadataFormatIsEncoded().orDefault(
+			    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+			self->context->ddEnabledState->setShardEncodeLocationMetadata(shardEncodeLocationMetadata);
+			TraceEvent("DDInitShardEncodeTarget", self->ddId)
+			    .detail("ShardEncodeLocationMetadata", shardEncodeLocationMetadata)
+			    .detail("ConfigFormatUnset",
+			            self->configuration.shardMetadataFormat == DatabaseConfiguration::ShardMetadataFormat::UNSET)
+			    .detail("Knob", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+
 			if (self->configuration.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
-			    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			    !shardEncodeLocationMetadata) {
 				TraceEvent(SevError, "PhysicalShardNotEnabledForShardedRocks", self->ddId)
+				    .detail("Reason", "sharded-rocksdb requires new-format shard-location metadata")
 				    .detail("EnableServerKnob", "SHARD_ENCODE_LOCATION_METADATA");
 				throw internal_error();
 			}
@@ -705,6 +767,7 @@ public:
 			    .detail("TotalBytes", 0)
 			    .detail("UnhealthyServers", 0)
 			    .detail("HighestPriority", 0)
+			    .detail("HighestTeamPriority", -1)
 			    .trackLatest(self->totalDataInFlightEventHolder->trackingKey);
 			TraceEvent("TotalDataInFlight", self->ddId)
 			    .detail("Primary", false)
@@ -769,7 +832,8 @@ public:
 		}
 
 		std::vector<Key> customBoundaries;
-		if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+		if (bulkLoadIsEnabled(self->initData->bulkLoadMode,
+		                      self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 			// Bulk load does not allow boundary change
 			TraceEvent(SevInfo, "DDInitCustomRangeConfigDisabledByBulkLoadMode", self->ddId);
 		} else {
@@ -904,7 +968,7 @@ public:
 				    .detail("DataMove", meta.toString());
 				cancelledMoves++;
 			} else if (it.value()->isCancelled() ||
-			           (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
+			           (it.value()->valid && !self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
@@ -1102,34 +1166,31 @@ Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<Data
 	}
 }
 
-// Replace a task with two tasks covering the same manifests, halving the key range each covers.
+// Derive the two tasks that replace an unplaceable one, each covering half its key range and the manifests
+// belonging to that half. Returns an empty Optional if the task cannot be narrowed: it holds a single
+// manifest, or no manifest boundary falls strictly inside its range.
 //
 // This is the recovery for a placement failure the task's range itself causes: src is the union of the
 // owners of every shard the range spans, and a destination team must be disjoint from src, so a range
 // spanning enough of the fleet has no legal destination. Re-dispatch cannot clear that, because every
 // attempt presents the same range and recomputes the same src. Narrower ranges span fewer shards and so
-// have narrower src.
+// have narrower src. Halving bounds recursion without a counter.
 //
-// The children's ranges tile the parent's and both writes land in one transaction, so no version exists in
-// which the parent's range is unowned, or owned by anything but tasks whose union is the parent. That is
-// the difference from erasing the task and relying on something to rebuild it, which drops the range's data
-// if nothing does. Because the job's manifests tile the key space, splitting the manifest list at the same
-// key that splits the range gives each child exactly the manifests covering its own range.
-//
-// Returns false without writing anything if the task cannot be narrowed -- it holds a single manifest, or no
-// manifest boundary falls inside its range -- and also if the parent turns out to be no longer ours, which is
-// not a statement about the range. Halving bounds recursion without a counter.
-Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskState parent) {
+// The children's ranges tile the parent's, so the caller must write both in a single transaction: then no
+// version exists in which the parent's range is unowned, or owned by anything but tasks whose union is the
+// parent -- that is the difference from erasing the task and relying on something to rebuild it, which drops
+// the range's data if nothing does.
+Optional<std::vector<BulkLoadTaskState>> deriveSplitBulkLoadTasks(const BulkLoadTaskState& parent, UID logId) {
 	std::vector<BulkLoadManifest> manifests = parent.getManifests();
 	if (manifests.size() < 2) {
 		// A single manifest is as narrow as a task gets, and a manifest can span an arbitrarily wide range,
 		// so this is reachable with a range covering the whole key space. Nothing here can place it: the
 		// cluster needs servers outside src, or the manifest needs to have been dumped more finely.
-		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", self->ddId)
+		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", logId)
 		    .detail("Reason", "Task holds a single manifest and cannot be narrowed")
 		    .detail("TaskRange", parent.getRange())
 		    .detail("TaskID", parent.getTaskId());
-		co_return false;
+		return {};
 	}
 	std::sort(manifests.begin(), manifests.end(), [](BulkLoadManifest const& a, BulkLoadManifest const& b) {
 		return a.getBeginKey() < b.getBeginKey();
@@ -1160,12 +1221,12 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	}
 	if (insideBoundaries.empty()) {
 		// Every manifest boundary is outside the parent's clipped range, so the range cannot be cut at one.
-		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", self->ddId)
+		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", logId)
 		    .detail("Reason", "No manifest split point lies inside the task's range")
 		    .detail("TaskRange", parent.getRange())
 		    .detail("TaskID", parent.getTaskId())
 		    .detail("ManifestCount", manifests.size());
-		co_return false;
+		return {};
 	}
 	int const half = insideBoundaries[insideBoundaries.size() / 2];
 	// The parent's range starts at or after its first manifest's begin key, so that key can never be
@@ -1192,7 +1253,7 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	ASSERT(children[0].getRange().begin == parent.getRange().begin);
 	ASSERT(children[0].getRange().end == children[1].getRange().begin);
 	ASSERT(children[1].getRange().end == parent.getRange().end);
-	// The writes below must be issued in ascending key order, so keep the guard next to the reason.
+	// The caller must issue the writes in ascending key order, so keep the guard next to the reason.
 	// krmSetRange reads oldValue at Snapshot::True on a plain Transaction, which has no read-your-writes,
 	// so each call is blind to the previous one's mutations and only their order makes the result correct.
 	// Each call emits clear(range); set(begin, value); set(end, oldValue). Ascending, the second call's
@@ -1201,6 +1262,18 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	// lands last and republishes the parent over the second child's range -- precisely the state the
 	// tiling comment above says cannot exist.
 	ASSERT(children[0].getRange().begin < children[1].getRange().begin);
+	return children;
+}
+
+// Install the derived children in place of the parent, in one transaction. Returns false without writing
+// anything if the task cannot be narrowed, and also if the parent turns out to be no longer ours, which is
+// not a statement about the range.
+Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskState parent) {
+	Optional<std::vector<BulkLoadTaskState>> derived = deriveSplitBulkLoadTasks(parent, self->ddId);
+	if (!derived.present()) {
+		co_return false;
+	}
+	std::vector<BulkLoadTaskState> const& children = derived.get();
 
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
@@ -1221,7 +1294,7 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 			    .detail("CommitVersion", tr.getCommittedVersion())
 			    .detail("TaskRange", parent.getRange())
 			    .detail("TaskID", parent.getTaskId())
-			    .detail("ManifestCount", manifests.size())
+			    .detail("ManifestCount", parent.getManifests().size())
 			    .detail("FirstRange", children[0].getRange())
 			    .detail("FirstTaskID", children[0].getTaskId())
 			    .detail("SecondRange", children[1].getRange())
@@ -1615,9 +1688,15 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 					// We do one metadata erase at a time to aviod unnecessary transaction conflicts
 					co_await eraseBulkLoadTask(self, bulkLoadTaskState.getRange(), bulkLoadTaskState.getTaskId());
 				} else if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
-					TraceEvent(SevWarnAlways, "DDBulkLoadTaskUnretriableError", self->ddId)
-					    .detail("Range", bulkLoadTaskState.getRange())
-					    .detail("TaskID", bulkLoadTaskState.getTaskId());
+					// Error is terminal and the metadata is deliberately left in place for the operator, so
+					// report each failed task once rather than on every rescan: the scan interval is seconds
+					// and nothing ever clears the entry, so re-logging continues for the cluster's life.
+					if (self->reportedErrorBulkLoadTasks.insert(bulkLoadTaskState.getTaskId()).second) {
+						TraceEvent(SevWarnAlways, "DDBulkLoadTaskUnretriableError", self->ddId)
+						    .detail("Range", bulkLoadTaskState.getRange())
+						    .detail("TaskID", bulkLoadTaskState.getTaskId())
+						    .detail("TotalErrorTasksReported", self->reportedErrorBulkLoadTasks.size());
+					}
 				} else {
 					ASSERT(bulkLoadTaskState.phase == BulkLoadPhase::Complete);
 				}
@@ -2141,7 +2220,7 @@ Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> self,
 		    localJobManifestFilePath,
 		    jobRange,
 		    self->ddId,
-		    /*output=*/self->bulkLoadJobManager.get().manifestEntryMap);
+		    /*manifestMap=*/self->bulkLoadJobManager.get().manifestEntryMap);
 		// It is possible that the bulkload job is using a data set that does not entirely contain the bulkload job
 		// range. In this case, we give up the bulkload job immediately without loading any range..
 		if (self->bulkLoadJobManager.get().jobState.getJobRange() != manifestMapRange) {
@@ -2218,8 +2297,7 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 						// No matter whether the task range is aligned with the manifest entry range, the task
 						// begin key must be in the manifestEntryMap. See manifestEntryMap definition for more
 						// details.
-						ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->find(task.getRange().begin) !=
-						       self->bulkLoadJobManager.get().manifestEntryMap->end());
+						ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->contains(task.getRange().begin));
 						if (task.onAnyPhase(
 						        { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error })) {
 							ASSERT(task.getRange().end == res[i + 1].key);
@@ -2565,10 +2643,11 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 		co_return;
 	}
 
-	// Only monitor if SHARD_ENCODE_LOCATION_METADATA is enabled (required for bulkload)
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	// Only monitor if the effective shard-location-metadata target is new
+	// format (required for bulkload)
+	if (!self->context->ddEnabledState->shardEncodeLocationMetadata()) {
 		TraceEvent(SevInfo, "DDBulkLoadModeMonitorSkipped", self->ddId)
-		    .detail("Reason", "SHARD_ENCODE_LOCATION_METADATA is disabled");
+		    .detail("Reason", "effective shard_metadata target is original");
 		co_return;
 	}
 
@@ -2593,7 +2672,8 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 				rd >> mode;
 			}
 
-			if (bulkLoadIsEnabled(mode) && !self->bulkLoadEnabled) {
+			if (bulkLoadIsEnabled(mode, self->context->ddEnabledState->shardEncodeLocationMetadata()) &&
+			    !self->bulkLoadEnabled) {
 				TraceEvent(SevInfo, "DDBulkLoadModeDynamicallyEnabled", self->ddId)
 				    .detail("UsableRegions", self->configuration.usableRegions);
 				self->bulkLoadEnabled = true;
@@ -2679,6 +2759,40 @@ Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 	self->bulkDumpParallelismLimitor.decrementTaskCounter();
 }
 
+// Marks ranges Error in the metadata so the failure is visible to pollers and survives a DD restart.
+Future<Void> markBulkDumpRangesFailed(Reference<DataDistributor> self, std::map<Key, KeyRange> rangeMap) {
+	const BulkDumpState errorState = self->bulkDumpJobManager.jobState.generateErrorMetadata();
+	const UID jobId = errorState.getJobId();
+	constexpr int rangesPerTransaction = 100;
+	Transaction tr(self->txnProcessor->context());
+	auto batchBegin = rangeMap.begin();
+	while (batchBegin != rangeMap.end()) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			auto it = batchBegin;
+			for (int n = 0; n < rangesPerTransaction && it != rangeMap.end(); ++n, ++it) {
+				const KeyRange& range = it->second;
+				RangeResult current = co_await krmGetRanges(&tr, bulkDumpPrefix, range);
+				for (int j = 0; j < static_cast<int>(current.size()) - 1; ++j) {
+					if (current[j].value.empty() || decodeBulkDumpState(current[j].value).getJobId() != jobId) {
+						throw bulkdump_task_outdated();
+					}
+				}
+				co_await krmSetRange(&tr, bulkDumpPrefix, range, bulkDumpStateValue(errorState));
+			}
+			co_await tr.commit();
+			batchBegin = it;
+			tr.reset();
+			continue;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	UID jobId = self->bulkDumpJobManager.jobState.getJobId();
 	KeyRange jobRange = self->bulkDumpJobManager.jobState.getJobRange();
@@ -2694,6 +2808,7 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	int rangeLocationIndex = 0;
 	std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations;
 	KeyRange taskRange;
+	std::map<Key, KeyRange> skippedRanges;
 	std::vector<Future<Void>> actors;
 	Transaction tr(cx);
 	while (beginKey < endKey) {
@@ -2722,7 +2837,11 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					    .detail("CurrentJob", bulkDumpState.getJobId());
 					throw bulkdump_task_outdated();
 				}
-				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
+				if (bulkDumpState.getPhase() == BulkDumpPhase::Error) {
+					self->bulkDumpJobManager.failed = true;
+				}
+				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete ||
+				    bulkDumpState.getPhase() == BulkDumpPhase::Error) {
 					TraceEvent(SevDebug, "DDBulkDumpJobScheduleJobSeeCompleteTask", self->ddId)
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
@@ -2745,11 +2864,28 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 				    .detail("BulkDumpRange", bulkDumpRange)
 				    .detail("BeginKey", bulkDumpResult[bulkDumpResultIndex].key)
 				    .detail("EndKey", rangeLocations.back().range.end);
+				const std::string targetDcId = self->bulkDumpTargetDcId();
 				rangeLocationIndex = 0;
 				for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
 					// Spawn task per shard
 					taskRange = rangeLocations[rangeLocationIndex].range;
 					ASSERT(!taskRange.empty());
+					// Skip rather than fall back to another region: the dumping server uploads the
+					// files, so a DC that cannot reach the destination would fail every task. The
+					// one exception is usable_regions == 1, handled in bulkDumpTargetDcId().
+					if (!targetDcId.empty()) {
+						const auto& servers = rangeLocations[rangeLocationIndex].servers;
+						auto targetDc = servers.find(targetDcId);
+						if (targetDc == servers.end() || targetDc->second.empty()) {
+							TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDc", self->ddId)
+							    .suppressFor(60.0)
+							    .detail("JobID", jobId)
+							    .detail("TargetDcId", targetDcId)
+							    .detail("SkippedRange", taskRange);
+							skippedRanges[taskRange.begin] = taskRange;
+							continue;
+						}
+					}
 					// Limit parallelism
 					while (true) {
 						if (self->bulkDumpParallelismLimitor.canStart()) {
@@ -2758,7 +2894,8 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 						co_await self->bulkDumpParallelismLimitor.waitUntilCounterChanged();
 					}
 					SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
-					                                        bulkDumpState.generateRangeTask(taskRange));
+					                                        bulkDumpState.generateRangeTask(taskRange),
+					                                        targetDcId);
 					// Issue task
 					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobSpawnRange", self->ddId)
 					    .detail("JobID", jobId)
@@ -2781,6 +2918,16 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 		co_await tr.onError(err);
 	}
 	co_await waitForAll(actors);
+	if (self->bulkDumpJobManager.skipTracker.shouldFail(
+	        skippedRanges.size(), now(), SERVER_KNOBS->DD_BULKDUMP_NO_TARGET_REPLICA_FAIL_SEC)) {
+		TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDcTimeout", self->ddId)
+		    .detail("JobID", jobId)
+		    .detail("TargetDcId", self->bulkDumpTargetDcId())
+		    .detail("SkippedRanges", skippedRanges.size())
+		    .detail("FailAfterSec", SERVER_KNOBS->DD_BULKDUMP_NO_TARGET_REPLICA_FAIL_SEC);
+		co_await markBulkDumpRangesFailed(self, skippedRanges);
+		self->bulkDumpJobManager.failed = true;
+	}
 	TraceEvent(SevInfo, "DDBulkDumpJobScheduleEnd", self->ddId).detail("JobId", jobId).detail("JobRange", jobRange);
 }
 
@@ -2810,7 +2957,8 @@ Future<bool> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
 					throw bulkdump_task_outdated();
 				}
 				if (bulkDumpState.getPhase() != BulkDumpPhase::Complete) {
-					ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
+					ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted ||
+					       bulkDumpState.getPhase() == BulkDumpPhase::Error);
 					co_return false;
 				}
 			}
@@ -2989,6 +3137,10 @@ Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 			co_await cancelBulkDumpJob(cx, jobId);
 			TraceEvent(SevInfo, "DDBulkDumpManagerMetadataCleared", self->ddId).detail("JobId", jobId);
 			break; // end
+		} else if (self->bulkDumpJobManager.failed) {
+			// Keep the metadata so the failure stays visible. Cancelling the job clears it, which ends this loop
+			// through bulkdump_task_outdated.
+			TraceEvent(SevWarnAlways, "DDBulkDumpJobFailed", self->ddId).suppressFor(60.0).detail("JobId", jobId);
 		} else {
 			// Schedule the job
 			co_await scheduleBulkDumpJob(self);
@@ -3026,7 +3178,11 @@ Future<Void> bulkDumpCore(Reference<DataDistributor> self, Future<Void> readyToS
 }
 
 void addDataDistributionActors(Reference<DataDistributor> self, std::vector<Future<Void>>& actors) {
-	if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+	actors.push_back(nativeCdcRetagCleanup(
+	    self->txnProcessor->context(), self->lock, self->context->ddEnabledState.get(), self->initialized.getFuture()));
+	actors.push_back(nativeCdcBalancer(
+	    self->txnProcessor->context(), self->lock, self->context->ddEnabledState.get(), self->initialized.getFuture()));
+	if (bulkLoadIsEnabled(self->initData->bulkLoadMode, self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 		TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
 		    .detail("UsableRegions", self->configuration.usableRegions);
 		self->bulkLoadEnabled = true;
@@ -3062,7 +3218,7 @@ void addDataDistributionActors(Reference<DataDistributor> self, std::vector<Futu
 Future<Void> dataDistribution(Reference<DataDistributor> self,
                               PromiseStream<GetMetricsListRequest> getShardMetricsList) {
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
-	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
+	cx->locationCache.setCapacity(SERVER_KNOBS->DD_LOCATION_CACHE_SIZE);
 	self->txnProcessor = makeReference<DDTxnProcessor>(cx);
 
 	TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Start");
@@ -3133,18 +3289,19 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			actors.push_back(self->pollMoveKeysLock());
 			actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
 
-			self->context->tracker = makeReference<DataDistributionTracker>(
-			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
-			                                       .distributorId = self->ddId,
-			                                       .readyToStart = self->initialized,
-			                                       .output = self->relocationProducer,
-			                                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
-			                                       .physicalShardCollection = self->physicalShardCollection,
-			                                       .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
-			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
-			                                       .shards = &shards,
-			                                       .trackerCancelled = &self->context->trackerCancelled,
-			                                       .usableRegions = self->configuration.usableRegions });
+			self->context->tracker = makeReference<DataDistributionTracker>(DataDistributionTrackerInitParams{
+			    .db = self->txnProcessor,
+			    .distributorId = self->ddId,
+			    .readyToStart = self->initialized,
+			    .output = self->relocationProducer,
+			    .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			    .physicalShardCollection = self->physicalShardCollection,
+			    .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
+			    .anyZeroHealthyTeams = anyZeroHealthyTeams,
+			    .shards = &shards,
+			    .trackerCancelled = &self->context->trackerCancelled,
+			    .usableRegions = self->configuration.usableRegions,
+			    .shardEncodeLocationMetadata = self->context->ddEnabledState->shardEncodeLocationMetadata() });
 			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(self->context->tracker,
 			                                                                 self->initData,
 			                                                                 getShardMetrics.getFuture(),
@@ -3379,9 +3536,9 @@ Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stream, Wo
 			    .detail("PeerAddress", stream.getEndpoint().getPrimaryAddress())
 			    .detail("Retry", snapReqRetry);
 			if (reply.getError().code() != error_code_request_maybe_delivered ||
-			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
+			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT) {
 				co_return ErrorOr<Void>(reply.getError());
-			else {
+			} else {
 				// retry for network failures with same snap UID to avoid snapshot twice
 				req = WorkerSnapRequest(req.snapPayload, req.snapUID, req.role);
 				co_await delay(snapRetryBackoff);
@@ -3469,7 +3626,7 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 
 			for (const auto& tlog : *tlogs) {
 				TraceEvent(SevDebug, "GetStatefulWorkersTLog").detail("Addr", tlog.address());
-				if (workersMap.find(tlog.address()) == workersMap.end()) {
+				if (!workersMap.contains(tlog.address())) {
 					TraceEvent(SevWarn, "MissingTLogWorkerInterface").detail("TlogAddress", tlog.address());
 					throw snap_tlog_failed();
 				}
@@ -3494,8 +3651,8 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 				// as we use primary addresses from storage and tlog interfaces above
 				NetworkAddress primary = worker.interf.address();
 				Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
-				if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end() ||
-				    (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
+				if (coordinatorsAddrSet.contains(primary) ||
+				    (secondary.present() && coordinatorsAddrSet.contains(secondary.get()))) {
 					if (result.contains(primary)) {
 						ASSERT(workersMap[primary].id() == result[primary].first.id());
 						result[primary].second.append(",coord");
@@ -3775,7 +3932,7 @@ Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req,
 		co_return;
 	}
 	// If there is only 1 team, unsafe to mark failed: team building can get stuck due to lack of servers left
-	if (self->teamCollection->teams.size() <= 1) {
+	if (self->teamCollection->teamCount() <= 1) {
 		TraceEvent("DDExclusionSafetyCheckNotEnoughTeams", self->ddId).log();
 		reply.safe = false;
 		req.reply.send(reply);
@@ -3829,9 +3986,9 @@ Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 			rep.storageMetricsList = result.get();
 		} else {
 			auto& metricVec = result.get();
-			if (metricVec.empty())
+			if (metricVec.empty()) {
 				rep.midShardSize = 0;
-			else {
+			} else {
 				rep.midShardSize = getMedianShardSize(metricVec.contents());
 			}
 		}
@@ -3912,6 +4069,11 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 	try {
 		ASSERT(audit != nullptr);
 		ASSERT(audit->coreState.ddId == self->ddId);
+		// Stop here if this data distributor lost the lock, or the audit was completed or taken over by another one:
+		// tasks dispatched for an audit that is over run against data that nothing keeps consistent. This covers the
+		// start of a generation only; tasks scheduled later within it are not re-checked.
+		co_await checkAuditRunningUnderLock(
+		    self->txnProcessor->context(), auditType, auditID, self->ddId, lockInfo, self->context->isDDEnabled());
 		loadAndDispatchAudit(self, audit);
 		TraceEvent(SevInfo, "DDAuditStorageCoreScheduled", self->ddId)
 		    .detail("Context", audit->getDDAuditContext())
@@ -3945,7 +4107,8 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			// Check audit persist progress to double check if any range omitted to be check
 			if (audit->coreState.getType() == AuditType::ValidateHA ||
 			    audit->coreState.getType() == AuditType::ValidateReplica ||
-			    audit->coreState.getType() == AuditType::ValidateRestore) {
+			    audit->coreState.getType() == AuditType::ValidateRestore ||
+			    audit->coreState.getType() == AuditType::RangeDigest) {
 				bool allFinish = co_await checkAuditProgressCompleteByRange(self->txnProcessor->context(),
 				                                                            audit->coreState.getType(),
 				                                                            audit->coreState.id,
@@ -3979,6 +4142,36 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 					    .detail("AuditType", auditType);
 					throw retry();
 				}
+			}
+			if (!audit->foundError && audit->coreState.getType() == AuditType::RangeDigest) {
+				// Combine the per-range digests into the cluster root and store it in the top-level
+				// audit record, which makes the root durable and readable via `get_audit_status`. This
+				// must happen while the phase is still Running: the per-range progress metadata is
+				// cleared once Complete is persisted, and the retry below re-enters runAuditStorage(),
+				// which requires Running.
+				RangeDigestSummary summary = co_await getRangeDigestSummary(
+				    self->txnProcessor->context(), audit->coreState.id, audit->coreState.range);
+				// Coverage guard: a fingerprint must never be reported over a partially-covered
+				// keyspace. If the persisted per-range digests do not tile the whole audit range (e.g. a
+				// shard was skipped because its team was briefly unavailable under data movement), retry
+				// rather than publish a root that silently omits keys.
+				if (!summary.complete) {
+					TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+					    .detail("Reason", "RangeDigestIncompleteCoverage")
+					    .detail("AuditID", auditID)
+					    .detail("IncompleteRange", summary.incompleteRange)
+					    .detail("RetryCount", audit->retryCount)
+					    .detail("AuditType", auditType);
+					throw retry();
+				}
+				audit->coreState.digest = summary.root.bytes();
+				audit->coreState.kvCount = summary.kvCount;
+				audit->coreState.byteCount = summary.byteCount;
+				TraceEvent(SevInfo, "DDAuditStorageRangeDigestRoot", self->ddId)
+				    .detail("AuditID", audit->coreState.id)
+				    .detail("Root", summary.root.toHex())
+				    .detail("KVCount", summary.kvCount)
+				    .detail("Bytes", summary.byteCount);
 			}
 			if (!audit->foundError) {
 				audit->coreState.setPhase(AuditPhase::Complete);
@@ -4122,7 +4315,7 @@ void runAuditStorage(Reference<DataDistributor> self,
 	if (auditState.getType() != AuditType::ValidateHA && auditState.getType() != AuditType::ValidateReplica &&
 	    auditState.getType() != AuditType::ValidateLocationMetadata &&
 	    auditState.getType() != AuditType::ValidateStorageServerShard &&
-	    auditState.getType() != AuditType::ValidateRestore) {
+	    auditState.getType() != AuditType::ValidateRestore && auditState.getType() != AuditType::RangeDigest) {
 		throw not_implemented();
 	}
 	TraceEvent(SevDebug, "DDRunAuditStorage", self->ddId)
@@ -4223,8 +4416,10 @@ Future<UID> launchAudit(Reference<DataDistributor> self,
 			// ValidateRestore is excluded because the current simulation test for restore validation
 			// is a simple end-to-end test that expects the audit to complete without DD restart.
 			// Future work could add more comprehensive fault injection testing for ValidateRestore.
+			// RangeDigest is excluded for the same reason: its test asserts the audit reached Complete,
+			// which a coin-flip restart per launch would turn into an unconditional skip.
 			if (g_network->isSimulated() && auditType != AuditType::ValidateRestore &&
-			    deterministicRandom()->coinflip()) {
+			    auditType != AuditType::RangeDigest && deterministicRandom()->coinflip()) {
 				TraceEvent(SevInfo, "DDAuditStorageLaunchFaultInjection", self->ddId)
 				    .detail("AuditID", auditID_)
 				    .detail("AuditType", auditType);
@@ -4277,6 +4472,9 @@ Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAuditReq
 	} else if (req.getType() == AuditType::ValidateRestore) {
 		co_await self->auditStorageRestoreLaunchingLock.take(TaskPriority::DefaultYield);
 		holder = FlowLock::Releaser(self->auditStorageRestoreLaunchingLock);
+	} else if (req.getType() == AuditType::RangeDigest) {
+		co_await self->auditStorageRangeDigestLaunchingLock.take(TaskPriority::DefaultYield);
+		holder = FlowLock::Releaser(self->auditStorageRangeDigestLaunchingLock);
 	} else {
 		req.reply.sendError(not_implemented());
 		co_return;
@@ -4363,6 +4561,9 @@ Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest r
 	} else if (req.getType() == AuditType::ValidateRestore) {
 		co_await self->auditStorageRestoreLaunchingLock.take(TaskPriority::DefaultYield);
 		holder = FlowLock::Releaser(self->auditStorageRestoreLaunchingLock);
+	} else if (req.getType() == AuditType::RangeDigest) {
+		co_await self->auditStorageRangeDigestLaunchingLock.take(TaskPriority::DefaultYield);
+		holder = FlowLock::Releaser(self->auditStorageRangeDigestLaunchingLock);
 	} else {
 		req.reply.sendError(not_implemented());
 		co_return;
@@ -4428,16 +4629,15 @@ void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAud
 	    .detail("AuditType", audit->coreState.getType())
 	    .detail("AuditRange", audit->coreState.range);
 
-	if (audit->coreState.getType() == AuditType::ValidateHA) {
-		audit->actors.add(dispatchAuditStorage(self, audit));
-	} else if (audit->coreState.getType() == AuditType::ValidateReplica) {
+	if (audit->coreState.getType() == AuditType::ValidateHA ||
+	    audit->coreState.getType() == AuditType::ValidateReplica ||
+	    audit->coreState.getType() == AuditType::ValidateRestore ||
+	    audit->coreState.getType() == AuditType::RangeDigest) {
 		audit->actors.add(dispatchAuditStorage(self, audit));
 	} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
 		audit->actors.add(dispatchAuditLocationMetadata(self, audit, allKeys));
 	} else if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
 		audit->actors.add(dispatchAuditStorageServerShard(self, audit));
-	} else if (audit->coreState.getType() == AuditType::ValidateRestore) {
-		audit->actors.add(dispatchAuditStorage(self, audit));
 	} else {
 		UNREACHABLE();
 	}
@@ -4671,7 +4871,7 @@ Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::shared_p
 	const AuditType auditType = audit->coreState.getType();
 	const KeyRange range = audit->coreState.range;
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	       auditType == AuditType::ValidateRestore);
+	       auditType == AuditType::ValidateRestore || auditType == AuditType::RangeDigest);
 	TraceEvent(SevInfo, "DDDispatchAuditStorageBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("Range", range)
@@ -4776,15 +4976,81 @@ Future<std::unordered_map<UID, KeyValueStoreType>> getStorageType(std::vector<St
 	co_return res;
 }
 
+// Subdivide one shard-sized audit task range so a single fat shard cannot become an unbounded
+// straggler; see AUDIT_TASK_MAX_BYTES. Takes the txnProcessor and ddId rather than the DataDistributor
+// so a mock can drive it: the failure mode that matters -- a metrics read error must degrade to the
+// unsplit shard, never fail the audit -- is otherwise only reachable on a real cluster.
+static Future<std::vector<KeyRange>> boundAuditTaskRange(Reference<IDDTxnProcessor> txnProcessor,
+                                                         UID ddId,
+                                                         KeyRange shardRange) {
+	if (SERVER_KNOBS->AUDIT_TASK_MAX_BYTES <= 0 || shardRange.empty()) {
+		co_return std::vector<KeyRange>{ shardRange };
+	}
+
+	Optional<Error> splitError;
+	try {
+		StorageMetrics splitMetrics;
+		splitMetrics.bytes = SERVER_KNOBS->AUDIT_TASK_MAX_BYTES;
+		// Split on size only. Setting the other dimensions to infinity is REQUIRED, not merely tidy:
+		// getSplitKey() does ASSERT(limits > 0), so leaving them at 0 would assert-fail in the storage
+		// server. Infinity makes getSplitKey's `limits < infinity / 2` test false, which is how a
+		// dimension is opted out of. Auditing is read-only, so size is the only dimension of interest.
+		splitMetrics.bytesWrittenPerKSecond = splitMetrics.infinity;
+		splitMetrics.iosPerKSecond = splitMetrics.infinity;
+		splitMetrics.bytesReadPerKSecond = splitMetrics.infinity;
+
+		// minSplitBytes must not exceed half the target. The storage server stops splitting once
+		// `remaining.bytes < 2 * minSplitBytes`, so passing the target itself leaves every shard below
+		// TWICE the target whole.
+		//
+		// Anything below target/2 behaves the same, since getSplitKey() only splits while
+		// remaining > target/2 and that binds first; half the target just avoids generating split points
+		// the client will discard.
+		const int minSplitBytes =
+		    std::max<int>(1,
+		                  static_cast<int>(std::min<int64_t>(std::numeric_limits<int>::max(),
+		                                                     SERVER_KNOBS->AUDIT_TASK_MAX_BYTES / 2)));
+		Standalone<VectorRef<KeyRef>> splitPoints =
+		    co_await txnProcessor->splitStorageMetrics(shardRange, splitMetrics, StorageMetrics(), minSplitBytes);
+		// splitStorageMetrics() returns shardRange.begin and shardRange.end as its first and last points,
+		// in order, so consecutive pairs tile the range. Same idiom as DDShardTracker's executeShardSplit().
+		std::vector<KeyRange> taskRanges;
+		for (int i = 0; i + 1 < splitPoints.size(); ++i) {
+			taskRanges.push_back(KeyRangeRef(splitPoints[i], splitPoints[i + 1]));
+		}
+		ASSERT(!taskRanges.empty());
+		if (taskRanges.size() > 1) {
+			TraceEvent(SevInfo, "DDAuditTaskRangeSubdivided", ddId)
+			    .suppressFor(30.0)
+			    .detail("ShardRange", shardRange)
+			    .detail("NumTaskRanges", taskRanges.size())
+			    .detail("MaxBytesPerTask", SERVER_KNOBS->AUDIT_TASK_MAX_BYTES);
+		}
+		co_return taskRanges;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		splitError = e;
+	}
+	// A metrics read must never fail an audit: fall back to the unsplit shard, which is exactly the
+	// behaviour before this cap existed. Worst case we keep the straggler we were trying to avoid.
+	TraceEvent(SevWarn, "DDAuditTaskRangeSplitFailed", ddId)
+	    .errorUnsuppressed(splitError.get())
+	    .detail("ShardRange", shardRange);
+	co_return std::vector<KeyRange>{ shardRange };
+}
+
 // Partition the input range into multiple subranges according to the range ownership, and
-// schedule ha/replica/restore audit tasks of each subrange on the server which owns the subrange
+// schedule ha/replica/restore/range_digest audit tasks of each subrange on the server which owns
+// the subrange
 // Automatically retry until complete or timed out
 Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
                                   std::shared_ptr<DDAudit> audit,
                                   KeyRange rangeToSchedule) {
 	const AuditType auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	       auditType == AuditType::ValidateRestore);
+	       auditType == AuditType::ValidateRestore || auditType == AuditType::RangeDigest);
 	TraceEvent(SevInfo, "DDScheduleAuditOnRangeBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditRange", audit->coreState.range)
@@ -4795,6 +5061,9 @@ Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 	Key currentRangeToScheduleBegin = rangeToSchedule.begin;
 	KeyRange currentRangeToSchedule;
 	int64_t issueDoAuditCount = 0;
+	// Counts skipped task ranges, not distinct shards: the engine-type skip has always been per audit
+	// state range, and a shard subdivided by AUDIT_TASK_MAX_BYTES contributes one count per piece. Kept
+	// under its existing name so the SkippedShardsCountInThisSchedule trace field stays greppable.
 	int64_t numSkippedShards = 0;
 
 	try {
@@ -4812,12 +5081,32 @@ Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 				    .detail("RangeLocationsBackKey", rangeLocations.back().range.end);
 			}
 
-			// Divide the audit job in to tasks according to KeyServers system mapping
+			// Divide the audit job in to tasks according to KeyServers system mapping, then subdivide
+			// any shard larger than AUDIT_TASK_MAX_BYTES. A task is scanned sequentially by one storage
+			// server and the audit phase ends only when its slowest task does, so an uncapped fat shard
+			// bounds the whole phase from below.
 			int assignedRangeTasks = 0;
-			int rangeLocationIndex = 0;
-			for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
+			// Split lazily, one shard at a time, so the first task dispatches immediately: splitting
+			// every shard up front would put thousands of sequential metrics reads ahead of any audit
+			// work. Entries are (task range, index of the shard it came from) -- the shard index is
+			// needed because the servers to audit come from that rangeLocations entry.
+			std::vector<std::pair<KeyRange, int>> taskRangesToSchedule;
+			int nextShardToSplit = 0;
+			for (int taskIndex = 0;; ++taskIndex) {
+				while (taskIndex >= taskRangesToSchedule.size() && nextShardToSplit < rangeLocations.size()) {
+					std::vector<KeyRange> boundedRanges = co_await boundAuditTaskRange(
+					    self->txnProcessor, self->ddId, rangeLocations[nextShardToSplit].range);
+					for (KeyRange const& boundedRange : boundedRanges) {
+						taskRangesToSchedule.emplace_back(boundedRange, nextShardToSplit);
+					}
+					++nextShardToSplit;
+				}
+				if (taskIndex >= taskRangesToSchedule.size()) {
+					break; // every shard split and every resulting task scheduled
+				}
 				// For each task, check the progress, and create task request for the unfinished range
-				KeyRange taskRange = rangeLocations[rangeLocationIndex].range;
+				KeyRange taskRange = taskRangesToSchedule[taskIndex].first;
+				const int rangeLocationIndex = taskRangesToSchedule[taskIndex].second;
 				if (SERVER_KNOBS->ENABLE_AUDIT_VERBOSE_TRACE) {
 					TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRangeTask", self->ddId)
 					    .detail("AuditID", audit->coreState.id)
@@ -4971,6 +5260,36 @@ Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 								taskRangeBegin = taskRange.end;
 								continue;
 							}
+						} else if (auditType == AuditType::RangeDigest) {
+							// Each shard is hashed exactly once by a single owning server; the SS reads
+							// only its local copy, so no comparison peers are needed (targetServers stays
+							// empty). Any replica holds identical content, so pick one from the primary DC.
+							if (rangeLocations[rangeLocationIndex].servers.empty()) {
+								TraceEvent(SevInfo, "DDScheduleAuditOnRangeSkipped", self->ddId)
+								    .detail("Reason", "No servers found for shard")
+								    .detail("AuditID", audit->coreState.id)
+								    .detail("AuditRange", audit->coreState.range)
+								    .detail("TaskRange", taskRange)
+								    .detail("AuditType", auditType);
+								++numSkippedShards;
+								taskRangeBegin = taskRange.end;
+								continue;
+							}
+							auto it = rangeLocations[rangeLocationIndex].servers.begin();
+							if (it->second.empty()) {
+								TraceEvent(SevInfo, "DDScheduleAuditOnRangeSkipped", self->ddId)
+								    .detail("Reason", "Primary DC server list empty")
+								    .detail("AuditID", audit->coreState.id)
+								    .detail("AuditRange", audit->coreState.range)
+								    .detail("TaskRange", taskRange)
+								    .detail("AuditType", auditType);
+								++numSkippedShards;
+								taskRangeBegin = taskRange.end;
+								continue;
+							}
+							const int idx = deterministicRandom()->randomInt(0, it->second.size());
+							targetServer = it->second[idx];
+							storageServersToCheck.push_back(it->second[idx]);
 						} else {
 							UNREACHABLE();
 						}
@@ -5042,7 +5361,15 @@ Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 					TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRangeTaskAssigned", self->ddId);
 				}
 				++assignedRangeTasks;
-				co_await delay(0.1);
+				// Throttle once per keyServers shard, NOT once per subdivided piece: per piece this
+				// multiplies by the split factor, adding a term linear in the piece count to the very
+				// wall-clock the cap exists to shorten. Pieces are appended a whole shard at a time, so
+				// the last present entry is always its shard's last piece.
+				const bool lastPieceOfShard = taskIndex + 1 >= taskRangesToSchedule.size() ||
+				                              taskRangesToSchedule[taskIndex + 1].second != rangeLocationIndex;
+				if (lastPieceOfShard) {
+					co_await delay(0.1);
+				}
 			}
 			// Proceed to the next range if getSourceServerInterfacesForRange is partially read
 			currentRangeToScheduleBegin = rangeLocations.back().range.end;
@@ -5083,7 +5410,7 @@ Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 Future<Void> skipAuditOnRange(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit, KeyRange rangeToSkip) {
 	AuditType auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	       auditType == AuditType::ValidateRestore);
+	       auditType == AuditType::ValidateRestore || auditType == AuditType::RangeDigest);
 	try {
 		audit->overallIssuedDoAuditCount++;
 		AuditStorageState res(audit->coreState.id, rangeToSkip, auditType);
@@ -5145,7 +5472,8 @@ Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
                                     AuditStorageRequest req) {
 	AuditType auditType = req.getType();
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	       auditType == AuditType::ValidateStorageServerShard || auditType == AuditType::ValidateRestore);
+	       auditType == AuditType::ValidateStorageServerShard || auditType == AuditType::ValidateRestore ||
+	       auditType == AuditType::RangeDigest);
 	TraceEvent(SevInfo, "DDDoAuditOnStorageServerBegin", self->ddId)
 	    .detail("AuditID", req.id)
 	    .detail("Range", req.range)
@@ -5595,6 +5923,136 @@ inline int getRandomShardCount() {
 
 } // namespace data_distribution_test
 
+namespace {
+
+// Drives boundAuditTaskRange() without a cluster: returns the configured split points, or fails the
+// metrics read when asked to.
+class AuditSplitTestTxnProcessor final : public DDTxnProcessor {
+public:
+	explicit AuditSplitTestTxnProcessor(std::vector<std::string> points, Optional<Error> failWith = {})
+	  : points(std::move(points)), failWith(failWith) {}
+
+	int getSplitCalls() const { return splitCalls; }
+	int64_t getLastMinSplitBytes() const { return lastMinSplitBytes; }
+
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
+	                                                          StorageMetrics const&,
+	                                                          StorageMetrics const&,
+	                                                          Optional<int> const& minSplitBytes) const override {
+		++splitCalls;
+		lastMinSplitBytes = minSplitBytes.present() ? minSplitBytes.get() : -1;
+		if (failWith.present()) {
+			return failWith.get();
+		}
+		Standalone<VectorRef<KeyRef>> splitKeys;
+		for (std::string const& p : points) {
+			splitKeys.push_back_deep(splitKeys.arena(), StringRef(p));
+		}
+		return splitKeys;
+	}
+
+private:
+	std::vector<std::string> points;
+	Optional<Error> failWith;
+	mutable int splitCalls = 0;
+	mutable int64_t lastMinSplitBytes = 0;
+};
+
+// Restores AUDIT_TASK_MAX_BYTES on any exit path. Unit tests share a process, so a knob left at a
+// test value by a failed ASSERT silently reconfigures every test that runs afterwards, turning one
+// failure into a cascade that no longer points at its cause.
+class AuditTaskMaxBytesGuard {
+public:
+	AuditTaskMaxBytesGuard() : saved(SERVER_KNOBS->AUDIT_TASK_MAX_BYTES) {}
+	~AuditTaskMaxBytesGuard() { set(saved); }
+	AuditTaskMaxBytesGuard(AuditTaskMaxBytesGuard const&) = delete;
+	AuditTaskMaxBytesGuard& operator=(AuditTaskMaxBytesGuard const&) = delete;
+
+	void set(int64_t value) { const_cast<ServerKnobs*>(SERVER_KNOBS)->AUDIT_TASK_MAX_BYTES = value; }
+
+private:
+	int64_t saved;
+};
+
+class BulkDumpUseRemoteRegionGuard {
+public:
+	BulkDumpUseRemoteRegionGuard() : saved(SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION) {}
+	~BulkDumpUseRemoteRegionGuard() { set(saved); }
+	BulkDumpUseRemoteRegionGuard(BulkDumpUseRemoteRegionGuard const&) = delete;
+	BulkDumpUseRemoteRegionGuard& operator=(BulkDumpUseRemoteRegionGuard const&) = delete;
+
+	void set(bool value) { const_cast<ServerKnobs*>(SERVER_KNOBS)->DD_BULKDUMP_USE_REMOTE_REGION = value; }
+
+private:
+	bool saved;
+};
+
+} // namespace
+
+TEST_CASE("/DataDistribution/Audit/BoundAuditTaskRange") {
+	KeyRange shard = KeyRangeRef("a"_sr, "z"_sr);
+	AuditTaskMaxBytesGuard maxBytes;
+
+	// A fat shard is subdivided at the reported split points.
+	{
+		maxBytes.set(1000);
+		auto processor = makeReference<AuditSplitTestTxnProcessor>(std::vector<std::string>{ "a", "m", "z" });
+		std::vector<KeyRange> ranges = co_await boundAuditTaskRange(processor, UID(), shard);
+		ASSERT_EQ(ranges.size(), 2);
+		ASSERT(ranges[0] == KeyRangeRef("a"_sr, "m"_sr));
+		ASSERT(ranges[1] == KeyRangeRef("m"_sr, "z"_sr));
+		ASSERT_EQ(processor->getSplitCalls(), 1);
+
+		// REGRESSION: minSplitBytes above target/2 makes the storage server leave shards below
+		// 2 * minSplitBytes whole. Silent when wrong -- the only symptom is a slow tail that looks like
+		// ordinary variance.
+		ASSERT(processor->getLastMinSplitBytes() > 0);
+		ASSERT(processor->getLastMinSplitBytes() * 2 <= SERVER_KNOBS->AUDIT_TASK_MAX_BYTES);
+	}
+
+	// A shard smaller than the cap reports no interior points and stays whole.
+	{
+		maxBytes.set(1000);
+		auto processor = makeReference<AuditSplitTestTxnProcessor>(std::vector<std::string>{ "a", "z" });
+		std::vector<KeyRange> ranges = co_await boundAuditTaskRange(processor, UID(), shard);
+		ASSERT_EQ(ranges.size(), 1);
+		ASSERT(ranges[0] == shard);
+	}
+
+	// Knob disabled: no metrics read at all, and the shard is used as-is.
+	{
+		maxBytes.set(0);
+		auto processor = makeReference<AuditSplitTestTxnProcessor>(std::vector<std::string>{ "a", "m", "z" });
+		std::vector<KeyRange> ranges = co_await boundAuditTaskRange(processor, UID(), shard);
+		ASSERT_EQ(ranges.size(), 1);
+		ASSERT(ranges[0] == shard);
+		ASSERT_EQ(processor->getSplitCalls(), 0);
+	}
+
+	// A failed metrics read must degrade to the unsplit shard rather than fail the audit: an audit that
+	// dies because a size estimate was unavailable is strictly worse than one straggler task.
+	{
+		maxBytes.set(1000);
+		auto processor =
+		    makeReference<AuditSplitTestTxnProcessor>(std::vector<std::string>{}, Optional<Error>(timed_out()));
+		std::vector<KeyRange> ranges = co_await boundAuditTaskRange(processor, UID(), shard);
+		ASSERT_EQ(ranges.size(), 1);
+		ASSERT(ranges[0] == shard);
+	}
+
+	// A cap small enough that target/2 would round to zero must still send a usable minSplitBytes: a
+	// zero or negative value would fall back to MIN_SHARD_BYTES on the server, silently ignoring the cap.
+	{
+		maxBytes.set(1);
+		auto processor = makeReference<AuditSplitTestTxnProcessor>(std::vector<std::string>{ "a", "m", "z" });
+		std::vector<KeyRange> ranges = co_await boundAuditTaskRange(processor, UID(), shard);
+		ASSERT_EQ(ranges.size(), 2);
+		ASSERT(processor->getLastMinSplitBytes() >= 1);
+	}
+
+	co_return;
+}
+
 TEST_CASE("/DataDistribution/Initialization/DcIds") {
 	RegionInfo configuredPrimary;
 	configuredPrimary.dcId = "primary"_sr;
@@ -5613,6 +6071,28 @@ TEST_CASE("/DataDistribution/Initialization/DcIds") {
 	dcIds = getDataDistributorDcIds(regions, Optional<Key>("unknown"_sr));
 	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
 	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/BulkDump/TargetDcId") {
+	Reference<DDSharedContext> context(new DDSharedContext(UID()));
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+	Reference<DataDistributor> self(new DataDistributor(dbInfo, UID(), context, ""));
+	self->primaryDcId = { Optional<Key>("primary"_sr) };
+	self->remoteDcIds = { Optional<Key>("remote"_sr) };
+	BulkDumpUseRemoteRegionGuard useRemoteRegion;
+
+	useRemoteRegion.set(true);
+	self->configuration.usableRegions = 2;
+	ASSERT_EQ(self->bulkDumpTargetDcId(), "remote");
+	// The remote DC is configured but holds no storage servers.
+	self->configuration.usableRegions = 1;
+	ASSERT_EQ(self->bulkDumpTargetDcId(), "primary");
+
+	useRemoteRegion.set(false);
+	self->configuration.usableRegions = 2;
+	ASSERT_EQ(self->bulkDumpTargetDcId(), "primary");
 
 	return Void();
 }
@@ -5660,4 +6140,156 @@ TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
 	self->shardsAffectedByTeamFailure->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
 	self->shardsAffectedByTeamFailure->check();
 	co_return;
+}
+
+namespace {
+
+// Only the key range matters to deriveSplitBulkLoadTasks(). The remaining fields are whatever satisfies
+// BulkLoadManifest::isValid(), which the constructor asserts.
+BulkLoadManifest splitTestManifest(KeyRef begin, KeyRef end) {
+	return BulkLoadManifest(BulkLoadFileSet("root", "relative", "0-manifest.txt", "0-data.sst", "", {}),
+	                        begin,
+	                        end,
+	                        /*version=*/1,
+	                        /*bytes=*/1,
+	                        /*keyCount=*/1,
+	                        BulkLoadByteSampleSetting(0, "hashlittle2", 250, 100, 0.5),
+	                        BulkLoadType::SST,
+	                        BulkLoadTransportMethod::CP);
+}
+
+BulkLoadTaskState splitTestTask(const std::vector<KeyRange>& manifestRanges, const KeyRange& taskRange) {
+	BulkLoadManifestSet set(manifestRanges.size());
+	for (const auto& range : manifestRanges) {
+		ASSERT(set.addManifest(splitTestManifest(range.begin, range.end)));
+	}
+	return BulkLoadTaskState(deterministicRandom()->randomUniqueID(), set, taskRange);
+}
+
+} // namespace
+
+TEST_CASE("/DataDistribution/BulkLoad/DeriveSplitTasks") {
+	// The children tile the parent and partition its manifests, and inherit its job.
+	{
+		auto parent = splitTestTask({ KeyRangeRef("a"_sr, "c"_sr),
+		                              KeyRangeRef("c"_sr, "e"_sr),
+		                              KeyRangeRef("e"_sr, "g"_sr),
+		                              KeyRangeRef("g"_sr, "i"_sr) },
+		                            KeyRangeRef("a"_sr, "i"_sr));
+		auto children = deriveSplitBulkLoadTasks(parent, UID()).get();
+		ASSERT_EQ(children.size(), 2);
+		ASSERT(children[0].getRange().begin == parent.getRange().begin);
+		ASSERT(children[0].getRange().end == children[1].getRange().begin);
+		ASSERT(children[1].getRange().end == parent.getRange().end);
+		ASSERT_EQ(children[0].getManifests().size() + children[1].getManifests().size(), parent.getManifests().size());
+		ASSERT(children[0].getJobId() == parent.getJobId());
+		ASSERT(children[1].getJobId() == parent.getJobId());
+	}
+
+	// The cut falls on a manifest boundary, so neither child is handed a range whose data lives in the
+	// other's manifests.
+	{
+		auto parent =
+		    splitTestTask({ KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("c"_sr, "e"_sr) }, KeyRangeRef("a"_sr, "e"_sr));
+		auto children = deriveSplitBulkLoadTasks(parent, UID()).get();
+		ASSERT(children[0].getRange() == KeyRangeRef("a"_sr, "c"_sr));
+		ASSERT(children[1].getRange() == KeyRangeRef("c"_sr, "e"_sr));
+	}
+
+	// A single manifest is as narrow as a task gets. Declining is terminal for the task -- the caller marks
+	// it Error rather than re-dispatching it.
+	{
+		auto parent = splitTestTask({ KeyRangeRef("a"_sr, "z"_sr) }, KeyRangeRef("a"_sr, "z"_sr));
+		ASSERT(!deriveSplitBulkLoadTasks(parent, UID()).present());
+	}
+
+	// REGRESSION: a task at a job-range edge holds manifests whose boundaries lie outside its clipped
+	// range. The cut must come from the boundaries strictly inside that range: here the manifest midpoint
+	// is "c", below the parent's own begin key.
+	{
+		auto parent =
+		    splitTestTask({ KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("c"_sr, "e"_sr), KeyRangeRef("e"_sr, "g"_sr) },
+		                  KeyRangeRef("d"_sr, "f"_sr));
+		auto children = deriveSplitBulkLoadTasks(parent, UID()).get();
+		ASSERT(children[0].getRange() == KeyRangeRef("d"_sr, "e"_sr));
+		ASSERT(children[1].getRange() == KeyRangeRef("e"_sr, "f"_sr));
+	}
+
+	// Every boundary outside the clipped range leaves nothing to cut at, so the task declines rather than
+	// producing an empty child.
+	{
+		auto parent =
+		    splitTestTask({ KeyRangeRef("a"_sr, "e"_sr), KeyRangeRef("e"_sr, "i"_sr) }, KeyRangeRef("f"_sr, "h"_sr));
+		ASSERT(!deriveSplitBulkLoadTasks(parent, UID()).present());
+	}
+
+	// Halving terminates: each child holds strictly fewer manifests than its parent, so repeated splitting
+	// of the lower child reaches a single manifest and declines.
+	{
+		StringRef const boundaries = "abcdefghi"_sr;
+		std::vector<KeyRange> ranges;
+		for (int i = 0; i + 1 < boundaries.size(); i++) {
+			ranges.push_back(KeyRangeRef(boundaries.substr(i, 1), boundaries.substr(i + 1, 1)));
+		}
+		BulkLoadTaskState task = splitTestTask(ranges, KeyRangeRef(ranges.front().begin, ranges.back().end));
+		while (true) {
+			Optional<std::vector<BulkLoadTaskState>> children = deriveSplitBulkLoadTasks(task, UID());
+			if (!children.present()) {
+				break;
+			}
+			ASSERT_LT(children.get()[0].getManifests().size(), task.getManifests().size());
+			task = children.get()[0];
+		}
+		ASSERT_EQ(task.getManifests().size(), 1);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/BulkDump/SkipTracker") {
+	constexpr double failAfter = 100.0;
+
+	// Skipped ranges that never drop fail the job once the window elapses.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, failAfter));
+		ASSERT(!tracker.shouldFail(5, 99.0, failAfter));
+		ASSERT(tracker.shouldFail(5, 100.0, failAfter));
+	}
+
+	// A growing count is not progress.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, failAfter));
+		ASSERT(!tracker.shouldFail(8, 50.0, failAfter));
+		ASSERT(tracker.shouldFail(8, 100.0, failAfter));
+	}
+
+	// A DC that is catching up keeps the job alive: each drop restarts the window.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, failAfter));
+		ASSERT(!tracker.shouldFail(4, 90.0, failAfter));
+		ASSERT(!tracker.shouldFail(4, 180.0, failAfter));
+		ASSERT(tracker.shouldFail(4, 190.0, failAfter));
+	}
+
+	// A pass with no skipped range clears the window.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, failAfter));
+		ASSERT(!tracker.shouldFail(0, 90.0, failAfter));
+		ASSERT(!tracker.shouldFail(5, 150.0, failAfter));
+		ASSERT(!tracker.shouldFail(5, 249.0, failAfter));
+		ASSERT(tracker.shouldFail(5, 250.0, failAfter));
+	}
+
+	// A zero knob never fails the job.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, 0.0));
+		ASSERT(!tracker.shouldFail(5, 1e9, 0.0));
+	}
+
+	return Void();
 }

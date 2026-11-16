@@ -31,7 +31,9 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/xxhash.h"
+#include "flow/UnitTest.h"
 #include "flow/Error.h"
+#include "flow/Platform.h"
 #include "rapidxml/rapidxml.hpp"
 #include <openssl/sha.h>
 #include "libb64/encode.h"
@@ -166,7 +168,7 @@ Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
 		return endpoint;
 
 	} catch (Error& e) {
-		TraceEvent(SevError, "S3ClientGetEndpointFailed").detail("URL", StringRef(s3url)).detail("Error", e.what());
+		TraceEvent(SevError, "S3ClientGetEndpointFailed").error(e).detail("URL", StringRef(s3url));
 		throw;
 	}
 }
@@ -492,7 +494,7 @@ static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			}
 
 			Optional<std::string> s3Checksum =
-			    co_await endpoint->finishMultiPartUpload(bucket, objectName, uploadID, etagMap);
+			    co_await endpoint->finishMultiPartUpload(bucket, objectName, uploadID, etagMap, size);
 
 			// Log the S3 checksum if present
 			if (s3Checksum.present()) {
@@ -749,7 +751,8 @@ static Future<PartState> downloadPart(Reference<S3BlobStoreEndpoint> endpoint,
 
 			// Verify checksum if provided (currently only MD5 is used for download verification)
 			if (!resultPart.checksum.empty()) {
-				std::string calculatedMD5 = HTTP::computeMD5Sum(std::string((char*)buffer->data(), totalBytesRead));
+				std::string calculatedMD5 =
+				    HTTP::computeMD5Sum(std::string_view((const char*)buffer->data(), totalBytesRead));
 				if (resultPart.checksum != calculatedMD5) {
 					TraceEvent(SevWarnAlways, "S3ClientDownloadPartChecksumMismatch")
 					    .detail("Expected", resultPart.checksum)
@@ -1007,6 +1010,26 @@ Future<Void> copyDownFile(std::string s3url, std::string filepath) {
 	TraceEvent(SevDebug, "S3ClientCopyDownFileWrapperEnd").detail("S3URL", s3url).detail("FilePath", filepath);
 }
 
+namespace {
+
+// Object names come from the bucket; don't let one escape dirpath.
+std::string copyDownFilePath(const std::string& dirpath, const std::string& resource, const std::string& objectName) {
+	std::string relativeName = objectName.substr(resource.size());
+	// copyUpDirectory names objects resource + "/" + file, so drop that one separator.
+	if (!relativeName.empty() && relativeName[0] == '/') {
+		relativeName = relativeName.substr(1);
+	}
+	if (!relativePathIsContained(relativeName)) {
+		TraceEvent(SevWarnAlways, "S3ClientCopyDownInvalidObjectName")
+		    .detail("ObjectName", objectName)
+		    .detail("Directory", dirpath);
+		throw backup_invalid_url();
+	}
+	return dirpath + "/" + relativeName;
+}
+
+} // namespace
+
 Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 	std::string resource;
 	S3BlobStoreEndpoint::ParametersT parameters;
@@ -1019,7 +1042,7 @@ Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 	    .detail("Bucket", bucket)
 	    .detail("Resource", resource);
 	for (const auto& object : objects) {
-		std::string filepath = dirpath + "/" + object.name.substr(resource.size());
+		std::string filepath = copyDownFilePath(dirpath, resource, object.name);
 		std::string s3path = object.name;
 		co_await copyDownFile(endpoint, bucket, s3path, filepath);
 	}
@@ -1112,7 +1135,7 @@ Future<Void> listFiles(std::string s3url, int maxDepth) {
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevError, "S3ClientListFilesError").detail("URL", s3url).detail("Error", e.what());
+		TraceEvent(SevError, "S3ClientListFilesError").error(e).detail("URL", s3url);
 		if (e.code() == error_code_backup_invalid_url) {
 			std::cerr << "ERROR: Invalid blobstore URL: " << s3url << std::endl;
 		} else if (e.code() == error_code_backup_auth_missing) {
@@ -1189,4 +1212,29 @@ AsyncResult<std::vector<std::string>> listFiles_impl(Reference<S3BlobStoreEndpoi
 		TraceEvent(SevWarn, "S3ClientListFilesError").error(e).detail("Bucket", bucket).detail("Path", path);
 		throw;
 	}
+}
+
+TEST_CASE("/backup/s3/copyDownFilePath") {
+	ASSERT_EQ(copyDownFilePath("/tmp/down", "dir", "dir/a"), std::string("/tmp/down/a"));
+	ASSERT_EQ(copyDownFilePath("/tmp/down", "dir", "dir/sub/b.sst"), std::string("/tmp/down/sub/b.sst"));
+	ASSERT_EQ(copyDownFilePath("/tmp/down", "dir", "dir/a..b"), std::string("/tmp/down/a..b"));
+	ASSERT_EQ(copyDownFilePath("/tmp/down", "", "/a"), std::string("/tmp/down/a"));
+	ASSERT_EQ(copyDownFilePath("/tmp/down", "", "a/b"), std::string("/tmp/down/a/b"));
+
+	const std::vector<std::pair<std::string, std::string>> rejected = {
+		{ "dir", "dir/../x" }, { "dir", "dir/a/../../x" }, { "dir", "dir//abs" },
+		{ "dir", "dir../x" },  { "dir", "dir/.." },        { "", "../x" },
+		{ "", "//abs" },
+	};
+	for (const auto& [resource, objectName] : rejected) {
+		try {
+			(void)copyDownFilePath("/tmp/down", resource, objectName);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+			continue;
+		}
+		ASSERT(false);
+	}
+
+	return Void();
 }

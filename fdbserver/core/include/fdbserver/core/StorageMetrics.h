@@ -60,9 +60,6 @@ struct TransientStorageMetricSample : StorageMetricSample {
 
 	int64_t addAndExpire(const Key& key, int64_t metric, double expiration);
 
-	int64_t erase(KeyRef key);
-	void erase(KeyRangeRef keys);
-
 	void poll(KeyRangeMap<std::vector<PromiseStream<StorageMetrics>>>& waitMap, StorageMetrics m);
 
 	void poll();

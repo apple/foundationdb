@@ -26,7 +26,6 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
@@ -286,8 +285,7 @@ static Future<Void> decodeBackupLogValue(Arena* arena,
                                          Version version,
                                          Reference<KeyRangeMap<Version>> key_version,
                                          Database cx,
-                                         bool provisionalProxy,
-                                         std::shared_ptr<DatabaseConfiguration> dbConfig) {
+                                         bool provisionalProxy) {
 	try {
 		uint64_t offset(0);
 		uint64_t protocolVersion = 0;
@@ -731,8 +729,7 @@ Future<int> kvMutationLogToTransactions(Database cx,
                                         Key rangeBegin,
                                         FlowLock* commitLock,
                                         Reference<KeyRangeMap<Version>> keyVersion,
-                                        bool provisionalProxy,
-                                        std::shared_ptr<DatabaseConfiguration> dbConfig) {
+                                        bool provisionalProxy) {
 	Version lastVersion = invalidVersion;
 	bool endOfStream = false;
 	int totalBytes = 0;
@@ -766,8 +763,7 @@ Future<int> kvMutationLogToTransactions(Database cx,
 				                              group.groupKey,
 				                              keyVersion,
 				                              cx,
-				                              provisionalProxy,
-				                              dbConfig);
+				                              provisionalProxy);
 
 				for (int i = 0; i < curReq.transaction.mutations.size(); i++) {
 					req.transaction.mutations.push_back_deep(req.arena, curReq.transaction.mutations[i]);
@@ -861,13 +857,10 @@ Future<Void> applyMutations(Database cx,
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> error = actorCollection(addActor.getFuture());
 	int maxBytes = CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES;
-	std::shared_ptr<DatabaseConfiguration> dbConfig = std::make_shared<DatabaseConfiguration>();
 
 	keyVersion->insert(metadataVersionKey, 0);
 
 	try {
-		*dbConfig = co_await getDatabaseConfiguration(cx);
-
 		while (true) {
 			if (beginVersion >= *endVersion) {
 				// Why do we need to take a lock here?
@@ -918,8 +911,7 @@ Future<Void> applyMutations(Database cx,
 				                                         ranges[idx].begin,
 				                                         &commitLock,
 				                                         keyVersion,
-				                                         provisionalProxy,
-				                                         dbConfig);
+				                                         provisionalProxy);
 				maxBytes = std::max<int>(CLIENT_KNOBS->APPLY_MAX_INCREASE_FACTOR * bytes, maxBytes);
 				if (error.isError())
 					throw error.getError();
@@ -1081,7 +1073,7 @@ Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
 Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool deleteData) {
 	Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
 
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	Optional<Key> removingLogUid;
 	std::set<Key> loggedLogUids;
 
@@ -1172,7 +1164,7 @@ Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool deleteDat
 }
 
 Future<Void> cleanupBackup(Database cx, DeleteData deleteData) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	while (true) {
 		Error err;
 		try {
@@ -1317,26 +1309,11 @@ std::string const BackupAgentBase::defaultTagName = "default";
 
 void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys) {
 	backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
-
-	for (auto& r : getSystemBackupRanges()) {
-		backupKeys.push_back_deep(backupKeys.arena(), r);
-	}
 }
 
 VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
 	static Standalone<VectorRef<KeyRangeRef>> systemBackupRanges;
 	return systemBackupRanges;
-}
-
-KeyRangeMap<bool> const& systemBackupMutationMask() {
-	static KeyRangeMap<bool> mask;
-	if (mask.size() == 1) {
-		for (auto r : getSystemBackupRanges()) {
-			mask.insert(r, true);
-		}
-	}
-
-	return mask;
 }
 
 KeyRangeRef const& getDefaultBackupSharedRange() {

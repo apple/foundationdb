@@ -26,6 +26,7 @@ if(WITH_ROCKSDB)
 endif()
 
 add_subdirectory(core)
+add_subdirectory(checkpoint)
 add_subdirectory(kvstore)
 add_subdirectory(logsystem)
 add_subdirectory(mocks3)
@@ -47,9 +48,19 @@ add_subdirectory(tlog)
 add_subdirectory(worker)
 add_subdirectory(workloads)
 
+if(FDB_MEMORY_TRACKER)
+  add_fdbserver_unit_test(fdbserver_memorytracker_test MemoryTrackerTest.cpp
+    fdbserver_core)
+  target_sources(fdbserver_memorytracker_test PRIVATE MemoryTrackerTest.cpp GlobalNewDelete.cpp)
+endif()
+
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
+if(FDB_REGISTER_UNIT_TESTS)
+  # CI also builds explicit server/package targets before invoking CTest.
+  add_dependencies(fdbserver unit_tests)
+endif()
 
 if (WITH_SWIFT)
   # Setup the Swift sources in FDBServer.
@@ -183,6 +194,7 @@ target_link_libraries(fdbserver PRIVATE
   fdbserver_storageserver
   fdbserver_tester
   fdbserver_tlog
+  fdbserver_checkpoint
   fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
@@ -218,12 +230,8 @@ if(GPERFTOOLS_FOUND)
 endif()
 
 if(NOT OPEN_FOR_IDE)
-  if(GENERATE_DEBUG_PACKAGES)
-    fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
-  else()
-    add_custom_target(prepare_fdbserver_install ALL DEPENDS strip_only_fdbserver)
-    fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbserver DESTINATION sbin COMPONENT server)
-  endif()
+  add_custom_target(stripped_fdbserver ALL DEPENDS strip_only_fdbserver)
+  fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
 endif()
 
 target_link_libraries(fdbserver PUBLIC fdbctl)

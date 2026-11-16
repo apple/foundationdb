@@ -40,6 +40,11 @@ type ProcessConfiguration struct {
 	// new fdbserver processes.
 	RunServers *bool `json:"runServers,omitempty"`
 
+	// UseSharedBinary defines whether the monitor must always launch the binary that was staged in the shared binary
+	// directory by the sidecar, even if the version is protocol compatible with the version of the main container.
+	// This defaults to false, in which case the binary of the main container is used for protocol compatible versions.
+	UseSharedBinary *bool `json:"useSharedBinary,omitempty"`
+
 	// BinaryPath provides the path to the binary to launch.
 	BinaryPath string `json:"-"`
 
@@ -105,15 +110,15 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 	case LiteralArgumentType:
 		return argument.Value, nil
 	case ConcatenateArgumentType:
-		concatenated := ""
+		var concatenated strings.Builder
 		for _, childArgument := range argument.Values {
 			childValue, err := childArgument.GenerateArgument(processNumber, env)
 			if err != nil {
 				return "", err
 			}
-			concatenated += childValue
+			concatenated.WriteString(childValue)
 		}
-		return concatenated, nil
+		return concatenated.String(), nil
 	case ProcessNumberArgumentType:
 		number := processNumber
 		if argument.Multiplier != 0 {
@@ -145,8 +150,7 @@ func (argument Argument) LookupEnv(env map[string]string) (string, error) {
 	}
 
 	if argument.ArgumentType == IPListArgumentType {
-		ips := strings.Split(value, ",")
-		for _, ipString := range ips {
+		for ipString := range strings.SplitSeq(value, ",") {
 			ip := net.ParseIP(ipString)
 			if ip == nil {
 				continue
@@ -184,6 +188,15 @@ func (configuration *ProcessConfiguration) GenerateArguments(processNumber int, 
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+// ShouldUseSharedBinary returns true if UseSharedBinary is set to true.
+func (configuration *ProcessConfiguration) ShouldUseSharedBinary() bool {
+	if configuration == nil {
+		return false
+	}
+
+	return pointer.BoolDeref(configuration.UseSharedBinary, false)
 }
 
 // ShouldRunServers returns true if RunServers is unset or set to true.

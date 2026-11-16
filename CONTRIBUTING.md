@@ -20,7 +20,7 @@ If you have questions, we encourage you to engage in discussion on the [communit
 
 ## Before you get started
 ### Community Guidelines
-We want the FoundationDB community to be as welcoming and inclusive as possible, and have adopted a [Code of Conduct](CODE_OF_CONDUCT.md) that we ask all community members to read and abide by.
+We want the FoundationDB community to be as welcoming and inclusive as possible, and have adopted a [Code of Conduct](https://github.com/apple/.github/blob/main/CODE_OF_CONDUCT.md) that we ask all community members to read and abide by.
 
 ### Project Licensing
 By submitting a pull request, you represent that you have the right to license your contribution to Apple and the community, and agree by submitting the patch that your contributions are licensed under the Apache 2.0 license.
@@ -45,7 +45,7 @@ We use a pre-commit pipeline with black and flake8 to enforce python best coding
 Please refer to the section below on [using GitHub issues and the community forums](#using-github-issues-and-community-forums) for more info.
 
 #### Security issues
-To report a security issue, please **DO NOT** start by filing a public issue or posting to the forums. Instead, use GitHub's private vulnerability reporting to [report a vulnerability](https://github.com/apple/foundationdb/security/advisories/new). Only the maintainers can see the report, and we will follow up with you there. See [SECURITY.md](SECURITY.md) for more.
+To report a security issue, please **DO NOT** start by filing a public issue or posting to the forums. Instead, use GitHub's private vulnerability reporting to [report a vulnerability](https://github.com/apple/foundationdb/security/advisories/new). Only the maintainers can see the report, and we will follow up with you there. See Apple's [security policy](https://github.com/apple/.github/blob/main/SECURITY.md) for more.
 
 ## Project Communication
 ### Community Forums

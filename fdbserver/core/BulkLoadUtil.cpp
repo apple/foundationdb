@@ -24,10 +24,7 @@
 #include "fdbclient/S3Client.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
-#include "fdbserver/core/StorageMetrics.h"
 #include "flow/genericactors.h"
-#include "flow/UnitTest.h"
 
 Future<Void> readBulkFileBytes(std::string path, int64_t maxLength, std::shared_ptr<std::string> output) {
 	try {
@@ -182,71 +179,6 @@ Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
 	}
 }
 
-// Return true if generated the byte sampling file. Otherwise, return false.
-// TODO(BulkDump): directly read from special key space.
-Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // input file
-                                       std::string byteSampleFileFullPath, // output file
-                                       UID logId) {
-	int counter = 0;
-	bool res = false;
-	int retryCount = 0;
-	double startTime = now();
-	while (true) {
-		Error err;
-		try {
-			std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
-			sstWriter->open(abspath(byteSampleFileFullPath));
-			bool anySampled = false;
-			std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
-			reader->open(abspath(dataFileFullPath));
-			while (reader->hasNext()) {
-				KeyValue kv = reader->next();
-				ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
-				if (sampleInfo.inSample) {
-					sstWriter->write(kv.key, BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned()));
-					anySampled = true;
-					counter++;
-					if (counter > SERVER_KNOBS->BULKLOAD_BYTE_SAMPLE_BATCH_KEY_COUNT) {
-						co_await yield();
-						counter = 0;
-					}
-				}
-			}
-			// It is possible that no key is sampled
-			// This can happen when the data to sample is small
-			// In this case, no SST sample byte file is generated
-			if (anySampled) {
-				ASSERT(sstWriter->finish());
-				res = true;
-			} else {
-				ASSERT(!sstWriter->finish());
-				deleteFile(abspath(byteSampleFileFullPath));
-			}
-			break;
-		} catch (Error& e) {
-			err = e;
-		}
-		if (err.code() == error_code_actor_cancelled) {
-			throw err;
-		}
-		TraceEvent(SevWarn, "SSBulkLoadTaskSamplingError", logId)
-		    .errorUnsuppressed(err)
-		    .detail("DataFileFullPath", dataFileFullPath)
-		    .detail("ByteSampleFileFullPath", byteSampleFileFullPath)
-		    .detail("Duration", now() - startTime)
-		    .detail("RetryCount", retryCount);
-		co_await delay(5.0);
-		deleteFile(abspath(byteSampleFileFullPath));
-		retryCount++;
-	}
-	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskSamplingComplete", logId)
-	    .detail("DataFileFullPath", dataFileFullPath)
-	    .detail("ByteSampleFileFullPath", byteSampleFileFullPath)
-	    .detail("Duration", now() - startTime)
-	    .detail("RetryCount", retryCount);
-	co_return res;
-}
-
 // TODO(BulkLoad): slow task
 void clearFileFolder(const std::string& folderPath, const UID& logId, bool ignoreError) {
 	try {
@@ -273,22 +205,19 @@ void resetFileFolder(const std::string& folderPath) {
 }
 
 // Defense-in-depth guard for the bulk-load sink. Before we wipe and repopulate
-// the local staging folder, verify it resolves to a location at or under the
+// the local staging folder, verify it is at or under the
 // (operator-supplied) local root. Parse-time validation in BulkLoadFileSet
 // already rejects ".."/absolute manifest fields; this is the last-resort check
 // right before eraseDirectoryRecursive() so that any traversal that slips
 // through cannot drive the wipe/writes to an arbitrary path (e.g. the FDB data
 // directory or TLS material). Throws rather than proceed.
 void assertLocalFolderContained(const BulkLoadFileSet& localFileSet, const UID& logId) {
-	std::string resolvedRoot = abspath(localFileSet.getRootPath());
-	std::string resolvedFolder = abspath(localFileSet.getFolder());
-	// Compare against root + separator so a sibling like "/data-evil" is not
-	// accepted for root "/data"; the exact-root case is allowed on its own.
-	bool contained = resolvedFolder == resolvedRoot || resolvedFolder.starts_with(resolvedRoot + "/");
-	if (!contained) {
+	// getFolder() is the root joined with the relative path, so a contained relative path keeps the folder at or
+	// under the root.
+	if (!relativePathIsContained(localFileSet.getRelativePath())) {
 		TraceEvent(SevError, "BulkLoadLocalFolderEscapesRoot", logId)
-		    .detail("ResolvedRoot", resolvedRoot)
-		    .detail("ResolvedFolder", resolvedFolder)
+		    .detail("RootPath", localFileSet.getRootPath())
+		    .detail("RelativePath", localFileSet.getRelativePath())
 		    .detail("FileSet", localFileSet.toString());
 		throw bulkload_fileset_invalid_filepath();
 	}
@@ -607,7 +536,7 @@ Future<KeyRange> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 						BulkLoadJobManifestFileHeader header(line);
 						headerProcessed = true;
 					} else {
-						mapRange = updateManifestEntryMap(line, range, mapRange, /*output=*/manifestEntryMap);
+						mapRange = updateManifestEntryMap(line, range, mapRange, /*manifestEntryMap=*/manifestEntryMap);
 					}
 				}
 				lineStart = pos + 1;
@@ -630,7 +559,7 @@ Future<KeyRange> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 				// If we somehow only have one line and it's the header
 				BulkLoadJobManifestFileHeader header(leftover);
 			} else {
-				mapRange = updateManifestEntryMap(leftover, range, mapRange, /*output=*/manifestEntryMap);
+				mapRange = updateManifestEntryMap(leftover, range, mapRange, /*manifestEntryMap=*/manifestEntryMap);
 			}
 		}
 	} catch (Error& e) {
@@ -666,26 +595,4 @@ Future<BulkLoadManifestSet> getBulkLoadManifestMetadataFromEntry(
 		ASSERT(manifests.addManifest(manifest));
 	}
 	co_return manifests;
-}
-
-TEST_CASE("/fdbserver/BulkLoad/bulkLoadPathIsContained") {
-	// Safe: relative paths, nested dirs, empty, dotfiles, and names that merely
-	// contain dots without a standalone ".." component.
-	ASSERT(bulkLoadPathIsContained(""));
-	ASSERT(bulkLoadPathIsContained("data.sst"));
-	ASSERT(bulkLoadPathIsContained("a/b/c"));
-	ASSERT(bulkLoadPathIsContained("5676202155931feac1bbd501d491170b/0/data.sst"));
-	ASSERT(bulkLoadPathIsContained("a/.hidden/b"));
-	ASSERT(bulkLoadPathIsContained("a..b/c"));
-	ASSERT(bulkLoadPathIsContained("..."));
-
-	// Unsafe: absolute path, or a ".." component anywhere in the path.
-	ASSERT(!bulkLoadPathIsContained("/var/lib/foundationdb"));
-	ASSERT(!bulkLoadPathIsContained(".."));
-	ASSERT(!bulkLoadPathIsContained("../x"));
-	ASSERT(!bulkLoadPathIsContained("../../../../var/lib/foundationdb"));
-	ASSERT(!bulkLoadPathIsContained("a/../../etc"));
-	ASSERT(!bulkLoadPathIsContained("a/b/.."));
-
-	return Void();
 }

@@ -151,18 +151,6 @@ class Ratekeeper {
 
 		double lastUpdateTime{ 0.0 };
 		double lastTagPushTime{ 0.0 };
-		Version version{ 0 };
-	};
-
-	struct VersionInfo {
-		int64_t totalTransactions;
-		int64_t batchTransactions;
-		double created;
-
-		VersionInfo(int64_t totalTransactions, int64_t batchTransactions, double created)
-		  : totalTransactions(totalTransactions), batchTransactions(batchTransactions), created(created) {}
-
-		VersionInfo() : totalTransactions(0), batchTransactions(0), created(0.0) {}
 	};
 
 	UID id;
@@ -190,26 +178,8 @@ class Ratekeeper {
 	RatekeeperLimits batchLimits;
 
 	Deque<double> actualTpsHistory;
-	Version maxVersion;
-	double unblockedAssignmentTime;
-	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
-	std::map<Version, std::pair<double, Optional<double>>> version_recovery;
 	Optional<Key> remoteDC;
 	Optional<UID> ssHighWriteQueue;
-
-	double getRecoveryDuration(Version ver) const {
-		auto it = version_recovery.lower_bound(ver);
-		double recoveryDuration = 0;
-		while (it != version_recovery.end()) {
-			if (it->second.second.present()) {
-				recoveryDuration += it->second.second.get() - it->second.first;
-			} else {
-				recoveryDuration += now() - it->second.first;
-			}
-			++it;
-		}
-		return recoveryDuration;
-	}
 
 	Ratekeeper(UID id, Database db);
 
@@ -229,10 +199,8 @@ class Ratekeeper {
 	Future<Void> monitorHotShards(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 	Future<Void> handleReportCommitCostEstimationReqs(RatekeeperInterface rkInterf);
 	Future<Void> handleGetSSVersionLagReqs(RatekeeperInterface rkInterf);
-	Future<Void> handleGetRateInfoReqs(RatekeeperInterface rkInterf, Version* recoveryVersion, bool* lastLimited);
+	Future<Void> handleGetRateInfoReqs(RatekeeperInterface rkInterf, bool* lastLimited);
 	Future<Void> handleDBInfoChanges(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-	                                 bool* recovering,
-	                                 Version* recoveryVersion,
 	                                 std::vector<TLogInterface>* tlogInterfs,
 	                                 std::vector<Future<Void>>* tlogTrackers,
 	                                 Promise<Void>* err);

@@ -57,8 +57,11 @@ struct SSBulkDumpTask {
 
 // Used by DD to generate a SSBulkDumpTask and send to SS
 // SS dumps the data based on the configuration of the SSBulkDumpTask
+// The target server is drawn from targetDcId, which must hold a replica of the range.
+// An empty targetDcId selects any DC, for clusters with no region configuration.
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
-                                 const BulkDumpState& bulkDumpState);
+                                 const BulkDumpState& bulkDumpState,
+                                 const std::string& targetDcId);
 
 std::string generateRandomBulkDumpDataFileName(Version version);
 
@@ -86,21 +89,6 @@ std::string generateBulkDumpJobFolder(const UID& jobId);
 // Define task folder name.
 std::string getBulkDumpJobTaskFolder(const UID& jobId, const UID& taskId);
 
-// Generate key-value data, byte sampling data, and manifest file.
-// Return BulkLoadManifest metadata (equivalent to content of the manifest file).
-// TODO(BulkDump): can cause slow tasks, do the task in a separate thread in the future.
-// The size of sortedData is defined at the place of generating the data (getRangeDataToDump).
-// The size is configured by MOVE_SHARD_KRM_ROW_LIMIT.
-Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
-                                                      std::shared_ptr<RangeDumpRawData> rangeDumpRawData,
-                                                      BulkLoadFileSet localFileSet,
-                                                      BulkLoadFileSet remoteFileSet,
-                                                      BulkLoadByteSampleSetting byteSampleSetting,
-                                                      Version dumpVersion,
-                                                      KeyRange dumpRange,
-                                                      BulkLoadType dumpType,
-                                                      BulkLoadTransportMethod transportMethod);
-
 // Upload manifest file for bulkdump job
 // Each job has one manifest file including manifest paths of all tasks.
 // The local file path:	<localRootLocal>/<jobId>-manifest.txt
@@ -119,7 +107,7 @@ Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod,
 
 class ParallelismLimitor {
 public:
-	explicit(false) ParallelismLimitor(int maxParallelism) : maxParallelism(maxParallelism) {}
+	explicit ParallelismLimitor(int maxParallelism) : maxParallelism(maxParallelism) {}
 
 	inline void decrementTaskCounter() {
 		ASSERT(numRunningTasks.get() <= maxParallelism);

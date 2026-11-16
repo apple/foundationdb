@@ -395,6 +395,11 @@ std::string joinPath(std::string const& directory, std::string const& filename);
 // Relative paths remain relative and are NOT rebased on the current working directory.
 std::string cleanPath(std::string const& path);
 
+// Returns true if `path`, when joined onto a base directory, can only resolve to the base itself or something
+// within it. The check is purely lexical, so it does not account for symbolic links inside the base.  An empty path
+// is contained, as is "."; any ".." component is rejected, even one that stays within the base.
+bool relativePathIsContained(const std::string& path);
+
 // Removes the last component from a path string (if possible) and returns the result with one trailing separator.
 // If there is only one path component, the result will be "" for relative paths and "/" for absolute paths.
 // Note that this is NOT the same as getting the parent of path, as the final component could be ".."
@@ -505,6 +510,45 @@ private:
 
 	void createTmpFile(const std::string_view dir, const std::string_view prefix);
 };
+
+#ifndef _WIN32
+// Waits on one thread for many descriptors to become readable, using epoll on Linux and kqueue elsewhere. Readiness is
+// edge-triggered: a descriptor is reported when it becomes readable (data, hang-up or error) and not again until more
+// arrives, so its reader must read until EAGAIN before waiting again. Only wake() may be called from other threads.
+class ReadinessPoller {
+public:
+	// Throws platform_error() if the kernel objects cannot be created.
+	ReadinessPoller();
+	~ReadinessPoller();
+
+	ReadinessPoller(const ReadinessPoller&) = delete;
+	ReadinessPoller& operator=(const ReadinessPoller&) = delete;
+
+	// Starts watching `fd`: wait() reports `tag` (not null) when it becomes readable, at once if it already is.
+	// Returns 0 or an errno value.
+	int watch(int fd, void* tag);
+
+	// Stops watching `fd`.
+	void unwatch(int fd);
+
+	// Waits until a watched descriptor becomes readable, wake() is called, or `timeoutMs` passes (-1 for no limit).
+	// Then appends to `ready` the tag of each descriptor that became readable, at most once each.
+	void wait(int timeoutMs, std::vector<void*>& ready);
+
+	// Makes the current or the next wait() return. Safe to call from any thread.
+	void wake();
+
+private:
+	int pollFd = -1; // The epoll or kqueue instance.
+#ifdef __linux__
+	int wakeFd = -1; // An eventfd, watched by `pollFd`, that wake() signals.
+#endif
+};
+
+// Bytes in `fd`'s send queue that the peer has not yet acknowledged (Linux) or that are not yet sent (macOS), or -1
+// where the platform cannot tell.
+int socketSendQueueBytes(int fd);
+#endif // _WIN32
 
 } // namespace platform
 
@@ -897,17 +941,9 @@ EXTERNC void setProfilingEnabled(int enabled);
 	                             DTRACE_PROBE)                                                                         \
 	(foundationdb, __VA_ARGS__)
 
-extern void fdb_probe_actor_create(const char* name, unsigned long id);
-extern void fdb_probe_actor_destroy(const char* name, unsigned long id);
-extern void fdb_probe_actor_enter(const char* name, unsigned long, int index);
-extern void fdb_probe_actor_exit(const char* name, unsigned long, int index);
 #else
 #define FDB_TRACE_PROBE_STRING_CONCAT(h, t) h##t
 #define FDB_TRACE_PROBE(...)
-inline void fdb_probe_actor_create(const char* name, unsigned long id) {}
-inline void fdb_probe_actor_destroy(const char* name, unsigned long id) {}
-inline void fdb_probe_actor_enter(const char* name, unsigned long id, int index) {}
-inline void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {}
 #endif
 
 #if defined(__aarch64__)

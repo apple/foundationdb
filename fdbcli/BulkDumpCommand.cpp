@@ -41,38 +41,13 @@ static const std::string BULK_DUMP_HELP_MESSAGE =
     std::string(BULK_DUMP_MODE_USAGE) + std::string(BULK_DUMP_DUMP_USAGE) + std::string(BULK_DUMP_STATUS_USAGE) +
     std::string(BULK_DUMP_CANCEL_USAGE);
 
-Future<bool> getOngoingBulkDumpJob(Database cx) {
-	Transaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			Optional<BulkDumpState> job = co_await getSubmittedBulkDumpJob(&tr);
-			if (job.present()) {
-				fmt::println("Running bulk dumping job: {}", job.get().getJobId().toString());
-				co_return true;
-			} else {
-				fmt::println("No bulk dumping job is running");
-				co_return false;
-			}
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
-Future<Void> getBulkDumpCompleteRanges(Database cx, KeyRange rangeToRead) {
-	try {
-		size_t finishCount = co_await getBulkDumpCompleteTaskCount(cx, rangeToRead);
-		fmt::println("Finished {} tasks", finishCount);
-	} catch (Error& e) {
-		if (e.code() == error_code_timed_out) {
-			fmt::println("timed out");
-		}
-	}
-}
-
 Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
+	// A bare `bulkdump` reaches here with only the command itself, and every branch below reads tokens[1].
+	if (tokens.size() < 2) {
+		printUsage(tokens[0]);
+		printLongDesc(tokens[0]);
+		co_return UID();
+	}
 	BulkDumpState bulkDumpJob;
 	if (tokencmp(tokens[1], "mode")) {
 		if (tokens.size() != 2 && tokens.size() != 3) {
@@ -193,13 +168,15 @@ Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 			             progress.errorTasks > 0 ? fmt::format(", {} error", progress.errorTasks) : "");
 		}
 
-		fmt::println(" Bytes: {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
+		fmt::println(" Bytes: {}", formatBytesProgress(progress.completedBytes, {}));
 
-		printProgressMetrics(progress.avgBytesPerSecond(), progress.etaSeconds(), progress.elapsedSeconds);
+		printProgressMetrics(progress.avgBytesPerSecond(), {}, progress.elapsedSeconds);
 
 		if (progress.errorTasks > 0) {
 			fmt::println("");
-			fmt::println("WARNING: {} tasks in error state", progress.errorTasks);
+			fmt::println(
+			    "WARNING: {} tasks in error state. The job cannot complete; run 'bulkdump cancel' to clear it.",
+			    progress.errorTasks);
 		}
 
 		co_return UID();

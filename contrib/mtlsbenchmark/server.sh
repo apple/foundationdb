@@ -11,9 +11,8 @@
 # knob_tls_handshake_flowlock_priority is set to 8900 for enabling TLS flowlock priority as high as the handshake priority. Default is 7000.
 # knob_tls_handshake_timeout_seconds is set to 3.0 seconds to timeout a handshake if not completed in 3 seconds. The default is 2.0 seconds.
 
-taskset -c 1-1  /root/build_output/bin/fdbserver \
-    -r unittests \
-    -f :/network/p2ptest \
+taskset -c 1-1  "${FDBRPC_NETWORK_TEST:-/root/build_output/bin/fdbrpc_network_test}" \
+    --mode p2p \
     --test_listenerAddresses=0.0.0.0:4500:tls \
     --test_targetDuration=0 \
     --knob_tls_handshake_limit=1000 \

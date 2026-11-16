@@ -31,6 +31,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <thread>
 #include <unordered_map>
 
 #ifdef WIN32
@@ -64,8 +65,8 @@
 #elif defined(__FreeBSD__)
 #define INIT_SEG __attribute__((init_priority(1000)))
 #elif defined(__APPLE__)
-#pragma message "init_priority is not supported on this platform; will this be a problem?"
-#define INIT_SEG
+#define INIT_SEG __attribute__((init_priority(1000)))
+// WARNING: init_priority for macOS linker is just "within single module" not "entire application"
 #else
 #error Where am I?
 #endif
@@ -309,10 +310,10 @@ namespace keepalive_allocator {
 
 namespace detail {
 
-std::set<void*> g_allocatedSet;
-std::set<void*> g_freedSet;
-std::vector<std::pair<const uint8_t*, int>> g_wipedSet;
-bool g_active = false;
+thread_local std::set<void*> g_allocatedSet;
+thread_local std::set<void*> g_freedSet;
+thread_local std::vector<std::pair<const uint8_t*, int>> g_wipedSet;
+thread_local bool g_active = false;
 
 } // namespace detail
 
@@ -368,6 +369,33 @@ std::vector<std::pair<const uint8_t*, int>> const& getWipedAreaSet() {
 }
 
 } // namespace keepalive_allocator
+
+TEST_CASE("/flow/FastAlloc/KeepaliveScopeThreadIsolation") {
+	std::atomic<bool> start{ false };
+	std::atomic<bool> allocated{ false };
+	std::atomic<bool> release{ false };
+	std::thread otherThread([&] {
+		while (!start.load(std::memory_order_acquire)) {
+			std::this_thread::yield();
+		}
+		auto* memory = allocateAndMaybeKeepalive(64);
+		allocated.store(true, std::memory_order_release);
+		while (!release.load(std::memory_order_acquire)) {
+			std::this_thread::yield();
+		}
+		freeOrMaybeKeepalive(memory);
+	});
+	{
+		keepalive_allocator::ActiveScope scope;
+		start.store(true, std::memory_order_release);
+		while (!allocated.load(std::memory_order_acquire)) {
+			std::this_thread::yield();
+		}
+	}
+	release.store(true, std::memory_order_release);
+	otherThread.join();
+	return Void();
+}
 
 template <int Size>
 void* FastAllocator<Size>::allocate() {
@@ -680,34 +708,25 @@ FastAllocator<Size>::ThreadData::~ThreadData() {
 int64_t getTotalUnusedAllocatedMemory() {
 	int64_t unusedMemory = 0;
 
-	unusedMemory += FastAllocator<16>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<32>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<64>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<96>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<128>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<256>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<512>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<1024>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<2048>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<4096>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<8192>::getApproximateMemoryUnused();
-	unusedMemory += FastAllocator<16384>::getApproximateMemoryUnused();
+	forEachFastAllocatorSize([&]<int Size>() { unusedMemory += FastAllocator<Size>::getApproximateMemoryUnused(); });
 
 	return unusedMemory;
 }
 
-template class FastAllocator<16>;
-template class FastAllocator<32>;
-template class FastAllocator<64>;
-template class FastAllocator<96>;
-template class FastAllocator<128>;
-template class FastAllocator<256>;
-template class FastAllocator<512>;
-template class FastAllocator<1024>;
-template class FastAllocator<2048>;
-template class FastAllocator<4096>;
-template class FastAllocator<8192>;
-template class FastAllocator<16384>;
+// Explicit class instantiation also emits the early thread-local initializer.
+static_assert(FAST_ALLOCATOR_SIZES.size() == 12, "Update the explicit instantiations when changing size classes.");
+template class FastAllocator<FAST_ALLOCATOR_SIZES[0]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[1]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[2]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[3]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[4]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[5]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[6]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[7]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[8]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[9]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[10]>;
+template class FastAllocator<FAST_ALLOCATOR_SIZES[11]>;
 
 #ifdef USE_JEMALLOC
 #include <jemalloc/jemalloc.h>

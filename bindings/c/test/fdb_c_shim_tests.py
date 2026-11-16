@@ -14,6 +14,9 @@ from fdb_test_runner.fdb_version import CURRENT_VERSION, PREV_RELEASE_VERSION
 TESTER_STATS_INTERVAL_SEC = 5
 DEFAULT_TEST_FILE = "CApiCorrectnessMultiThr.toml"
 IMPLIBSO_ERROR_CODE = -6  # SIGABORT
+CLIENT_CLEANUP_TIMEOUT_SEC = 5
+LEGACY_PRIMARY_TIMEOUT_SEC = 30
+LEGACY_PRIMARY_VERSIONS = ("7.2.9", "7.3.79", "7.4.8")
 
 
 def version_from_str(ver_str):
@@ -70,12 +73,28 @@ class TestEnv(LocalCluster):
         super().__exit__(xc_type, exc_value, traceback)
         shutil.rmtree(self.tmp_dir)
 
-    def exec_client_command(self, cmd_args, env_vars=None, expected_ret_code=0):
+    def exec_client_command(
+        self,
+        cmd_args,
+        env_vars=None,
+        expected_ret_code=0,
+        timeout_seconds=None,
+    ):
         print("Executing test command: {}".format(" ".join([str(c) for c in cmd_args])))
         tester_proc = subprocess.Popen(
             cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env_vars
         )
-        tester_retcode = tester_proc.wait()
+        try:
+            tester_retcode = tester_proc.wait(timeout=timeout_seconds)
+        except BaseException:
+            if tester_proc.poll() is None:
+                tester_proc.terminate()
+                try:
+                    tester_proc.wait(timeout=CLIENT_CLEANUP_TIMEOUT_SEC)
+                except subprocess.TimeoutExpired:
+                    tester_proc.kill()
+                    tester_proc.wait(timeout=CLIENT_CLEANUP_TIMEOUT_SEC)
+            raise
         assert (
             tester_retcode == expected_ret_code
         ), "Tester completed return code {}, but {} was expected".format(
@@ -107,6 +126,13 @@ class FdbCShimTests:
         if self.test_prev_versions:
             self.downloader.download_old_binaries(PREV_RELEASE_VERSION)
             self.downloader.download_old_binaries("7.0.0")
+            for version in LEGACY_PRIMARY_VERSIONS:
+                self.downloader.download_old_binary(
+                    version,
+                    "libfdb_c.so",
+                    "libfdb_c.{}.so".format(self.downloader.platform),
+                    False,
+                )
 
     def build_c_api_tester_args(self, test_env, test_file):
         test_file_path = self.api_test_dir.joinpath(test_file)
@@ -170,6 +196,9 @@ class FdbCShimTests:
         set_ld_lib_path=False,
         use_external_lib=True,
         expected_ret_code=0,
+        expected_local_client_version=None,
+        timeout_seconds=None,
+        clear_network_options=False,
     ):
         print("-" * 80)
         if api_version is None:
@@ -203,6 +232,11 @@ class FdbCShimTests:
                 "--local-client-library",
                 ("dummy" if invalid_lib_path else self.downloader.lib_path(version)),
             ]
+        if expected_local_client_version is not None:
+            cmd_args = cmd_args + [
+                "--expected-local-client-version",
+                expected_local_client_version,
+            ]
         if use_external_lib:
             cmd_args = cmd_args + [
                 "--disable-local-client",
@@ -210,6 +244,11 @@ class FdbCShimTests:
                 test_env.client_lib_external,
             ]
         env_vars = os.environ.copy()
+        if clear_network_options:
+            for name in tuple(env_vars):
+                if name.startswith("FDB_NETWORK_OPTION_"):
+                    del env_vars[name]
+            env_vars.pop("FDB_LOCAL_CLIENT_LIBRARY_PATH", None)
         if set_ld_lib_path:
             env_vars["LD_LIBRARY_PATH"] = "%s:%s" % (
                 self.downloader.lib_dir(version),
@@ -219,7 +258,9 @@ class FdbCShimTests:
             env_vars["FDB_LOCAL_CLIENT_LIBRARY_PATH"] = (
                 "dummy" if invalid_lib_path else self.downloader.lib_path(version)
             )
-        test_env.exec_client_command(cmd_args, env_vars, expected_ret_code)
+        test_env.exec_client_command(
+            cmd_args, env_vars, expected_ret_code, timeout_seconds
+        )
 
     def run_tests(self):
         # Test the API workload with the dev version
@@ -265,6 +306,17 @@ class FdbCShimTests:
             self.run_c_shim_lib_tester(
                 CURRENT_VERSION, test_env, call_set_path=True, api_version=700
             )
+
+            if self.test_prev_versions:
+                for version in LEGACY_PRIMARY_VERSIONS:
+                    self.run_c_shim_lib_tester(
+                        version,
+                        test_env,
+                        call_set_path=True,
+                        expected_local_client_version=version,
+                        timeout_seconds=LEGACY_PRIMARY_TIMEOUT_SEC,
+                        clear_network_options=True,
+                    )
 
         if self.test_prev_versions:
             # Test the API workload with the release version

@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <iostream>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <cstring>
 #include <string>
@@ -124,6 +125,11 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <signal.h>
 /* Needed for gnu_dev_{major,minor} */
 #include <sys/sysmacros.h>
+/* Needed for ReadinessPoller and socketSendQueueBytes */
+#include <linux/sockios.h>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <sys/ioctl.h>
 #endif // __linux__
 
 #ifdef __FreeBSD__
@@ -154,6 +160,8 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <devstat.h>
 #include <kvm.h>
 #include <libutil.h>
+/* Needed for ReadinessPoller */
+#include <sys/event.h>
 #endif // __FreeBSD__
 
 #ifdef __APPLE__
@@ -172,6 +180,8 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <sys/sysctl.h>
 #include <sys/syslimits.h>
 #include <sys/uio.h>
+/* Needed for ReadinessPoller */
+#include <sys/event.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
@@ -716,6 +726,22 @@ const char* getInterfaceName(const IPAddress& _ip) {
 	else
 		return nullptr;
 }
+
+// Cached because getifaddrs() can take tens of milliseconds
+static const char* getCachedInterfaceName(const IPAddress& ip) {
+	thread_local std::optional<IPAddress> cachedIp;
+	thread_local std::string cachedName;
+	if (cachedIp == ip) {
+		return cachedName.c_str();
+	}
+	const char* name = getInterfaceName(ip);
+	if (!name) {
+		return nullptr;
+	}
+	cachedIp = ip;
+	cachedName = name;
+	return cachedName.c_str();
+}
 #endif
 
 #if defined(__linux__)
@@ -730,7 +756,7 @@ void getNetworkTraffic(const IPAddress& ip,
 	                          // other platforms do, and since all of our simulation testing is on Linux...
 	const char* ifa_name = nullptr;
 	try {
-		ifa_name = getInterfaceName(ip);
+		ifa_name = getCachedInterfaceName(ip);
 	} catch (Error& e) {
 		if (e.code() != error_code_platform_error) {
 			throw;
@@ -978,7 +1004,7 @@ void getNetworkTraffic(const IPAddress ip,
 
 	const char* ifa_name = nullptr;
 	try {
-		ifa_name = getInterfaceName(ip);
+		ifa_name = getCachedInterfaceName(ip);
 	} catch (Error& e) {
 		if (e.code() != error_code_platform_error) {
 			throw;
@@ -1170,7 +1196,7 @@ void getNetworkTraffic(const IPAddress& ip,
 
 	const char* ifa_name = nullptr;
 	try {
-		ifa_name = getInterfaceName(ip);
+		ifa_name = getCachedInterfaceName(ip);
 	} catch (Error& e) {
 		if (e.code() != error_code_platform_error) {
 			throw;
@@ -1206,7 +1232,7 @@ void getNetworkTraffic(const IPAddress& ip,
 		struct if_msghdr* ifm = (struct if_msghdr*)next;
 		next += ifm->ifm_msglen;
 
-		if ((ifm->ifm_type = RTM_IFINFO2)) {
+		if (ifm->ifm_type == RTM_IFINFO2) {
 			struct if_msghdr2* if2m = (struct if_msghdr2*)ifm;
 			struct sockaddr_dl* sdl = (struct sockaddr_dl*)(if2m + 1);
 
@@ -1313,23 +1339,25 @@ DiskStatistics getDiskStatistics(std::string const& directory) {
 
 	DiskStatistics diskStats;
 
-	if ((number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsReadsKey)))) {
+	number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsReadsKey));
+	if (number) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &diskStats.reads);
 	}
 
-	if ((number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsWritesKey)))) {
+	number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsWritesKey));
+	if (number) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &diskStats.writes);
 	}
 
 	uint64_t nanoSecs;
-	if ((number =
-	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalReadTimeKey)))) {
+	number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalReadTimeKey));
+	if (number) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
 		diskStats.readMilliSecs += nanoSecs / 1000000;
 		diskStats.IOMilliSecs += nanoSecs / 1000000;
 	}
-	if ((number =
-	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalWriteTimeKey)))) {
+	number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalWriteTimeKey));
+	if (number) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
 		diskStats.writeMilliSecs += nanoSecs / 1000000;
 		diskStats.IOMilliSecs += nanoSecs / 1000000;
@@ -2529,6 +2557,24 @@ std::string cleanPath(std::string const& path) {
 	return result.empty() ? "." : result;
 }
 
+bool relativePathIsContained(const std::string& path) {
+	const std::string unixPath{ [&path] {
+		std::string s{ path };
+		std::ranges::replace(s, CANONICAL_PATH_SEPARATOR, '/');
+		return s;
+	}() };
+	if (!unixPath.empty() && unixPath[0] == '/') {
+		return false;
+	}
+	StringRef p{ unixPath };
+	while (!p.empty()) {
+		if (p.eat("/"_sr) == dotdot) {
+			return false;
+		}
+	}
+	return true;
+}
+
 std::string popPath(const std::string& path) {
 	int i = path.size() - 1;
 	// Skip over any trailing separators
@@ -2874,6 +2920,134 @@ void setCloseOnExec(int fd) {
 #endif
 }
 
+#ifdef __linux__
+
+ReadinessPoller::ReadinessPoller() {
+	pollFd = ::epoll_create1(EPOLL_CLOEXEC);
+	wakeFd = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+	// Level-triggered, and drained by wait(); a null tag marks it.
+	epoll_event ev{};
+	ev.events = EPOLLIN;
+	ev.data.ptr = nullptr;
+	if (pollFd < 0 || wakeFd < 0 || ::epoll_ctl(pollFd, EPOLL_CTL_ADD, wakeFd, &ev) != 0) {
+		for (int fd : { pollFd, wakeFd }) {
+			if (fd >= 0) {
+				::close(fd);
+			}
+		}
+		throw platform_error();
+	}
+}
+
+ReadinessPoller::~ReadinessPoller() {
+	::close(wakeFd);
+	::close(pollFd);
+}
+
+int ReadinessPoller::watch(int fd, void* tag) {
+	ASSERT(tag != nullptr);
+	epoll_event ev{};
+	// EPOLLERR and EPOLLHUP are always reported.
+	ev.events = EPOLLIN | EPOLLRDHUP | EPOLLET;
+	ev.data.ptr = tag;
+	return ::epoll_ctl(pollFd, EPOLL_CTL_ADD, fd, &ev) == 0 ? 0 : errno;
+}
+
+void ReadinessPoller::unwatch(int fd) {
+	// Kernels before 2.6.9 require a non-null event even for EPOLL_CTL_DEL.
+	epoll_event ev{};
+	[[maybe_unused]] int rc = ::epoll_ctl(pollFd, EPOLL_CTL_DEL, fd, &ev);
+}
+
+void ReadinessPoller::wait(int timeoutMs, std::vector<void*>& ready) {
+	// Descriptors beyond this batch stay ready in the kernel and are reported by the next call.
+	epoll_event events[128];
+	int n = ::epoll_wait(pollFd, events, 128, timeoutMs);
+	for (int i = 0; i < n; ++i) {
+		if (events[i].data.ptr != nullptr) {
+			ready.push_back(events[i].data.ptr);
+		} else {
+			uint64_t count;
+			[[maybe_unused]] auto rc = ::read(wakeFd, &count, sizeof(count));
+		}
+	}
+}
+
+void ReadinessPoller::wake() {
+	uint64_t one = 1;
+	[[maybe_unused]] auto rc = ::write(wakeFd, &one, sizeof(one));
+}
+
+int socketSendQueueBytes(int fd) {
+	int bytes = 0;
+	return ::ioctl(fd, SIOCOUTQ, &bytes) == 0 ? bytes : -1;
+}
+
+#elif defined(__APPLE__) || defined(__FreeBSD__)
+
+ReadinessPoller::ReadinessPoller() {
+	pollFd = ::kqueue();
+	if (pollFd < 0) {
+		throw platform_error();
+	}
+	setCloseOnExec(pollFd);
+	// wake() triggers this user event; EV_CLEAR resets it once reported.
+	struct kevent ev;
+	EV_SET(&ev, 0, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, nullptr);
+	if (::kevent(pollFd, &ev, 1, nullptr, 0, nullptr) != 0) {
+		::close(pollFd);
+		throw platform_error();
+	}
+}
+
+ReadinessPoller::~ReadinessPoller() {
+	::close(pollFd);
+}
+
+int ReadinessPoller::watch(int fd, void* tag) {
+	ASSERT(tag != nullptr);
+	// EV_CLEAR makes the read filter edge-triggered; hang-ups and errors are reported through it with EV_EOF.
+	struct kevent ev;
+	EV_SET(&ev, fd, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, tag);
+	return ::kevent(pollFd, &ev, 1, nullptr, 0, nullptr) == 0 ? 0 : errno;
+}
+
+void ReadinessPoller::unwatch(int fd) {
+	struct kevent ev;
+	EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, nullptr);
+	[[maybe_unused]] int rc = ::kevent(pollFd, &ev, 1, nullptr, 0, nullptr);
+}
+
+void ReadinessPoller::wait(int timeoutMs, std::vector<void*>& ready) {
+	timespec timeout{ timeoutMs / 1000, (timeoutMs % 1000) * 1000000L };
+	// Descriptors beyond this batch stay ready in the kernel and are reported by the next call.
+	struct kevent events[128];
+	int n = ::kevent(pollFd, nullptr, 0, events, 128, timeoutMs < 0 ? nullptr : &timeout);
+	for (int i = 0; i < n; ++i) {
+		if (events[i].filter == EVFILT_READ) {
+			ready.push_back(events[i].udata);
+		}
+	}
+}
+
+void ReadinessPoller::wake() {
+	struct kevent ev;
+	EV_SET(&ev, 0, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
+	[[maybe_unused]] int rc = ::kevent(pollFd, &ev, 1, nullptr, 0, nullptr);
+}
+
+int socketSendQueueBytes(int fd) {
+#ifdef __APPLE__
+	int bytes = 0;
+	socklen_t len = sizeof(bytes);
+	return ::getsockopt(fd, SOL_SOCKET, SO_NWRITE, &bytes, &len) == 0 ? bytes : -1;
+#else
+	return -1;
+#endif
+}
+
+#endif // __linux__
+
 } // namespace platform
 
 #ifdef _WIN32
@@ -2911,7 +3085,10 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 	pthread_t t;
 	pthread_attr_t attr;
 
-	pthread_attr_init(&attr);
+	int attrError = pthread_attr_init(&attr);
+	if (attrError != 0) {
+		criticalError(FDB_EXIT_ERROR, "ThreadAttributesError", strerror(attrError));
+	}
 	if (stackSize != 0) {
 		if (pthread_attr_setstacksize(&attr, stackSize) != 0) {
 			// If setting the stack size fails the default stack size will be used, so failure to set
@@ -2924,8 +3101,13 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 	}
 
 	auto* args = new ThreadCreateArgs(func, arg);
-	pthread_create(&t, &attr, &runFunc, args);
+	int createError = pthread_create(&t, &attr, &runFunc, args);
 	pthread_attr_destroy(&attr);
+	if (createError != 0) {
+		delete args;
+		// Callers transfer thread-owned state without a failed-launch recovery path.
+		criticalError(FDB_EXIT_ERROR, "ThreadCreationError", strerror(createError));
+	}
 
 #if defined(__linux__)
 	if (name != nullptr) {
@@ -3137,8 +3319,8 @@ int setEnvironmentVar(const char* name, const char* value, int overwrite) {
 #define getcwd(buf, maxlen) _getcwd(buf, maxlen)
 #endif
 std::string getWorkingDirectory() {
-	char* buf;
-	if ((buf = getcwd(nullptr, 0)) == nullptr) {
+	char* buf = getcwd(nullptr, 0);
+	if (buf == nullptr) {
 		TraceEvent(SevWarnAlways, "GetWorkingDirectoryError").GetLastError();
 		throw platform_error();
 	}
@@ -3711,6 +3893,57 @@ void registerCrashHandlerCallback(void (*f)()) {
 	g_crashHandlerCallbacks.push_back(f);
 }
 
+#ifdef __linux__
+// Sampled at registration time, not in the handler: reading /proc/self/maps needs
+// malloc, and the handler can run with the allocator's locks held.
+uintptr_t g_reportedStackLow = 0;
+uintptr_t g_reportedStackHigh = 0;
+uintptr_t g_mainStackMappedLow = 0;
+uintptr_t g_mainStackMappedHigh = 0;
+uint64_t g_stackRlimit = 0;
+
+// Global because crashHandler keeps its plain sa_handler signature.
+uintptr_t g_faultAddress = 0;
+bool g_faultAddressValid = false;
+
+void sampleMainStackExtent() {
+	struct rlimit rl;
+	if (getrlimit(RLIMIT_STACK, &rl) == 0) {
+		g_stackRlimit = rl.rlim_cur;
+	}
+
+	// Must match initStackBoundsForThread in flow/MemoryTracker.cpp.
+	pthread_attr_t attr;
+	if (pthread_getattr_np(pthread_self(), &attr) == 0) {
+		void* base = nullptr;
+		size_t size = 0;
+		if (pthread_attr_getstack(&attr, &base, &size) == 0) {
+			g_reportedStackLow = reinterpret_cast<uintptr_t>(base);
+			g_reportedStackHigh = g_reportedStackLow + size;
+		}
+		pthread_attr_destroy(&attr);
+	}
+
+	FILE* maps = fopen("/proc/self/maps", "r");
+	if (maps == nullptr) {
+		return;
+	}
+	char line[512];
+	while (fgets(line, sizeof(line), maps) != nullptr) {
+		if (strstr(line, "[stack]") == nullptr) {
+			continue;
+		}
+		unsigned long low = 0, high = 0;
+		if (sscanf(line, "%lx-%lx", &low, &high) == 2) {
+			g_mainStackMappedLow = low;
+			g_mainStackMappedHigh = high;
+		}
+		break;
+	}
+	fclose(maps);
+}
+#endif
+
 // The crashHandler function is registered to handle signals before the process terminates.
 // Basic information about the crash is printed/traced, and stdout and trace events are flushed.
 void crashHandler(int sig) {
@@ -3730,6 +3963,9 @@ void crashHandler(int sig) {
 
 	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
 	if (error) {
+		if (g_faultAddressValid) {
+			fprintf(stderr, "FaultAddress: 0x%zx\n", (size_t)g_faultAddress);
+		}
 		fprintf(stderr, "Trace: %s\n", backtrace.c_str());
 	}
 
@@ -3737,6 +3973,18 @@ void crashHandler(int sig) {
 	{
 		TraceEvent te(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated");
 		te.detail("Signal", sig).detail("Name", strsignal(sig)).detail("Trace", backtrace);
+		if (g_faultAddressValid) {
+			// FaultInReportedStack separates a wild pointer from stack bounds that reach
+			// below what is mapped.
+			te.detail("FaultAddress", format("0x%zx", (size_t)g_faultAddress))
+			    .detail("ReportedStackLow", format("0x%zx", (size_t)g_reportedStackLow))
+			    .detail("ReportedStackHigh", format("0x%zx", (size_t)g_reportedStackHigh))
+			    .detail("MainStackMappedLow", format("0x%zx", (size_t)g_mainStackMappedLow))
+			    .detail("MainStackMappedHigh", format("0x%zx", (size_t)g_mainStackMappedHigh))
+			    .detail("StackRlimit", g_stackRlimit)
+			    .detail("FaultInReportedStack",
+			            g_faultAddress >= g_reportedStackLow && g_faultAddress < g_reportedStackHigh);
+		}
 		if (error) {
 			te.setErrorKind(ErrorKind::BugDetected);
 		}
@@ -3771,14 +4019,26 @@ void crashHandler(int sig) {
 #endif
 }
 
+#ifdef __linux__
+void crashHandlerSigInfo(int sig, siginfo_t* info, void*) {
+	if (info != nullptr && (sig == SIGSEGV || sig == SIGBUS)) {
+		g_faultAddress = reinterpret_cast<uintptr_t>(info->si_addr);
+		g_faultAddressValid = true;
+	}
+	crashHandler(sig);
+}
+#endif
+
 void registerCrashHandler() {
 #ifdef __linux__
+	sampleMainStackExtent();
+
 	// For these otherwise fatal errors, attempt to log a trace of
 	// what was happening and then exit
 	struct sigaction action;
-	action.sa_handler = crashHandler;
+	action.sa_sigaction = crashHandlerSigInfo;
 	sigfillset(&action.sa_mask);
-	action.sa_flags = 0;
+	action.sa_flags = SA_SIGINFO; // deliver siginfo_t so SIGSEGV reports its fault address
 
 	sigaction(SIGILL, &action, nullptr);
 	sigaction(SIGFPE, &action, nullptr);
@@ -4018,21 +4278,6 @@ void* checkThread(void* arg) {
 	return nullptr;
 #endif
 }
-
-#if defined(DTRACE_PROBES)
-void fdb_probe_actor_create(const char* name, unsigned long id) {
-	FDB_TRACE_PROBE(actor_create, name, id);
-}
-void fdb_probe_actor_destroy(const char* name, unsigned long id) {
-	FDB_TRACE_PROBE(actor_destroy, name, id);
-}
-void fdb_probe_actor_enter(const char* name, unsigned long id, int index) {
-	FDB_TRACE_PROBE(actor_enter, name, id, index);
-}
-void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {
-	FDB_TRACE_PROBE(actor_exit, name, id, index);
-}
-#endif
 
 void throwExecPathError(Error e, char path[]) {
 	Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
@@ -4353,6 +4598,37 @@ void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {
 void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {}
 #endif
 
+TEST_CASE("/flow/Platform/relativePathIsContained") {
+	// Contained: relative with no ".." component, including names that merely contain dots.
+	ASSERT(relativePathIsContained(""));
+	ASSERT(relativePathIsContained("."));
+	ASSERT(relativePathIsContained("data.sst"));
+	ASSERT(relativePathIsContained("a/b/c"));
+	ASSERT(relativePathIsContained("logs/"));
+	ASSERT(relativePathIsContained("5676202155931feac1bbd501d491170b/0/data.sst"));
+	ASSERT(relativePathIsContained("kvranges/snapshot.000000000000000001//0/range,1,abc,1048576"));
+	ASSERT(relativePathIsContained("a/.hidden/b"));
+	ASSERT(relativePathIsContained("a..b/c"));
+	ASSERT(relativePathIsContained("..a"));
+	ASSERT(relativePathIsContained("..."));
+	ASSERT(relativePathIsContained("./a"));
+
+	// Not contained: absolute, or any ".." component (even one that would stay within the base).
+	ASSERT(!relativePathIsContained("/"));
+	ASSERT(!relativePathIsContained("/var/lib/foundationdb"));
+	ASSERT(!relativePathIsContained(".."));
+	ASSERT(!relativePathIsContained("../"));
+	ASSERT(!relativePathIsContained("../x"));
+	ASSERT(!relativePathIsContained("./../x"));
+	ASSERT(!relativePathIsContained("../../../../var/lib/foundationdb"));
+	ASSERT(!relativePathIsContained("a/../../etc"));
+	ASSERT(!relativePathIsContained("a/b/../../.."));
+	ASSERT(!relativePathIsContained("a/../b"));
+	ASSERT(!relativePathIsContained("a/b/.."));
+
+	return Void();
+}
+
 TEST_CASE("/flow/Platform/directoryOps") {
 	int errors = 0;
 
@@ -4477,3 +4753,21 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	ASSERT(errors == 0);
 	return Void();
 }
+
+#ifdef __linux__
+// The first call looks the interface up and caches it; later calls use the cache. Both report the same interface.
+TEST_CASE("/flow/Platform/getNetworkTraffic") {
+	const IPAddress loopback(0x7f000001);
+	// Zero loopback traffic leaves the byte counters unchanged.
+	uint64_t sent[2] = {}, received[2] = {}, outSegs[2] = {}, retransSegs[2] = {};
+	for (int i = 0; i < 2; i++) {
+		getNetworkTraffic(loopback, sent[i], received[i], outSegs[i], retransSegs[i]);
+	}
+	ASSERT_GE(sent[1], sent[0]);
+	ASSERT_GE(received[1], received[0]);
+	ASSERT_GE(outSegs[1], outSegs[0]);
+	const char* name = getCachedInterfaceName(loopback);
+	ASSERT(name != nullptr && std::string(name) == "lo");
+	return Void();
+}
+#endif

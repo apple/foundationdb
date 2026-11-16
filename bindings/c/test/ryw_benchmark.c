@@ -179,7 +179,8 @@ int singleClearGetRange(FDBTransaction* tr, struct ResultSet* rs) {
 	double end = getTime();
 
 	insertData(tr);
-	return 100 * numKeys / 2 / (end - start);
+	const int keysRead = 100 * numKeys / 2;
+	return keysRead / (end - start);
 }
 
 int clearRangeGetRange(FDBTransaction* tr, struct ResultSet* rs) {
@@ -221,7 +222,8 @@ int clearRangeGetRange(FDBTransaction* tr, struct ResultSet* rs) {
 	double end = getTime();
 
 	insertData(tr);
-	return 100 * numKeys * 3 / 4 / (end - start);
+	const int keysRead = 100 * numKeys * 3 / 4;
+	return keysRead / (end - start);
 }
 
 int interleavedSetsGets(FDBTransaction* tr, struct ResultSet* rs) {

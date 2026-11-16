@@ -96,9 +96,6 @@ public:
 
 	double secondMultiplier;
 	double secondBudget;
-	PromiseStream<Future<Void>> addActor;
-	Future<Void> laggingRequests; // requests for which a different recipient already answered
-	int laggingRequestCount;
 
 	QueueModel() : secondMultiplier(1.0), secondBudget(0), laggingRequestCount(0) {
 		laggingRequests = actorCollection(addActor.getFuture(), &laggingRequestCount);
@@ -106,7 +103,24 @@ public:
 
 	~QueueModel() { laggingRequests.cancel(); }
 
+	void addBackgroundActor(Future<Void> actor) { addActor.send(actor); }
+
+	// The lagging actor must be created after an exhausted collection is cancelled.
+	template <class MakeActor>
+	void addLaggingRequest(MakeActor&& makeActor) {
+		if (laggingRequestCount > FLOW_KNOBS->MAX_LAGGING_REQUESTS_OUTSTANDING || laggingRequests.isReady()) {
+			laggingRequests.cancel();
+			laggingRequestCount = 0;
+			addActor = PromiseStream<Future<Void>>();
+			laggingRequests = actorCollection(addActor.getFuture(), &laggingRequestCount);
+		}
+		addActor.send(makeActor());
+	}
+
 private:
+	PromiseStream<Future<Void>> addActor;
+	Future<Void> laggingRequests; // requests for which a different recipient already answered
+	int laggingRequestCount;
 	std::unordered_map<uint64_t, QueueData> data;
 };
 

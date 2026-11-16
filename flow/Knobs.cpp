@@ -56,7 +56,9 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ENABLE_COORDINATOR_DNS_CACHE,                      false ); if( randomize && buggify() ) ENABLE_COORDINATOR_DNS_CACHE = true;
 	init( COORDINATOR_DNS_CACHE_REFRESH_INTERVAL,             3.0 );
 	init( COORDINATOR_DNS_CACHE_TTL,                         30.0 );
+	init( STALE_PEER_OBSERVABILITY,                          false );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
+	init( PERSISTENT_CONNECT_FAILED_COUNT_TTL, isSimulated ? 120.0 : 600.0 );
 
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
 	init( DELAY_JITTER_RANGE,                                  0.2 );
@@ -88,11 +90,11 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	// Per-call-site sampled memory tracker. See design/memory-tracker.md.
 	// Initial rollout: prod default off (=0). Simulation defaults to 1-in-10 sampling so the path is exercised.
-	init( MEMORY_TRACKING_SAMPLE_INVERSE,                        0 ); if( isSimulated ) MEMORY_TRACKING_SAMPLE_INVERSE = 10;
+	init( MEMORY_TRACKING_SAMPLE_INVERSE,       isSimulated ? 10 : 0 );
 	init( MEMORY_TRACKING_FORCE_SAMPLE_BYTES,               100000 );
 	init( MEMORY_TRACKING_LIVE_TRACKING,                      true );
-	init( MEMORY_TRACKING_REPORT_INTERVAL,                   600.0 ); if( isSimulated ) MEMORY_TRACKING_REPORT_INTERVAL = 30.0;
-	init( MEMORY_TRACKING_REPORT_BYTES_THRESHOLD,         80000000 ); if( isSimulated ) MEMORY_TRACKING_REPORT_BYTES_THRESHOLD = 1000000;
+	init( MEMORY_TRACKING_REPORT_INTERVAL, isSimulated ? 30.0 : 600.0 );
+	init( MEMORY_TRACKING_REPORT_BYTES_THRESHOLD, isSimulated ? 1000000 : 80000000 );
 	init( MEMORY_TRACKING_FRAMES,                                6 );
 
 	// Chaos testing - enabled for simulation by default
@@ -122,6 +124,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY,         2.0 );
 
 	//FlowTransport
+	init( CONNECTION_EVENT_SUPPRESS_FOR,                       2.0 );
 	init( CONNECTION_REJECTED_MESSAGE_DELAY,                   1.0 );
 	init( CONNECTION_ID_TIMEOUT,                             600.0 ); if( randomize && buggify() ) CONNECTION_ID_TIMEOUT = 60.0;
 	init( CONNECTION_CLEANUP_DELAY,                          100.0 );
@@ -146,12 +149,14 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,             11.0 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
 	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               1 );
+	init( TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS,      false );
 	init( TLS_CLIENT_HANDSHAKE_THREADS,                          0 );
 	init( TLS_SERVER_HANDSHAKE_THREADS,                         64 );
 	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                64 * 1024 );
 	init( TLS_MALLOC_ARENA_MAX,                                  6 );
 	init( TLS_HANDSHAKE_LIMIT,                                1000 );
 	init( DISABLE_MAINTHREAD_TLS_HANDSHAKE,                  false );
+	init( TLS_HANDSHAKE_NONBLOCKING_WORKERS,                 false );
 	init( TLS_HANDSHAKE_FLOWLOCK_PRIORITY, static_cast<int>(TaskPriority::DefaultYield) );
 	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );

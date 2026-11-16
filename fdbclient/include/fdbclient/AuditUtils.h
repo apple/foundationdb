@@ -26,6 +26,7 @@
 #include "fdbclient/Audit.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/RangeDigest.h"
 #include "fdbrpc/fdbrpc.h"
 
 struct MoveKeyLockInfo {
@@ -48,12 +49,31 @@ Future<Void> persistAuditState(Database cx,
 // Read a single audit's state by type and ID.
 Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id);
 
+// Throws audit_storage_cancelled if the audit's metadata is gone, and audit_storage_task_outdated if the audit is no
+// longer Running (it completed, failed or errored), so that work still in flight for it can stop. Used by audit tasks
+// before they act on data that is only meaningful while the audit runs.
+Future<Void> checkAuditRunning(Database cx, AuditType type, UID auditId);
+
+// As above, for the data distributor `ddId` that dispatches the audit: also throws movekeys_conflict if `lock` was lost
+// to another data distributor or data distribution is disabled (`ddEnabled` false, as for the other lock checks), and
+// audit_storage_task_outdated if the audit now belongs to another data distributor.
+Future<Void> checkAuditRunningUnderLock(Database cx,
+                                        AuditType type,
+                                        UID auditId,
+                                        UID ddId,
+                                        MoveKeyLockInfo lock,
+                                        bool ddEnabled);
+
 // List audit states for a given type, optionally filtered by phase, ordered by ID.
 AsyncResult<std::vector<AuditStorageState>> getAuditStates(Database cx,
                                                            AuditType auditType,
                                                            bool newFirst,
                                                            Optional<int> num = Optional<int>(),
                                                            Optional<AuditPhase> phase = Optional<AuditPhase>());
+
+// True for errors from reading audit state that come from proxies under load, throttling or recoveries and succeed
+// when the read is repeated.
+bool isTransientAuditStateReadError(const Error& e);
 
 // Persist per-range audit progress (which sub-ranges have been validated).
 Future<Void> persistAuditStateByRange(Database cx, AuditStorageState auditState);
@@ -86,6 +106,41 @@ AuditPhase stringToAuditPhase(std::string auditPhaseStr);
 
 // Check whether all sub-ranges of auditRange have completed range-based audit progress.
 Future<bool> checkAuditProgressCompleteByRange(Database cx, AuditType auditType, UID auditId, KeyRange auditRange);
+
+// Combined result of a RangeDigest audit over a key range.
+struct RangeDigestSummary {
+	RangeDigest root; // sum (mod 2^256) of all persisted per-range digests
+	int64_t kvCount = 0;
+	int64_t byteCount = 0;
+	bool complete = true; // false if some sub-range has no persisted digest yet
+	KeyRange incompleteRange; // first sub-range lacking a digest, when !complete
+};
+
+// Read the persisted per-range RangeDigest progress for `auditId` over `range` and combine it
+// into a single cluster root (plus kv/byte totals). Because the combine is additive, this is
+// independent of how the ranges were partitioned across storage servers.
+//
+// Stops at the first range it cannot count, so on !complete the totals are partial by construction
+// and only `incompleteRange` is meaningful.
+Future<RangeDigestSummary> getRangeDigestSummary(Database cx, UID auditId, KeyRange range);
+
+// One entry of the persisted per-range RangeDigest progress, as read at a krm boundary.
+struct RangeDigestRangeEntry {
+	KeyRange boundaryRange; // the range this row was read at
+	AuditStorageState state; // decoded row; meaningful only when `present`
+	bool present = false; // false when the progress map has no row covering `boundaryRange`
+	const char* rejectReason = nullptr; // nullptr when the row may be counted into a root
+};
+
+// Per-range detail behind getRangeDigestSummary, for operator inspection while an audit is Running.
+// Unlike the summary this reads every range, so a partially covered audit still reports what it has.
+// The progress metadata is cleared once the audit reaches Complete, after which this reads empty and
+// the per-range history survives only in the SSAuditRangeDigestComplete trace events.
+Future<std::vector<RangeDigestRangeEntry>> getRangeDigestProgress(Database cx, UID auditId, KeyRange range);
+
+// Countability rules for one persisted per-range row; nullptr means the row may be counted.
+// Shared so the summary and the operator-facing progress view cannot disagree about what counts.
+const char* rangeDigestRowRejectReason(const AuditStorageState& s, KeyRange boundaryRange);
 
 // Check whether a specific server's audit progress is complete for the given range.
 Future<bool> checkAuditProgressCompleteByServer(Database cx,

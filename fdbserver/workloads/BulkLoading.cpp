@@ -24,7 +24,7 @@
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/BulkLoadUtil.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
+#include "fdbserver/checkpoint/RocksDBCheckpointUtils.h"
 #include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/tester/workloads.h"
 
@@ -52,6 +52,7 @@ struct BulkLoadTaskTestUnit {
 
 	BulkLoadTaskState bulkLoadTask;
 	std::vector<KeyValue> data;
+	int64_t sampledBytes = 0;
 };
 
 struct BulkLoading : TestWorkload {
@@ -375,7 +376,7 @@ struct BulkLoading : TestWorkload {
 		return res; // ordered
 	}
 
-	BulkLoadFileSet generateSSTFiles(BulkLoading* self, std::string rootPath, BulkLoadTaskTestUnit task) {
+	BulkLoadFileSet generateSSTFiles(BulkLoading* self, std::string rootPath, BulkLoadTaskTestUnit& task) {
 		const std::string dataFileNameBase = deterministicRandom()->randomUniqueID().toString();
 		const std::string dataFileName = dataFileNameBase + "-data.sst";
 		const std::string sampleFileName = dataFileNameBase + "-sample.sst";
@@ -385,11 +386,18 @@ struct BulkLoading : TestWorkload {
 		ASSERT(platform::createDirectory(folder));
 		std::string dataFile = res.getDataFileFullPath();
 		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+		if (sstWriter == nullptr) {
+			TraceEvent(SevWarnAlways, "BulkLoadingNoSstWriter")
+			    .detail("Reason", "Binary was built without RocksDB and cannot write SST files")
+			    .detail("DataFile", dataFile);
+			throw unsupported_operation();
+		}
 		sstWriter->open(abspath(dataFile));
 		std::vector<KeyValue> bytesSample;
 		for (const auto& kv : task.data) {
 			ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
 			if (sampleInfo.inSample) {
+				task.sampledBytes += sampleInfo.sampledSize;
 				Key sampleKey = kv.key;
 				Value sampleValue = BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned());
 				bytesSample.push_back(Standalone(KeyValueRef(sampleKey, sampleValue)));
@@ -442,6 +450,7 @@ struct BulkLoading : TestWorkload {
 
 	std::vector<Key> getAllKeys(const std::vector<KeyValue>& kvs) {
 		std::vector<Key> res;
+		res.reserve(kvs.size());
 		for (const auto& kv : kvs) {
 			res.push_back(kv.key);
 		}
@@ -545,6 +554,10 @@ struct BulkLoading : TestWorkload {
 			int dataSize = std::pow(10, deterministicRandom()->randomInt(0, 4));
 			BulkLoadTaskTestUnit taskUnit =
 			    self->generateBulkLoadTaskUnit(self, folderPath, dataSize, KeyRangeRef(beginKey, endKey));
+			const auto& manifest = taskUnit.bulkLoadTask.getManifests().front();
+			if (i == 0 && manifest.hasByteSampleFile()) {
+				writeFile(manifest.getBytesSampleFileFullPath(), "invalid SST");
+			}
 			bulkLoadTaskStates.push_back(taskUnit.bulkLoadTask);
 			taskRanges.push_back(taskUnit.bulkLoadTask.getRange());
 			taskUnits.push_back(taskUnit);
@@ -556,6 +569,7 @@ struct BulkLoading : TestWorkload {
 		oldBulkLoadMode = co_await setBulkLoadMode(cx, 1);
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		std::vector<BulkLoadTaskState> errorTasks = co_await self->waitUntilAllTaskCompleteOrError(self, cx);
+		errorRanges.reserve(errorTasks.size());
 		for (const auto& errorTask : errorTasks) {
 			errorRanges.push_back(errorTask.getRange());
 		}
@@ -577,6 +591,8 @@ struct BulkLoading : TestWorkload {
 			if (rangeTaskError) {
 				continue; // Ignore error ranges
 			}
+			StorageMetrics metrics = co_await cx->getStorageMetrics(taskUnits[j].getRange(), CLIENT_KNOBS->TOO_MANY);
+			ASSERT_EQ(metrics.bytes, taskUnits[j].sampledBytes);
 			kvs.insert(kvs.end(), taskUnits[j].data.begin(), taskUnits[j].data.end());
 		}
 		ASSERT(self->checkSame(self, kvs, dbkvs));
@@ -667,6 +683,7 @@ struct BulkLoading : TestWorkload {
 		}
 		// Wait until all tasks have completed
 		std::vector<BulkLoadTaskState> errorTasks = co_await self->waitUntilAllTaskCompleteOrError(self, cx);
+		errorRanges.reserve(errorTasks.size());
 		for (const auto& errorTask : errorTasks) {
 			errorRanges.push_back(errorTask.getRange()); // for any error range, do not check data
 		}
@@ -759,6 +776,7 @@ struct BulkLoading : TestWorkload {
 		if (backgroundTrafficEnabled) {
 			std::vector<Future<Void>> trafficActors;
 			int actorCount = deterministicRandom()->randomInt(1, 10);
+			trafficActors.reserve(actorCount);
 			for (int i = 0; i < actorCount; i++) {
 				trafficActors.push_back(backgroundWriteTraffic(this, cx));
 			}

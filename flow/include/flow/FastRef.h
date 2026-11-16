@@ -127,6 +127,8 @@ public:
 		if (ptr)
 			delref(ptr);
 	}
+	// Comparing pointees also handles self-assignment.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	Reference& operator=(const Reference& r) {
 		P* oldPtr = ptr;
 		P* newPtr = r.ptr;

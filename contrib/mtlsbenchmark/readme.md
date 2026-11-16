@@ -5,7 +5,8 @@ A testing framework for benchmarking TLS performance in peer-to-peer network sce
 ## Prerequisites
 
 - OpenSSL or compatible tool for certificate generation
-- Environment for FoundationDB unit test execution
+- Build `fdbrpc_network_test` (`cmake --build build --target fdbrpc_network_test`).
+- Set `FDBRPC_NETWORK_TEST` to the executable path if it differs from `/root/build_output/bin/fdbrpc_network_test`.
 
 ## Quick Start
 
@@ -22,14 +23,17 @@ Generate the required certificate files:
 
 ### Step 2: Configure Test in Scripts
 
-The test scripts support two unit tests that can be configured:
+The standalone network diagnostic supports two P2P modes:
 
-| Test Mode | Purpose | Configuration (set by -f) |
+| Test Mode | Purpose | Configuration (set by --mode) |
 |-----------|---------|---------------|
-| **Long Running** | Testing with connections and messages | `:/network/p2ptest` |
-| **One Shot** | One-time connection only and no message | `:/network/p2poneshottest` |
+| **Long Running** | Testing with connections and messages | `p2p` |
+| **One Shot** | One-time connection only and no message | `p2p-oneshot` |
 
-Set the desired test mode in your script before running.
+Set the desired test mode in your script before running. The `--test_*`,
+`--knob_*`, and `--tls_*` options retain their meanings. These modes were
+previously run through `fdbserver -r unittests`; they now use the standalone
+[`fdbrpc_network_test`](../../fdbrpc/tests/networktest.md) executable.
 
 ## Folder Structure
 

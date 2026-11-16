@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/CoordinationInterface.h"
-#include "fdbrpc/WellKnownEndpoints.h"
+#include "fdbclient/WellKnownEndpoints.h"
 
 struct GenerationRegInterface {
 	constexpr static FileIdentifier file_identifier = 16726744;

@@ -122,7 +122,7 @@ struct JSONDoc {
 			const json_spirit::mObject* curObj = curVal ? &curVal->get_obj() : pObj;
 
 			// Make sure key exists, if not then return false
-			if (!curObj->count(key))
+			if (!curObj->contains(key))
 				return false;
 
 			// Advance curVal
@@ -170,7 +170,7 @@ struct JSONDoc {
 			}
 
 			// Make sure key exists, if not then return false
-			if (!curObj->count(key))
+			if (!curObj->contains(key))
 				(*curObj)[key] = json_spirit::mValue();
 
 			// Advance curVal

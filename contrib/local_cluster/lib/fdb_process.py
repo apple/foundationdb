@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 FDBSERVER_TIMEOUT: float = 180.0
 
-FDBCLI_TIMEOUT: float = 180.0
+FDBCLI_TIMEOUT: float = 30.0
 FDBCLI_RETRY_TIME: float = 1.0
 
 
@@ -37,7 +37,7 @@ class FileNotFoundError(OSError):
     @property
     def filename(self) -> str:
         """Name of the file"""
-        return self._strerror
+        return self._filename
 
     @property
     def strerror(self) -> str:
@@ -207,10 +207,30 @@ async def get_server_status(cluster_file: str) -> Union[Dict, None]:
         cluster_file=cluster_file, commands="status json"
     ).run()
     try:
-        output = await asyncio.wait_for(fdbcli_process.stdout.read(-1), FDBCLI_TIMEOUT)
+        stdout, stderr = await asyncio.wait_for(
+            fdbcli_process.communicate(), FDBCLI_TIMEOUT
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Timed out waiting for fdbcli [status json]")
+        fdbcli_process.kill()
         await fdbcli_process.wait()
-        return json.loads(output.decode())
-    except TimeoutError:
+        return None
+
+    if fdbcli_process.returncode != 0:
+        logger.warning(
+            f"fdbcli [status json] exited with {fdbcli_process.returncode}, "
+            f"stderr: {stderr.decode(errors='replace').strip()[:1024]!r}"
+        )
+        return None
+
+    try:
+        return json.loads(stdout.decode())
+    except json.JSONDecodeError:
+        logger.warning(
+            f"fdbcli [status json] emitted non-JSON output: "
+            f"{stdout.decode(errors='replace')[:1024]!r}, "
+            f"stderr: {stderr.decode(errors='replace').strip()[:1024]!r}"
+        )
         return None
 
 

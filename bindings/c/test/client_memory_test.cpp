@@ -64,6 +64,7 @@ int main(int argc, char** argv) {
 	};
 	std::vector<std::thread> threads;
 	constexpr auto kThreadCount = 64;
+	threads.reserve(kThreadCount);
 	for (int i = 0; i < kThreadCount; ++i) {
 		threads.emplace_back(thread_func);
 	}

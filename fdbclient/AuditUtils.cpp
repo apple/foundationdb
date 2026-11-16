@@ -38,13 +38,9 @@ void clearAuditProgressMetadata(Transaction* tr, AuditType auditType, UID auditI
 	// This function clears the progress metadata accordingly
 	if (auditType == AuditType::ValidateStorageServerShard) {
 		tr->clear(auditServerBasedProgressRangeFor(auditType, auditId));
-	} else if (auditType == AuditType::ValidateHA) {
-		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
-	} else if (auditType == AuditType::ValidateReplica) {
-		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
-	} else if (auditType == AuditType::ValidateLocationMetadata) {
-		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
-	} else if (auditType == AuditType::ValidateRestore) {
+	} else if (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
+	           auditType == AuditType::ValidateLocationMetadata || auditType == AuditType::ValidateRestore ||
+	           auditType == AuditType::RangeDigest) {
 		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
 	} else {
 		UNREACHABLE();
@@ -134,6 +130,22 @@ AuditPhase stringToAuditPhase(std::string auditPhaseStr) {
 		return AuditPhase::Error;
 	} else {
 		return AuditPhase::Invalid;
+	}
+}
+
+bool isTransientAuditStateReadError(const Error& e) {
+	switch (e.code()) {
+	case error_code_grv_proxy_memory_limit_exceeded:
+	case error_code_commit_proxy_memory_limit_exceeded:
+	case error_code_transaction_too_old:
+	case error_code_future_version:
+	case error_code_tag_throttled:
+	case error_code_batch_transaction_throttled:
+	case error_code_database_locked:
+	case error_code_timed_out:
+		return true;
+	default:
+		return false;
 	}
 }
 
@@ -447,6 +459,61 @@ Future<Void> persistAuditState(Database cx,
 	}
 }
 
+// `ddEnabled` only matters when `lock` is given.
+static Future<Void> checkAuditRunningImpl(Database cx,
+                                          AuditType type,
+                                          UID auditId,
+                                          Optional<UID> ddId,
+                                          Optional<MoveKeyLockInfo> lock,
+                                          bool ddEnabled) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			if (lock.present()) {
+				co_await checkMoveKeysLockForAudit(&tr, lock.get(), ddEnabled, false);
+			}
+			Optional<Value> res = co_await tr.get(auditKey(type, auditId));
+			if (!res.present()) {
+				throw audit_storage_cancelled();
+			}
+			const AuditStorageState state = decodeAuditStorageState(res.get());
+			if (state.getPhase() != AuditPhase::Running || (ddId.present() && state.ddId != ddId.get())) {
+				TraceEvent(SevInfo, "AuditUtilAuditNoLongerRunning", auditId)
+				    .detail("AuditType", type)
+				    .detail("AuditPhase", state.getPhase())
+				    .detail("AuditDDID", state.ddId)
+				    .detail("CallerDDID", ddId);
+				throw audit_storage_task_outdated();
+			}
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.code() == error_code_audit_storage_cancelled || err.code() == error_code_audit_storage_task_outdated ||
+		    err.code() == error_code_movekeys_conflict) {
+			throw err;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+Future<Void> checkAuditRunning(Database cx, AuditType type, UID auditId) {
+	return checkAuditRunningImpl(cx, type, auditId, Optional<UID>(), Optional<MoveKeyLockInfo>(), true);
+}
+
+Future<Void> checkAuditRunningUnderLock(Database cx,
+                                        AuditType type,
+                                        UID auditId,
+                                        UID ddId,
+                                        MoveKeyLockInfo lock,
+                                        bool ddEnabled) {
+	return checkAuditRunningImpl(cx, type, auditId, ddId, lock, ddEnabled);
+}
+
 Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id) {
 	Transaction tr(cx);
 	Optional<Value> res;
@@ -675,7 +742,8 @@ Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 
 Future<bool> checkAuditProgressCompleteByRange(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	       auditType == AuditType::ValidateLocationMetadata || auditType == AuditType::ValidateRestore);
+	       auditType == AuditType::ValidateLocationMetadata || auditType == AuditType::ValidateRestore ||
+	       auditType == AuditType::RangeDigest);
 	KeyRange rangeToRead = auditRange;
 	Key rangeToReadBegin = auditRange.begin;
 	int retryCount = 0;
@@ -721,6 +789,154 @@ Future<bool> checkAuditProgressCompleteByRange(Database cx, AuditType auditType,
 	    .detail("AuditRange", auditRange)
 	    .detail("AuditType", auditType);
 	co_return true;
+}
+
+// Countability rules for one persisted per-range RangeDigest row, read at boundary `boundaryRange`.
+// Returns nullptr when the row may be counted, otherwise a static reason string.
+//
+// A row is countable only if it is Complete, carries a real digest, and still describes exactly the
+// boundary range it was read at. The latter two read as Complete without being audited data:
+// skipAuditOnRange persists Complete with no digest, which fromBytes parses as the additive identity
+// and would silently under-count; and a row whose range differs from its boundary range is a wider
+// entry re-anchored by a later narrower krmSetRange, which would count a region twice. Anything
+// uncountable is incomplete coverage, never a zero contribution.
+const char* rangeDigestRowRejectReason(const AuditStorageState& s, KeyRange boundaryRange) {
+	if (s.getPhase() != AuditPhase::Complete) {
+		return "PhaseNotComplete";
+	}
+	if (s.digest.size() != sizeof(RangeDigest::state)) {
+		return "NoDigest";
+	}
+	if (s.range != boundaryRange) {
+		return "RangeMismatch";
+	}
+	return nullptr;
+}
+
+Future<RangeDigestSummary> getRangeDigestSummary(Database cx, UID auditId, KeyRange range) {
+	RangeDigestSummary summary;
+	Key rangeToReadBegin = range.begin;
+	int retryCount = 0;
+	Transaction tr(cx);
+	// Stop at the first uncountable range: the caller discards an incomplete summary and re-audits, so
+	// combining the remainder only burns krmGetRanges round trips over the rest of the keyspace.
+	while (summary.complete && rangeToReadBegin < range.end) {
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				// Read the raw per-range progress. Unlike getAuditStateByRange, we need the digest
+				// fields, so decode the full persisted AuditStorageState here.
+				RangeResult auditStates =
+				    co_await krmGetRanges(&tr,
+				                          auditRangeBasedProgressPrefixFor(AuditType::RangeDigest, auditId),
+				                          KeyRangeRef(rangeToReadBegin, range.end),
+				                          CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                          CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
+				// krmGetRanges returns a boundary map: n+1 entries describing n ranges, where entry i
+				// carries the value covering [key(i), key(i+1)) and the last entry is only a terminator.
+				// An entry with an empty value is a region the map has no row for at all.
+				for (int i = 0; i < auditStates.size() - 1; ++i) {
+					KeyRange currentRange = KeyRangeRef(auditStates[i].key, auditStates[i + 1].key);
+					if (auditStates[i].value.empty()) {
+						summary.complete = false;
+						summary.incompleteRange = currentRange;
+						TraceEvent(SevWarn, "AuditUtilGetRangeDigestSummaryIncomplete")
+						    .detail("AuditID", auditId)
+						    .detail("Reason", "NoProgressRow")
+						    .detail("BoundaryRange", currentRange);
+						break;
+					}
+					AuditStorageState s = decodeAuditStorageState(auditStates[i].value);
+					const char* rejectReason = rangeDigestRowRejectReason(s, currentRange);
+					if (rejectReason != nullptr) {
+						summary.complete = false;
+						summary.incompleteRange = currentRange;
+						TraceEvent(SevWarn, "AuditUtilGetRangeDigestSummaryIncomplete")
+						    .detail("AuditID", auditId)
+						    .detail("Reason", rejectReason)
+						    .detail("BoundaryRange", currentRange)
+						    .detail("StateRange", s.range)
+						    .detail("Phase", s.getPhase());
+						break;
+					}
+					summary.root.combine(RangeDigest::fromBytes(s.digest));
+					summary.kvCount += s.kvCount;
+					summary.byteCount += s.byteCount;
+				}
+				rangeToReadBegin = auditStates.back().key;
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
+			}
+			if (retryCount > 30) {
+				TraceEvent(SevWarn, "AuditUtilGetRangeDigestSummaryFailed").detail("AuditID", auditId);
+				throw audit_storage_failed();
+			}
+			co_await tr.onError(err);
+			retryCount++;
+		}
+	}
+	TraceEvent(SevInfo, "AuditUtilGetRangeDigestSummary")
+	    .detail("AuditID", auditId)
+	    .detail("Range", range)
+	    .detail("Root", summary.root.toHex())
+	    .detail("KVCount", summary.kvCount)
+	    .detail("Bytes", summary.byteCount)
+	    .detail("Complete", summary.complete);
+	co_return summary;
+}
+
+Future<std::vector<RangeDigestRangeEntry>> getRangeDigestProgress(Database cx, UID auditId, KeyRange range) {
+	std::vector<RangeDigestRangeEntry> entries;
+	Key rangeToReadBegin = range.begin;
+	int retryCount = 0;
+	Transaction tr(cx);
+	while (rangeToReadBegin < range.end) {
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				RangeResult auditStates =
+				    co_await krmGetRanges(&tr,
+				                          auditRangeBasedProgressPrefixFor(AuditType::RangeDigest, auditId),
+				                          KeyRangeRef(rangeToReadBegin, range.end),
+				                          CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                          CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
+				for (int i = 0; i < auditStates.size() - 1; ++i) {
+					RangeDigestRangeEntry entry;
+					entry.boundaryRange = KeyRangeRef(auditStates[i].key, auditStates[i + 1].key);
+					entry.present = !auditStates[i].value.empty();
+					if (entry.present) {
+						entry.state = decodeAuditStorageState(auditStates[i].value);
+						entry.rejectReason = rangeDigestRowRejectReason(entry.state, entry.boundaryRange);
+					}
+					entries.push_back(entry);
+				}
+				rangeToReadBegin = auditStates.back().key;
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
+			}
+			if (retryCount > 30) {
+				TraceEvent(SevWarn, "AuditUtilGetRangeDigestProgressFailed").detail("AuditID", auditId);
+				throw audit_storage_failed();
+			}
+			co_await tr.onError(err);
+			retryCount++;
+		}
+	}
+	co_return entries;
 }
 
 Future<bool> checkAuditProgressCompleteByServer(Database cx,

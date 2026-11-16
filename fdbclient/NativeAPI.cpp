@@ -46,7 +46,6 @@
 #include "fdbrpc/MultiInterface.h"
 
 #include "fdbclient/ActorLineageProfiler.h"
-#include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClientOptionValidation.h"
 #include "fdbclient/ClusterInterface.h"
@@ -73,7 +72,7 @@
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbclient/versions.h"
-#include "fdbrpc/WellKnownEndpoints.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
@@ -153,46 +152,14 @@ Future<Void> refreshTransaction(DatabaseContext* self, Transaction* tr) {
 }
 
 Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const KeyRef& key, Reverse isBackward) {
-	Arena arena;
-
-	auto range = isBackward ? locationCache.rangeContainingKeyBefore(key) : locationCache.rangeContaining(key);
-	if (range->value()) {
-		return KeyRangeLocationInfo(range->range(), range->value());
-	}
-
-	return Optional<KeyRangeLocationInfo>();
+	return locationCache.get(key, isBackward);
 }
 
 bool DatabaseContext::getCachedLocations(const KeyRangeRef& range,
                                          std::vector<KeyRangeLocationInfo>& result,
                                          int limit,
                                          Reverse reverse) {
-	result.clear();
-
-	Arena arena;
-
-	auto begin = locationCache.rangeContaining(range.begin);
-	auto end = locationCache.rangeContainingKeyBefore(range.end);
-
-	while (true) {
-		auto r = reverse ? end : begin;
-		if (!r->value()) {
-			CODE_PROBE(!result.empty(), "had some but not all cached locations");
-			result.clear();
-			return false;
-		}
-		result.emplace_back((r->range() & range), r->value());
-		if (result.size() == limit || begin == end) {
-			break;
-		}
-
-		if (reverse)
-			--end;
-		else
-			++begin;
-	}
-
-	return true;
+	return locationCache.getRange(range, result, limit, reverse);
 }
 
 Reference<LocationInfo> DatabaseContext::setCachedLocation(const KeyRangeRef& absoluteKeys,
@@ -203,37 +170,17 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation(const KeyRangeRef& ab
 		serverRefs.push_back(StorageServerInfo::getInterface(this, interf, clientLocality));
 	}
 
-	int maxEvictionAttempts = 100, attempts = 0;
 	auto loc = makeReference<LocationInfo>(serverRefs);
-	while (locationCache.size() > locationCacheSize && attempts < maxEvictionAttempts) {
-		CODE_PROBE(true, "NativeAPI storage server locationCache entry evicted");
-		attempts++;
-		auto r = locationCache.randomRange();
-		Key begin = r.begin(), end = r.end(); // insert invalidates r, so can't be passed a mere reference into it
-		locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
-	}
 	locationCache.insert(absoluteKeys, loc);
 	return loc;
 }
 
 void DatabaseContext::invalidateCache(const KeyRef& key, Reverse isBackward) {
-	Arena arena;
-	KeyRef resolvedKey = key;
-
-	if (isBackward) {
-		locationCache.rangeContainingKeyBefore(resolvedKey)->value() = Reference<LocationInfo>();
-	} else {
-		locationCache.rangeContaining(resolvedKey)->value() = Reference<LocationInfo>();
-	}
+	locationCache.invalidate(key, isBackward);
 }
 
 void DatabaseContext::invalidateCache(const KeyRangeRef& keys) {
-	Arena arena;
-
-	auto rs = locationCache.intersectingRanges(keys);
-	Key begin = rs.begin().begin(),
-	    end = rs.end().begin(); // insert invalidates rs, so can't be passed a mere reference into it
-	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
+	locationCache.invalidateIntersecting(keys);
 }
 
 void DatabaseContext::setFailedEndpointOnHealthyServer(const Endpoint& endpoint) {
@@ -289,7 +236,7 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 	} else {
 		switch (option) {
 		case FDBDatabaseOptions::LOCATION_CACHE_SIZE:
-			locationCacheSize = (int)extractIntOption(value, 0, std::numeric_limits<int>::max());
+			locationCache.setCapacity((int)extractIntOption(value, 0, std::numeric_limits<int>::max()));
 			break;
 		case FDBDatabaseOptions::MACHINE_ID:
 			clientLocality =
@@ -302,7 +249,7 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			if (!clientInfo->get().grvProxies.empty())
 				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies);
 			server_interf.clear();
-			locationCache.insert(allKeys, Reference<LocationInfo>());
+			locationCache.clear();
 			break;
 		case FDBDatabaseOptions::MAX_WATCHES:
 			maxOutstandingWatches = (int)extractIntOption(value, 0, CLIENT_KNOBS->ABSOLUTE_MAX_WATCHES);
@@ -318,7 +265,7 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			if (!clientInfo->get().grvProxies.empty())
 				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies);
 			server_interf.clear();
-			locationCache.insert(allKeys, Reference<LocationInfo>());
+			locationCache.clear();
 			break;
 		case FDBDatabaseOptions::SNAPSHOT_RYW_ENABLE:
 			validateOptionValueNotPresent(value);
@@ -1388,14 +1335,15 @@ void DatabaseContext::updateBackoff(const Error& err) {
 	}
 }
 
-Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database cx,
-                                                                        KeyRange keys,
-                                                                        int limit,
-                                                                        Reverse reverse,
-                                                                        SpanContext spanContext,
-                                                                        Optional<UID> debugID,
-                                                                        UseProvisionalProxies useProvisionalProxies,
-                                                                        Version version) {
+AsyncResult<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
+    Database cx,
+    KeyRange keys,
+    int limit,
+    Reverse reverse,
+    SpanContext spanContext,
+    Optional<UID> debugID,
+    UseProvisionalProxies useProvisionalProxies,
+    Version version) {
 	Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
@@ -1452,6 +1400,12 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database
 	}
 }
 
+// Complete cache hits synchronously without adding a wrapper coroutine around cache misses.
+static AsyncResult<std::vector<KeyRangeLocationInfo>> readyKeyRangeLocations(
+    std::vector<KeyRangeLocationInfo> locations) {
+	co_return locations;
+}
+
 // Get the SS locations for each shard in the 'keys' key-range;
 // Returned vector size is the number of shards in the input keys key-range.
 // Returned vector element is <ShardRange, storage server location info> pairs, where
@@ -1459,15 +1413,15 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database
 // Example: If query the function with  key range (b, d), the returned list of pairs could be something like:
 // [([a, b1), locationInfo), ([b1, c), locationInfo), ([c, d1), locationInfo)].
 template <class F>
-Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& cx,
-                                                               KeyRange const& keys,
-                                                               int limit,
-                                                               Reverse reverse,
-                                                               F StorageServerInterface::* member,
-                                                               SpanContext const& spanContext,
-                                                               Optional<UID> const& debugID,
-                                                               UseProvisionalProxies useProvisionalProxies,
-                                                               Version version) {
+AsyncResult<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& cx,
+                                                                    KeyRange const& keys,
+                                                                    int limit,
+                                                                    Reverse reverse,
+                                                                    F StorageServerInterface::* member,
+                                                                    SpanContext const& spanContext,
+                                                                    Optional<UID> const& debugID,
+                                                                    UseProvisionalProxies useProvisionalProxies,
+                                                                    Version version) {
 
 	ASSERT(!keys.empty());
 
@@ -1498,15 +1452,15 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& c
 		    cx, keys, limit, reverse, spanContext, debugID, useProvisionalProxies, version);
 	}
 
-	return locations;
+	return readyKeyRangeLocations(std::move(locations));
 }
 
 template <class F>
-Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<TransactionState> trState,
-                                                               KeyRange const& keys,
-                                                               int limit,
-                                                               Reverse reverse,
-                                                               F StorageServerInterface::* member) {
+AsyncResult<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<TransactionState> trState,
+                                                                    KeyRange const& keys,
+                                                                    int limit,
+                                                                    Reverse reverse,
+                                                                    F StorageServerInterface::* member) {
 	return getKeyRangeLocations(trState->cx,
 	                            keys,
 	                            limit,
@@ -1538,7 +1492,7 @@ Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) 
 		    trState->readVersion());
 		totalRanges += CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT;
 		totalRequests++;
-		if (locations.empty() || totalRanges >= trState->cx->locationCacheSize ||
+		if (locations.empty() || totalRanges >= trState->cx->locationCache.capacity() ||
 		    locations[locations.size() - 1].range.end >= keys.end)
 			break;
 
@@ -1607,7 +1561,7 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 
 Future<Void> startTransaction(Reference<TransactionState> trStateInput) {
 	Reference<TransactionState> trState(std::move(trStateInput));
-	co_await success(trState->readVersionFuture);
+	co_await trState->readVersionFuture;
 }
 
 TEST_CASE("/fdbclient/NativeAPI/startTransaction/releasesStateOnCompletion") {
@@ -1765,7 +1719,7 @@ Future<Optional<Value>> getValue(Reference<TransactionState> trStateInput,
 
 			trState->cx->transactionBytesRead += reply.value.present() ? reply.value.get().size() : 0;
 			++trState->cx->transactionKeysRead;
-			co_return reply.value;
+			co_return std::move(reply.value);
 		} catch (Error& e) {
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
@@ -2368,7 +2322,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trStateInput
 			req.arena.dependsOn(locations[shard].range.arena());
 
 			transformRangeLimits(limits, reverse, req);
-			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+			ASSERT(req.limitBytes > 0 && req.limit != 0 && (req.limit < 0) == reverse);
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
@@ -2765,7 +2719,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trStateInput,
 			}
 
 			transformRangeLimits(limits, reverse, req);
-			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+			ASSERT(req.limitBytes > 0 && req.limit != 0 && (req.limit < 0) == reverse);
 
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
 			req.spanContext = span.context;
@@ -3164,7 +3118,7 @@ Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>> maybeDuplicateTSSStr
 			ReplyPromiseStream<REPLYSTREAM_TYPE(Request)> tssReplyStream = tssRequestStream.getReplyStream(req);
 			PromiseStream<REPLYSTREAM_TYPE(Request)> ssDuplicateReplyStream;
 			TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)> streamData(ssDuplicateReplyStream);
-			model->addActor.send(tssStreamComparison(req, streamData, tssReplyStream, tssData.get()));
+			model->addBackgroundActor(tssStreamComparison(req, streamData, tssReplyStream, tssData.get()));
 			return Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>>(streamData);
 		}
 	}
@@ -3211,7 +3165,7 @@ Future<Void> getRangeStreamImpl(Reference<TransactionState> trStateInput,
 			// keep shard's arena around in case of async tss comparison
 			req.arena.dependsOn(range.arena());
 
-			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+			ASSERT(req.limitBytes > 0 && req.limit != 0 && (req.limit < 0) == reverse);
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
@@ -5794,10 +5748,21 @@ Future<ProtocolVersion> getClusterProtocolImpl(
 		if (!coordinator->get().present()) {
 			co_await coordinator->onChange();
 		} else {
+			// Created before resolving the hostname and reused for the race below, so a change that lands between
+			// the resolve finishing and this coroutine resuming is not missed.
+			auto coordinatorChanged = coordinator->onChange();
 			NetworkAddress coordinatorAddress;
 			if (coordinator->get().get().hostname.present()) {
 				Hostname h = coordinator->get().get().hostname.get();
-				coordinatorAddress = co_await h.resolveWithRetry();
+				// resolveWithRetry() never gives up, so a hostname that can't be resolved (e.g. a stale coordinator
+				// that was removed from DNS) must not keep us from noticing that the coordinator has changed.
+				auto resolved = co_await race(h.resolveWithRetry(), coordinatorChanged);
+				if (resolved.index() == 1) {
+					CODE_PROBE(true, "Coordinator changed while resolving the coordinator hostname");
+					needToConnect = true;
+					continue;
+				}
+				coordinatorAddress = std::get<0>(resolved);
 			} else {
 				coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
 			}
@@ -5809,7 +5774,6 @@ Future<ProtocolVersion> getClusterProtocolImpl(
 				needToConnect = false;
 			}
 
-			auto coordinatorChanged = coordinator->onChange();
 			// Older coordinators report their protocol version only in the connect packet.
 			Future<Optional<ProtocolVersion>> connectPacketVersion =
 			    coordinatorChanged.isReady() || protocolVersion.isReady()
@@ -5968,29 +5932,38 @@ Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 	}
 
 	Version version = trState.present() ? trState.get()->readVersion() : latestVersion;
-	std::vector<KeyRangeLocationInfo> locations = co_await getKeyRangeLocations(cx,
-	                                                                            keys,
-	                                                                            std::numeric_limits<int>::max(),
-	                                                                            Reverse::False,
-	                                                                            &StorageServerInterface::waitMetrics,
-	                                                                            span.context,
-	                                                                            Optional<UID>(),
-	                                                                            UseProvisionalProxies::False,
-	                                                                            version);
-	int nLocs = locations.size();
-	std::vector<Future<StorageMetrics>> fx(nLocs);
 	StorageMetrics total;
-	KeyRef partBegin, partEnd;
-	for (int i = 0; i < nLocs; i++) {
-		partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
-		partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
-		fx[i] = doGetStorageMetrics(cx, version, KeyRangeRef(partBegin, partEnd), locations[i].locations, trState);
+	// Fetch shard locations in bounded batches: the location reply for an arbitrarily large range can otherwise
+	// exceed the packet limit on the commit proxy.
+	while (true) {
+		std::vector<KeyRangeLocationInfo> locations =
+		    co_await getKeyRangeLocations(cx,
+		                                  keys,
+		                                  CLIENT_KNOBS->STORAGE_METRICS_LARGE_RANGE_SHARD_LIMIT,
+		                                  Reverse::False,
+		                                  &StorageServerInterface::waitMetrics,
+		                                  span.context,
+		                                  Optional<UID>(),
+		                                  UseProvisionalProxies::False,
+		                                  version);
+		int nLocs = locations.size();
+		std::vector<Future<StorageMetrics>> fx(nLocs);
+		KeyRef partBegin, partEnd;
+		for (int i = 0; i < nLocs; i++) {
+			partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
+			partEnd = (i == nLocs - 1) ? std::min(locations[i].range.end, keys.end) : locations[i].range.end;
+			fx[i] = doGetStorageMetrics(cx, version, KeyRangeRef(partBegin, partEnd), locations[i].locations, trState);
+		}
+		co_await waitForAll(fx);
+		for (int i = 0; i < nLocs; i++) {
+			total += fx[i].get();
+		}
+		if (nLocs == 0 || locations.back().range.end >= keys.end) {
+			co_return total;
+		}
+		CODE_PROBE(true, "getStorageMetricsLargeKeyRange fetches shard locations in multiple batches");
+		keys = KeyRangeRef(locations.back().range.end, keys.end);
 	}
-	co_await waitForAll(fx);
-	for (int i = 0; i < nLocs; i++) {
-		total += fx[i].get();
-	}
-	co_return total;
 }
 
 Future<Void> trackBoundedStorageMetrics(Version version,
@@ -6514,6 +6487,65 @@ TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/multipleShards") {
 	return Void();
 }
 
+TEST_CASE("/fdbclient/NativeAPI/watchRefCount/removesEmptyEntries") {
+	// Default error "operation_failed()" avoids "internal" range (4xxx),
+	// which causes simulation tests with --crash enabled to abort/fail.
+	Database database = Database(new DatabaseContext(operation_failed()));
+	Key k = "k"_sr;
+
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
+
+	database->increaseWatchRefCount(k, 1);
+	database->increaseWatchRefCount(k, 2);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 1);
+
+	// Reference count entry should remain while version set for k is not empty
+	database->decreaseWatchRefCount(k, 2);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 1);
+
+	// …but should be removed once the reference set is empty
+	database->decreaseWatchRefCount(k, 1);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
+
+	// …and nothing should happen when removing a stale reference
+	ASSERT_EQ(database->decreaseWatchRefCount(k, 1), 0);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/watchRefCount/deletesMetadataOnlyOnLastRef") {
+	// Default error "operation_failed()" avoids "internal" range (4xxx),
+	// which causes simulation tests with --crash enabled to abort/fail.
+	Database database = Database(new DatabaseContext(operation_failed()));
+	Key k = "k"_sr;
+	Promise<Void> neverSet;
+	auto watchParameters = makeReference<WatchParameters>(k,
+	                                                      Optional<Value>(),
+	                                                      1,
+	                                                      TagSet(),
+	                                                      SpanContext(),
+	                                                      TaskPriority::DefaultEndpoint,
+	                                                      Optional<UID>(),
+	                                                      UseProvisionalProxies::False);
+
+	auto md = makeReference<WatchMetadata>(watchParameters);
+	md->watchFutureSS = success(neverSet.getFuture());
+
+	database->setWatchMetadata(md);
+	database->increaseWatchRefCount(k, 1);
+	database->increaseWatchRefCount(k, 2);
+	database->decreaseWatchRefCount(k, 1);
+	ASSERT(database->getWatchMetadata(k).isValid());
+
+	database->decreaseWatchRefCount(k, 2);
+	ASSERT(!database->getWatchMetadata(k).isValid());
+	ASSERT(md->watchFutureSS.isError());
+	ASSERT(md->watchFutureSS.getError().code() == error_code_actor_cancelled);
+
+	return Void();
+}
+
 Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
 	ReadYourWritesTransaction tr(cx);
 	while (true) {
@@ -6960,7 +6992,7 @@ static Future<CheckpointMetaData> getCheckpointMetaDataInternal(KeyRange range,
 	throw error.get();
 }
 
-static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaDataForRange(
+static AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaDataForRange(
     Database cxInput,
     KeyRange rangeInput,
     Version version,
@@ -7037,26 +7069,28 @@ static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpoin
 	co_return res;
 }
 
-Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(Database cx,
-                                                                                   std::vector<KeyRange> ranges,
-                                                                                   Version version,
-                                                                                   CheckpointFormat format,
-                                                                                   Optional<UID> actionId,
-                                                                                   double timeout) {
-	std::vector<Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>>> futures;
+AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(Database cx,
+                                                                                        std::vector<KeyRange> ranges,
+                                                                                        Version version,
+                                                                                        CheckpointFormat format,
+                                                                                        Optional<UID> actionId,
+                                                                                        double timeout) {
+	std::vector<AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>>> futures;
+	futures.reserve(ranges.size());
 
 	// TODO(heliu): Avoid send requests to the same shard.
 	for (const auto& range : ranges) {
 		futures.push_back(getCheckpointMetaDataForRange(cx, range, version, format, actionId, timeout));
 	}
 
-	std::vector<std::vector<std::pair<KeyRange, CheckpointMetaData>>> results = co_await getAll(futures);
+	std::vector<std::vector<std::pair<KeyRange, CheckpointMetaData>>> results =
+	    co_await getAllAsync(std::move(futures));
 
 	std::vector<std::pair<KeyRange, CheckpointMetaData>> res;
 
-	for (const auto& r : results) {
+	for (auto& r : results) {
 		ASSERT(!r.empty());
-		res.insert(res.end(), r.begin(), r.end());
+		res.insert(res.end(), std::make_move_iterator(r.begin()), std::make_move_iterator(r.end()));
 	}
 
 	co_return res;
@@ -7084,20 +7118,7 @@ Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> excl
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators").log();
 	ClientCoordinators coordinatorList(cx->getConnectionRecord());
-	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
-	for (const auto& clientLeaderServer : coordinatorList.clientLeaderServers) {
-		if (clientLeaderServer.hostname.present()) {
-			leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coordinatorList.clusterKey, UID()),
-			                                                  clientLeaderServer.hostname.get(),
-			                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
-			                                                  TaskPriority::CoordinationReply));
-		} else {
-			leaderServers.push_back(retryBrokenPromise(clientLeaderServer.getLeader,
-			                                           GetLeaderRequest(coordinatorList.clusterKey, UID()),
-			                                           TaskPriority::CoordinationReply));
-		}
-	}
+	std::vector<Future<Optional<LeaderInfo>>> leaderServers = coordinatorList.getLeaderReplies();
 	// Wait for quorum so we don't dismiss live coordinators as unreachable by acting too fast
 	auto res = co_await race(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.0), delay(3.0));
 	if (res.index() == 1) {
@@ -7178,7 +7199,7 @@ static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, boo
 	std::vector<std::string> addressesVec;
 	boost::algorithm::split(addressesVec, addr.toString(), boost::is_any_of(","));
 	// Note: reuse this knob from fdbcli, change it if necessary
-	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+	auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 	std::vector<Future<bool>> verifyInterfs;
 	for (const auto& requestedAddress : addressesVec) {
 		// step 1: check that the requested address is in the worker list provided by CC

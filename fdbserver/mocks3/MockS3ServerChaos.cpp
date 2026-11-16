@@ -54,18 +54,13 @@ void clearMockS3ChaosRegistry() {
 S3Operation classifyS3Operation(const std::string& method, const std::string& resource) {
 	if (method == "GET" || method == "HEAD") {
 		return S3Operation::READ;
-	} else if (method == "PUT") {
+	} else if (method == "PUT" || method == "POST") {
 		if (resource.find("uploads") != std::string::npos) {
 			return S3Operation::MULTIPART;
 		}
 		return S3Operation::WRITE;
 	} else if (method == "DELETE") {
 		return S3Operation::DELETE;
-	} else if (method == "POST") {
-		if (resource.find("uploads") != std::string::npos) {
-			return S3Operation::MULTIPART;
-		}
-		return S3Operation::WRITE;
 	} else {
 		return S3Operation::READ; // Default fallback
 	}
@@ -237,7 +232,7 @@ Future<Void> maybeCorruptResponse(Reference<HTTP::OutgoingResponse> response, S3
 	// Only corrupt successful responses
 	if (response->code >= 200 && response->code < 300) {
 		// Invalidate ETag to simulate data corruption
-		if (response->data.headers.find("ETag") != response->data.headers.end()) {
+		if (response->data.headers.contains("ETag")) {
 			response->data.headers["ETag"] = "\"corrupted-" + deterministicRandom()->randomUniqueID().toString() + "\"";
 		}
 
@@ -342,11 +337,7 @@ Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 		    .detail("TotalRegistered", registeredMockS3ChaosServers().size());
 
 	} catch (Error& e) {
-		TraceEvent(SevError, "MockS3ChaosServerRegistrationFailed")
-		    .error(e)
-		    .detail("Address", serverKey)
-		    .detail("ErrorCode", e.code())
-		    .detail("ErrorName", e.name());
+		TraceEvent(SevError, "MockS3ChaosServerRegistrationFailed").error(e).detail("Address", serverKey);
 		throw;
 	}
 }

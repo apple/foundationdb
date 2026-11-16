@@ -28,6 +28,7 @@
 #include <sys/stat.h>
 #include <sys/eventfd.h>
 #include <sys/syscall.h>
+#include <type_traits>
 #include "linux_kaio.h"
 #include "flow/Knobs.h"
 #include "fdbrpc/Stats.h"
@@ -37,6 +38,61 @@
 // Set this to true to enable detailed KAIO request logging, which currently is written to a hardcoded location
 // /data/v7/fdb/
 #define KAIO_LOGGING 0
+
+namespace kaio_detail {
+// Truncation runs synchronously on the network thread; repeated signals must not keep it in a retry loop indefinitely.
+constexpr int MAX_EINTR_RETRIES = 3;
+
+struct SyscallResult {
+	int result;
+	int errorCode;
+	int retries;
+};
+
+template <class Call>
+SyscallResult retryOnEINTR(Call&& call) {
+	for (int retries = 0;; ++retries) {
+		int result = call();
+		if (result == 0)
+			return { result, 0, retries };
+		int errorCode = errno;
+		if (errorCode != EINTR || retries == MAX_EINTR_RETRIES)
+			return { result, errorCode, retries };
+	}
+}
+
+struct TruncateResult {
+	int result;
+	int errorCode;
+	int fallocateErrorCode;
+	int fallocateRetries;
+	int ftruncateRetries;
+};
+
+template <class Fallocate, class Ftruncate>
+TruncateResult truncateSyscalls(int fd,
+                                int64_t size,
+                                int64_t lastFileSize,
+                                bool& fallocateSupported,
+                                Fallocate&& fallocateCall,
+                                Ftruncate&& ftruncateCall) {
+	int fallocateRetries = 0;
+	int fallocateErrorCode = 0;
+	if (fallocateSupported && size >= lastFileSize) {
+		auto allocation = retryOnEINTR([&] { return fallocateCall(fd, 0, 0, size); });
+		fallocateRetries = allocation.retries;
+		if (allocation.result == 0)
+			return { 0, 0, 0, fallocateRetries, 0 };
+		fallocateErrorCode = allocation.errorCode;
+		if (fallocateErrorCode != EOPNOTSUPP)
+			return { allocation.result, allocation.errorCode, fallocateErrorCode, fallocateRetries, 0 };
+		fallocateSupported = false;
+	}
+
+	auto truncation = retryOnEINTR([&] { return ftruncateCall(fd, size); });
+	return { truncation.result, truncation.errorCode, fallocateErrorCode, fallocateRetries, truncation.retries };
+}
+} // namespace kaio_detail
 
 struct SlowAioSubmit {
 	int64_t submitDuration;
@@ -258,7 +314,7 @@ public:
 		nextFileSize = std::max(nextFileSize, offset + length);
 
 		enqueue(io, "write", this);
-		Future<int> result = io->result.getFuture();
+		Future<Void> result = io->writeResult.getFuture();
 
 #if KAIO_LOGGING
 		// result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
@@ -267,9 +323,8 @@ public:
 		// auto& actorLineageSet = IAsyncFileSystem::filesystem()->getActorLineageSet();
 		// auto index = actorLineageSet.insert(*currentLineage);
 		// ASSERT(index != ActorLineageSet::npos);
-		Future<Void> res = success(result);
 		// actorLineageSet.erase(index);
-		return res;
+		return result;
 	}
 // TODO(alexmiller): Remove when we upgrade the dev docker image to >14.10
 #ifndef FALLOC_FL_ZERO_RANGE
@@ -299,33 +354,31 @@ public:
 #if KAIO_LOGGING
 		uint32_t id = OpLogEntry::nextID();
 #endif
-		int result = -1;
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::START, size / 4096);
-		bool completed = false;
 		double begin = timer_monotonic();
 
-		if (ctx.fallocateSupported && size >= lastFileSize) {
-			result = fallocate(fd, 0, 0, size);
-			if (result != 0) {
-				int fallocateErrCode = errno;
-				TraceEvent("AsyncFileKAIOAllocateError")
-				    .detail("Fd", fd)
-				    .detail("Filename", filename)
-				    .detail("Size", size)
-				    .GetLastError();
-				if (fallocateErrCode == EOPNOTSUPP) {
-					// Mark fallocate as unsupported. Try again with truncate.
-					ctx.fallocateSupported = false;
-				} else {
-					KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
-					return io_error();
-				}
-			} else {
-				completed = true;
+		auto outcome =
+		    kaio_detail::truncateSyscalls(fd, size, lastFileSize, ctx.fallocateSupported, ::fallocate, ::ftruncate);
+		if (outcome.fallocateRetries || outcome.ftruncateRetries) {
+			TraceEvent("AsyncFileKAIOTruncateInterrupted")
+			    .suppressFor(60)
+			    .detail("Fd", fd)
+			    .detail("Filename", filename)
+			    .detail("FallocateRetries", outcome.fallocateRetries)
+			    .detail("FtruncateRetries", outcome.ftruncateRetries);
+		}
+		if (outcome.fallocateErrorCode != 0) {
+			errno = outcome.fallocateErrorCode;
+			TraceEvent("AsyncFileKAIOAllocateError")
+			    .detail("Fd", fd)
+			    .detail("Filename", filename)
+			    .detail("Size", size)
+			    .GetLastError();
+			if (outcome.fallocateErrorCode != EOPNOTSUPP) {
+				KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, outcome.result);
+				return io_error();
 			}
 		}
-		if (!completed)
-			result = ftruncate(fd, size);
 
 		double end = timer_monotonic();
 		if (nondeterministicRandom()->random01() < end - begin) {
@@ -333,9 +386,10 @@ public:
 			    .detail("TruncateTime", end - begin)
 			    .detail("TruncateBytes", size - lastFileSize);
 		}
-		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
+		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, outcome.result);
 
-		if (result != 0) {
+		if (outcome.result != 0) {
+			errno = outcome.errorCode;
 			TraceEvent("AsyncFileKAIOTruncateError").detail("Fd", fd).detail("Filename", filename).GetLastError();
 			return io_error();
 		}
@@ -433,7 +487,7 @@ public:
 				if (io->owner->lastFileSize != io->owner->nextFileSize) {
 					++ctx.countPreSubmitTruncate;
 					int64_t truncateSize = io->owner->nextFileSize - io->owner->lastFileSize;
-					ASSERT(truncateSize > 0);
+					ASSERT_GT(truncateSize, 0);
 					ctx.preSubmitTruncateBytes += truncateSize;
 					largestTruncate = std::max(largestTruncate, truncateSize);
 					io->owner->truncate(io->owner->nextFileSize);
@@ -504,6 +558,7 @@ private:
 
 	struct IOBlock : linux_iocb, FastAllocated<IOBlock> {
 		Promise<int> result;
+		Promise<Void> writeResult;
 		Reference<AsyncFileKAIO> owner;
 		int64_t prio;
 		IOBlock* prev;
@@ -517,7 +572,10 @@ private:
 			bool operator()(IOBlock* a, IOBlock* b) { return a->prio < b->prio; }
 		};
 
-		IOBlock(int op, int fd) : prev(nullptr), next(nullptr), startTime(0) {
+		IOBlock(int op, int fd)
+		  : result(op == IO_CMD_PWRITE ? Promise<int>(nullptr) : Promise<int>()),
+		    writeResult(op == IO_CMD_PWRITE ? Promise<Void>() : Promise<Void>(nullptr)), prev(nullptr), next(nullptr),
+		    startTime(0) {
 			memset((linux_iocb*)this, 0, sizeof(linux_iocb));
 			aio_lio_opcode = op;
 			aio_fildes = fd;
@@ -528,14 +586,23 @@ private:
 
 		TaskPriority getTask() const { return static_cast<TaskPriority>((prio >> 32) + 1); }
 
-		static Future<Void> deliver(Uncancellable, Promise<int> result, bool failed, int r, TaskPriority task) {
-			co_await delay(0, task);
-			if (failed)
-				result.sendError(io_timeout());
-			else if (r < 0)
-				result.sendError(io_error());
-			else
-				result.send(r);
+		template <class T>
+		static coro::DetachedCoroutine deliver(Promise<T> result, bool failed, int r, TaskPriority task) {
+			try {
+				co_await delay(0, task);
+				if (failed)
+					result.sendError(io_timeout());
+				else if (r < 0)
+					result.sendError(io_error());
+				else if constexpr (std::is_same_v<T, Void>)
+					result.send(Void());
+				else
+					result.send(r);
+			} catch (const Error&) {
+				// Typed completion errors have no result consumer.
+			} catch (...) {
+				(void)unknown_error();
+			}
 		}
 
 		void setResult(int r) {
@@ -554,7 +621,11 @@ private:
 				    .detail("Size", fst.st_size)
 				    .detail("Filename", owner->filename);
 			}
-			deliver(Uncancellable(), result, owner->failed, r, getTask());
+			if (aio_lio_opcode == IO_CMD_PWRITE) {
+				deliver(std::move(writeResult), owner->failed, r, getTask());
+			} else {
+				deliver(std::move(result), owner->failed, r, getTask());
+			}
 			delete this;
 		}
 

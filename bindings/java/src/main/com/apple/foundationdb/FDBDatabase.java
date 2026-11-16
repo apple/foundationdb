@@ -113,17 +113,6 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
-	protected void finalize() throws Throwable {
-		try {
-			checkUnclosed("Database");
-			close();
-		}
-		finally {
-			super.finalize();
-		}
-	}
-
-	@Override
 	public Transaction createTransaction(Executor e) {
 		return createTransaction(e, eventKeeper);
 	}

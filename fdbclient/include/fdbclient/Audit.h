@@ -41,6 +41,7 @@ enum class AuditType : uint8_t {
 	ValidateStorageServerShard = 4,
 	ValidateRestore = 5,
 	ValidateMetadataEncoding = 6,
+	RangeDigest = 7,
 };
 
 struct AuditStorageState {
@@ -56,7 +57,9 @@ struct AuditStorageState {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, auditServerId, range, type, phase, error, ddId, engineType);
+		// New fields must be appended (flatbuffers with IncludeVersion): old readers
+		// ignore trailing fields and new readers default-init them for old values.
+		serializer(ar, id, auditServerId, range, type, phase, error, ddId, engineType, digest, kvCount, byteCount);
 	}
 
 	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(type); }
@@ -69,6 +72,10 @@ struct AuditStorageState {
 		std::string res = "AuditStorageState: [ID]: " + id.toString() +
 		                  ", [Range]: " + Traceable<KeyRangeRef>::toString(range) +
 		                  ", [Type]: " + std::to_string(type) + ", [Phase]: " + std::to_string(phase);
+		if (getType() == AuditType::RangeDigest) {
+			res += ", [KVCount]: " + std::to_string(kvCount) + ", [Bytes]: " + std::to_string(byteCount) +
+			       ", [Digest]: " + digestToHex();
+		}
 		if (!error.empty()) {
 			res += ", [Error]: " + error;
 		}
@@ -76,20 +83,33 @@ struct AuditStorageState {
 		return res;
 	}
 
+	// Lower-case hex of the raw 32-byte RangeDigest state (empty string if unset).
+	std::string digestToHex() const {
+		static const char* hexDigits = "0123456789abcdef";
+		std::string out;
+		out.reserve(digest.size() * 2);
+		for (unsigned char b : digest) {
+			out.push_back(hexDigits[b >> 4]);
+			out.push_back(hexDigits[b & 0xf]);
+		}
+		return out;
+	}
+
 	UID id;
-	UID ddId; // ddId indicates this audit is managed by which dd
-	// ddId is used to check if dd has changed
-	// When a new dd starts in the middle of an onging audit,
-	// The ongoing audit's ddId gets updated
-	// When SS updates the progress, it checks ddId
-	// If the ddId is updated, SS Audit actors of the old dd will stop themselves
-	// New dd will issue new requests to SSes to continue the remaining work
+	UID ddId; // the data distributor that manages this audit
+	// A data distributor that starts in the middle of an ongoing audit takes it over by updating ddId, and issues new
+	// requests to the storage servers to continue the remaining work. Progress that a task of the previous data
+	// distributor persists afterwards is still accepted and recorded under the current ddId, since the work is valid.
 	UID auditServerId; // UID of SS who is working on this audit task
 	KeyRange range;
 	uint8_t type;
 	uint8_t phase;
 	KeyValueStoreType engineType;
 	std::string error;
+	// RangeDigest results (unused/empty for other audit types):
+	std::string digest; // raw 32-byte big-endian RangeDigest state for `range`
+	int64_t kvCount = 0; // number of key-values folded into `digest`
+	int64_t byteCount = 0; // sum of key+value bytes folded into `digest`
 };
 
 struct AuditStorageRequest {

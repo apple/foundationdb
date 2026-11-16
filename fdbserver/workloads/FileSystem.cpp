@@ -107,7 +107,7 @@ struct FileSystemWorkload : TestWorkload {
 
 		if (deleted)
 			tr->set(format("/files/server/%08x/deleted/%016llx", serverID, id), doubleToTestKey(time));
-		tr->set(format("/files/user/%016llx/updated/%016llx/%016llx", userID, *(uint64_t*)&time, id), path);
+		tr->set(format("/files/user/%016llx/updated/%016llx/%016llx", userID, std::bit_cast<uint64_t>(time), id), path);
 		tr->set(format("/files/user/%016llx/path/", userID) + path, format("%016llx", id));
 		// This index was not specified in the original test: it removes duplicated paths
 		tr->set("/files/path/" + path, format("%016llx", id));

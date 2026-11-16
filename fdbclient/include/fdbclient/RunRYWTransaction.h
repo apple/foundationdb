@@ -44,7 +44,7 @@ using RunRYWTransactionResult = decltype(std::declval<Function>()(Reference<Read
 // transaction is retried.
 template <class Function>
 Future<RunRYWTransactionResult<Function>> runRYWTransaction(Database cx, Function func, ExplicitVoid = {}) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	while (true) {
 		Error err;
 		try {
@@ -65,7 +65,7 @@ Future<RunRYWTransactionResult<Function>> runRYWTransactionDebug(Database cx,
                                                                  StringRef name,
                                                                  Function func,
                                                                  ExplicitVoid = {}) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	while (true) {
 		Error err;
 		try {
@@ -92,7 +92,7 @@ Future<RunRYWTransactionResult<Function>> runRYWTransactionDebug(Database cx,
 // transaction is retried.
 template <class Function>
 Future<Void> runRYWTransactionVoid(Database cx, Function func, const char* errorEvent = nullptr) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	while (true) {
 		Error err;
 		try {
@@ -111,7 +111,7 @@ Future<Void> runRYWTransactionVoid(Database cx, Function func, const char* error
 
 template <class Function>
 Future<RunRYWTransactionResult<Function>> runRYWTransactionFailIfLocked(Database cx, Function func, ExplicitVoid = {}) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	while (true) {
 		Error err;
 		try {
@@ -129,7 +129,7 @@ Future<RunRYWTransactionResult<Function>> runRYWTransactionFailIfLocked(Database
 
 template <class Function>
 Future<RunRYWTransactionResult<Function>> runRYWTransactionNoRetry(Database cx, Function func, ExplicitVoid = {}) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	auto const result = co_await func(tr);
 	co_await tr->commit();
 	co_return result;

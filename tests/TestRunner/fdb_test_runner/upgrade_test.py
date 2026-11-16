@@ -55,7 +55,14 @@ class UpgradeTest:
         self.build_dir = Path(args.build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(args.build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
-        self.tester_bin = self.build_dir.joinpath("bin", "fdb_c_api_tester")
+        # With a primary version, the shim-linked tester loads that release's libfdb_c
+        # as its primary library, so the release's multi-version client loads this
+        # build's library as an external client.
+        self.primary_version = args.primary_version
+        self.tester_bin = self.build_dir.joinpath(
+            "bin",
+            "fdb_c_shim_api_tester" if self.primary_version else "fdb_c_api_tester",
+        )
         assert self.tester_bin.exists(), "{} does not exist".format(self.tester_bin)
         self.upgrade_path = args.upgrade_path
         self.used_versions = set(self.upgrade_path).difference(set(CLUSTER_ACTIONS))
@@ -63,6 +70,8 @@ class UpgradeTest:
         self.tmp_dir.mkdir(parents=True)
         self.downloader = FdbBinaryDownloader(args.build_dir)
         self.download_old_binaries()
+        if self.primary_version:
+            self.downloader.download_old_binaries(self.primary_version)
         self.create_external_lib_dir()
         self.testing_future_version = FUTURE_VERSION in self.upgrade_path
         self.future_version_client_lib_path = (
@@ -199,6 +208,10 @@ class UpgradeTest:
         self.api_version = api_version_from_str(CURRENT_VERSION)
         for version in self.used_versions:
             self.api_version = min(api_version_from_str(version), self.api_version)
+        if self.primary_version:
+            self.api_version = min(
+                api_version_from_str(self.primary_version), self.api_version
+            )
 
     # Start the tester to generate the workload specified by the test file
     def exec_workload(self, test_file):
@@ -237,6 +250,15 @@ class UpgradeTest:
                     "--future-version-client-library",
                     self.future_version_client_lib_path,
                 ]
+            env = os.environ.copy()
+            if self.primary_version:
+                primary_lib_path = self.downloader.lib_path(self.primary_version)
+                env["FDB_LOCAL_CLIENT_LIBRARY_PATH"] = str(primary_lib_path)
+                print(
+                    "Primary client library: {} ({})".format(
+                        primary_lib_path, self.primary_version
+                    )
+                )
             print(
                 "Executing test command: {}".format(
                     " ".join([str(c) for c in cmd_args])
@@ -244,7 +266,7 @@ class UpgradeTest:
             )
 
             self.tester_proc = subprocess.Popen(
-                cmd_args, stdout=sys.stdout, stderr=sys.stderr
+                cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env
             )
             self.tester_retcode = self.tester_proc.wait()
             self.tester_proc = None
@@ -458,6 +480,12 @@ def main():
     )
     parser.add_argument(
         "--run-with-gdb", help="Execute the tester binary from gdb", action="store_true"
+    )
+    parser.add_argument(
+        "--primary-version",
+        help="Use the client library of this release as the tester's primary library "
+        "instead of the one from the build directory. The external client libraries "
+        "are not affected.",
     )
     args = parser.parse_args()
     if args.process_number == 0:

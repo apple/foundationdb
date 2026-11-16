@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "fdbclient/AnnotateActor.h"
+#include "fdbclient/WaitState.h"
 
 #include <optional>
 #include <string>

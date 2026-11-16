@@ -32,7 +32,7 @@ void HealthMonitor::purgeOutdatedHistory() {
 		if (p.first < now() - FLOW_KNOBS->HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS) {
 			auto& count = peerClosedNum[p.second];
 			--count;
-			ASSERT(count >= 0);
+			ASSERT_GE(count, 0);
 			if (count == 0) {
 				peerClosedNum.erase(p.second);
 			}
