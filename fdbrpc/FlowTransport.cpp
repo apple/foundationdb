@@ -947,10 +947,6 @@ Future<Void> connectionKeeper(Reference<Peer> self,
 						    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/OutgoingConnectionCreated");
 						countOutgoingConnectionCreated->increment(1);
 						co_await conn->connectHandshake();
-						if (FLOW_KNOBS->RESET_CONNECT_FAILED_COUNT_ON_CONNECT) {
-							// Only consecutive failures indicate an unreachable peer.
-							self->connectFailedCount = 0;
-						}
 						static SimpleCounter<int64_t>* countOutgoingConnectionHandshakeComplete =
 						    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/OutgoingConnectionHandshakeComplete");
 						countOutgoingConnectionHandshakeComplete->increment(1);
@@ -990,7 +986,7 @@ Future<Void> connectionKeeper(Reference<Peer> self,
 					                               FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_IS_NOT_CONNECT_FAILURE && conn &&
 					                               conn->handshakeTimedOutOrDisconnected();
 					const bool countFailure =
-					    !handshakeOverload && !(cancelled && FLOW_KNOBS->RESET_CONNECT_FAILED_COUNT_ON_CONNECT);
+					    !handshakeOverload && !(cancelled && FLOW_KNOBS->CANCELLED_CONNECT_IS_NOT_CONNECT_FAILURE);
 					if (countFailure) {
 						++self->connectFailedCount;
 						// Track per-address cumulative connect failures + last-failure time. The map
