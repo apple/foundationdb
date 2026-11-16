@@ -130,7 +130,7 @@ func main() {
 	pflag.StringArrayVar(&copyLibraries, "copy-library", nil, "A list of libraries to copy from /usr/lib/fdb/multiversion to $(output-dir)/lib/multiversion")
 	pflag.StringVar(&copyPrimaryLibrary, "copy-primary-library", "", "A library to copy from /usr/lib/fdb/multiversion to $(output-dir)/lib. This file will be renamed to libfdb_c.so")
 	pflag.StringArrayVar(&requiredCopyFiles, "require-not-empty", nil, "When copying this file, exit with an error if the file is empty")
-	pflag.StringVar(&mainContainerVersion, "main-container-version", "", "For sidecar mode, this specifies the version of the main container. If this is equal to the current container version, no files will be copied")
+	pflag.StringVar(&mainContainerVersion, "main-container-version", "", "Deprecated: this flag is ignored, the sidecar mode always copies the files regardless of the main container version")
 	pflag.StringVar(&additionalEnvFile, "additional-env-file", "", "A file with additional environment variables to use when interpreting the monitor configuration")
 	pflag.IntVar(&processCount, "process-count", 1, "The number of processes to start")
 	pflag.BoolVar(&enablePprof, "enable-pprof", false, "Enables /debug/pprof endpoints on the listen address")
@@ -186,18 +186,22 @@ func main() {
 			os.Exit(1)
 		}
 	case executionModeSidecar:
-		if mainContainerVersion != currentContainerVersion {
-			err = copyFiles(logger, outputDir, copyDetails, requiredCopies)
-			if err != nil {
-				logger.Error(err, "Error copying files")
-				os.Exit(1)
-			}
+		err = copyFiles(logger, outputDir, copyDetails, requiredCopies)
+		if err != nil {
+			logger.Error(err, "Error copying files")
+			os.Exit(1)
 		}
-		done := make(chan os.Signal, 1)
-		signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
-		logger.Info("Waiting for process to be terminated")
-		// Will block here until a signal is received, e.g. when the container/pod is shutdown
-		<-done
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+
+		logger.Info("Finished initial copy of the files. Started watching the output dir.")
+		// Will block here until a signal is received, e.g. when the container/pod is shutdown. Files that are removed
+		// in the meantime, e.g. pruned binaries, are copied again.
+		err = restoreDeletedFiles(ctx, logger, outputDir, copyDetails, requiredCopies)
+		if err != nil {
+			logger.Error(err, "Error watching copied files")
+			os.Exit(1)
+		}
 	default:
 		logger.Error(nil, "Unknown execution mode", "mode", mode)
 		os.Exit(1)
