@@ -52,6 +52,13 @@ struct LoadContext {
 
 	void addArena(Arena& arena) { arena = ar->arena(); }
 
+	// Throws serialization_failed unless [ptr, ptr + len) lies inside the buffer being loaded.
+	void checkRange(const uint8_t* ptr, size_t len) const {
+		if constexpr (Ar::checksBounds) {
+			ar->checkRange(ptr, len);
+		}
+	}
+
 	LoadContext& context() { return *this; }
 };
 
@@ -68,6 +75,7 @@ public:
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
 		LoadContext<ReaderImpl> context(static_cast<ReaderImpl*>(this));
 		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
+		context.checkRange(data, 2 * sizeof(uint32_t)); // root offset and file identifier
 		if (read_file_identifier(data) != file_identifier) {
 			// Some file identifiers are changed in 7.0, so file identifier mismatches
 			// are expected during a downgrade from 7.0 to 6.3
@@ -81,7 +89,7 @@ public:
 				te.detail("Expected", file_identifier).detail("Read", read_file_identifier(data));
 			}
 			if (!expectMismatch) {
-				ASSERT(false);
+				throw serialization_failed();
 			}
 		}
 		load_members(data, context, items...);
@@ -105,6 +113,8 @@ class ObjectReader : public _ObjectReader<ObjectReader> {
 
 public:
 	static constexpr bool ownsUnderlyingMemory = false;
+	// The caller supplies only a start pointer, so loads cannot be confined to the buffer.
+	static constexpr bool checksBounds = false;
 
 	template <class VersionOptions>
 	ObjectReader(const uint8_t* data, VersionOptions vo) : _data(data) {
@@ -132,6 +142,9 @@ class ArenaObjectReader : public _ObjectReader<ArenaObjectReader> {
 	friend struct _IncludeVersion;
 	ArenaObjectReader& operator>>(ProtocolVersion& version) {
 		uint64_t result;
+		if (static_cast<size_t>(_end - _data) < sizeof(result)) {
+			detail::flat_buffer_load_failed("buffer too short for protocol version");
+		}
 		memcpy(&result, _data, sizeof(result));
 		_data += sizeof(result);
 		version = ProtocolVersion(result);
@@ -140,25 +153,42 @@ class ArenaObjectReader : public _ObjectReader<ArenaObjectReader> {
 
 public:
 	static constexpr bool ownsUnderlyingMemory = true;
+	static constexpr bool checksBounds = true;
 
 	template <class VersionOptions>
 	ArenaObjectReader(Arena const& arena, const StringRef& input, VersionOptions vo)
-	  : _data(input.begin()), _arena(arena) {
+	  : _data(input.begin()), _end(input.end()), _arena(arena) {
 		vo.read(*this);
+		_begin = _data;
 	}
 
 	template <class VersionOptions>
 	ArenaObjectReader(Arena&& arena, const StringRef& input, VersionOptions vo)
-	  : _data(input.begin()), _arena(std::move(arena)) {
+	  : _data(input.begin()), _end(input.end()), _arena(std::move(arena)) {
 		vo.read(*this);
+		_begin = _data;
 	}
 
 	const uint8_t* data() { return _data; }
 
 	Arena& arena() { return _arena; }
 
+	void checkRange(const uint8_t* ptr, size_t len) const {
+		if (len == 0) {
+			return;
+		}
+		auto p = reinterpret_cast<uintptr_t>(ptr);
+		auto b = reinterpret_cast<uintptr_t>(_begin);
+		auto e = reinterpret_cast<uintptr_t>(_end);
+		if (p < b || p > e || len > e - p) {
+			detail::flat_buffer_load_failed("read outside of buffer");
+		}
+	}
+
 private:
 	const uint8_t* _data;
+	const uint8_t* _begin = nullptr;
+	const uint8_t* _end;
 	Arena _arena;
 };
 

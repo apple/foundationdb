@@ -130,9 +130,9 @@ struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 	void receive(ArenaObjectReader& reader) override {
 		if (!SAV<T>::canBeSet())
 			return;
-		this->addPromiseRef();
 		ErrorOr<EnsureTable<T>> message;
 		reader.deserialize(message);
+		this->addPromiseRef();
 		if (message.isError()) {
 			SAV<T>::sendErrorAndDelPromiseRef(message.getError());
 		} else {
@@ -394,9 +394,9 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 
 	void destroy() override { delete this; }
 	void receive(ArenaObjectReader& reader) override {
-		this->addPromiseRef();
 		ErrorOr<EnsureTable<T>> message;
 		reader.deserialize(message);
+		this->addPromiseRef();
 
 		if (message.isError()) {
 			if (message.getError().code() == error_code_broken_promise) {
@@ -732,9 +732,9 @@ struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<Ne
 
 	void destroy() override { delete this; }
 	void receive(ArenaObjectReader& reader) override {
-		this->addPromiseRef();
 		T message;
 		reader.deserialize(message);
+		this->addPromiseRef();
 		if constexpr (IsPublic) {
 			if (!message.verify()) {
 				if constexpr (HasReply<T>) {

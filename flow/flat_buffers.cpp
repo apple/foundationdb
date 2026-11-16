@@ -41,6 +41,13 @@ void swapWithThreadLocalGlobal(std::vector<int>& writeToOffsets) {
 	gWriteToOffsetsMemory.swap(writeToOffsets);
 }
 
+void flat_buffer_load_failed(const char* reason) {
+	// In simulation a malformed buffer means a writer or the bounds checks are wrong, not that a peer is hostile.
+	ASSERT(!g_network || !g_network->isSimulated());
+	TraceEvent(SevWarnAlways, "MalformedObjectBuffer").suppressFor(1.0).detail("Reason", reason);
+	throw serialization_failed();
+}
+
 VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
 	if (numMembers == 0) {
 		return VTable{ 4, 4 };
@@ -611,6 +618,106 @@ TEST_CASE("/flow/FlatBuffers/NonEmptyUnorderedSet") {
 		y.a = i;
 		ASSERT(xs[0].find(y) != xs[0].end());
 	}
+	return Void();
+}
+
+struct Untrusted {
+	std::string s;
+	std::vector<int64_t> v;
+	Optional<int> o;
+	std::vector<Optional<int>> vo;
+	std::vector<bool> b;
+	std::vector<std::string> strs;
+	template <class Archiver>
+	void serialize(Archiver& ar) {
+		serializer(ar, s, v, o, vo, b, strs);
+	}
+};
+
+constexpr FileIdentifier untrustedFileIdentifier{ 4242 };
+
+// Deserializes |bytes| from a heap allocation of exactly that size, so asan or valgrind catch any read past the end.
+// Returns false if the buffer was rejected with serialization_failed.
+bool tryDeserializeUntrusted(const uint8_t* bytes, int size, Untrusted& out) {
+	auto buffer = std::make_unique<uint8_t[]>(std::max(size, 1));
+	memcpy(buffer.get(), bytes, size);
+	::Arena arena;
+	try {
+		ArenaObjectReader reader(arena, StringRef(buffer.get(), size), AssumeVersion(currentProtocolVersion()));
+		reader.deserialize(untrustedFileIdentifier, out);
+		return true;
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_serialization_failed);
+		return false;
+	}
+}
+
+TEST_CASE("/flow/FlatBuffers/RejectsMalformedBuffers") {
+	if (g_network->isSimulated()) {
+		// Malformed buffers assert in simulation, see detail::flat_buffer_load_failed.
+		return Void();
+	}
+
+	Untrusted src;
+	src.s = "hello world";
+	src.v = { 1, 2, 3, 4, 5 };
+	src.o = 7;
+	src.vo = { Optional<int>(1), Optional<int>(), Optional<int>(3) };
+	src.b = { true, false, true };
+	src.strs = { "abc", "", "defgh" };
+
+	ObjectWriter writer(Unversioned());
+	writer.serialize(untrustedFileIdentifier, src);
+	StringRef good = writer.toStringRef();
+
+	Untrusted dst;
+	ASSERT(tryDeserializeUntrusted(good.begin(), good.size(), dst));
+	ASSERT(dst.s == src.s && dst.v == src.v && dst.o == src.o && dst.vo == src.vo && dst.b == src.b &&
+	       dst.strs == src.strs);
+
+	// A root offset that points far outside the buffer.
+	for (uint32_t rootOffset : { 0x7ffffff0u, 0xffffffffu, (uint32_t)good.size(), (uint32_t)good.size() - 3 }) {
+		std::vector<uint8_t> bad(good.begin(), good.end());
+		memcpy(bad.data(), &rootOffset, sizeof(rootOffset));
+		ASSERT(!tryDeserializeUntrusted(bad.data(), bad.size(), dst));
+	}
+
+	// Every truncation either fails cleanly or only drops bytes that were never read.
+	for (int n = 0; n < good.size(); ++n) {
+		tryDeserializeUntrusted(good.begin(), n, dst);
+	}
+
+	// Overwrite each aligned word with values that are hostile as a length, count, or relative offset.
+	for (uint32_t hostile : { 0u, 1u, 0xffffffffu, 0x7ffffff0u, 0x80000000u, 0xfffffff0u, 0x10000u }) {
+		for (int pos = 0; pos + 4 <= good.size(); pos += 4) {
+			std::vector<uint8_t> bad(good.begin(), good.end());
+			memcpy(bad.data() + pos, &hostile, sizeof(hostile));
+			tryDeserializeUntrusted(bad.data(), bad.size(), dst);
+		}
+	}
+
+	// Random byte damage, including to the vtables.
+	for (int iter = 0; iter < 2000; ++iter) {
+		std::vector<uint8_t> bad(good.begin(), good.end());
+		int flips = deterministicRandom()->randomInt(1, 4);
+		for (int i = 0; i < flips; ++i) {
+			bad[deterministicRandom()->randomInt(0, bad.size())] = deterministicRandom()->randomInt(0, 256);
+		}
+		tryDeserializeUntrusted(bad.data(), bad.size(), dst);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/RejectsWrongFileIdentifier") {
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+	Untrusted src;
+	ObjectWriter writer(Unversioned());
+	writer.serialize(FileIdentifier{ untrustedFileIdentifier + 1 }, src);
+	Standalone<StringRef> msg(writer.toStringRef());
+	Untrusted dst;
+	ASSERT(!tryDeserializeUntrusted(msg.begin(), msg.size(), dst));
 	return Void();
 }
 
