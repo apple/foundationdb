@@ -4044,28 +4044,6 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				// Store job ID for monitoring
 				Params.bulkDumpJobId().set(task, bulkDumpJob.getJobId().toString());
 
-				// Also record it on the config now rather than only on completion, so that status and any
-				// operator tooling can name the job while it is still running. Restorability is reported
-				// from bulkDumpSnapshotEndVersion, which is set only once the dump finishes, so an id
-				// present here does not imply the data exists yet.
-				{
-					Transaction idTr(cx);
-					std::string runningJobId = bulkDumpJob.getJobId().toString();
-					while (true) {
-						Error err;
-						try {
-							idTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-							idTr.setOption(FDBTransactionOptions::LOCK_AWARE);
-							config.bulkDumpJobId().set(&idTr, runningJobId);
-							co_await idTr.commit();
-							break;
-						} catch (Error& e) {
-							err = e;
-						}
-						co_await idTr.onError(err);
-					}
-				}
-
 				// Monitor BulkDump progress - timeout is configurable for large datasets
 				bool completed = co_await monitorBulkDumpJobCompletion(cx,
 				                                                       bulkDumpJob.getJobId(),
@@ -8601,9 +8579,8 @@ public:
 					}
 					doc.setKey("SnapshotMode", snapshotModeText);
 
-					// Check if backup is BulkLoad compatible. This asks whether the dumped data exists, so it
-					// keys off bulkDumpSnapshotEndVersion, which is set when the dump completes, not off the
-					// job id, which is recorded while the job is still running.
+					// Check if backup is BulkLoad compatible: keyed off bulkDumpSnapshotEndVersion, the marker
+					// that the dumped data exists, rather than the job id, which only names the job.
 					Optional<Version> bulkDumpSnapshotEnd = co_await config.bulkDumpSnapshotEndVersion().get(tr);
 					doc.setKey("BulkLoadCompatible", bulkDumpSnapshotEnd.present());
 
@@ -8770,8 +8747,8 @@ public:
 					// Check if backup is BulkLoad compatible (has bulkdump_data/).
 					// In rangefile mode no bulkdump task ever runs, so the answer is
 					// always "no" and the line carries no information — skip it.
-					// Keyed off bulkDumpSnapshotEndVersion rather than the job id: the id is recorded while
-					// the dump runs, whereas this line is a claim that the data is there to restore from.
+					// Keyed off bulkDumpSnapshotEndVersion, the marker that the dumped data exists, rather than
+					// the job id, which only names the job.
 					if (snapshotModeValue != 0) {
 						Optional<Version> bulkDumpSnapshotEnd = co_await config.bulkDumpSnapshotEndVersion().get(tr);
 						statusText += format("BulkLoad Compatible: %s\n", bulkDumpSnapshotEnd.present() ? "yes" : "no");
