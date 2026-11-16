@@ -978,15 +978,20 @@ Future<Void> connectionKeeper(Reference<Peer> self,
 						throw connection_failed();
 					}
 				} catch (Error& e) {
-					// A handshake that timed out or disconnected after TCP connected is what overload on either end
-					// looks like, not a sign that the peer is down, and a cancelled attempt means this process stopped
-					// trying. TCP connect failures and TLS errors still count.
 					const bool cancelled = e.code() == error_code_actor_cancelled;
-					const bool handshakeOverload = !cancelled &&
-					                               FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_IS_NOT_CONNECT_FAILURE && conn &&
-					                               conn->handshakeTimedOutOrDisconnected();
-					const bool countFailure =
-					    !handshakeOverload && !(cancelled && FLOW_KNOBS->CANCELLED_CONNECT_IS_NOT_CONNECT_FAILURE);
+					bool handshakeOverload = false;
+					bool countFailure = true; // Every failure counts unless a knob below says otherwise.
+					if (FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_IS_NOT_CONNECT_FAILURE && !cancelled) {
+						// TCP connected, then the handshake timed out or was dropped: overload on either end, not a
+						// down peer. Not checked after a cancellation, since the handshake may still be running and
+						// recording its error.
+						handshakeOverload = conn && conn->handshakeTimedOutOrDisconnected();
+						countFailure = !handshakeOverload;
+					}
+					if (FLOW_KNOBS->CANCELLED_CONNECT_IS_NOT_CONNECT_FAILURE && cancelled) {
+						// This process stopped trying, which says nothing about the peer.
+						countFailure = false;
+					}
 					if (countFailure) {
 						++self->connectFailedCount;
 						// Track per-address cumulative connect failures + last-failure time. The map
