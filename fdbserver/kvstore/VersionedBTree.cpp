@@ -5559,6 +5559,79 @@ private:
 	int64_t m_mutationCount;
 	DecodeBoundaryVerifier* m_pBoundaryVerifier;
 
+	// When used recursively in commitSubtree, neither node-local or commit-global counters actually succeed at breaking
+	// up the run loop reasonably. The only invariant that works is to count operations across the entire recursive
+	// execution, and have all subtree roots yield after execution if their recursive call also yielded.
+	class CommitYielder {
+	private:
+		int const interval_;
+
+		int count_{ 0 };
+		Future<Void> currentYield_;
+		// Yield at the priority the commit started at, not whatever priority a nested read left us running at
+		TaskPriority const priority_;
+
+		bool countAndCheck(int const weight) {
+			count_ += weight;
+			if (count_ >= interval_) {
+				count_ = 0;
+				if (check_yield()) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// Page and record ops share one counter, so each op type's weight is the interval scaled by its own ops per
+		// yield. An ops per yield of 0 disables that op type, which is a weight of 0 so it never adds to the count.
+		static int weightFor(int const opsPerYield, int const interval) {
+			return opsPerYield > 0 ? interval / opsPerYield : 0;
+		}
+
+	public:
+		int const pageWeight;
+		int const recordWeight;
+
+		CommitYielder()
+		  : interval_(std::max(1, SERVER_KNOBS->REDWOOD_COMMIT_SUBTREE_PAGE_OPS_PER_YIELD) *
+		              std::max(1, SERVER_KNOBS->REDWOOD_COMMIT_SUBTREE_RECORD_OPS_PER_YIELD)),
+		    currentYield_(Void()), priority_(g_network->getCurrentTask()),
+		    pageWeight(weightFor(SERVER_KNOBS->REDWOOD_COMMIT_SUBTREE_PAGE_OPS_PER_YIELD, interval_)),
+		    recordWeight(weightFor(SERVER_KNOBS->REDWOOD_COMMIT_SUBTREE_RECORD_OPS_PER_YIELD, interval_)) {}
+
+		// We just did some expensive work, check if we should yield
+		bool shouldYield(int weight) {
+			if (currentYield_.isReady() && countAndCheck(weight)) {
+				currentYield_ = delay(0, priority_);
+			}
+			// A yield in flight was started by this or a nested frame, everything up the recursion waits for it.
+			return !currentYield_.isReady();
+		}
+
+		Future<Void> waitCurrentYield() const { return currentYield_; }
+
+		// We just did some expensive work, IF the current future is ready (completed synchronously without yielding).
+		template <class T>
+		inline Future<T> maybeYieldIfReady(Future<T> const& f, int const weight) {
+			// An unready future will suspend on its own, and an errored one must keep throwing from the same place.
+			if (!f.isReady() || f.isError()) {
+				return f;
+			}
+			if (currentYield_.isReady()) {
+				if (countAndCheck(weight)) {
+					currentYield_ = delay(0, priority_);
+				} else {
+					return f;
+				}
+			}
+			if constexpr (std::is_same_v<T, Void>) {
+				return currentYield_;
+			} else {
+				return tag(currentYield_, f.get());
+			}
+		}
+	};
+
 	struct CommitBatch {
 		Version readVersion;
 		Version writeVersion;
@@ -5566,6 +5639,7 @@ private:
 		std::unique_ptr<MutationBuffer> mutations;
 		int64_t mutationCount;
 		Reference<IPagerSnapshot> snapshot;
+		CommitYielder commitYielder;
 	};
 
 	Version m_newOldestVersion;
@@ -5710,11 +5784,12 @@ private:
 	};
 
 	// Scans a vector of records and decides on page split points, returning a vector of 1+ pages to build
-	std::vector<PageToBuild> splitPages(const RedwoodRecordRef* lowerBound,
-	                                    const RedwoodRecordRef* upperBound,
-	                                    int prefixLen,
-	                                    VectorRef<RedwoodRecordRef> records,
-	                                    unsigned int height) {
+	Future<std::vector<PageToBuild>> splitPages(CommitYielder* commitYielder,
+	                                            const RedwoodRecordRef* lowerBound,
+	                                            const RedwoodRecordRef* upperBound,
+	                                            int prefixLen,
+	                                            VectorRef<RedwoodRecordRef> records,
+	                                            unsigned int height) {
 
 		debug_printf("splitPages height=%d records=%d\n\tlowerBound=%s\n\tupperBound=%s\n",
 		             height,
@@ -5739,6 +5814,9 @@ private:
 		deltaSizes.back() = records.back().deltaSize(*upperBound, prefixLen, true);
 		for (int i = 1; i < records.size(); ++i) {
 			deltaSizes[i] = records[i].deltaSize(records[i - 1], prefixLen, true);
+			if (commitYielder->shouldYield(commitYielder->recordWeight)) {
+				co_await commitYielder->waitCurrentYield();
+			}
 		}
 
 		PageToBuild p(0, m_blockSize, m_encodingType, height, splitByDomain);
@@ -5761,6 +5839,11 @@ private:
 				p.finish();
 				pages.push_back(p);
 				p = p.next();
+
+				// yield for some complete processed page even across subtrees
+				if (commitYielder->shouldYield(commitYielder->pageWeight)) {
+					co_await commitYielder->waitCurrentYield();
+				}
 			} else {
 				i++;
 			}
@@ -5792,11 +5875,12 @@ private:
 			}
 		}
 
-		return pages;
+		co_return pages;
 	}
 
 	// Writes entries to 1 or more pages and return a vector of boundary keys with their ArenaPage(s)
 	static Future<Standalone<VectorRef<RedwoodRecordRef>>> writePages(VersionedBTree* self,
+	                                                                  CommitYielder* commitYielder,
 	                                                                  const RedwoodRecordRef* lowerBound,
 	                                                                  const RedwoodRecordRef* upperBound,
 	                                                                  VectorRef<RedwoodRecordRef> entries,
@@ -5811,14 +5895,14 @@ private:
 		// All records share the prefix shared by the lower and upper boundaries
 		int prefixLen = lowerBound->getCommonPrefixLen(*upperBound);
 
-		std::vector<PageToBuild> pagesToBuild = self->splitPages(lowerBound, upperBound, prefixLen, entries, height);
+		std::vector<PageToBuild> pagesToBuild =
+		    co_await self->splitPages(commitYielder, lowerBound, upperBound, prefixLen, entries, height);
 		ASSERT(!pagesToBuild.empty());
 		debug_printf("splitPages returning %s\n", toString(pagesToBuild).c_str());
 
 		// Lower bound of the page being added to
 		RedwoodRecordRef pageLowerBound = lowerBound->withoutValue();
 		RedwoodRecordRef pageUpperBound;
-		int sinceYield = 0;
 
 		for (int pageIndex = 0; pageIndex < pagesToBuild.size(); ++pageIndex) {
 			PageToBuild* p = &pagesToBuild[pageIndex];
@@ -5886,6 +5970,12 @@ private:
 			             p->usedBytes());
 			int written = btPage->tree()->build(
 			    deltaTreeSpace, &entries[p->startIndex], &entries[p->endIndex()], &pageLowerBound, &pageUpperBound);
+
+			// Weight by count * recordWeight instead of page weight, since page build is much more expensive for
+			// internal pages with lots of records than leaf pages with a couple records.
+			if (commitYielder->shouldYield(p->count * commitYielder->recordWeight)) {
+				co_await commitYielder->waitCurrentYield();
+			}
 
 			if (written > deltaTreeSpace) {
 				debug_printf("ERROR:  Wrote %d bytes to page %s deltaTreeSpace=%d\n",
@@ -5961,9 +6051,8 @@ private:
 				    self->m_pBoundaryVerifier->update(childPageID, v, pageLowerBound.key, pageUpperBound.key, height));
 			}
 
-			if (++sinceYield > 100) {
-				sinceYield = 0;
-				co_await yield();
+			if (commitYielder->shouldYield(commitYielder->pageWeight)) {
+				co_await commitYielder->waitCurrentYield();
 			}
 
 			if (REDWOOD_DEBUG) {
@@ -5997,6 +6086,7 @@ private:
 	// until there is only 1 root records which is small enough to fit in the BTree commit header.
 	static Future<Standalone<VectorRef<RedwoodRecordRef>>> buildNewRootsIfNeeded(
 	    VersionedBTree* self,
+	    CommitYielder* commitYielder,
 	    Version version,
 	    Standalone<VectorRef<RedwoodRecordRef>> records,
 	    unsigned int height) {
@@ -6014,7 +6104,7 @@ private:
 			self->m_header.height = ++height;
 			ASSERT(height < std::numeric_limits<int8_t>::max());
 			Standalone<VectorRef<RedwoodRecordRef>> newRecords = co_await writePages(
-			    self, &dbBegin, &dbEnd, records, height, version, BTreeNodeLinkRef(), invalidLogicalPageID);
+			    self, commitYielder, &dbBegin, &dbEnd, records, height, version, BTreeNodeLinkRef(), invalidLogicalPageID);
 			debug_printf("Wrote a new root level at version %" PRId64 " height %d size %d pages\n",
 			             version,
 			             height,
@@ -6562,8 +6652,9 @@ private:
 			}
 		}
 
-		Reference<const ArenaPage> page = co_await readPage(
-		    self, PagerEventReasons::Commit, height, batch->snapshot.getPtr(), rootID, height, false, true);
+		Reference<const ArenaPage> page = co_await batch->commitYielder.maybeYieldIfReady(
+		    readPage(self, PagerEventReasons::Commit, height, batch->snapshot.getPtr(), rootID, height, false, true),
+		    batch->commitYielder.pageWeight);
 
 		// If the page exists in the cache, it must be copied before modification.
 		// That copy will be referenced by pageCopy, as page must stay in scope in case anything references its
@@ -6751,6 +6842,10 @@ private:
 					}
 				}
 
+				if (batch->commitYielder.shouldYield(batch->commitYielder.recordWeight)) {
+					co_await batch->commitYielder.waitCurrentYield();
+				}
+
 				// Before advancing the iterator, get whether or not the records in the following range must be removed
 				bool remove = mBegin.mutation().clearAfterBoundary;
 				// Advance to the next boundary because we need to know the end key for the current range.
@@ -6864,12 +6959,14 @@ private:
 					debug_print(addPrefix(context, update->toString()));
 				} else {
 					// Otherwise update it.
-					BTreeNodeLinkRef newID = co_await self->updateBTreePage(self,
-					                                                        rootID,
-					                                                        parentID,
-					                                                        &update->newLinks.arena(),
-					                                                        pageCopy.castTo<ArenaPage>(),
-					                                                        batch->writeVersion);
+					BTreeNodeLinkRef newID = co_await batch->commitYielder.maybeYieldIfReady(
+					    self->updateBTreePage(self,
+					                          rootID,
+					                          parentID,
+					                          &update->newLinks.arena(),
+					                          pageCopy.castTo<ArenaPage>(),
+					                          batch->writeVersion),
+					    batch->commitYielder.pageWeight);
 
 					debug_printf("%s Leaf node updated in-place at version %s, new contents:\n",
 					             context.c_str(),
@@ -6900,6 +6997,7 @@ private:
 
 			// Rebuild new page(s).
 			Standalone<VectorRef<RedwoodRecordRef>> entries = co_await writePages(self,
+			                                                                      &batch->commitYielder,
 			                                                                      &update->subtreeLowerBound,
 			                                                                      &update->subtreeUpperBound,
 			                                                                      merged,
@@ -7082,6 +7180,13 @@ private:
 
 				recursions.push_back(
 				    self->commitSubtree(self, batch, pageID, rootID.front(), height - 1, mBegin, mEnd, &u));
+
+				// This callsite doesn't do any work itself, but we need to join any yields that any of our child
+				// commitSubtree's started.
+				if (batch->commitYielder.shouldYield(0)) {
+					CODE_PROBE(true, "Redwood commitSubtree yield between child subtree commits");
+					co_await batch->commitYielder.waitCurrentYield();
+				}
 			}
 
 			debug_printf("%s Recursions from internal page started. pageSize=%d level=%d children=%d slices=%zu "
@@ -7213,12 +7318,14 @@ private:
 							}
 						}
 
-						BTreeNodeLinkRef newID = co_await self->updateBTreePage(self,
-						                                                        rootID,
-						                                                        parentID,
-						                                                        &update->newLinks.arena(),
-						                                                        pageCopy.castTo<ArenaPage>(),
-						                                                        batch->writeVersion);
+						BTreeNodeLinkRef newID = co_await batch->commitYielder.maybeYieldIfReady(
+						    self->updateBTreePage(self,
+						                          rootID,
+						                          parentID,
+						                          &update->newLinks.arena(),
+						                          pageCopy.castTo<ArenaPage>(),
+						                          batch->writeVersion),
+						    batch->commitYielder.pageWeight);
 						debug_printf(
 						    "%s commitSubtree(): Internal node updated in-place at version %s, new contents:\n",
 						    context.c_str(),
@@ -7271,6 +7378,7 @@ private:
 						}
 						Standalone<VectorRef<RedwoodRecordRef>> newChildEntries =
 						    co_await writePages(self,
+						                        &batch->commitYielder,
 						                        &update->subtreeLowerBound,
 						                        &update->subtreeUpperBound,
 						                        modifier.rebuild,
@@ -7378,8 +7486,11 @@ private:
 				Standalone<VectorRef<RedwoodRecordRef>> newRootRecords(commitState->all.newLinks,
 				                                                       commitState->all.newLinks.arena());
 				// Build new root levels if there are multiple new root records or if the root pointer is too large
-				Standalone<VectorRef<RedwoodRecordRef>> newRootPage = co_await buildNewRootsIfNeeded(
-				    self, commitState->batch.writeVersion, newRootRecords, self->m_header.height);
+				Standalone<VectorRef<RedwoodRecordRef>> newRootPage = co_await buildNewRootsIfNeeded(self,
+				                                                                       &commitState->batch.commitYielder,
+				                                                                       commitState->batch.writeVersion,
+				                                                                       newRootRecords,
+				                                                                       self->m_header.height);
 				commitState->rootNodeLink = newRootPage.front().getChildPage();
 			}
 		}
