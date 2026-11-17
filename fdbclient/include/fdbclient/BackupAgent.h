@@ -49,7 +49,6 @@ FDB_BOOLEAN_PARAM(DeleteData);
 FDB_BOOLEAN_PARAM(SetValidation);
 FDB_BOOLEAN_PARAM(PartialBackup);
 FDB_BOOLEAN_PARAM(ReadLowPriority);
-FDB_BOOLEAN_PARAM(ReadLegacyLogMode);
 
 extern Optional<std::string> fileBackupAgentProxy;
 
@@ -976,7 +975,7 @@ public:
 		Optional<Version> ordinaryDispatchEnd = {};
 		std::string typeName() const { return type.present() ? mutationLogTypeToString(type.get()) : "unknown"; }
 	};
-	Future<LogProgress> getStatusLogProgress(Reference<ReadYourWritesTransaction> tr, ReadLegacyLogMode readLegacy);
+	Future<LogProgress> getStatusLogProgress(Reference<ReadYourWritesTransaction> tr);
 
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);

@@ -269,7 +269,7 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 
 	Subspace oldConfig(uidPrefixKey("uid->config/"_sr.withPrefix(fileBackupPrefixRange.begin), config.getUid()));
 	Key legacyKey = oldConfig.pack("partitionedLogEnabled"_sr);
-	auto status = [&] { return config.getStatusLogProgress(tr, ReadLegacyLogMode::True); };
+	auto status = [&] { return config.getStatusLogProgress(tr); };
 	auto logs = co_await status();
 	ASSERT(logs.type == MutationLogType::DEFAULT && logs.restorable == 120);
 	tr->set(legacyKey, "\x14"_sr); // 7.4 tuple encoding of false
@@ -312,17 +312,45 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 
 	config.incrementalBackupOnly().set(tr, true);
 	logs = co_await status();
-	ASSERT(logs.type == MutationLogType::DEFAULT && logs.restorable == 401);
-	config.firstSnapshotEndVersion().set(tr, 100);
+	ASSERT(logs.restorePointUnknown && !logs.restorable.present() && logs.ordinaryDispatchEnd == 402);
+	tr->clear(prefixRange(dest.withPrefix(logRangesRange.begin)));
+	config.snapshotBeginVersion().set(tr, 250);
+	config.latestBackupWorkerSavedVersion().set(tr, 249);
+	logs = co_await status();
+	ASSERT(logs.type == MutationLogType::PARTITIONED_LOG && logs.restorePointUnknown &&
+	       !logs.exclusiveLogEnd.present());
+	config.latestBackupWorkerSavedVersion().set(tr, 250);
+	logs = co_await status();
+	ASSERT(logs.exclusiveLogEnd == 251 && logs.restorable == 250);
+
+	// A completed backup has released its destination. The remaining counters cannot tell
+	// whether 8.0 finished the start task and installed ordinary capture rules.
+	tr->clear(config.getUidAsKey().withPrefix(dest).withPrefix(backupLatestVersionsPrefix));
 	config.incrementalBackupOnly().clear(tr);
+	config.firstSnapshotEndVersion().set(tr, 301);
+	logs = co_await status();
+	ASSERT(!logs.type.present() && logs.restorePointUnknown && !logs.restorable.present());
+
 	config.mutationLogType().set(tr, MutationLogType::RANGE_PARTITIONED_LOG);
 	logs = co_await status();
-	ASSERT(logs.type == MutationLogType::RANGE_PARTITIONED_LOG && logs.restorable == 401);
+	ASSERT(logs.type == MutationLogType::RANGE_PARTITIONED_LOG);
 	config.mutationLogType().set(tr, MutationLogType::PARTITIONED_LOG);
+	config.latestBackupWorkerSavedVersion().set(tr, 300);
+	logs = co_await status();
+	ASSERT(logs.type == MutationLogType::PARTITIONED_LOG && logs.sharedWorkerVersion == 300);
+	ASSERT(!logs.exclusiveLogEnd.present() && !logs.restorable.present());
 	config.latestBackupWorkerSavedVersion().set(tr, 301);
 	logs = co_await status();
-	ASSERT(logs.type == MutationLogType::PARTITIONED_LOG && logs.exclusiveLogEnd == 302 && logs.restorable == 301);
-	ASSERT((co_await config.getLatestRestorableVersion(tr)) == 300);
+	ASSERT(logs.exclusiveLogEnd == 302 && logs.restorable == 301);
+	ASSERT(!(co_await config.getLatestRestorableVersion(tr)).present());
+	config.firstSnapshotEndVersion().clear(tr);
+	config.incrementalBackupOnly().set(tr, true);
+	config.latestBackupWorkerSavedVersion().set(tr, 249);
+	logs = co_await status();
+	ASSERT(logs.restorePointUnknown && !logs.restorable.present());
+	config.latestBackupWorkerSavedVersion().set(tr, 250);
+	logs = co_await status();
+	ASSERT(logs.exclusiveLogEnd == 251 && logs.restorable == 250);
 }
 } // namespace
 
