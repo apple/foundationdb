@@ -23,7 +23,6 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/tester/workloads.h"
 #include "BackupRangeSpec.h"
 #include "BackupSteps.h"
@@ -93,10 +92,7 @@ struct CompareBackupsWorkload : TestWorkload {
 		}
 		ranges = requested.get();
 
-		std::string keyFileName = "simfdb/" + getTestEncryptionFileName();
-		if (fileExists(keyFileName)) {
-			encryptionKeyFileName = keyFileName;
-		}
+		encryptionKeyFileName = BackupSteps::testEncryptionKeyFile();
 	}
 
 	Standalone<VectorRef<KeyRangeRef>> prefixedRanges(Key const& prefix) const {
@@ -160,14 +156,7 @@ struct CompareBackupsWorkload : TestWorkload {
 	                                     Key const& tag,
 	                                     Key const& prefix,
 	                                     Version target) const {
-		BackupSteps::RestoreSpec spec;
-		spec.tag = tag;
-		spec.container = container;
-		spec.ranges = ranges;
-		spec.addPrefix = prefix;
-		spec.targetVersion = target;
-		spec.encryptionKeyFileName = encryptionKeyFileName;
-		return spec;
+		return BackupSteps::prefixedRestoreSpec(container, tag, ranges, prefix, encryptionKeyFileName, target);
 	}
 
 	Standalone<VectorRef<KeyRangeRef>> destinations() const {

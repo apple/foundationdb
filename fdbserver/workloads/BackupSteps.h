@@ -34,6 +34,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/tester/workloads.h"
 
 // Steps shared by the workloads that act on an existing backup, taking explicit parameters.
@@ -170,6 +171,12 @@ inline Future<Reference<IBackupContainer>> openExistingContainer(std::string url
 	co_return openContainerAt(found.orDefault(url), encryptionKeyFileName);
 }
 
+// The encryption key file of the simulation tests, if it exists: only then are the backups encrypted.
+inline Optional<std::string> testEncryptionKeyFile() {
+	std::string keyFileName = "simfdb/" + getTestEncryptionFileName();
+	return fileExists(keyFileName) ? Optional<std::string>(keyFileName) : Optional<std::string>();
+}
+
 // What a restore needs, with named fields instead of the 17 positional arguments of FileBackupAgent::restore.
 struct RestoreSpec {
 	Key tag;
@@ -182,6 +189,24 @@ struct RestoreSpec {
 	Version targetVersion = ::invalidVersion;
 	Optional<std::string> encryptionKeyFileName;
 };
+
+// A restore of `ranges` (as the backup has them) from `container` under `addPrefix`, to `targetVersion` (the latest
+// restorable one when invalid).
+inline RestoreSpec prefixedRestoreSpec(Reference<IBackupContainer> container,
+                                       Key tag,
+                                       Standalone<VectorRef<KeyRangeRef>> ranges,
+                                       Key addPrefix,
+                                       Optional<std::string> encryptionKeyFileName,
+                                       Version targetVersion = ::invalidVersion) {
+	RestoreSpec spec;
+	spec.tag = tag;
+	spec.container = container;
+	spec.ranges = ranges;
+	spec.addPrefix = addPrefix;
+	spec.targetVersion = targetVersion;
+	spec.encryptionKeyFileName = encryptionKeyFileName;
+	return spec;
+}
 
 // Restores `spec` and returns the version restored to.
 inline Future<Version> restoreBackup(Database cx, FileBackupAgent* agent, BackupVersion version, RestoreSpec spec) {

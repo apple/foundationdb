@@ -331,12 +331,8 @@ inline Future<Void> validateAgainstPrefixedRestore(Database cx,
 		maxRestorable = desc.maxRestorableVersion.present() ? desc.maxRestorableVersion.get() : -1;
 	}
 	double restoreStart = now();
-	BackupSteps::RestoreSpec spec;
-	spec.tag = validationTag;
-	spec.container = container;
-	spec.ranges = backupRanges;
-	spec.addPrefix = prefix;
-	spec.encryptionKeyFileName = container->getEncryptionKeyFileName();
+	BackupSteps::RestoreSpec spec = BackupSteps::prefixedRestoreSpec(
+	    container, validationTag, backupRanges, prefix, container->getEncryptionKeyFileName());
 	Version restoredVersion = co_await BackupSteps::restoreBackup(cx, backupAgent, trace.version, spec);
 	if (trace.traceRestorableVersions) {
 		TraceEvent(versionsEvent.c_str(), trace.id)

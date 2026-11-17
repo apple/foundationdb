@@ -31,7 +31,6 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.h"
-#include "fdbserver/tester/TestEncryptionUtils.h"
 #include "BackupRangeSpec.h"
 #include "BackupSteps.h"
 #include "ValidateRestoreAudit.h"
@@ -119,11 +118,7 @@ struct RestoreBackupWorkload : TestWorkload {
 			throw test_specification_invalid();
 		}
 
-		std::string keyFileName = "simfdb/" + getTestEncryptionFileName();
-		// Only set encryptionKeyFileName if the encryption key file exists during backup.
-		if (fileExists(keyFileName)) {
-			encryptionKeyFileName = keyFileName;
-		}
+		encryptionKeyFileName = BackupSteps::testEncryptionKeyFile();
 	}
 
 	static constexpr auto NAME = "RestoreBackup";
