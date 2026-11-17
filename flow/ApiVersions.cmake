@@ -1,5 +1,5 @@
 # API Versions
-set(FDB_AV_LATEST_VERSION                   "800")
+set(FDB_AV_LATEST_VERSION                   "900")
 set(FDB_AV_LATEST_BINDINGS_VERSION          "800")
 
 # Features
@@ -26,3 +26,4 @@ set(FDB_AV_GET_CLIENT_STATUS                "730")
 set(FDB_AV_INITIALIZE_TRACE_ON_SETUP        "730")
 set(FDB_AV_TENANT_GET_ID                    "730")
 set(FDB_AV_NATIVE_CDC_API                   "800")
+set(FDB_AV_RANGE_KEYS                       "900")

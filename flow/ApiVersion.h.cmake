@@ -84,6 +84,7 @@ public: // introduced features
     API_VERSION_FEATURE(@FDB_AV_INITIALIZE_TRACE_ON_SETUP@, InitializeTraceOnSetup);
     API_VERSION_FEATURE(@FDB_AV_TENANT_GET_ID@, TenantGetId);
     API_VERSION_FEATURE(@FDB_AV_NATIVE_CDC_API@, NativeCdcApi);
+    API_VERSION_FEATURE(@FDB_AV_RANGE_KEYS@, RangeKeys);
 };
 
 #endif // FLOW_CODE_API_VERSION_H
