@@ -410,6 +410,10 @@ struct DDBulkDumpJobManager {
 	std::map<Key, BulkLoadManifest> taskManifestMap;
 	BulkDumpSkipTracker skipTracker;
 	bool failed = false; // set once an Error range is seen or written; stops scheduling
+	// Remaining keyspace at the last admission, for pacing. Held per job rather than per scheduling pass:
+	// a pass restarts whenever scheduling is interrupted, and with this reset each time, every admission
+	// looked like the first and none was ever paced -- one job restarted 63 passes for 32 admissions.
+	double previousRemainingWidth = -1;
 
 	DDBulkDumpJobManager() = default;
 	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -2811,6 +2815,32 @@ Future<Void> markBulkDumpRangesFailed(Reference<DataDistributor> self, std::map<
 	}
 }
 
+// Approximate position of a key as a fraction, by reading its leading bytes as a base-256 value.
+//
+// Pacing needs a measure of progress through the job, and the key range is the only thing a bulkdump
+// knows at submit time. Task counts cannot serve: the metadata counts dump batches, and the number of
+// tasks is not bounded by shards either -- a single-shard job still dispatches one task per batch-bounded
+// portion, so the total is only known once the job is over.
+//
+// Eight bytes is ample. The value is used solely for ratios between keys in the same job, so a shared
+// prefix beyond that resolution only makes successive tasks look equally sized, which costs smoothness
+// and not correctness.
+double keyPositionFraction(StringRef key) {
+	double value = 0;
+	double scale = 1.0 / 256.0;
+	for (int i = 0; i < 8; i++) {
+		uint8_t byte = i < key.size() ? key[i] : 0;
+		value += byte * scale;
+		scale /= 256.0;
+	}
+	return value;
+}
+
+// Width of a range as a fraction of the keyspace, floored at zero for inverted or empty input.
+double keyRangeWidthFraction(KeyRangeRef range) {
+	return std::max(0.0, keyPositionFraction(range.end) - keyPositionFraction(range.begin));
+}
+
 Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	UID jobId = self->bulkDumpJobManager.jobState.getJobId();
 	KeyRange jobRange = self->bulkDumpJobManager.jobState.getJobRange();
@@ -2916,13 +2946,95 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					// goes, so it can run for as long as the job does: a pause has to be read here, inside
 					// the dispatch loop and after the limiter wait, or it would not take effect until the
 					// job had finished. One point get per admitted shard task, against dumping a shard.
-					if (co_await bulkJobIsPaused(cx, jobId, /*isBulkDump=*/true)) {
+					Optional<BulkJobControlState> control = co_await getBulkJobControl(cx, jobId, /*isBulkDump=*/true);
+					if (control.present() && control.get().isPaused()) {
 						TraceEvent(SevInfo, "DDBulkDumpJobScheduleJobPaused", self->ddId)
 						    .suppressFor(60.0)
 						    .detail("JobId", jobId)
 						    .detail("NotAdmittedRange", taskRange);
 						pausedMidPass = true;
 						break;
+					}
+					// Spread admissions across the window the operator asked for. Delaying is the only
+					// lever available: this can hold a job back to the requested pace but cannot make the
+					// cluster finish sooner than it would unpaced, so a target already past just admits.
+					if (!control.present() || !control.get().hasTargetEndTime()) {
+						// Logged, not silent: an unpaced admission and a paced one that declined to wait
+						// are different faults, and without this the trace cannot tell them apart.
+						TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobPacingSkipped", self->ddId)
+						    .suppressFor(10.0)
+						    .detail("JobId", jobId)
+						    .detail("Reason", control.present() ? "NoTargetEndTime" : "NoControlRecord");
+					}
+					if (control.present() && control.get().hasTargetEndTime()) {
+						double remainingSeconds = control.get().targetEndTime - now();
+						if (remainingSeconds <= 0) {
+							TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobPacingSkipped", self->ddId)
+							    .suppressFor(10.0)
+							    .detail("JobId", jobId)
+							    .detail("Reason", "TargetAlreadyPassed")
+							    .detail("TargetEndTime", control.get().targetEndTime);
+						}
+						if (remainingSeconds > 0) {
+							// Spend the remaining window in proportion to the keyspace this task consumes.
+							// A task covering a tenth of what is left should take a tenth of the time that
+							// is left, which needs no count of how many tasks there will be -- the quantity
+							// that defeated every previous attempt, because batches, shards and bytes all
+							// measure something other than the work remaining.
+							// Measure what the previous admission consumed rather than what this one claims.
+							// A task's range is not the work it will do: where the keyspace has not split,
+							// every task is dispatched over the whole remainder and the storage server
+							// dumps only a batch-bounded slice of it. Range width then equals remaining
+							// width on every admission, which is why pacing declined to wait at all on
+							// those seeds. The shrinkage of the remainder between admissions is the work
+							// that actually happened.
+							double remainingWidth = keyRangeWidthFraction(KeyRangeRef(taskRange.begin, jobRange.end));
+							double& previousRemainingWidth = self->bulkDumpJobManager.previousRemainingWidth;
+							double consumedWidth =
+							    previousRemainingWidth < 0 ? 0 : previousRemainingWidth - remainingWidth;
+							previousRemainingWidth = remainingWidth;
+							double waitSeconds = 0;
+							if (remainingWidth > 0 && consumedWidth > 0) {
+								// Never wait past the deadline itself. As the remainder shrinks the ratio
+								// approaches one, so a late chunk would otherwise be allocated the whole
+								// window again and the job would finish well past the time asked for.
+								waitSeconds =
+								    std::min(remainingSeconds * (consumedWidth / remainingWidth), remainingSeconds);
+							}
+							// Emitted whether or not a wait results, so a run that paced nothing still
+							// records why.
+							TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobPacing", self->ddId)
+							    .suppressFor(10.0)
+							    .detail("JobId", jobId)
+							    .detail("WaitSeconds", waitSeconds)
+							    .detail("RemainingSeconds", remainingSeconds)
+							    .detail("ConsumedWidth", consumedWidth)
+							    .detail("RemainingWidth", remainingWidth)
+							    .detail("TaskRange", taskRange);
+							// Sliced, not capped. A cap bounded the total spread to admissions times the
+							// cap, which bore no relation to the target and left pacing unable to reach it.
+							// The wait keeps its length; slicing only makes it interruptible, so a pause
+							// issued during one is still seen promptly.
+							double waitUntil = now() + waitSeconds;
+							while (waitSeconds > 0 && now() < waitUntil) {
+								co_await delay(
+								    std::min(waitUntil - now(), SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC));
+								Optional<BulkJobControlState> duringWait =
+								    co_await getBulkJobControl(cx, jobId, /*isBulkDump=*/true);
+								if (duringWait.present() && duringWait.get().isPaused()) {
+									TraceEvent(SevInfo, "DDBulkDumpJobPausedDuringPacingWait", self->ddId)
+									    .suppressFor(60.0)
+									    .detail("JobId", jobId)
+									    .detail("NotAdmittedRange", taskRange);
+									pausedMidPass = true;
+									break;
+								}
+							}
+							if (pausedMidPass) {
+								break;
+							}
+							tr.reset();
+						}
 					}
 					SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
 					                                        bulkDumpState.generateRangeTask(taskRange),

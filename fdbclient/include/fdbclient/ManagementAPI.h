@@ -411,6 +411,7 @@ Future<Void> setBulkJobPaused(Database cx, UID jobId, bool paused, bool isBulkDu
 
 // Number of tasks data distribution has dispatched for a bulkdump job. Zero if none yet.
 Future<int64_t> getBulkDumpAdmittedCount(Database cx, UID jobId);
+Future<Void> setBulkJobTargetEndTime(Database cx, UID jobId, double targetEndTime, bool isBulkDump);
 
 // ==================== End Progress Tracking ====================
 

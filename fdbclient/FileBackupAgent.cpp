@@ -4044,6 +4044,36 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				// Store job ID for monitoring
 				Params.bulkDumpJobId().set(task, bulkDumpJob.getJobId().toString());
 
+				// Carry --snapshot-interval through to the job. Data distribution paces admission against
+				// this, so a bulkdump snapshot spreads over the requested window the way a rangefile
+				// snapshot already does: before this, -s reached only BackupSnapshotDispatchTask, which a
+				// bulkdump-mode backup never schedules, so the interval was accepted and ignored.
+				int64_t snapshotIntervalSeconds = 0;
+				Transaction intervalTr(cx);
+				while (true) {
+					Error err;
+					try {
+						intervalTr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+						intervalTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+						snapshotIntervalSeconds =
+						    co_await config.snapshotIntervalSeconds().getD(&intervalTr, Snapshot::False, 0);
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
+					co_await intervalTr.onError(err);
+				}
+				if (snapshotIntervalSeconds > 0) {
+					// Resolved against the clock now rather than stored as a duration: see
+					// BulkJobControlState::targetEndTime for why there is no dependable job start time.
+					co_await setBulkJobTargetEndTime(
+					    cx, bulkDumpJob.getJobId(), now() + snapshotIntervalSeconds, /*isBulkDump=*/true);
+					TraceEvent("BulkDumpTaskTargetEndTimeSet")
+					    .detail("BackupUID", config.getUid())
+					    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
+					    .detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
+				}
+
 				// Monitor BulkDump progress - timeout is configurable for large datasets
 				bool completed = co_await monitorBulkDumpJobCompletion(cx,
 				                                                       bulkDumpJob.getJobId(),
