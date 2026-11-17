@@ -7714,87 +7714,60 @@ StringRef StartFullRestoreTaskFunc::name = "restore_start"_sr;
 REGISTER_TASKFUNC(StartFullRestoreTaskFunc);
 } // namespace fileBackup
 
-Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<ReadYourWritesTransaction> tr) {
+Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,
+                                                                     EBackupState state) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	BackupConfig config = *this;
 	auto type = co_await config.mutationLogType().get(tr);
-	bool legacyWorkers = false;
-	if (!type.present()) {
-		KeyBackedProperty<bool> requested = config.configSpace.pack("partitionedLogEnabled"_sr);
-		bool partitioned, started;
-		co_await (store(partitioned, requested.getD(tr)) && store(started, config.allWorkerStarted().getD(tr)));
-		legacyWorkers = partitioned && started;
-	}
-	if (!legacyWorkers && type != MutationLogType::PARTITIONED_LOG) {
-		auto dispatchEnd = co_await config.latestLogEndVersion().get(tr);
-		auto restorable = co_await config.getLatestRestorableVersion(tr, dispatchEnd);
-		co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT), dispatchEnd, restorable };
-	}
-
-	bool logsOnly;
-	Optional<Version> worker, firstSnapshot;
-	co_await (store(logsOnly, config.incrementalBackupOnly().getD(tr)) &&
-	          store(worker, config.latestBackupWorkerSavedVersion().get(tr)) &&
-	          store(firstSnapshot, config.firstSnapshotEndVersion().get(tr)));
-	if (legacyWorkers) {
-		Optional<Key> dest;
-		Optional<std::vector<KeyRange>> ranges;
-		co_await (store(dest, config.destUidValue().get(tr)) && store(ranges, config.backupRanges().get(tr)));
-
-		// A 7.4 start that finished on 8.0 installed ordinary capture rules. Those rules
-		// remain until the last consumer releases the destination, which other backups may share.
-		Optional<Value> owner;
-		RangeResult capture;
-		if (dest.present()) {
-			auto ownerKey = config.getUidAsKey().withPrefix(dest.get()).withPrefix(backupLatestVersionsPrefix);
-			co_await (store(owner, tr->get(ownerKey)) &&
-			          store(capture, tr->getRange(prefixRange(dest.get().withPrefix(logRangesRange.begin)), 1)));
+	auto dispatch = config.latestLogEndVersion().get(tr);
+	KeyBackedProperty<bool> requested = config.configSpace.pack("partitionedLogEnabled"_sr);
+	if (!type.present() && (co_await requested.getD(tr))) {
+		Optional<Version> worker;
+		bool started;
+		Optional<Value> startedWorkers;
+		co_await (store(worker, config.latestBackupWorkerSavedVersion().get(tr)) &&
+		          store(started, config.allWorkerStarted().getD(tr)) &&
+		          store(startedWorkers, tr->get(config.startedBackupWorkers().key)));
+		bool mayHaveTaggedFiles =
+		    started || worker.present() || startedWorkers.present() || !BackupAgentBase::isRunnable(state);
+		if (!mayHaveTaggedFiles) {
+			// 7.4 published the ID before waiting for each worker to acknowledge it.
+			auto registered = co_await tr->get(backupStartedKey);
+			if (registered.present()) {
+				auto backups = decodeBackupStartedValue(registered.get());
+				mayHaveTaggedFiles = std::any_of(
+				    backups.begin(), backups.end(), [&](const auto& entry) { return entry.first == config.getUid(); });
+			}
 		}
-		if (!owner.present() || !ranges.present() || ranges.get().empty() || !capture.empty()) {
-			auto dispatchEnd = co_await config.latestLogEndVersion().get(tr);
-			co_return LogProgress{ {}, {}, {}, logsOnly || firstSnapshot.present(), worker, dispatchEnd };
-		}
-	}
-	// Incremental restore prefers ordinary files. An upgraded legacy dispatcher can write
-	// such files even when only the tagged stream captured mutations.
-	if (legacyWorkers && logsOnly) {
-		auto dispatchEnd = co_await config.latestLogEndVersion().get(tr);
-		co_return LogProgress{ MutationLogType::PARTITIONED_LOG, {}, {}, true, worker, dispatchEnd };
-	}
-	auto floor = firstSnapshot;
-	if (logsOnly) {
-		// Logs-only backups keep the begin version assigned after worker registration.
-		floor = co_await config.snapshotBeginVersion().get(tr);
-	}
-	LogProgress unconfirmed{ MutationLogType::PARTITIONED_LOG, {}, {}, logsOnly || firstSnapshot.present(), worker };
-	if (!worker.present() || !floor.present() || worker.get() < floor.get()) {
-		co_return unconfirmed;
-	}
-	// Workers observe deregistration independently. A shared watermark may still be
-	// published for a stopped backup after one partition stopped writing its files.
-	auto registered = co_await tr->get(backupStartedKey);
-	if (!registered.present()) {
-		co_return unconfirmed;
-	}
-	auto backups = decodeBackupStartedValue(registered.get());
-	auto current =
-	    std::find_if(backups.begin(), backups.end(), [&](const auto& entry) { return entry.first == config.getUid(); });
-	if (current == backups.end() || current->second > floor.get()) {
-		co_return unconfirmed;
-	}
-	if (legacyWorkers) {
-		// Cleanup on 8.0 can disable workers while a legacy backup is registered. A later
-		// epoch can resume publishing without files from the disabled epoch.
-		auto previousEpoch = co_await tr->get(lastEpochEndKey);
-		if (previousEpoch.present() &&
-		    BinaryReader::fromStringRef<Version>(previousEpoch.get(), Unversioned()) >= current->second) {
-			co_return unconfirmed;
+		if (mayHaveTaggedFiles) {
+			// The shared checkpoint records an inclusive end. It does not record the start of
+			// each partition's files or gaps while workers were disabled.
+			Optional<Version> snapshot;
+			bool logsOnly;
+			co_await (store(snapshot, config.firstSnapshotEndVersion().get(tr)) &&
+			          store(logsOnly, config.incrementalBackupOnly().getD(tr)) && success(dispatch));
+			if (started) {
+				auto dest = co_await config.destUidValue().get(tr);
+				auto ranges = co_await config.backupRanges().get(tr);
+				if (dest.present() && ranges.present() && !ranges.get().empty()) {
+					// 8.0 installed ordinary capture rules when it finished an interrupted start.
+					// Those rules survive until the last consumer releases the shared destination.
+					auto ownerKey = config.getUidAsKey().withPrefix(dest.get()).withPrefix(backupLatestVersionsPrefix);
+					auto owner = tr->get(ownerKey);
+					auto capture = tr->getRange(prefixRange(dest.get().withPrefix(logRangesRange.begin)), 1);
+					co_await (success(owner) && success(capture));
+					if (owner.get().present() && capture.get().empty()) {
+						type = MutationLogType::PARTITIONED_LOG;
+					}
+				}
+			}
+			co_return LogProgress{ type, {}, {}, logsOnly || snapshot.present(), worker, dispatch.get() };
 		}
 	}
-	Version end = worker.get() + 1; // Workers save an inclusive version.
-	auto restorable = co_await config.getLatestRestorableVersion(tr, Optional<Version>(end));
-	co_return LogProgress{ MutationLogType::PARTITIONED_LOG, end, restorable };
+	auto restorable = co_await config.getLatestRestorableVersion(tr);
+	co_await dispatch;
+	co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT), dispatch.get(), restorable };
 }
 
 struct LogInfo : public ReferenceCounted<LogInfo> {
@@ -8470,7 +8443,7 @@ public:
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						Reference<IBackupContainer> bc;
 						BackupConfig::LogProgress logs;
-						co_await (store(logs, config.getStatusLogProgress(tr)) &&
+						co_await (store(logs, config.getStatusLogProgress(tr, backupState)) &&
 						          store(bc, config.backupContainer().getOrThrow(tr)));
 						logEnd = logs.exclusiveLogEnd;
 						auto latestRestorable = co_await getTimestampedVersion(tr, logs.restorable);
@@ -8478,6 +8451,7 @@ public:
 
 						if (logs.sharedWorkerVersion.present()) {
 							doc.setKey("SharedWorkerSavedVersion", logs.sharedWorkerVersion.get());
+							doc.setKey("SharedWorkerLogEndExclusive", logs.sharedWorkerLogEnd());
 						}
 						if (logs.ordinaryDispatchEnd.present()) {
 							doc.setKey("OrdinaryLogDispatchEnd", logs.ordinaryDispatchEnd.get());
@@ -8697,7 +8671,7 @@ public:
 					Reference<IBackupContainer> bc;
 					BackupConfig::LogProgress logs;
 					Version recentReadVersion{ 0 };
-					co_await (store(logs, config.getStatusLogProgress(tr)) &&
+					co_await (store(logs, config.getStatusLogProgress(tr, backupState)) &&
 					          store(bc, config.backupContainer().getOrThrow(tr)) &&
 					          store(recentReadVersion, tr->getReadVersion()));
 					auto latestRestorableVersion = logs.restorable;
@@ -8761,8 +8735,9 @@ public:
 
 					statusText += format("Mutation Log Type: %s\n", logs.typeName().c_str());
 					if (logs.sharedWorkerVersion.present()) {
-						statusText +=
-						    format("Shared backup worker saved version: %lld\n", logs.sharedWorkerVersion.get());
+						statusText += format("Shared backup worker saved version: %lld (exclusive end %lld)\n",
+						                     logs.sharedWorkerVersion.get(),
+						                     logs.sharedWorkerLogEnd());
 					}
 					if (logs.ordinaryDispatchEnd.present()) {
 						statusText += format("Ordinary log dispatch end: %lld\n", logs.ordinaryDispatchEnd.get());
