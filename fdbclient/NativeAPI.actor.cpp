@@ -2558,6 +2558,31 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 	}
 }
 
+Optional<std::string> getClientTraceDirectory() {
+	return networkOptions.traceDirectory;
+}
+
+void initializeClientAuditTracing(Reference<IClusterConnectionRecord> connRecord, std::string const& directory) {
+	// Network must be created before initializing tracing
+	ASSERT(g_network && !g_network->isSimulated());
+
+	// Same address and options as the client trace file opened by initializeClientTracing.
+	Optional<NetworkAddress> localAddress;
+	if (connRecord) {
+		auto publicIP = connRecord->getConnectionString().determineLocalSourceIP();
+		localAddress = NetworkAddress(publicIP, ::getpid());
+	}
+	openAuditTraceFile(localAddress,
+	                   networkOptions.traceRollSize,
+	                   networkOptions.traceMaxLogsSize,
+	                   directory,
+	                   "trace",
+	                   networkOptions.traceLogGroup,
+	                   networkOptions.traceFileIdentifier,
+	                   networkOptions.tracePartialFileSuffix,
+	                   networkOptions.traceFormat);
+}
+
 // Creates a database object that represents a connection to a cluster
 // This constructor uses a preallocated DatabaseContext that may have been created
 // on another thread
@@ -8762,6 +8787,68 @@ void Transaction::addGranuleMaterializeStats(const GranuleMaterializeStats& stat
 	trState->cx->bgReadRowsCleared += stats.rowsCleared;
 	trState->cx->bgReadRowsInserted += stats.rowsInserted;
 	trState->cx->bgReadRowsUpdated += stats.rowsUpdated;
+}
+
+TEST_CASE("/fdbclient/NativeAPI/watchRefCount/removesEmptyEntries") {
+	// Default error "operation_failed()" avoids "internal" range (4xxx),
+	// which causes simulation tests with --crash enabled to abort/fail.
+	Database database = Database(new DatabaseContext(operation_failed()));
+	const int64_t tenantId = TenantInfo::INVALID_TENANT;
+	Key k = "k"_sr;
+
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
+
+	database->increaseWatchRefCount(tenantId, k, 1);
+	database->increaseWatchRefCount(tenantId, k, 2);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 1);
+
+	// Reference count entry should remain while version set for k is not empty
+	database->decreaseWatchRefCount(tenantId, k, 2);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 1);
+
+	// …but should be removed once the reference set is empty
+	database->decreaseWatchRefCount(tenantId, k, 1);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
+
+	// …and nothing should happen when removing a stale reference
+	ASSERT_EQ(database->decreaseWatchRefCount(tenantId, k, 1), 0);
+	ASSERT_EQ(database->getWatchRefCountEntryCount(), 0);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/watchRefCount/deletesMetadataOnlyOnLastRef") {
+	// Default error "operation_failed()" avoids "internal" range (4xxx),
+	// which causes simulation tests with --crash enabled to abort/fail.
+	Database database = Database(new DatabaseContext(operation_failed()));
+	const int64_t tenantId = TenantInfo::INVALID_TENANT;
+	Key k = "k"_sr;
+	Promise<Void> neverSet;
+	auto watchParameters = makeReference<WatchParameters>(TenantInfo(),
+	                                                      k,
+	                                                      Optional<Value>(),
+	                                                      1,
+	                                                      TagSet(),
+	                                                      SpanContext(),
+	                                                      TaskPriority::DefaultEndpoint,
+	                                                      Optional<UID>(),
+	                                                      UseProvisionalProxies::False);
+
+	auto md = makeReference<WatchMetadata>(watchParameters);
+	md->watchFutureSS = success(neverSet.getFuture());
+
+	database->setWatchMetadata(md);
+	database->increaseWatchRefCount(tenantId, k, 1);
+	database->increaseWatchRefCount(tenantId, k, 2);
+	database->decreaseWatchRefCount(tenantId, k, 1);
+	ASSERT(database->getWatchMetadata(tenantId, k).isValid());
+
+	database->decreaseWatchRefCount(tenantId, k, 2);
+	ASSERT(!database->getWatchMetadata(tenantId, k).isValid());
+	ASSERT(md->watchFutureSS.isError());
+	ASSERT(md->watchFutureSS.getError().code() == error_code_actor_cancelled);
+
+	return Void();
 }
 
 ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
