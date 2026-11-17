@@ -51,6 +51,113 @@ var _ = Describe("Testing monitor metrics", func() {
 			})
 		})
 
+		When("staged versions are registered", func() {
+			BeforeEach(func() {
+				monitorMetrics.registerStagedVersions([]string{sevenOneVersion, sevenThreeVersion})
+			})
+
+			getStagedVersions := func() []string {
+				families, err := registry.Gather()
+				Expect(err).NotTo(HaveOccurred())
+
+				var versions []string
+				for _, family := range families {
+					if !strings.HasSuffix(pointer.StringDeref(family.Name, ""), stagedVersionMetricName) {
+						continue
+					}
+
+					for _, metric := range family.Metric {
+						Expect(*metric.Gauge.Value).To(BeNumerically("==", 1))
+						Expect(metric.Label).To(HaveLen(1))
+						Expect(*metric.Label[0].Name).To(Equal(versionLabel))
+						versions = append(versions, *metric.Label[0].Value)
+					}
+				}
+
+				return versions
+			}
+
+			It("should report all staged versions", func() {
+				Expect(getStagedVersions()).To(ConsistOf(sevenOneVersion, sevenThreeVersion))
+			})
+
+			When("a version is no longer staged", func() {
+				BeforeEach(func() {
+					monitorMetrics.registerStagedVersions([]string{sevenThreeVersion})
+				})
+
+				It("should remove the series of the version", func() {
+					Expect(getStagedVersions()).To(ConsistOf(sevenThreeVersion))
+				})
+			})
+		})
+
+		When("running binaries are registered", func() {
+			// getRunningBinaries returns the label values of the running_binary series by process.
+			getRunningBinaries := func() map[string][2]string {
+				families, err := registry.Gather()
+				Expect(err).NotTo(HaveOccurred())
+
+				result := map[string][2]string{}
+				for _, family := range families {
+					if !strings.HasSuffix(pointer.StringDeref(family.Name, ""), runningBinaryMetricName) {
+						continue
+					}
+
+					for _, metric := range family.Metric {
+						Expect(*metric.Gauge.Value).To(BeNumerically("==", 1))
+						labels := map[string]string{}
+						for _, label := range metric.Label {
+							labels[*label.Name] = *label.Value
+						}
+						Expect(labels).To(HaveLen(3))
+						result[labels[processLabel]] = [2]string{labels[versionLabel], labels[binaryPathLabel]}
+					}
+				}
+
+				return result
+			}
+
+			BeforeEach(func() {
+				monitorMetrics.registerRunningBinary(1, sevenOneVersion, "/usr/bin/fdbserver")
+				monitorMetrics.registerRunningBinary(2, sevenOneVersion, "/usr/bin/fdbserver")
+			})
+
+			It("should report a series for every process", func() {
+				Expect(getRunningBinaries()).To(Equal(map[string][2]string{
+					"1": {sevenOneVersion, "/usr/bin/fdbserver"},
+					"2": {sevenOneVersion, "/usr/bin/fdbserver"},
+				}))
+			})
+
+			When("a process is restarted with another binary", func() {
+				BeforeEach(func() {
+					monitorMetrics.registerRunningBinary(1, sevenThreeVersion, "/shared/7.3.37/fdbserver")
+				})
+
+				It("should replace the series of the process", func() {
+					Expect(getRunningBinaries()).To(Equal(map[string][2]string{
+						"1": {sevenThreeVersion, "/shared/7.3.37/fdbserver"},
+						"2": {sevenOneVersion, "/usr/bin/fdbserver"},
+					}))
+				})
+			})
+
+			When("a process terminated", func() {
+				BeforeEach(func() {
+					monitorMetrics.unregisterRunningBinary(1)
+					// Unregistering a process without a series is a no-op.
+					monitorMetrics.unregisterRunningBinary(3)
+				})
+
+				It("should remove the series of the process", func() {
+					Expect(getRunningBinaries()).To(Equal(map[string][2]string{
+						"2": {sevenOneVersion, "/usr/bin/fdbserver"},
+					}))
+				})
+			})
+		})
+
 		When("a configuration change is registered", func() {
 			BeforeEach(func() {
 				monitorMetrics.registerConfigurationChange(sevenOneVersion)

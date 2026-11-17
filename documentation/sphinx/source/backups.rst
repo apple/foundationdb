@@ -170,7 +170,13 @@ Here is a complete list of valid parameters:
 
  *max_delay_connection_failed (or *dcf*) - Max seconds to delay before retry again when seeing an connection failure.
 
+ *aws_v4_header* (or *v4*) - Set 1 to sign requests with AWS Signature Version 4, or 0 to use Version 2.  Overrides the ``HTTP_REQUEST_AWS_V4_HEADER`` knob for this URL. The URL is saved with the backup, so each backup can use its own value.
+
  *header* - Add an additional HTTP header to each blob store REST API request.  Can be specified multiple times.  Format is *header=<FieldName>:<FieldValue>* where both strings are non-empty.
+
+ *server_side_encryption* (or *sse*) - Value of the *x-amz-server-side-encryption* header sent on requests that create objects, for example *AES256* or *aws:kms*.  Overrides the ``BLOBSTORE_ENCRYPTION_TYPE`` knob for this URL.  Use *sse=none* to send no server-side encryption header even when the knob is set.  The URL is saved with the backup, so each backup can use its own value.
+
+ *proxy* - Proxy to use for this URL, as *host:port* or *IP:port*.  Overrides the ``--proxy`` option of ``fdbbackup``, ``backup_agent``, and ``fdbserver``, and the proxy environment variables.  Use *proxy=none* to connect directly even when a proxy is configured.  The URL is saved with the backup, so each backup can use its own proxy.
 
  *sdk_auth* (or *sa*) - Use the AWS SDK to do credentials and authentication. This supports all aws authentication types, including credential-less iam role-based authentication in aws. Experimental, and only works if FDB was compiled with BUILD_AWS_BACKUP=ON. When this parameter is set, all other credential parts of the backup url can be ignored.
  
