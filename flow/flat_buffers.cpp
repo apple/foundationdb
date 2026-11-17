@@ -708,6 +708,55 @@ TEST_CASE("/flow/FlatBuffers/RejectsMalformedBuffers") {
 	return Void();
 }
 
+TEST_CASE("/flow/FlatBuffers/RejectsHostileStringOffsetAndLength") {
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+
+	Untrusted src;
+	src.s = "hello world";
+	ObjectWriter writer(Unversioned());
+	writer.serialize(untrustedFileIdentifier, src);
+	StringRef good = writer.toStringRef();
+
+	auto read32 = [&](int pos) {
+		uint32_t x;
+		memcpy(&x, good.begin() + pos, sizeof(x));
+		return x;
+	};
+	auto payload = std::search(good.begin(), good.end(), src.s.begin(), src.s.end());
+	ASSERT(payload != good.end());
+	int lengthPos = (payload - good.begin()) - sizeof(uint32_t);
+	ASSERT_EQ(read32(lengthPos), src.s.size());
+
+	// The string field holds a relative offset that lands on the length prefix.
+	int offsetPos = -1;
+	for (int pos = 0; pos + 4 <= lengthPos; pos += 4) {
+		if (pos + read32(pos) == lengthPos) {
+			ASSERT_EQ(offsetPos, -1);
+			offsetPos = pos;
+		}
+	}
+	ASSERT_NE(offsetPos, -1);
+
+	uint32_t sizeToEnd = good.size() - offsetPos;
+	for (uint32_t hostile : { 0x7ffffff0u, 0xffffffffu, sizeToEnd, sizeToEnd + 1 }) {
+		std::vector<uint8_t> bad(good.begin(), good.end());
+		memcpy(bad.data() + offsetPos, &hostile, sizeof(hostile));
+		Untrusted dst;
+		ASSERT(!tryDeserializeUntrusted(bad.data(), bad.size(), dst));
+	}
+
+	uint32_t sizeToEndFromPayload = good.size() - (lengthPos + sizeof(uint32_t));
+	for (uint32_t hostile : { 0x7ffffff0u, 0xffffffffu, sizeToEndFromPayload + 1 }) {
+		std::vector<uint8_t> bad(good.begin(), good.end());
+		memcpy(bad.data() + lengthPos, &hostile, sizeof(hostile));
+		Untrusted dst;
+		ASSERT(!tryDeserializeUntrusted(bad.data(), bad.size(), dst));
+	}
+	return Void();
+}
+
 TEST_CASE("/flow/FlatBuffers/RejectsWrongFileIdentifier") {
 	if (g_network->isSimulated()) {
 		return Void();
