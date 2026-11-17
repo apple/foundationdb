@@ -7715,14 +7715,15 @@ REGISTER_TASKFUNC(StartFullRestoreTaskFunc);
 } // namespace fileBackup
 
 Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,
-                                                                     EBackupState state) {
+                                                                     EBackupState state,
+                                                                     BackupStatusSchema schema) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	BackupConfig config = *this;
 	auto type = co_await config.mutationLogType().get(tr);
 	auto dispatch = config.latestLogEndVersion().get(tr);
 	KeyBackedProperty<bool> requested = config.configSpace.pack("partitionedLogEnabled"_sr);
-	if (!type.present() && (co_await requested.getD(tr))) {
+	if (schema == BackupStatusSchema::V2 && !type.present() && (co_await requested.getD(tr))) {
 		Optional<Version> worker;
 		bool started;
 		Optional<Value> startedWorkers;
@@ -7741,12 +7742,6 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 			}
 		}
 		if (mayHaveTaggedFiles) {
-			// The shared checkpoint records an inclusive end. It does not record the start of
-			// each partition's files or gaps while workers were disabled.
-			Optional<Version> snapshot;
-			bool logsOnly;
-			co_await (store(snapshot, config.firstSnapshotEndVersion().get(tr)) &&
-			          store(logsOnly, config.incrementalBackupOnly().getD(tr)) && success(dispatch));
 			if (started) {
 				auto dest = co_await config.destUidValue().get(tr);
 				auto ranges = co_await config.backupRanges().get(tr);
@@ -7762,7 +7757,10 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 					}
 				}
 			}
-			co_return LogProgress{ type, {}, {}, logsOnly || snapshot.present(), worker, dispatch.get() };
+			// The shared checkpoint records an inclusive end. It does not record the start of
+			// each partition's files or gaps while workers were disabled.
+			auto cursor = co_await dispatch;
+			co_return LogProgress{ type, {}, {}, true, worker, cursor };
 		}
 	}
 	auto restorable = co_await config.getLatestRestorableVersion(tr);
@@ -8401,14 +8399,17 @@ public:
 		co_return tv;
 	}
 
-	static Future<std::string> getStatusJSON(FileBackupAgent* backupAgent, Database cx, std::string tagName) {
+	static Future<std::string> getStatusJSON(FileBackupAgent* backupAgent,
+	                                         Database cx,
+	                                         std::string tagName,
+	                                         BackupStatusSchema schema) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		while (true) {
 			Error err;
 			try {
 				JsonBuilderObject doc;
-				doc.setKey("SchemaVersion", "1.0.0");
+				doc.setKey("SchemaVersion", schema == BackupStatusSchema::V1 ? "1.0.0" : "2.0.0");
 
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -8443,7 +8444,7 @@ public:
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						Reference<IBackupContainer> bc;
 						BackupConfig::LogProgress logs;
-						co_await (store(logs, config.getStatusLogProgress(tr, backupState)) &&
+						co_await (store(logs, config.getStatusLogProgress(tr, backupState, schema)) &&
 						          store(bc, config.backupContainer().getOrThrow(tr)));
 						logEnd = logs.exclusiveLogEnd;
 						auto latestRestorable = co_await getTimestampedVersion(tr, logs.restorable);
@@ -8453,8 +8454,8 @@ public:
 							doc.setKey("SharedWorkerSavedVersion", logs.sharedWorkerVersion.get());
 							doc.setKey("SharedWorkerLogEndExclusive", logs.sharedWorkerLogEnd());
 						}
-						if (logs.ordinaryDispatchEnd.present()) {
-							doc.setKey("OrdinaryLogDispatchEnd", logs.ordinaryDispatchEnd.get());
+						if (logs.logDispatchCursor.present()) {
+							doc.setKey("LogDispatchCursor", logs.logDispatchCursor.get());
 						}
 						if (logs.restorePointUnknown) {
 							doc.setKey("RestorePointStatus", "unknown");
@@ -8739,8 +8740,8 @@ public:
 						                     logs.sharedWorkerVersion.get(),
 						                     logs.sharedWorkerLogEnd());
 					}
-					if (logs.ordinaryDispatchEnd.present()) {
-						statusText += format("Ordinary log dispatch end: %lld\n", logs.ordinaryDispatchEnd.get());
+					if (logs.logDispatchCursor.present()) {
+						statusText += format("Log dispatch cursor: %lld\n", logs.logDispatchCursor.get());
 					}
 					if (logs.restorePointUnknown) {
 						statusText += "Latest restore point: unknown from backup metadata.\n";
@@ -9498,8 +9499,8 @@ Future<std::string> FileBackupAgent::getStatus(Database cx, ShowErrors showError
 	return FileBackupAgentImpl::getStatus(this, cx, showErrors, tagName);
 }
 
-Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagName) {
-	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName);
+Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagName, BackupStatusSchema schema) {
+	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName, schema);
 }
 
 Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr,

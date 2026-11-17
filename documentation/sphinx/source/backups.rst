@@ -387,7 +387,15 @@ The ``status`` subcommand is used to get information on the current status of ba
 
 ::
 
-   user@host$ fdbbackup status [-t <TAG>]
+   user@host$ fdbbackup status [-t <TAG>] [--json | --json-v2]
+
+Text output and ``--json-v2`` distinguish shared worker progress from a restore point for a legacy 7.4 backup.
+For example, ``SharedWorkerSavedVersion`` of 301 gives ``SharedWorkerLogEndExclusive`` of 302.
+These counters do not show whether each partition saved files covering the entire snapshot.
+When the database cannot establish a restore point, schema 2 reports ``RestorePointStatus`` as ``unknown`` and omits ``Restorable`` and ``LatestRestorablePoint``.
+``LogDispatchCursor`` shows where the log dispatcher has advanced. A dispatcher can advance while it waits for workers.
+
+Existing clients can continue to use ``--json`` for schema 1. Its ``Restorable`` Boolean and version fields retain their historical metadata-based calculation.
 
 .. program:: fdbbackup delete
 

@@ -290,7 +290,7 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	config.firstSnapshotEndVersion().clear(tr);
 	config.latestBackupWorkerSavedVersion().set(tr, 199);
 	logs = co_await status();
-	ASSERT(logs.type == MutationLogType::PARTITIONED_LOG && !logs.restorePointUnknown && !logs.restorable.present());
+	ASSERT(logs.type == MutationLogType::PARTITIONED_LOG && logs.restorePointUnknown && !logs.restorable.present());
 
 	// At checkpoint equality a tagged file ends at 302, but another partition's first
 	// file may start after the oldest range in the snapshot.
@@ -317,13 +317,17 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	auto missing = co_await container->writeTaggedLogFile(250, 275, 1024, 1, 2);
 	co_await missing->finish();
 	ASSERT((co_await container->getRestoreSet(301)).present());
+	config.firstSnapshotEndVersion().clear(tr);
+	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_ABORTED);
+	ASSERT(logs.restorePointUnknown && !logs.restorable.present());
+	config.firstSnapshotEndVersion().set(tr, 301);
 	co_await container->deleteContainer();
 
 	config.startMutationLogs(tr, KeyRangeRef("a"_sr, "z"_sr), dest);
 	config.latestLogEndVersion().set(tr, 402);
 	logs = co_await status();
 	ASSERT(!logs.type.present() && logs.restorePointUnknown && !logs.restorable.present());
-	ASSERT(logs.ordinaryDispatchEnd == 402 && logs.sharedWorkerVersion == 301);
+	ASSERT(logs.logDispatchCursor == 402 && logs.sharedWorkerVersion == 301);
 	config.firstSnapshotEndVersion().clear(tr);
 	config.incrementalBackupOnly().set(tr, true);
 	logs = co_await status();
@@ -334,6 +338,10 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	config.latestBackupWorkerSavedVersion().clear(tr);
 	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_COMPLETED);
 	ASSERT(!logs.type.present() && logs.restorePointUnknown && !logs.restorable.present());
+
+	// Released one-time-backup controllers use the V1 Boolean to decide whether to restart.
+	auto v1 = co_await config.getStatusLogProgress(tr, EBackupState::STATE_COMPLETED, BackupStatusSchema::V1);
+	ASSERT(!v1.restorePointUnknown && v1.restorable == 401 && v1.exclusiveLogEnd == 402);
 
 	config.mutationLogType().set(tr, MutationLogType::DEFAULT);
 	logs = co_await status();

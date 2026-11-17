@@ -41,6 +41,7 @@ FDB_BOOLEAN_PARAM(IncrementalBackupOnly);
 FDB_BOOLEAN_PARAM(OnlyApplyMutationLogs);
 FDB_BOOLEAN_PARAM(InconsistentSnapshotOnly);
 FDB_BOOLEAN_PARAM(ShowErrors);
+enum class BackupStatusSchema { V1, V2 };
 FDB_BOOLEAN_PARAM(AbortOldBackup);
 FDB_BOOLEAN_PARAM(DstOnly); // TODO: More descriptive name?
 FDB_BOOLEAN_PARAM(WaitForDestUID);
@@ -358,7 +359,9 @@ public:
 	Future<Void> checkAndDisableRangePartitionedBackupWorkers(Database cx);
 
 	Future<std::string> getStatus(Database cx, ShowErrors, std::string tagName);
-	Future<std::string> getStatusJSON(Database cx, std::string tagName);
+	Future<std::string> getStatusJSON(Database cx,
+	                                  std::string tagName,
+	                                  BackupStatusSchema schema = BackupStatusSchema::V1);
 
 	Future<Optional<Version>> getLastRestorable(Reference<ReadYourWritesTransaction> tr,
 	                                            Key tagName,
@@ -972,11 +975,13 @@ public:
 		Optional<Version> restorable;
 		bool restorePointUnknown = false;
 		Optional<Version> sharedWorkerVersion = {};
-		Optional<Version> ordinaryDispatchEnd = {};
+		Optional<Version> logDispatchCursor = {};
 		Version sharedWorkerLogEnd() const { return sharedWorkerVersion.get() + 1; }
 		std::string typeName() const { return type.present() ? mutationLogTypeToString(type.get()) : "unknown"; }
 	};
-	Future<LogProgress> getStatusLogProgress(Reference<ReadYourWritesTransaction> tr, EBackupState state);
+	Future<LogProgress> getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,
+	                                         EBackupState state,
+	                                         BackupStatusSchema schema = BackupStatusSchema::V2);
 
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
