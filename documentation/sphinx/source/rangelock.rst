@@ -94,7 +94,7 @@ For ad-hoc operational use — inspecting active locks, releasing a lock left be
     rangelock release-all <OWNER_ID>
     rangelock list [<BEGIN_KEY> <END_KEY>]
 
-Range locks only take effect when commit proxies are started with ``knob_enable_read_lock_on_range=true``. ``rangelock take`` prints an advisory notice as a reminder, but cannot probe the server-side knob — the take itself succeeds either way; the lock simply has no effect when the knob is off.
+Range locks are enforced only when range locking is enabled, either with ``configure range_lock=enabled`` or, while that configuration is unset, by starting the commit proxies with ``knob_enable_read_lock_on_range=true``. When it is not enabled, ``rangelock take`` (and any transaction that takes a lock, such as BulkLoad job submission) is rejected with ``range_lock_disabled``. ``configure range_lock=disabled`` is refused while any lock is held.
 
 The bulkload-specific commands (``bulkload addlockowner`` / ``bulkload clearlock`` / ``bulkload printlockowner``) remain available; they are a constrained subset of the above scoped to the bulkload workflow.
 

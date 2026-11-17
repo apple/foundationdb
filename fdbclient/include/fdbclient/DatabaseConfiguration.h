@@ -263,6 +263,20 @@ struct DatabaseConfiguration {
 	// Whether DD should actively converge existing entries at init.
 	bool shardMetadataMigrationEnabled() const { return shardMetadataMigration == ShardMetadataMigration::ENABLED; }
 
+	// Unset -> commit proxies fall back to the ENABLE_READ_LOCK_ON_RANGE knob; an explicit value overrides it.
+	static constexpr const char* RANGE_LOCK_KEY = "range_lock";
+	static constexpr const char* RANGE_LOCK_ENABLED = "enabled";
+	static constexpr const char* RANGE_LOCK_DISABLED = "disabled";
+	enum class RangeLockSetting { UNSET, DISABLED, ENABLED };
+	RangeLockSetting rangeLockSetting;
+
+	Optional<bool> rangeLockIsEnabled() const {
+		if (rangeLockSetting == RangeLockSetting::UNSET) {
+			return Optional<bool>();
+		}
+		return rangeLockSetting == RangeLockSetting::ENABLED;
+	}
+
 	// Storage Migration Type
 	StorageMigrationType storageMigrationType;
 

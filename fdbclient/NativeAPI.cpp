@@ -4761,7 +4761,8 @@ static Future<Void> tryCommit(Reference<TransactionState> trStateInput, CommitTr
 		    err.code() != error_code_batch_transaction_throttled && err.code() != error_code_tag_throttled &&
 		    err.code() != error_code_process_behind && err.code() != error_code_future_version &&
 		    err.code() != error_code_transaction_throttled_hot_shard &&
-		    err.code() != error_code_transaction_rejected_range_locked) {
+		    err.code() != error_code_transaction_rejected_range_locked &&
+		    err.code() != error_code_range_lock_disabled) {
 			TraceEvent(SevError, "TryCommitError").error(err);
 		}
 		if (trState->trLogInfo) {

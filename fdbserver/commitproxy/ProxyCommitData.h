@@ -386,13 +386,16 @@ struct ProxyCommitData {
 		}
 	}
 
+	// Overrides the ENABLE_READ_LOCK_ON_RANGE knob when set.
+	Optional<bool> rangeLockConfig;
+
 	// RangeLock feature currently does not support version vector
 	// So, if the version vector is enabled, the RangeLock is automatically disabled
 	// RangeLock feature currently rely on processing private mutations in commit proxy
 	// So, if PROXY_USE_RESOLVER_PRIVATE_MUTATIONS is on, the RangeLock is automatically disabled.
-	bool rangeLockEnabled() {
-		return SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
-		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST;
+	bool rangeLockEnabled() const {
+		return rangeLockConfig.orDefault(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE) &&
+		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR && !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST;
 	}
 
 	ProxyCommitData(UID dbgid,

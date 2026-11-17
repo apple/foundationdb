@@ -41,17 +41,6 @@ static const std::string RANGELOCK_HELP_MESSAGE =
     RANGELOCK_REGISTER_USAGE + RANGELOCK_UNREGISTER_USAGE + RANGELOCK_OWNERS_USAGE + RANGELOCK_TAKE_USAGE +
     RANGELOCK_RELEASE_USAGE + RANGELOCK_RELEASE_ALL_USAGE + RANGELOCK_LIST_USAGE;
 
-// Range locks only take effect when commit proxies are started with
-// knob_enable_read_lock_on_range=true. The client cannot probe the knob
-// (server knobs aren't exposed to fdbclient), so we print this notice
-// after any operation that the user might assume blocks writes.
-static void printKnobReminder() {
-	fmt::println("NOTE: Range locks take effect only when commit proxies were started with");
-	fmt::println("      knob_enable_read_lock_on_range=true. If that knob is off cluster-wide,");
-	fmt::println("      this operation persists metadata but writes are not actually rejected.");
-	fmt::println("      Verify the knob in commit-proxy startup logs.");
-}
-
 // Validate range bounds and return a Standalone KeyRange. Prints a user-facing
 // error and returns an empty Optional if the range is invalid (empty, inverted,
 // or outside the normal key space).
@@ -82,6 +71,9 @@ static bool reportRangeLockError(const Error& e, std::string_view operation) {
 		break;
 	case error_code_range_lock_failed:
 		fmt::println("ERROR: cannot {}: invalid range, unregistered owner, or empty argument", operation);
+		break;
+	case error_code_range_lock_disabled:
+		fmt::println("ERROR: cannot {}: range locking is not enabled; run `configure range_lock=enabled`", operation);
 		break;
 	default:
 		fmt::println("ERROR: cannot {}: {} ({})", operation, e.what(), e.code());
@@ -193,7 +185,6 @@ Future<bool> rangeLockCommandActor(Database cx, std::vector<StringRef> tokens) {
 			co_return reportRangeLockError(e, "take lock");
 		}
 		fmt::println("Locked range {} for owner {}", range.get().toString(), ownerId);
-		printKnobReminder();
 		co_return true;
 	}
 

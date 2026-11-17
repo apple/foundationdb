@@ -299,6 +299,12 @@ Future<bool> configureCommandActor(Reference<IDatabase> db,
 		        "automatically by the backup system.\n");
 		ret = false;
 		break;
+	case ConfigurationResult::RANGE_LOCKS_HELD:
+		fprintf(stderr,
+		        "ERROR: range locks are held, so range_lock cannot be disabled; commit proxies would stop enforcing "
+		        "them. Release the locks first (`rangelock list`, `rangelock release`).\n");
+		ret = false;
+		break;
 	default:
 		ASSERT(false);
 		ret = false;
@@ -333,6 +339,7 @@ void configureGenerator(const char* text,
 		                   "storage_migration_type=",
 		                   "shard_metadata_format=",
 		                   "shard_metadata_migration=",
+		                   "range_lock=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
@@ -347,7 +354,8 @@ CommandFactory configureFactory(
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|perpetual_storage_wiggle_engine=<ENGINE>|"
         "storage_migration_type={disabled|gradual|aggressive}|"
         "shard_metadata_format={original|encoded}|"
-        "shard_metadata_migration={enabled|disabled}"
+        "shard_metadata_migration={enabled|disabled}|"
+        "range_lock={enabled|disabled}"
         "|exclude=<ADDRESS...>",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
@@ -388,6 +396,9 @@ CommandFactory configureFactory(
         "shard metadata entries to shard_metadata_format. When disabled (default), DD does nothing at init "
         "in either direction; entries drain via natural DD moves or a manual storage wiggle. See the "
         "SHARD_ENCODE_LOCATION_METADATA design doc for cost model and safety analysis.\n\n"
+        "range_lock={enabled|disabled}: Whether commit proxies enforce range locks (BulkLoad takes one on its target "
+        "range). When unset, commit proxies fall back to the ENABLE_READ_LOCK_ON_RANGE knob. The change takes effect "
+        "at the recovery that the configuration change triggers.\n\n"
         "exclude=<ADDRESS...>: Sets the addresses in the format of IP1:port1,IP2:port2 pairs to be excluded during "
         "recruitment. Note this should be only used when the database is unavailable because of the faulty processes "
         "that are blocking the recovery from completion. The number of addresses should be less than the replication "

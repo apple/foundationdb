@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/Knobs.h"
@@ -38,8 +39,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 	int lockActorCount = 10;
 
 	RandomRangeLockWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {
-		enabled = SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
-		          !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
+		enabled = !SERVER_KNOBS->ENABLE_VERSION_VECTOR && !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
 		          !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
 		enabled &= (clientId == 0) && g_network->isSimulated();
 	}
@@ -165,6 +165,10 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
+		if (enabled) {
+			DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
+			enabled = config.rangeLockIsEnabled().orDefault(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
+		}
 		if (enabled) {
 			// Run lockActorCount number of actor concurrently.
 			// Each actor conducts (1) locking a range for a while and (2) unlocking the range.

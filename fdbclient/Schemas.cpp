@@ -1018,6 +1018,11 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "$enum":[
              "enabled",
              "disabled"
+         ]},
+         "range_lock": {
+             "$enum":[
+             "enabled",
+             "disabled"
          ]}
       },
       "consistency_scan" : {

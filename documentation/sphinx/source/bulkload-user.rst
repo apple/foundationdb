@@ -246,7 +246,7 @@ To load from 'S3' (presuming an empty cluster and presuming a previous dump whos
 Troubleshooting
 ===============
 
-:command:`BulkLoad` requires '--knob_shard_encode_location_metadata=1' and '--knob_enable_read_lock_on_range=1'. :command:`BulkDump` works without additional knobs.
+:command:`BulkLoad` requires '--knob_shard_encode_location_metadata=1' and range locking ('configure range_lock=enabled', or '--knob_enable_read_lock_on_range=1' while that configuration is unset). Submitting a job while range locking is not enabled fails with range_lock_disabled. :command:`BulkDump` works without additional knobs.
 
 As for backup, enable '--knob_http_verbose_level 10' to debug connection issues: the http request/response will be dumped on STDOUT.
 

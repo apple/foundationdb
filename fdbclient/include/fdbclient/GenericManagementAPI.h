@@ -64,7 +64,8 @@ enum class ConfigurationResult {
 	DATABASE_IS_REGISTERED,
 	INVALID_STORAGE_TYPE,
 	BACKUP_WORKER_ENABLED_RESTRICTED,
-	RANGE_PARTITIONED_BACKUP_WORKER_ENABLED_RESTRICTED
+	RANGE_PARTITIONED_BACKUP_WORKER_ENABLED_RESTRICTED,
+	RANGE_LOCKS_HELD
 };
 
 enum class CoordinatorsResult {
@@ -197,6 +198,20 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
 			if (!creating && !force) {
+				// Proxies stop enforcing locks once range_lock is disabled, so refuse while any lock is held.
+				auto rangeLockChange = m.find(configKeysPrefix.toString() + DatabaseConfiguration::RANGE_LOCK_KEY);
+				if (rangeLockChange != m.end() &&
+				    rangeLockChange->second == DatabaseConfiguration::RANGE_LOCK_DISABLED) {
+					typename DB::TransactionT::template FutureT<RangeResult> fLocksF =
+					    tr->getRange(rangeLockKeys, CLIENT_KNOBS->TOO_MANY);
+					RangeResult locks = co_await safeThreadFutureToFuture(fLocksF);
+					for (const KeyValueRef& kv : locks) {
+						if (isRangeLockHeld(kv.value)) {
+							co_return ConfigurationResult::RANGE_LOCKS_HELD;
+						}
+					}
+				}
+
 				typename DB::TransactionT::template FutureT<RangeResult> fConfigF =
 				    tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
 				Future<RangeResult> fConfig = safeThreadFutureToFuture(fConfigF);
