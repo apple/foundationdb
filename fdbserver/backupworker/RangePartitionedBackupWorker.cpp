@@ -588,7 +588,7 @@ Future<Optional<std::pair<Version, PartitionMap>>> loadActivePartitionMapFromSS(
 // TODO akanksha:
 // 1. Test if concurrent uploads of identical content to the same path in blob storage is safe or not.
 // 2. When folder is advanced to next version, do we upload the partition map again to that version.
-Future<Void> uploadPartitionList(RangePartitionedBackupData* self, PartitionMap partitionMap) {
+Future<Void> uploadPartitionList(RangePartitionedBackupData* self, Version pmVersion, PartitionMap partitionMap) {
 	std::vector<Future<Void>> fileFutures;
 	auto it = self->backups.begin();
 
@@ -601,7 +601,7 @@ Future<Void> uploadPartitionList(RangePartitionedBackupData* self, PartitionMap 
 			continue;
 		}
 		Reference<IBackupContainer> container = it->second.container.get().get();
-		fileFutures.push_back(container->writePartitionListFile(self->logFolderBaseVersion, jsonContent));
+		fileFutures.push_back(container->writePartitionListFile(pmVersion, jsonContent));
 		it++;
 	}
 	if (fileFutures.empty()) {
@@ -618,7 +618,7 @@ Future<Void> persistAndUploadPartitionMap(RangePartitionedBackupData* self,
                                           Version pmVersion,
                                           PartitionMap const& partitionMap) {
 	co_await persistPartitionMapToSS(self, pmVersion, partitionMap);
-	co_await uploadPartitionList(self, partitionMap);
+	co_await uploadPartitionList(self, pmVersion, partitionMap);
 }
 
 // Updates local routing state to use the new partition map.
@@ -875,9 +875,15 @@ static Future<Void> updateLogBytesWritten(RangePartitionedBackupData* self, std:
 	}
 }
 
-struct MutationLogFiles {
-	std::vector<UID> backupUids;
-	std::vector<Reference<IBackupFile>> files;
+struct CompletedMutationLogFile {
+	UID backupUid;
+	Reference<IBackupFile> file;
+};
+
+// One backup's state for a batch, copied once so every retry writes the same files.
+struct MutationLogBackup {
+	Version beginVersion;
+	Reference<IBackupContainer> container;
 };
 
 static bool retryableBackupFileError(Error error) {
@@ -896,10 +902,26 @@ static bool retryableBackupFileError(Error error) {
 	}
 }
 
+// Errors where the backup destination is temporarily unreachable and is expected to come back.
+static bool destinationBackupFileError(Error error) {
+	switch (error.code()) {
+	case error_code_io_error:
+	case error_code_io_timeout:
+	case error_code_timed_out:
+	case error_code_connection_failed:
+	case error_code_lookup_failed:
+	case error_code_http_request_failed:
+		return true;
+	default:
+		return false;
+	}
+}
+
 // One complete-file attempt for messages in [0, numMsg), without advancing progress or accounting.
-static Future<MutationLogFiles> writeMutationsToFile(
+static Future<std::vector<CompletedMutationLogFile>> writeMutationsToFile(
     RangePartitionedBackupData* self,
     const KeyRangeMap<std::vector<std::pair<UID, int32_t>>>& keyRangeToBackupAssignment,
+    const std::map<UID, MutationLogBackup>& batchBackups,
     Version lastVersionInFile,
     int numMsg,
     int blockSize) {
@@ -912,9 +934,9 @@ static Future<MutationLogFiles> writeMutationsToFile(
 	     ++entry) {
 		for (const auto& [backupUid, partitionId] : entry->value()) {
 
-			auto it = self->backups.find(backupUid);
-			if (it == self->backups.end() || !it->second.container.get().present()) {
-				TraceEvent("RangePartitionedBWRemoveContainerInFileCreation", self->myId).detail("BackupId", backupUid);
+			auto backup = batchBackups.find(backupUid);
+			if (backup == batchBackups.end() || !self->backups.contains(backupUid)) {
+				// No container, or stopped since the batch began.
 				continue;
 			}
 
@@ -924,13 +946,10 @@ static Future<MutationLogFiles> writeMutationsToFile(
 			}
 
 			Version fileEndVersion = lastVersionInFile + 1;
-			if (it->second.nextFileBeginVersion == invalidVersion) {
-				it->second.nextFileBeginVersion = self->savedVersion + 1;
-			}
-			Version beginVersion = it->second.nextFileBeginVersion;
+			Version beginVersion = backup->second.beginVersion;
 
 			RangePartitionedLogFileInfo lf;
-			lf.backupUid = it->first;
+			lf.backupUid = backupUid;
 			lf.partitionId = partitionId;
 			// The partition's full range.
 			lf.fileKeyRange = self->keyRangeToPartitionId.rangeContaining(entry->range().begin).range();
@@ -939,13 +958,13 @@ static Future<MutationLogFiles> writeMutationsToFile(
 
 			activeFiles.push_back(lf);
 			fileIndexByBackupPartition[bpKey] = activeFiles.size() - 1;
-			fileFutures.push_back(it->second.container.get().get()->writeRangePartitionedLogFile(
+			fileFutures.push_back(backup->second.container->writeRangePartitionedLogFile(
 			    beginVersion, fileEndVersion, self->logFolderBaseVersion, partitionId, blockSize));
 		}
 	}
 
 	if (fileFutures.empty()) {
-		co_return MutationLogFiles{};
+		co_return std::vector<CompletedMutationLogFile>();
 	}
 	co_await waitForAll(fileFutures);
 
@@ -959,7 +978,7 @@ static Future<MutationLogFiles> writeMutationsToFile(
 	co_await waitForAll(headerWrites);
 
 	if (activeFiles.empty()) {
-		co_return MutationLogFiles{};
+		co_return std::vector<CompletedMutationLogFile>();
 	}
 
 	// Process mutations
@@ -979,7 +998,10 @@ static Future<MutationLogFiles> writeMutationsToFile(
 		if (m.type != MutationRef::Type::ClearRange) {
 			for (const auto& entry : keyRangeToBackupAssignment[m.param1]) {
 				auto it = fileIndexByBackupPartition.find(entry);
-				ASSERT(it != fileIndexByBackupPartition.end());
+				if (it == fileIndexByBackupPartition.end()) {
+					// This backup has no file in this batch.
+					continue;
+				}
 
 				int fileIdx = it->second;
 				auto& lf = activeFiles[fileIdx];
@@ -994,7 +1016,10 @@ static Future<MutationLogFiles> writeMutationsToFile(
 			for (auto range : keyRangeToBackupAssignment.intersectingRanges(mutationRange)) {
 				for (const auto& entry : range.value()) {
 					auto it = fileIndexByBackupPartition.find(entry);
-					ASSERT(it != fileIndexByBackupPartition.end());
+					if (it == fileIndexByBackupPartition.end()) {
+						// This backup has no file in this batch.
+						continue;
+					}
 
 					int fileIdx = it->second;
 					// For ClearRange, we only need to write the full mutation once for each file.
@@ -1023,10 +1048,10 @@ static Future<MutationLogFiles> writeMutationsToFile(
 	}
 	co_await waitForAll(finished);
 
-	MutationLogFiles completed;
+	std::vector<CompletedMutationLogFile> completed;
+	completed.reserve(activeFiles.size());
 	for (const auto& lf : activeFiles) {
-		completed.backupUids.push_back(lf.backupUid);
-		completed.files.push_back(lf.file);
+		completed.push_back({ lf.backupUid, lf.file });
 	}
 	co_return completed;
 }
@@ -1040,61 +1065,87 @@ Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastV
 	KeyRangeMap<std::vector<std::pair<UID, int32_t>>> keyRangeToBackupAssignment;
 	computeKeyRangeToBackupAssignment(self, &keyRangeToBackupAssignment);
 
+	// Copied once: every retry must write the same files.
+	std::map<UID, MutationLogBackup> batchBackups;
+	for (const auto& [uid, info] : self->backups) {
+		if (!info.container.get().present()) {
+			TraceEvent("RangePartitionedBWRemoveContainerInFileCreation", self->myId).detail("BackupId", uid);
+			continue;
+		}
+		const Version beginVersion =
+		    info.nextFileBeginVersion == invalidVersion ? self->savedVersion + 1 : info.nextFileBeginVersion;
+		batchBackups.emplace(uid, MutationLogBackup{ beginVersion, info.container.get().get() });
+	}
+
+	ASSERT(self->backupEpoch == self->recruitedEpoch || self->endVersion.present());
+	const bool oldEpoch = self->backupEpoch < self->recruitedEpoch;
 	const int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
 	const int retryLimit = SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_LIMIT;
-	const double maxDelay = std::max(0.0, SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY);
-	double retryDelay = std::max(0.0, std::min(SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_DELAY, maxDelay));
+	const double maxDelay = oldEpoch ? std::max(1.0, CLIENT_KNOBS->BACKUP_ERROR_DELAY)
+	                                 : std::max(0.0, SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY);
+	double retryDelay =
+	    oldEpoch ? 1.0 : std::max(0.0, std::min(SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_DELAY, maxDelay));
 	Future<Void> configChanged = self->changedTrigger.onTrigger();
-	MutationLogFiles completed;
+	std::vector<CompletedMutationLogFile> completed;
 	Optional<Error> lastError;
+	bool oldEpochRetry = false;
 	int retries = 0;
 	while (true) {
 		try {
-			completed =
-			    co_await writeMutationsToFile(self, keyRangeToBackupAssignment, lastVersionInFile, numMsg, blockSize);
+			completed = co_await writeMutationsToFile(
+			    self, keyRangeToBackupAssignment, batchBackups, lastVersionInFile, numMsg, blockSize);
 			// keyRangeToBackupAssignment is stale if backups changed during a retry. Recovery must replay the
 			// retained prefix, even when this attempt's files finished successfully.
-			if (lastError.present() && configChanged.isReady()) {
+			if (lastError.present() && !oldEpochRetry && configChanged.isReady()) {
 				throw lastError.get();
 			}
 			break;
 		} catch (Error& e) {
-			if (!retryableBackupFileError(e) || retries >= retryLimit || self->stopped || configChanged.isReady()) {
+			// Old-epoch failures don't trigger recovery, so nobody would replace this worker.
+			oldEpochRetry = oldEpoch && destinationBackupFileError(e);
+			if (!retryableBackupFileError(e) || self->stopped ||
+			    (!oldEpochRetry && (retries >= retryLimit || configChanged.isReady()))) {
 				throw;
 			}
 			lastError = e;
 		}
-		const double waitSeconds = retryDelay * (0.5 + 0.5 * deterministicRandom()->random01());
+		const double waitSeconds = oldEpoch ? retryDelay : retryDelay * (0.5 + 0.5 * deterministicRandom()->random01());
 		retryDelay = std::min(maxDelay, retryDelay * 2);
 		++retries;
 		TraceEvent(SevWarn, "RangePartitionedBWFileRetry", self->myId)
+		    .suppressFor(10.0)
 		    .errorUnsuppressed(lastError.get())
+		    .detail("BackupEpoch", self->backupEpoch)
 		    .detail("Retry", retries)
-		    .detail("RetryLimit", retryLimit)
 		    .detail("Delay", waitSeconds);
 		Future<Void> backoff = delay(waitSeconds);
 		while (!backoff.isReady()) {
-			co_await (backoff || self->doneTrigger.onTrigger() || configChanged);
-			if (self->stopped || configChanged.isReady()) {
+			co_await (backoff || self->doneTrigger.onTrigger() || (oldEpochRetry ? Never() : configChanged));
+			if (self->stopped || (!oldEpochRetry && configChanged.isReady())) {
 				throw lastError.get();
 			}
 		}
 		co_await backoff;
-		if (self->stopped || configChanged.isReady()) {
+		if (self->stopped || (!oldEpochRetry && configChanged.isReady())) {
 			throw lastError.get();
 		}
 	}
+	if (retries > 0) {
+		TraceEvent("RangePartitionedBWFileRetryDone", self->myId)
+		    .detail("BackupEpoch", self->backupEpoch)
+		    .detail("Retries", retries);
+	}
 
-	if (completed.backupUids.empty()) {
+	if (completed.empty()) {
 		co_return;
 	}
 	std::map<UID, int64_t> bytesPerBackup;
-	for (int i = 0; i < completed.backupUids.size(); i++) {
-		auto it = self->backups.find(completed.backupUids[i]);
+	for (const auto& [backupUid, file] : completed) {
+		auto it = self->backups.find(backupUid);
 		if (it != self->backups.end()) {
 			it->second.nextFileBeginVersion = lastVersionInFile + 1;
 		}
-		bytesPerBackup[completed.backupUids[i]] += completed.files[i]->size();
+		bytesPerBackup[backupUid] += file->size();
 	}
 
 	co_await updateLogBytesWritten(self, std::move(bytesPerBackup));
