@@ -1739,8 +1739,9 @@ static Optional<UID> parseTracingTransactionId(std::string_view text) {
 		return {};
 	}
 	auto parse = [](std::string_view digits, int base, uint64_t& value) {
-		const char* end = digits.data() + digits.size();
-		auto result = std::from_chars(digits.data(), end, value, base);
+		const char* begin = digits.data();
+		const char* end = begin + digits.size();
+		auto result = std::from_chars(begin, end, value, base);
 		return result.ec == std::errc{} && result.ptr == end;
 	};
 	uint64_t high = 0, low = 0;
