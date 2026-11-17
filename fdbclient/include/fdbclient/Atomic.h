@@ -111,6 +111,12 @@ inline ValueRef doXor(const Optional<ValueRef>& existingValueOptional, const Val
 	return StringRef(buf, i);
 }
 
+// An append is skipped only when it would grow a non-empty value past the size limit. An empty (or absent) value
+// accepts any operand.
+inline bool appendIfFitsApplies(int existingSize, int operandSize) {
+	return existingSize == 0 || existingSize + operandSize <= CLIENT_KNOBS->VALUE_SIZE_LIMIT;
+}
+
 inline ValueRef doAppendIfFits(const Optional<ValueRef>& existingValueOptional,
                                const ValueRef& otherOperand,
                                Arena& ar) {
@@ -119,7 +125,7 @@ inline ValueRef doAppendIfFits(const Optional<ValueRef>& existingValueOptional,
 		return otherOperand;
 	if (otherOperand.empty())
 		return existingValue;
-	if (existingValue.size() + otherOperand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) {
+	if (!appendIfFitsApplies(existingValue.size(), otherOperand.size())) {
 		CODE_PROBE(true, "AppendIfFits resulted in truncation");
 		return existingValue;
 	}

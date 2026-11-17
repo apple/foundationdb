@@ -123,3 +123,5 @@ timeout = 7200
     # And that submitRestore refuses --add-prefix with --mode bulkload: SSTs cannot be rewritten to a
     # new prefix, so only the mutation log would be prefixed and the result would be split.
     expectBulkPrefixRejection = true
+    # And that submitBackup refuses a second tag on this URL while the backup is running.
+    expectSameLocationRejection = true

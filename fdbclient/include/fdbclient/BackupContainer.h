@@ -392,6 +392,10 @@ public:
 	Optional<std::string> const& getProxy() const { return proxy; }
 	Optional<std::string> const& getEncryptionKeyFileName() const { return encryptionKeyFileName; }
 
+	// Where the container's files are stored, without credentials or connection parameters.
+	// Containers with the same location read and write the same files.
+	virtual std::string getLocation() const { return URL; }
+
 	virtual Future<Void> writeEncryptionMetadata(int encryptionBlockSize) = 0;
 
 	static std::string lastOpenError;

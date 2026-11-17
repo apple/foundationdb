@@ -21,6 +21,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path"
 	"strconv"
 	"time"
 
@@ -248,7 +250,32 @@ var _ = Describe("Testing FDB Pod client", func() {
 				Expect(fakeClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: podName}, pod)).NotTo(HaveOccurred())
 
 				Expect(pod.Annotations).To(HaveKeyWithValue(api.CurrentConfigurationAnnotation, ""))
-				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\"}"))
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"STAGED_VERSIONS\":\"\"}"))
+			})
+		})
+
+		When("versions are staged in the shared binary directory", func() {
+			BeforeEach(func() {
+				sharedBinaryDir = GinkgoT().TempDir()
+				for _, version := range []string{"7.3.10", "7.1.51"} {
+					Expect(os.MkdirAll(path.Join(sharedBinaryDir, version), 0700)).To(Succeed())
+					Expect(os.WriteFile(path.Join(sharedBinaryDir, version, "fdbserver"), []byte("fdbserver"), 0700)).To(Succeed())
+				}
+				// A directory without a ready binary is not reported.
+				Expect(os.MkdirAll(path.Join(sharedBinaryDir, "7.4.1"), 0700)).To(Succeed())
+
+				mon = &monitor{
+					activeConfiguration: &api.ProcessConfiguration{
+						BinaryPath: "/usr/bin",
+					},
+				}
+			})
+
+			It("should report the sorted staged versions in the environment annotation", func() {
+				pod := &corev1.Pod{}
+				Expect(fakeClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: podName}, pod)).NotTo(HaveOccurred())
+
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"STAGED_VERSIONS\":\"7.1.51,7.3.10\"}"))
 			})
 		})
 
@@ -273,7 +300,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 				Expect(fakeClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: podName}, pod)).NotTo(HaveOccurred())
 
 				Expect(pod.Annotations).To(HaveKeyWithValue(api.CurrentConfigurationAnnotation, ""))
-				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"TEST\":\"test-value\"}"))
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"STAGED_VERSIONS\":\"\",\"TEST\":\"test-value\"}"))
 			})
 		})
 
@@ -303,7 +330,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 				Expect(fakeClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: podName}, pod)).NotTo(HaveOccurred())
 
 				Expect(pod.Annotations).To(HaveKeyWithValue(api.CurrentConfigurationAnnotation, ""))
-				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"TEST\":\"test-value\"}"))
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"STAGED_VERSIONS\":\"\",\"TEST\":\"test-value\"}"))
 			})
 		})
 	})
