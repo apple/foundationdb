@@ -299,6 +299,12 @@ Future<bool> configureCommandActor(Reference<IDatabase> db,
 		        "automatically by the backup system.\n");
 		ret = false;
 		break;
+	case ConfigurationResult::RANGE_LOCKS_HELD:
+		fprintf(stderr,
+		        "ERROR: range locks are held, so range_lock cannot be disabled; commit proxies would stop enforcing "
+		        "them. Release the locks first (`rangelock list`, `rangelock release`).\n");
+		ret = false;
+		break;
 	default:
 		ASSERT(false);
 		ret = false;

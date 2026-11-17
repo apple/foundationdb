@@ -22,6 +22,7 @@
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
@@ -841,3 +842,47 @@ struct RangeLocking : TestWorkload {
 };
 
 WorkloadFactory<RangeLocking> RangeLockingFactory;
+
+// Drives `configure range_lock=...`: the setting is refused while a lock is held.
+struct RangeLockConfigGuard : TestWorkload {
+	static constexpr auto NAME = "RangeLockConfigGuard";
+
+	const RangeLockOwnerName owner = "rangeLockConfigGuardOwner";
+	const KeyRange range = KeyRangeRef("rangeLockConfigGuard/a"_sr, "rangeLockConfigGuard/z"_sr);
+
+	explicit RangeLockConfigGuard(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	Future<ConfigurationResult> configure(Database cx, std::string mode) {
+		while (true) {
+			ConfigurationResult res = co_await ManagementAPI::changeConfig(cx.getReference(), mode, false);
+			TraceEvent("RangeLockConfigGuardConfigure").detail("Mode", mode).detail("Result", static_cast<int>(res));
+			if (res != ConfigurationResult::DATABASE_UNAVAILABLE && res != ConfigurationResult::NOT_ENOUGH_WORKERS) {
+				co_return res;
+			}
+			co_await delay(1.0);
+		}
+	}
+
+	Future<Void> start(Database const& cx) override {
+		if (clientId != 0) {
+			co_return;
+		}
+		co_await registerRangeLockOwner(cx, owner, "range lock config guard");
+
+		// Range locking was enabled by an earlier test phase, so the proxies enforce this lock.
+		co_await takeExclusiveReadLockOnRange(cx, range, owner);
+
+		ConfigurationResult res = co_await configure(cx, "range_lock=disabled");
+		ASSERT(res == ConfigurationResult::RANGE_LOCKS_HELD);
+
+		co_await releaseExclusiveReadLockOnRange(cx, range, owner);
+		res = co_await configure(cx, "range_lock=disabled");
+		ASSERT(res == ConfigurationResult::SUCCESS);
+	}
+};
+
+WorkloadFactory<RangeLockConfigGuard> RangeLockConfigGuardFactory;
