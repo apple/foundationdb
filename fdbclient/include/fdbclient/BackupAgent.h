@@ -969,24 +969,24 @@ public:
 
 	struct LogProgress {
 		MutationLogType type;
-		Optional<Version> checkpoint;
-
-		Optional<Version> exclusiveLogEnd() const {
-			// A partitioned worker saves progress through the last version in its file.
-			if (type == MutationLogType::PARTITIONED_LOG && checkpoint.present()) {
-				return checkpoint.get() + 1;
-			}
-			return checkpoint;
-		}
+		Optional<Version> exclusiveLogEnd;
 	};
 
-	Future<LogProgress> getLogProgress(Reference<ReadYourWritesTransaction> tr, ReadLegacyLogMode readLegacy);
+	// Requires an absent mutationLogType read in the same transaction.
+	Future<bool> recoverLegacyWorkerRegistration(Reference<ReadYourWritesTransaction> tr);
+	Future<LogProgress> getStatusLogProgress(Reference<ReadYourWritesTransaction> tr, ReadLegacyLogMode readLegacy);
 
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
-		auto logs = getLogProgress(tr, ReadLegacyLogMode::False);
-		// Backup tasks use the checkpoint as stored. Only status normalizes the worker's inclusive checkpoint.
-		return getLatestRestorableVersion(tr,
-		                                  map(logs, [](const LogProgress& progress) { return progress.checkpoint; }));
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		auto type = mutationLogType().get(tr);
+		auto ordinary = latestLogEndVersion().get(tr);
+		auto worker = latestBackupWorkerSavedVersion().get(tr);
+		// Backup tasks use the checkpoint as stored. Status converts it to an exclusive log end.
+		auto checkpoint = map(success(type) && success(ordinary) && success(worker), [=](Void) {
+			return type.get() == MutationLogType::PARTITIONED_LOG ? worker.get() : ordinary.get();
+		});
+		return getLatestRestorableVersion(tr, checkpoint);
 	}
 
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr,

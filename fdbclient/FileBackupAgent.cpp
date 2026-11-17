@@ -352,8 +352,23 @@ KeyBackedTag::KeyBackedTag(std::string tagName, StringRef tagMapPrefix)
   : KeyBackedProperty<UidAndAbortedFlagT>(TagUidMap(tagMapPrefix).getProperty(tagName)), tagName(tagName),
     tagMapPrefix(tagMapPrefix) {}
 
-Future<BackupConfig::LogProgress> BackupConfig::getLogProgress(Reference<ReadYourWritesTransaction> tr,
-                                                               ReadLegacyLogMode readLegacy) {
+Future<bool> BackupConfig::recoverLegacyWorkerRegistration(Reference<ReadYourWritesTransaction> tr) {
+	UID uid = getUid();
+	auto logType = mutationLogType();
+	Optional<Value> started = co_await tr->get(backupStartedKey);
+	if (started.present()) {
+		for (const auto& registration : decodeBackupStartedValue(started.get())) {
+			if (registration.first == uid) {
+				logType.set(tr, MutationLogType::PARTITIONED_LOG);
+				co_return true;
+			}
+		}
+	}
+	co_return false;
+}
+
+Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,
+                                                                     ReadLegacyLogMode readLegacy) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	auto logEnd = latestLogEndVersion().get(tr);
@@ -361,6 +376,8 @@ Future<BackupConfig::LogProgress> BackupConfig::getLogProgress(Reference<ReadYou
 	KeyBackedProperty<bool> legacyPartitioned = configSpace.pack("partitionedLogEnabled"_sr);
 	auto workersStarted = allWorkerStarted();
 	auto logsOnly = incrementalBackupOnly();
+	auto snapshotBegin = snapshotBeginVersion();
+	auto firstSnapshotEnd = firstSnapshotEndVersion();
 	Optional<MutationLogType> type = co_await mutationLogType().get(tr);
 	if (readLegacy && !type.present()) {
 		bool partitioned, started, incremental;
@@ -373,8 +390,22 @@ Future<BackupConfig::LogProgress> BackupConfig::getLogProgress(Reference<ReadYou
 		}
 	}
 	co_await (success(logEnd) && success(workerEnd));
-	co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT),
-		                   type == MutationLogType::PARTITIONED_LOG ? workerEnd.get() : logEnd.get() };
+	if (type != MutationLogType::PARTITIONED_LOG) {
+		co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT), logEnd.get() };
+	}
+	Optional<Version> checkpoint = workerEnd.get();
+	if (checkpoint.present()) {
+		// Workers publish a shared watermark. Snapshot initialization follows worker registration,
+		// so a watermark below both snapshot bounds does not prove this backup has a file.
+		Optional<Version> begin, firstEnd;
+		co_await (store(begin, snapshotBegin.get(tr)) && store(firstEnd, firstSnapshotEnd.get(tr)));
+		if ((begin.present() && checkpoint.get() >= begin.get()) ||
+		    (firstEnd.present() && checkpoint.get() >= firstEnd.get())) {
+			// A worker checkpoint includes its last saved version.
+			co_return LogProgress{ MutationLogType::PARTITIONED_LOG, checkpoint.get() + 1 };
+		}
+	}
+	co_return LogProgress{ MutationLogType::PARTITIONED_LOG, {} };
 }
 
 // Lists all backups and find if any partitioned backup is running.
@@ -4285,6 +4316,13 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				mutationLogType = config.mutationLogType().get(tr);
 				co_await mutationLogType;
+				// A 7.4 agent can commit worker registration and lose this task before finish.
+				// Keep that registration and its original start version when the upgraded agent retries.
+				if (!mutationLogType.get().present() && (co_await config.recoverLegacyWorkerRegistration(tr))) {
+					co_await taskBucket->keepRunning(tr, task);
+					co_await tr->commit();
+					mutationLogType = Optional<MutationLogType>(MutationLogType::PARTITIONED_LOG);
+				}
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -8412,9 +8450,9 @@ public:
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						Reference<IBackupContainer> bc;
 						TimestampedVersion latestRestorable;
-						auto logs =
-						    config.getLogProgress(tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
-						logEnd = map(logs, [](const BackupConfig::LogProgress& p) { return p.exclusiveLogEnd(); });
+						auto logs = config.getStatusLogProgress(
+						    tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
+						logEnd = map(logs, [](const BackupConfig::LogProgress& p) { return p.exclusiveLogEnd; });
 
 						co_await (store(latestRestorable,
 						                getTimestampedVersion(tr, config.getLatestRestorableVersion(tr, logEnd))) &&
@@ -8632,8 +8670,9 @@ public:
 					Reference<IBackupContainer> bc;
 					Optional<Version> latestRestorableVersion;
 					Version recentReadVersion{ 0 };
-					auto logs = config.getLogProgress(tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
-					auto logEnd = map(logs, [](const BackupConfig::LogProgress& p) { return p.exclusiveLogEnd(); });
+					auto logs =
+					    config.getStatusLogProgress(tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
+					auto logEnd = map(logs, [](const BackupConfig::LogProgress& p) { return p.exclusiveLogEnd; });
 
 					co_await (store(latestRestorableVersion, config.getLatestRestorableVersion(tr, logEnd)) &&
 					          store(bc, config.backupContainer().getOrThrow(tr)) &&

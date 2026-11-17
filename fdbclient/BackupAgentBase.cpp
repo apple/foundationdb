@@ -255,10 +255,10 @@ Future<Void> checkBackupStatus(BackupConfig config,
                                MutationLogType expectedType,
                                Optional<Version> expectedEnd,
                                Optional<Version> expectedRestorable) {
-	auto logs = co_await config.getLogProgress(tr, ReadLegacyLogMode::True);
+	auto logs = co_await config.getStatusLogProgress(tr, ReadLegacyLogMode::True);
 	ASSERT(logs.type == expectedType);
-	ASSERT(logs.exclusiveLogEnd() == expectedEnd);
-	ASSERT((co_await config.getLatestRestorableVersion(tr, logs.exclusiveLogEnd())) == expectedRestorable);
+	ASSERT(logs.exclusiveLogEnd == expectedEnd);
+	ASSERT((co_await config.getLatestRestorableVersion(tr, logs.exclusiveLogEnd)) == expectedRestorable);
 }
 
 TEST_CASE("/backup/status/legacyPartitionedLog") {
@@ -278,10 +278,27 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
 	tr->set(legacyKey, "\x15\x01"_sr); // 7.4 tuple encoding of true
 
-	// Submitted on 7.4, started on 8.0 with ordinary logs.
+	// Queued on 7.4, with only another backup registered when the upgraded agent starts.
+	tr->set(backupStartedKey, encodeBackupStartedValue({ { UID(3, 4), 50 } }));
+	ASSERT(!(co_await config.recoverLegacyWorkerRegistration(tr)));
 	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
 
-	// Started on 7.4 with partitioned workers, still waiting for the first checkpoint.
+	// The 7.4 start task registered this backup and was interrupted before finish.
+	tr->set(backupStartedKey, encodeBackupStartedValue({ { UID(3, 4), 50 }, { config.getUid(), 200 } }));
+	ASSERT(co_await config.recoverLegacyWorkerRegistration(tr));
+	ASSERT((co_await config.mutationLogType().get(tr)) == MutationLogType::PARTITIONED_LOG);
+
+	// An older backup's shared checkpoint does not establish coverage for this UID.
+	config.snapshotBeginVersion().set(tr, 250);
+	config.firstSnapshotEndVersion().clear(tr);
+	config.latestBackupWorkerSavedVersion().set(tr, 199);
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, {}, {});
+	config.latestBackupWorkerSavedVersion().set(tr, 220);
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, {}, {});
+
+	// Started entirely on 7.4, so no explicit mode was recorded.
+	config.mutationLogType().clear(tr);
+	config.latestBackupWorkerSavedVersion().clear(tr);
 	config.allWorkerStarted().set(tr, true);
 	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, {}, {});
 
@@ -292,7 +309,7 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 302, 301);
 	config.latestBackupWorkerSavedVersion().set(tr, 401);
 	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 402, 401);
-	ASSERT((co_await config.getLogProgress(tr, ReadLegacyLogMode::False)).checkpoint == 121);
+	ASSERT((co_await config.getStatusLogProgress(tr, ReadLegacyLogMode::False)).exclusiveLogEnd == 121);
 
 	// A newly registered logs-only backup can see another backup's checkpoint before it has any files.
 	config.firstSnapshotEndVersion().clear(tr);
