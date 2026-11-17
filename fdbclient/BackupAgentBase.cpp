@@ -250,19 +250,6 @@ TEST_CASE("/backup/logversion") {
 	return Void();
 }
 
-Future<Void> checkBackupStatus(BackupConfig config,
-                               Reference<ReadYourWritesTransaction> tr,
-                               MutationLogType expectedType,
-                               Optional<Version> expectedEnd,
-                               Optional<Version> expectedRestorable) {
-	BackupConfig::StatusFileLookup lookup;
-	auto logs = co_await config.getStatusLogProgress(tr, ReadLegacyLogMode::True, lookup);
-	ASSERT(!logs.fileError.present());
-	ASSERT(logs.type == expectedType);
-	ASSERT(logs.exclusiveLogEnd == expectedEnd);
-	ASSERT((co_await config.getLatestRestorableVersion(tr, logs.exclusiveLogEnd)) == expectedRestorable);
-}
-
 TEST_CASE("/backup/status/legacyPartitionedLog") {
 	Database db = DatabaseContext::create(
 	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
@@ -272,92 +259,70 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	config.clear(tr);
 	config.firstSnapshotEndVersion().set(tr, 100);
 	config.latestLogEndVersion().set(tr, 121);
+	UID destination(5, 6);
+	Key dest = BinaryWriter::toValue(destination, Unversioned());
+	config.destUidValue().set(tr, dest);
+	tr->clear(prefixRange(dest.withPrefix(logRangesRange.begin)));
+	config.backupRanges().set(tr, std::vector<KeyRange>{ KeyRangeRef("a"_sr, "z"_sr) });
+	tr->set(config.getUidAsKey().withPrefix(dest).withPrefix(backupLatestVersionsPrefix),
+	        BinaryWriter::toValue<Version>(50, Unversioned()));
 
 	Subspace oldConfig(uidPrefixKey("uid->config/"_sr.withPrefix(fileBackupPrefixRange.begin), config.getUid()));
 	Key legacyKey = oldConfig.pack("partitionedLogEnabled"_sr);
-	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
+	auto status = [&] { return config.getStatusLogProgress(tr, ReadLegacyLogMode::True); };
+	auto logs = co_await status();
+	ASSERT(logs.type == MutationLogType::DEFAULT && logs.restorable == 120);
 	tr->set(legacyKey, "\x14"_sr); // 7.4 tuple encoding of false
-	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
+	logs = co_await status();
+	ASSERT(logs.type == MutationLogType::DEFAULT && logs.exclusiveLogEnd == 121);
 	tr->set(legacyKey, "\x15\x01"_sr); // 7.4 tuple encoding of true
+	logs = co_await status();
+	ASSERT(logs.type == MutationLogType::DEFAULT && logs.restorable == 120);
 
-	// A queued 7.4 backup can start ordinary logging on 8.0.
-	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
-	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
-	auto container = IBackupContainer::openContainer(url, {}, {}, 0);
-	co_await container->create();
-	config.backupContainer().set(tr, container);
+	// A shared worker watermark can predate this backup. Rotating snapshots must not
+	// turn that watermark into a confirmed per-backup log end.
 	config.allWorkerStarted().set(tr, true);
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, {}, {});
-
-	// 7.4 registered the workers, but 8.0 finished startup and wrote ordinary files.
-	auto range = co_await container->writeRangeFile(100, 0, 100, 1024);
-	co_await range->finish();
-	std::vector<std::string> names{ range->getFileName() };
-	std::vector<std::pair<Key, Key>> keys{ { "a"_sr, "z"_sr } };
-	co_await container->writeKeyspaceSnapshotFile(names, keys, 1, IncludeKeyRangeMap::True);
-	auto ordinary = co_await container->writeLogFile(100, 121, 1024);
-	co_await ordinary->finish();
-	config.logBytesWritten().set(tr, 0);
-	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
-
-	// A newly started backup does not own an earlier backup's shared checkpoint.
 	config.firstSnapshotEndVersion().clear(tr);
 	config.snapshotBeginVersion().set(tr, 250);
 	config.latestBackupWorkerSavedVersion().set(tr, 199);
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, {}, {});
-	auto tag0 = co_await container->writeTaggedLogFile(200, 301, 1024, 0, 2);
-	co_await tag0->finish();
-	config.latestBackupWorkerSavedVersion().set(tr, 220);
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, {}, {});
-	auto tag1 = co_await container->writeTaggedLogFile(200, 301, 1024, 1, 2);
-	co_await tag1->finish();
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 221, {});
-	config.latestBackupWorkerSavedVersion().set(tr, 280);
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 281, {});
+	logs = co_await status();
+	ASSERT(logs.type == MutationLogType::PARTITIONED_LOG && logs.sharedWorkerVersion == 199);
+	ASSERT(!logs.exclusiveLogEnd.present() && !logs.restorable.present() && !logs.restorePointUnknown);
 	config.firstSnapshotEndVersion().set(tr, 301);
 	config.snapshotBeginVersion().set(tr, 350);
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 281, {});
-
-	auto range2 = co_await container->writeRangeFile(250, 0, 301, 1024);
-	co_await range2->finish();
-	names = { range2->getFileName() };
-	co_await container->writeKeyspaceSnapshotFile(names, keys, 1, IncludeKeyRangeMap::True);
-	auto next0 = co_await container->writeTaggedLogFile(301, 402, 1024, 0, 2);
-	co_await next0->finish();
-	auto next1 = co_await container->writeTaggedLogFile(301, 402, 1024, 1, 2);
-	co_await next1->finish();
 	config.latestBackupWorkerSavedVersion().set(tr, 300);
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 301, {});
+	logs = co_await status();
+	ASSERT(!logs.exclusiveLogEnd.present() && logs.restorePointUnknown && logs.sharedWorkerVersion == 300);
 	config.latestBackupWorkerSavedVersion().set(tr, 301);
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 302, 301);
-	config.latestBackupWorkerSavedVersion().set(tr, 401);
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 402, 401);
-	BackupConfig::StatusFileLookup lookup;
-	ASSERT((co_await config.getStatusLogProgress(tr, ReadLegacyLogMode::False, lookup)).exclusiveLogEnd == 121);
+	logs = co_await status();
+	ASSERT(logs.exclusiveLogEnd == 302 && logs.restorable == 301 && !logs.restorePointUnknown);
 
-	// A newly registered logs-only backup can see another backup's checkpoint before it has any files.
+	// Ordinary capture can belong to this backup after an interrupted start, or to another
+	// backup sharing the destination. Even copied empty files cannot distinguish those histories.
+	config.startMutationLogs(tr, KeyRangeRef("a"_sr, "z"_sr), dest);
+	config.latestLogEndVersion().set(tr, 402);
+	config.logBytesWritten().set(tr, 0);
+	logs = co_await status();
+	ASSERT(!logs.type.present() && !logs.exclusiveLogEnd.present() && !logs.restorable.present());
+	ASSERT(logs.restorePointUnknown && logs.ordinaryDispatchEnd == 402 && logs.sharedWorkerVersion == 301);
 	config.firstSnapshotEndVersion().clear(tr);
-	config.incrementalBackupOnly().set(tr, true);
-	config.latestLogEndVersion().clear(tr);
-	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, {}, {});
-	config.latestLogEndVersion().set(tr, 121);
-	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
-	config.incrementalBackupOnly().clear(tr);
+	config.latestBackupWorkerSavedVersion().clear(tr);
+	logs = co_await status();
+	ASSERT(!logs.restorePointUnknown && !logs.restorable.present() && logs.ordinaryDispatchEnd == 402);
 
+	config.incrementalBackupOnly().set(tr, true);
+	logs = co_await status();
+	ASSERT(logs.type == MutationLogType::DEFAULT && logs.restorable == 401);
 	config.firstSnapshotEndVersion().set(tr, 100);
-	config.mutationLogType().set(tr, MutationLogType::DEFAULT);
-	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
+	config.incrementalBackupOnly().clear(tr);
 	config.mutationLogType().set(tr, MutationLogType::RANGE_PARTITIONED_LOG);
-	co_await checkBackupStatus(config, tr, MutationLogType::RANGE_PARTITIONED_LOG, 121, 120);
-	tr->set(legacyKey, "\x14"_sr);
+	logs = co_await status();
+	ASSERT(logs.type == MutationLogType::RANGE_PARTITIONED_LOG && logs.restorable == 401);
 	config.mutationLogType().set(tr, MutationLogType::PARTITIONED_LOG);
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 402, 401);
-	ASSERT((co_await config.getLatestRestorableVersion(tr)) == 400);
-	config.firstSnapshotEndVersion().clear(tr);
-	config.incrementalBackupOnly().set(tr, true);
-	config.latestBackupWorkerSavedVersion().set(tr, 220);
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 221, 220);
-	co_await container->deleteContainer();
+	config.latestBackupWorkerSavedVersion().set(tr, 301);
+	logs = co_await status();
+	ASSERT(logs.type == MutationLogType::PARTITIONED_LOG && logs.exclusiveLogEnd == 302 && logs.restorable == 301);
+	ASSERT((co_await config.getLatestRestorableVersion(tr)) == 300);
 }
 } // namespace
 

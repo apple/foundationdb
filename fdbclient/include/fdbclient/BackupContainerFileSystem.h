@@ -165,8 +165,6 @@ public:
 
 	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Database cx) final;
 
-	Future<bool> hasPartitionedLogAt(Version version) final;
-
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
 	                                                  VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                  bool logsOnly,

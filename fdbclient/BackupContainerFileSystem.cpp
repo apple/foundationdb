@@ -2290,14 +2290,6 @@ Future<std::vector<BulkDumpRangeVersion>> BackupContainerFileSystem::readBulkDum
 	co_return ranges;
 }
 
-Future<bool> BackupContainerFileSystem::hasPartitionedLogAt(Version version) {
-	auto files = co_await listLogFiles(version, version, MutationLogType::PARTITIONED_LOG);
-	RestorableFileSet set{};
-	set.targetVersion = version;
-	co_return BackupContainerFileSystemImpl::getRestoreSetFromPartitionedLogs(std::move(files), version, std::move(set))
-	    .present();
-}
-
 Future<Optional<RestorableFileSet>> BackupContainerFileSystem::getRestoreSet(Version targetVersion,
                                                                              VectorRef<KeyRangeRef> keyRangesFilter,
                                                                              bool logsOnly,

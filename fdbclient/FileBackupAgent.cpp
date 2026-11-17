@@ -7714,101 +7714,60 @@ StringRef StartFullRestoreTaskFunc::name = "restore_start"_sr;
 REGISTER_TASKFUNC(StartFullRestoreTaskFunc);
 } // namespace fileBackup
 
-static Future<BackupConfig::LogProgress> verifyStatusLogFiles(Reference<IBackupContainer> container,
-                                                              Optional<Version> ordinaryEnd,
-                                                              Optional<Version> worker,
-                                                              Optional<Version> firstSnapshot) {
-	// The counters can describe different histories when 8.0 finished a 7.4 start task.
-	// Ask restore about the furthest candidate first, using this backup's own files.
-	std::vector<std::pair<Version, MutationLogType>> candidates;
-	if (worker.present()) {
-		candidates.emplace_back(worker.get(), MutationLogType::PARTITIONED_LOG);
-	}
-	if (ordinaryEnd.present()) {
-		candidates.emplace_back(ordinaryEnd.get() - 1, MutationLogType::DEFAULT);
-		std::sort(candidates.rbegin(), candidates.rend());
-	}
-	for (const auto& [version, type] : candidates) {
-		if (firstSnapshot.present() && version >= firstSnapshot.get()) {
-			auto files = co_await container->getRestoreSet(version);
-			if (!files.present()) {
-				continue;
-			}
-			if (!files.get().logs.empty() && files.get().continuousEndVersion > version) {
-				auto actual = files.get().logs.front().isPartitionedLog() ? MutationLogType::PARTITIONED_LOG
-				                                                          : MutationLogType::DEFAULT;
-				co_return BackupConfig::LogProgress{ actual, version + 1 };
-			}
-			// A snapshot at exactly this version can restore without a log file.
-		}
-		if (type == MutationLogType::PARTITIONED_LOG && (co_await container->hasPartitionedLogAt(version))) {
-			co_return BackupConfig::LogProgress{ type, version + 1 };
-		}
-	}
-	co_return BackupConfig::LogProgress{ MutationLogType::PARTITIONED_LOG, {} };
-}
-
 Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,
-                                                                     ReadLegacyLogMode readLegacy,
-                                                                     StatusFileLookup& lookup) {
+                                                                     ReadLegacyLogMode readLegacy) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	BackupConfig config = *this;
 	auto type = co_await config.mutationLogType().get(tr);
-	bool legacy = false;
+	auto dispatchEnd = config.latestLogEndVersion().get(tr);
 	if (readLegacy && !type.present()) {
 		KeyBackedProperty<bool> requested = config.configSpace.pack("partitionedLogEnabled"_sr);
 		bool partitioned, started, logsOnly;
 		co_await (store(partitioned, requested.getD(tr)) && store(started, config.allWorkerStarted().getD(tr)) &&
 		          store(logsOnly, config.incrementalBackupOnly().getD(tr)));
-		legacy = partitioned && started && !logsOnly;
-	}
-	if (!legacy && type != MutationLogType::PARTITIONED_LOG) {
-		auto end = co_await config.latestLogEndVersion().get(tr);
-		co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT), end };
-	}
+		if (partitioned && started && !logsOnly) {
+			Optional<Key> dest;
+			Optional<std::vector<KeyRange>> ranges;
+			Optional<Version> worker, firstSnapshot;
+			co_await (store(dest, config.destUidValue().get(tr)) && store(ranges, config.backupRanges().get(tr)) &&
+			          store(worker, config.latestBackupWorkerSavedVersion().get(tr)) &&
+			          store(firstSnapshot, config.firstSnapshotEndVersion().get(tr)) && success(dispatchEnd));
 
-	Optional<Version> worker, firstSnapshot, snapshotBegin;
-	co_await (store(worker, config.latestBackupWorkerSavedVersion().get(tr)) &&
-	          store(firstSnapshot, config.firstSnapshotEndVersion().get(tr)) &&
-	          store(snapshotBegin, config.snapshotBeginVersion().get(tr)));
-	LogProgress known{ MutationLogType::PARTITIONED_LOG, {} };
-	if (!legacy && worker.present() &&
-	    ((firstSnapshot.present() && worker.get() >= firstSnapshot.get()) ||
-	     (snapshotBegin.present() && worker.get() >= snapshotBegin.get()))) {
-		// Snapshot initialization follows worker registration. The checkpoint includes the saved version.
-		known.exclusiveLogEnd = worker.get() + 1;
-	}
-
-	Optional<Version> ordinaryEnd;
-	if (legacy && firstSnapshot.present()) {
-		auto end = co_await config.latestLogEndVersion().get(tr);
-		if (end.present() && end.get() > firstSnapshot.get() && end.get() > known.exclusiveLogEnd.orDefault(0) &&
-		    (co_await config.logBytesWritten().get(tr)).present()) {
-			ordinaryEnd = end;
+			// A 7.4 start that finished on 8.0 installed ordinary capture rules. Those rules
+			// remain until the last consumer releases the destination, which other backups may share.
+			Optional<Value> owner;
+			RangeResult capture;
+			if (dest.present()) {
+				auto ownerKey = config.getUidAsKey().withPrefix(dest.get()).withPrefix(backupLatestVersionsPrefix);
+				co_await (store(owner, tr->get(ownerKey)) &&
+				          store(capture, tr->getRange(prefixRange(dest.get().withPrefix(logRangesRange.begin)), 1)));
+			}
+			if (!owner.present() || !ranges.present() || ranges.get().empty() || !capture.empty()) {
+				co_return LogProgress{ {}, {}, {}, firstSnapshot.present(), worker, dispatchEnd.get() };
+			}
+			// The 7.4 agent waited for every worker before starting its first snapshot. Only a
+			// watermark covering that snapshot establishes a restore point for this backup ID.
+			if (firstSnapshot.present() && worker.present() && worker.get() >= firstSnapshot.get()) {
+				co_return LogProgress{ MutationLogType::PARTITIONED_LOG, worker.get() + 1, worker };
+			}
+			co_return LogProgress{ MutationLogType::PARTITIONED_LOG, {}, {}, firstSnapshot.present(), worker, {} };
 		}
 	}
-	if (!ordinaryEnd.present() && (!worker.present() || known.exclusiveLogEnd.present())) {
-		co_return known;
-	}
-	if (!lookup.result.isValid() || lookup.uid != config.getUid()) {
-		auto container = co_await config.backupContainer().getOrThrow(tr);
-		lookup.uid = config.getUid();
-		lookup.result =
-		    timeoutError(verifyStatusLogFiles(
-		                     fileBackup::getBackupContainerWithProxy(container), ordinaryEnd, worker, firstSnapshot),
-		                 CLIENT_KNOBS->STATUS_TIMEOUT);
-	}
-	auto files = co_await errorOr(lookup.result);
-	if (files.isError()) {
-		if (files.getError().code() == error_code_actor_cancelled ||
-		    files.getError().code() == error_code_broken_promise) {
-			throw files.getError();
+
+	if (type == MutationLogType::PARTITIONED_LOG) {
+		Optional<Version> worker, firstSnapshot;
+		co_await (store(worker, config.latestBackupWorkerSavedVersion().get(tr)) &&
+		          store(firstSnapshot, config.firstSnapshotEndVersion().get(tr)));
+		if (firstSnapshot.present() && worker.present() && worker.get() >= firstSnapshot.get()) {
+			Version end = worker.get() + 1;
+			auto restorable = co_await config.getLatestRestorableVersion(tr, Optional<Version>(end));
+			co_return LogProgress{ type, end, restorable };
 		}
-		known.fileError = files.getError();
-		co_return known;
 	}
-	co_return files.get();
+	Optional<Version> restorable = co_await config.getLatestRestorableVersion(tr);
+	co_await dispatchEnd;
+	co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT), dispatchEnd.get(), restorable };
 }
 
 struct LogInfo : public ReferenceCounted<LogInfo> {
@@ -8444,7 +8403,6 @@ public:
 
 	static Future<std::string> getStatusJSON(FileBackupAgent* backupAgent, Database cx, std::string tagName) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
-		BackupConfig::StatusFileLookup fileLookup;
 
 		while (true) {
 			Error err;
@@ -8486,18 +8444,26 @@ public:
 						Reference<IBackupContainer> bc;
 						TimestampedVersion latestRestorable;
 						auto logs = config.getStatusLogProgress(
-						    tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)), fileLookup);
+						    tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
 						logEnd = map(logs, [](const BackupConfig::LogProgress& p) { return p.exclusiveLogEnd; });
 
-						co_await (store(latestRestorable,
-						                getTimestampedVersion(tr, config.getLatestRestorableVersion(tr, logEnd))) &&
-						          store(bc, config.backupContainer().getOrThrow(tr)));
+						co_await (
+						    store(
+						        latestRestorable,
+						        getTimestampedVersion(
+						            tr, map(logs, [](const BackupConfig::LogProgress& p) { return p.restorable; }))) &&
+						    store(bc, config.backupContainer().getOrThrow(tr)));
 						bc = fileBackup::getBackupContainerWithProxy(bc);
 
-						if (logs.get().fileError.present()) {
-							doc.setKey("LogProgressError", logs.get().fileError.get().what());
+						if (logs.get().sharedWorkerVersion.present()) {
+							doc.setKey("SharedWorkerSavedVersion", logs.get().sharedWorkerVersion.get());
 						}
-						if (latestRestorable.present() || !logs.get().fileError.present()) {
+						if (logs.get().ordinaryDispatchEnd.present()) {
+							doc.setKey("OrdinaryLogDispatchEnd", logs.get().ordinaryDispatchEnd.get());
+						}
+						if (logs.get().restorePointUnknown) {
+							doc.setKey("RestorePointStatus", "unknown");
+						} else {
 							doc.setKey("Restorable", latestRestorable.present());
 						}
 
@@ -8511,7 +8477,7 @@ public:
 							doc.setKey("LatestRestorablePoint", o);
 						}
 						doc.setKey("DestinationURL", bc->getURL());
-						doc.setKey("MutationLogType", mutationLogTypeToString(logs.get().type));
+						doc.setKey("MutationLogType", logs.get().typeName());
 					}
 
 					if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
@@ -8679,7 +8645,6 @@ public:
 	                                     ShowErrors showErrors,
 	                                     std::string tagName) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
-		BackupConfig::StatusFileLookup fileLookup;
 		std::string statusText;
 
 		while (true) {
@@ -8711,11 +8676,12 @@ public:
 					Reference<IBackupContainer> bc;
 					Optional<Version> latestRestorableVersion;
 					Version recentReadVersion{ 0 };
-					auto logs = config.getStatusLogProgress(
-					    tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)), fileLookup);
+					auto logs =
+					    config.getStatusLogProgress(tr, ReadLegacyLogMode(BackupAgentBase::isRunnable(backupState)));
 					auto logEnd = map(logs, [](const BackupConfig::LogProgress& p) { return p.exclusiveLogEnd; });
 
-					co_await (store(latestRestorableVersion, config.getLatestRestorableVersion(tr, logEnd)) &&
+					co_await (store(latestRestorableVersion,
+					                map(logs, [](const BackupConfig::LogProgress& p) { return p.restorable; })) &&
 					          store(bc, config.backupContainer().getOrThrow(tr)) &&
 					          store(recentReadVersion, tr->getReadVersion()));
 					bc = fileBackup::getBackupContainerWithProxy(bc);
@@ -8732,7 +8698,9 @@ public:
 						snapshotProgress = true;
 						break;
 					case EBackupState::STATE_RUNNING_DIFFERENTIAL:
-						statusText += "The backup on tag `" + tagName + "' is restorable but continuing to " +
+						statusText += "The backup on tag `" + tagName +
+						              (latestRestorableVersion.present() ? "' is restorable but continuing to "
+						                                                 : "' is continuing to ") +
 						              bc->getURL() + ".\n";
 						snapshotProgress = true;
 						break;
@@ -8772,10 +8740,16 @@ public:
 					}
 					statusText += format("Snapshot Mode: %s\n", snapshotModeText.c_str());
 
-					statusText += format("Mutation Log Type: %s\n", mutationLogTypeToString(logs.get().type).c_str());
-					if (logs.get().fileError.present()) {
-						statusText += format("Could not verify log files in the backup container: %s\n",
-						                     logs.get().fileError.get().what());
+					statusText += format("Mutation Log Type: %s\n", logs.get().typeName().c_str());
+					if (logs.get().sharedWorkerVersion.present()) {
+						statusText +=
+						    format("Shared backup worker saved version: %lld\n", logs.get().sharedWorkerVersion.get());
+					}
+					if (logs.get().ordinaryDispatchEnd.present()) {
+						statusText += format("Ordinary log dispatch end: %lld\n", logs.get().ordinaryDispatchEnd.get());
+					}
+					if (logs.get().restorePointUnknown) {
+						statusText += "Latest restore point: unknown from legacy backup metadata.\n";
 					}
 
 					// Check if backup is BulkLoad compatible (has bulkdump_data/).

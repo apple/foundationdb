@@ -968,19 +968,15 @@ public:
 	KeyBackedProperty<Key> destUidValue() { return configSpace.pack(__FUNCTION__sr); }
 
 	struct LogProgress {
-		MutationLogType type;
+		Optional<MutationLogType> type;
 		Optional<Version> exclusiveLogEnd;
-		Optional<Error> fileError = {};
+		Optional<Version> restorable;
+		bool restorePointUnknown = false;
+		Optional<Version> sharedWorkerVersion = {};
+		Optional<Version> ordinaryDispatchEnd = {};
+		std::string typeName() const { return type.present() ? mutationLogTypeToString(type.get()) : "unknown"; }
 	};
-
-	// Keep a file lookup across transaction retries within one status request.
-	struct StatusFileLookup {
-		UID uid;
-		Future<LogProgress> result;
-	};
-	Future<LogProgress> getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,
-	                                         ReadLegacyLogMode readLegacy,
-	                                         StatusFileLookup& lookup);
+	Future<LogProgress> getStatusLogProgress(Reference<ReadYourWritesTransaction> tr, ReadLegacyLogMode readLegacy);
 
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);

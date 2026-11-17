@@ -369,9 +369,6 @@ public:
 	virtual Future<BackupFileList> dumpFileList(Version begin = 0,
 	                                            Version end = std::numeric_limits<Version>::max()) = 0;
 
-	// Whether this container has tagged log files covering every partition at this version.
-	virtual Future<bool> hasPartitionedLogAt(Version version) = 0;
-
 	// Get exactly the files necessary to restore the key space filtered by the specified key ranges to targetVersion.
 	// If targetVersion is 'latestVersion', use the minimum restorable version in a snapshot.
 	// If logsOnly is set, only use log files in [beginVersion, targetVervions) in restore set.
