@@ -97,11 +97,11 @@ timeout = 7200
     # Enough keys that the range splits into several shards, hence several dump tasks.
     # Sized so that outstanding work is guaranteed by construction rather than caught by luck. At
     # ~76 tasks the probe raced the job to completion and failed on 3 of 10 Joshua seeds with
-    # NeverMidFlight; with hundreds of tasks the job cannot finish inside the probe window, so the
-    # mid-flight precondition stops being a coin flip. This is why the test lives in slow/.
+    # BulkDumpingPauseProbeNeverDispatched; with hundreds of tasks the job cannot finish inside the
+    # probe window, so the mid-flight precondition stops being a coin flip. Hence slow/.
     dataKeyCount = 60000
     # Must exceed the dispatch parallelism, which a buggified run re-randomises to 1-5 regardless of
-    # dd_bulkdump_parallelism below, so that the drain cannot consume every outstanding task.
+    # the dd_bulkdump_parallelism set above, so that the drain cannot consume every outstanding task.
     # Pause once this many tasks have been dispatched: early, with most of the job still ahead.
     minAdmissionsToProbe = 5
     pauseProbeTimeout = 1800.0

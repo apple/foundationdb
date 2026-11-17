@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
@@ -294,7 +296,23 @@ struct BulkDumping : TestWorkload {
 		co_await delay(2 * SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
 		int64_t admittedAtHoldStart = co_await getBulkDumpAdmittedCount(cx, jobId);
 
-		double holdSeconds = std::max(60.0, 10.0 / std::max(observedAdmitRatePerSec, 0.001));
+		// Hold long enough that a running job would have been seen admitting: the target is ten
+		// admissions at the rate measured before the pause. Bounded, because the rate can be low
+		// enough that ten of them would outlast the test's own timeout and a wall-clock failure
+		// would displace the one under test.
+		double holdSeconds = std::clamp(10.0 / std::max(observedAdmitRatePerSec, 0.001), 60.0, 600.0);
+		double expectedIfRunning = observedAdmitRatePerSec * holdSeconds;
+		if (expectedIfRunning < 5.0) {
+			// Too slow for the bounded hold to distinguish a pause from an idle queue. Skipping says
+			// so; asserting on a window this thin would pass whether the gate worked or not.
+			TraceEvent(SevWarnAlways, "BulkDumpingPauseProbeSkippedSlowRate")
+			    .detail("JobId", jobId)
+			    .detail("ObservedAdmitRatePerSec", observedAdmitRatePerSec)
+			    .detail("HoldSeconds", holdSeconds)
+			    .detail("ExpectedAdmissionsIfRunning", expectedIfRunning);
+			co_await setBulkJobPaused(cx, jobId, /*paused=*/false, /*isBulkDump=*/true);
+			co_return;
+		}
 		double holdStart = now();
 		while (now() - holdStart < holdSeconds) {
 			co_await delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
@@ -305,6 +323,9 @@ struct BulkDumping : TestWorkload {
 				    .detail("AdmittedAtHoldStart", admittedAtHoldStart)
 				    .detail("AdmittedNow", admittedNow)
 				    .detail("HeldSeconds", now() - holdStart);
+				// Resume anyway: leaving it paused would strand the job and bury this error under a
+				// completion timeout.
+				co_await setBulkJobPaused(cx, jobId, /*paused=*/false, /*isBulkDump=*/true);
 				co_return;
 			}
 		}
@@ -312,7 +333,7 @@ struct BulkDumping : TestWorkload {
 		    .detail("JobId", jobId)
 		    .detail("Admitted", admittedAtHoldStart)
 		    .detail("HeldSeconds", holdSeconds)
-		    .detail("ExpectedAdmissionsIfRunning", observedAdmitRatePerSec * holdSeconds);
+		    .detail("ExpectedAdmissionsIfRunning", expectedIfRunning);
 
 		co_await setBulkJobPaused(cx, jobId, /*paused=*/false, /*isBulkDump=*/true);
 

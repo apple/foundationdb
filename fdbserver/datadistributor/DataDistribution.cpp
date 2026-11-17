@@ -1635,6 +1635,25 @@ Future<bool> bulkJobIsPaused(Database cx, UID jobId, bool isBulkDump) {
 	co_return control.present() && control.get().isPaused();
 }
 
+// Only durable witness that a task was handed out: task metadata and progress describe what exists,
+// not what has started. Atomic add to stay off the read-modify-write path.
+Future<Void> recordBulkDumpAdmission(Database cx, UID jobId) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.atomicOp(bulkDumpAdmittedKeyFor(jobId), "\x01\x00\x00\x00\x00\x00\x00\x00"_sr, MutationRef::AddValue);
+			co_await tr.commit();
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 	Key beginKey = normalKeys.begin;
 	Key endKey = normalKeys.end;
@@ -2194,6 +2213,7 @@ Future<Void> moveErrorBulkLoadJobToHistory(Reference<DataDistributor> self, std:
 			currentJobState.setEndTime(now());
 			co_await addBulkLoadJobToHistory(&tr, currentJobState);
 			co_await releaseExclusiveReadLockOnRange(&tr, jobRange, rangeLockNameForBulkLoad);
+			tr.clear(bulkLoadControlKeyFor(jobId));
 			co_await tr.commit();
 			break;
 		} catch (Error& e) {
@@ -2532,6 +2552,7 @@ Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 				    &tr, bulkLoadJobPrefix, jobState.getJobRange(), bulkLoadJobValue(BulkLoadJobState()));
 				co_await addBulkLoadJobToHistory(&tr, jobState);
 				co_await releaseExclusiveReadLockOnRange(&tr, jobState.getJobRange(), rangeLockNameForBulkLoad);
+				tr.clear(bulkLoadControlKeyFor(jobState.getJobId()));
 			} else {
 				co_await krmSetRange(&tr, bulkLoadJobPrefix, jobCompleteRange, bulkLoadJobValue(jobState));
 			}
@@ -2934,28 +2955,7 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					    .detail("TaskJobID", bulkDumpState.getJobId())
 					    .detail("TaskRange", taskRange)
 					    .detail("TaskID", task.bulkDumpState.getTaskId());
-					// Record the dispatch. This is the only durable witness that a task started: the task
-					// metadata records what exists, and progress counts every non-complete entry as
-					// running, so neither can answer whether anything has been handed out since a given
-					// moment. An atomic add keeps it off the read-modify-write path.
-					{
-						Transaction admitTr(cx);
-						int64_t one = 1;
-						Value delta = StringRef(reinterpret_cast<const uint8_t*>(&one), sizeof(one));
-						while (true) {
-							Error admitErr;
-							try {
-								admitTr.setOption(FDBTransactionOptions::LOCK_AWARE);
-								admitTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-								admitTr.atomicOp(bulkDumpAdmittedKeyFor(jobId), delta, MutationRef::AddValue);
-								co_await admitTr.commit();
-								break;
-							} catch (Error& e) {
-								admitErr = e;
-							}
-							co_await admitTr.onError(admitErr);
-						}
-					}
+					co_await recordBulkDumpAdmission(cx, jobId);
 					actors.push_back(doBulkDumpTask(self, task.targetServer, task.bulkDumpState, task.checksumServers));
 				}
 				beginKey = rangeLocations.back().range.end;

@@ -3502,10 +3502,7 @@ Future<int64_t> getBulkDumpAdmittedCount(Database cx, UID jobId) {
 			if (!value.present()) {
 				co_return 0;
 			}
-			int64_t count = 0;
-			ASSERT(value.get().size() == sizeof(count));
-			memcpy(&count, value.get().begin(), sizeof(count));
-			co_return count;
+			co_return BinaryReader::fromStringRef<int64_t>(value.get(), Unversioned());
 		} catch (Error& e) {
 			err = e;
 		}
