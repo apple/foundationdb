@@ -21,6 +21,9 @@ Usage
 - Then you can run `bin/<target> --help` to see possible uses of that benchmark binary.
 - Running `bin/<target>` directly will run all registered benchmarks in that binary, but you may want to limit your run to a subset of benchmarks. This can be done by running `bin/<target> --benchmark_filter=<regex>`
 - All benchmark names can be listed with `bin/<target> --benchmark_list_tests`
+- To compare the TraceEvent benchmarks (`BenchTrace.cpp`) between two builds, run
+  `python3 bench_trace_compare.py --before <before build>/bin/flow_bench --after <after build>/bin/flow_bench`. It runs
+  them interleaved on both and prints a before/after table.
 - Example output:
 
 ```
