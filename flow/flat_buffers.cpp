@@ -730,7 +730,7 @@ struct ByteVector {
 };
 
 struct ByteArray {
-	std::array<uint8_t, 16> a{};
+	std::array<uint8_t, 16> a;
 	template <class Archiver>
 	void serialize(Archiver& ar) {
 		serializer(ar, a);
@@ -741,7 +741,7 @@ TEST_CASE("/flow/FlatBuffers/RejectsWrongArrayLength") {
 	if (g_network->isSimulated()) {
 		return Void();
 	}
-	// A std::vector and a std::array have the same wire format, so a vector stands in for a hostile peer.
+	// A vector and an array share a wire format, so a vector stands in for a hostile peer.
 	for (size_t n : { 0, 15, 16, 17, 4096 }) {
 		ByteVector src;
 		src.v.assign(n, 0xab);
@@ -751,14 +751,17 @@ TEST_CASE("/flow/FlatBuffers/RejectsWrongArrayLength") {
 
 		::Arena arena;
 		ByteArray dst;
+		bool threw = false;
 		try {
 			ArenaObjectReader reader(arena, msg, AssumeVersion(currentProtocolVersion()));
 			reader.deserialize(untrustedFileIdentifier, dst);
-			ASSERT_EQ(n, dst.a.size());
-			ASSERT(std::all_of(dst.a.begin(), dst.a.end(), [](uint8_t b) { return b == 0xab; }));
 		} catch (Error& e) {
-			ASSERT_NE(n, dst.a.size());
 			ASSERT_EQ(e.code(), error_code_serialization_failed);
+			threw = true;
+		}
+		ASSERT_EQ(threw, n != dst.a.size());
+		if (!threw) {
+			ASSERT(std::all_of(dst.a.begin(), dst.a.end(), [](uint8_t b) { return b == 0xab; }));
 		}
 	}
 	return Void();
