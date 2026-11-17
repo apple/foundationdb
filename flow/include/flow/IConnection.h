@@ -82,6 +82,11 @@ public:
 	// local endpoint. For non-TLS connections this is always true for any valid open connection.
 	virtual bool hasTrustedPeer() const = 0;
 
+	// Returns whether a failed acceptHandshake() or connectHandshake() timed out or ended because the connection
+	// closed, which overload on either end causes, rather than failing with a TLS error. Always false for non-TLS
+	// connections.
+	virtual bool handshakeTimedOutOrDisconnected() const { return false; }
+
 	virtual UID getDebugID() const = 0;
 
 	// At present, implemented by Sim2Conn where we want to disable bits flip for connections between parent process and
@@ -145,12 +150,14 @@ public:
 
 	virtual Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) = 0;
 
-	// Make an outgoing connection to the given address with hostname for SNI (TLS Server Name Indication)
-	virtual Future<Reference<IConnection>> connectExternalWithHostname(NetworkAddress toAddr,
-	                                                                   const std::string& hostname) {
-		// Default implementation ignores hostname - subclasses can override for SNI support
-		return connectExternal(toAddr);
-	}
+	// Make an outgoing connection to an external (non-FDB) server, identified by hostname. A TLS connection sends the
+	// hostname as SNI and authenticates the server by CA chain and hostname rather than by the cluster's
+	// --tls-verify-peers rules, which describe FDB peers. existingSocket, if set, is an already-connected socket
+	// (e.g. a tunnel through an HTTP proxy) to run TLS over. The default implementation ignores hostname.
+	virtual Future<Reference<IConnection>> connectExternalWithHostname(
+	    NetworkAddress toAddr,
+	    const std::string& hostname,
+	    boost::asio::ip::tcp::socket* existingSocket = nullptr);
 
 	// Make an outgoing udp connection and connect to the passed address.
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) = 0;

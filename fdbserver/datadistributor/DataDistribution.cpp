@@ -310,12 +310,13 @@ Future<Void> monitorBackupPartitionRequired(Database cx, KeyRangeMap<ShardTracke
 						tr.set(backupPartitionListKey, encodeBackupPartitionListValue(partitions));
 						tr.clear(backupPartitionRequiredKey);
 						co_await tr.commit();
-						TraceEvent("DDBackupPartitionsComputed", ddId).detail("NumPartitions", partitions.size());
+						TraceEvent("RangePartitionedBWPartitionsComputedByDD", ddId)
+						    .detail("NumPartitions", partitions.size());
 					} else {
 						tr.clear(backupPartitionListKey);
 						tr.clear(backupPartitionRequiredKey);
 						co_await tr.commit();
-						TraceEvent("DDBackupPartitionsCleared", ddId);
+						TraceEvent("RangePartitionedBWPartitionsClearedByDD", ddId);
 					}
 					break;
 				} catch (Error& e) {
@@ -385,9 +386,30 @@ struct DDBulkLoadJobManager {
 	bool isValid() const { return jobState.isValid(); }
 };
 
+// The window restarts whenever the skipped count falls below its lowest value so far, so a DC that is catching up
+// (e.g. after usable_regions goes from 1 to 2) is not failed while it is making progress.
+struct BulkDumpSkipTracker {
+	Optional<double> stalledSince;
+	size_t lowestSkipped = 0;
+
+	bool shouldFail(size_t skipped, double currentTime, double failAfterSec) {
+		if (skipped == 0) {
+			stalledSince.reset();
+			return false;
+		}
+		if (!stalledSince.present() || skipped < lowestSkipped) {
+			stalledSince = currentTime;
+			lowestSkipped = skipped;
+		}
+		return failAfterSec > 0 && currentTime - stalledSince.get() >= failAfterSec;
+	}
+};
+
 struct DDBulkDumpJobManager {
 	BulkDumpState jobState;
 	std::map<Key, BulkLoadManifest> taskManifestMap;
+	BulkDumpSkipTracker skipTracker;
+	bool failed = false; // set once an Error range is seen or written; stops scheduling
 
 	DDBulkDumpJobManager() = default;
 	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -2737,6 +2759,40 @@ Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 	self->bulkDumpParallelismLimitor.decrementTaskCounter();
 }
 
+// Marks ranges Error in the metadata so the failure is visible to pollers and survives a DD restart.
+Future<Void> markBulkDumpRangesFailed(Reference<DataDistributor> self, std::map<Key, KeyRange> rangeMap) {
+	const BulkDumpState errorState = self->bulkDumpJobManager.jobState.generateErrorMetadata();
+	const UID jobId = errorState.getJobId();
+	constexpr int rangesPerTransaction = 100;
+	Transaction tr(self->txnProcessor->context());
+	auto batchBegin = rangeMap.begin();
+	while (batchBegin != rangeMap.end()) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			auto it = batchBegin;
+			for (int n = 0; n < rangesPerTransaction && it != rangeMap.end(); ++n, ++it) {
+				const KeyRange& range = it->second;
+				RangeResult current = co_await krmGetRanges(&tr, bulkDumpPrefix, range);
+				for (int j = 0; j < static_cast<int>(current.size()) - 1; ++j) {
+					if (current[j].value.empty() || decodeBulkDumpState(current[j].value).getJobId() != jobId) {
+						throw bulkdump_task_outdated();
+					}
+				}
+				co_await krmSetRange(&tr, bulkDumpPrefix, range, bulkDumpStateValue(errorState));
+			}
+			co_await tr.commit();
+			batchBegin = it;
+			tr.reset();
+			continue;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	UID jobId = self->bulkDumpJobManager.jobState.getJobId();
 	KeyRange jobRange = self->bulkDumpJobManager.jobState.getJobRange();
@@ -2752,6 +2808,7 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	int rangeLocationIndex = 0;
 	std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations;
 	KeyRange taskRange;
+	std::map<Key, KeyRange> skippedRanges;
 	std::vector<Future<Void>> actors;
 	Transaction tr(cx);
 	while (beginKey < endKey) {
@@ -2780,7 +2837,11 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					    .detail("CurrentJob", bulkDumpState.getJobId());
 					throw bulkdump_task_outdated();
 				}
-				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
+				if (bulkDumpState.getPhase() == BulkDumpPhase::Error) {
+					self->bulkDumpJobManager.failed = true;
+				}
+				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete ||
+				    bulkDumpState.getPhase() == BulkDumpPhase::Error) {
 					TraceEvent(SevDebug, "DDBulkDumpJobScheduleJobSeeCompleteTask", self->ddId)
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
@@ -2821,6 +2882,7 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 							    .detail("JobID", jobId)
 							    .detail("TargetDcId", targetDcId)
 							    .detail("SkippedRange", taskRange);
+							skippedRanges[taskRange.begin] = taskRange;
 							continue;
 						}
 					}
@@ -2856,6 +2918,16 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 		co_await tr.onError(err);
 	}
 	co_await waitForAll(actors);
+	if (self->bulkDumpJobManager.skipTracker.shouldFail(
+	        skippedRanges.size(), now(), SERVER_KNOBS->DD_BULKDUMP_NO_TARGET_REPLICA_FAIL_SEC)) {
+		TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDcTimeout", self->ddId)
+		    .detail("JobID", jobId)
+		    .detail("TargetDcId", self->bulkDumpTargetDcId())
+		    .detail("SkippedRanges", skippedRanges.size())
+		    .detail("FailAfterSec", SERVER_KNOBS->DD_BULKDUMP_NO_TARGET_REPLICA_FAIL_SEC);
+		co_await markBulkDumpRangesFailed(self, skippedRanges);
+		self->bulkDumpJobManager.failed = true;
+	}
 	TraceEvent(SevInfo, "DDBulkDumpJobScheduleEnd", self->ddId).detail("JobId", jobId).detail("JobRange", jobRange);
 }
 
@@ -2885,7 +2957,8 @@ Future<bool> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
 					throw bulkdump_task_outdated();
 				}
 				if (bulkDumpState.getPhase() != BulkDumpPhase::Complete) {
-					ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
+					ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted ||
+					       bulkDumpState.getPhase() == BulkDumpPhase::Error);
 					co_return false;
 				}
 			}
@@ -3064,6 +3137,10 @@ Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 			co_await cancelBulkDumpJob(cx, jobId);
 			TraceEvent(SevInfo, "DDBulkDumpManagerMetadataCleared", self->ddId).detail("JobId", jobId);
 			break; // end
+		} else if (self->bulkDumpJobManager.failed) {
+			// Keep the metadata so the failure stays visible. Cancelling the job clears it, which ends this loop
+			// through bulkdump_task_outdated.
+			TraceEvent(SevWarnAlways, "DDBulkDumpJobFailed", self->ddId).suppressFor(60.0).detail("JobId", jobId);
 		} else {
 			// Schedule the job
 			co_await scheduleBulkDumpJob(self);
@@ -6164,6 +6241,54 @@ TEST_CASE("/DataDistribution/BulkLoad/DeriveSplitTasks") {
 			task = children.get()[0];
 		}
 		ASSERT_EQ(task.getManifests().size(), 1);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/BulkDump/SkipTracker") {
+	constexpr double failAfter = 100.0;
+
+	// Skipped ranges that never drop fail the job once the window elapses.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, failAfter));
+		ASSERT(!tracker.shouldFail(5, 99.0, failAfter));
+		ASSERT(tracker.shouldFail(5, 100.0, failAfter));
+	}
+
+	// A growing count is not progress.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, failAfter));
+		ASSERT(!tracker.shouldFail(8, 50.0, failAfter));
+		ASSERT(tracker.shouldFail(8, 100.0, failAfter));
+	}
+
+	// A DC that is catching up keeps the job alive: each drop restarts the window.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, failAfter));
+		ASSERT(!tracker.shouldFail(4, 90.0, failAfter));
+		ASSERT(!tracker.shouldFail(4, 180.0, failAfter));
+		ASSERT(tracker.shouldFail(4, 190.0, failAfter));
+	}
+
+	// A pass with no skipped range clears the window.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, failAfter));
+		ASSERT(!tracker.shouldFail(0, 90.0, failAfter));
+		ASSERT(!tracker.shouldFail(5, 150.0, failAfter));
+		ASSERT(!tracker.shouldFail(5, 249.0, failAfter));
+		ASSERT(tracker.shouldFail(5, 250.0, failAfter));
+	}
+
+	// A zero knob never fails the job.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, 0.0));
+		ASSERT(!tracker.shouldFail(5, 1e9, 0.0));
 	}
 
 	return Void();

@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/ManagementAPI.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -571,7 +569,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		DatabaseBackupAgent backupAgent(cx);
 		DatabaseBackupAgent restoreTool(extraDB);
 		Future<Void> extraBackup;
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		TraceEvent("BARW_Arguments")
 		    .detail("BackupTag", printable(backupTag))
 		    .detail("BackupAfter", backupAfter)

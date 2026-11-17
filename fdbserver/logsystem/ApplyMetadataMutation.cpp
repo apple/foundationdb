@@ -994,15 +994,6 @@ private:
 						break;
 					}
 				}
-				auto& systemBackupRanges = getSystemBackupRanges();
-				for (auto r = systemBackupRanges.begin(); !foundKey && r != systemBackupRanges.end(); ++r) {
-					for (auto& it : vecBackupKeys->intersectingRanges(*r)) {
-						if (it.value().contains(logDestination)) {
-							foundKey = true;
-							break;
-						}
-					}
-				}
 				if (!foundKey) {
 					auto logRanges = vecBackupKeys->modify(singleKeyRange(metadataVersionKey));
 					for (auto logRange : logRanges) {
