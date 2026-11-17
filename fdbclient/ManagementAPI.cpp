@@ -1426,6 +1426,7 @@ Future<std::vector<std::string>> getManagementApiSpecialKeyValues(Reference<IDat
                                                                   const char* errorEvent) {
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
+		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		Error err;
 		try {
 			ThreadFuture<RangeResult> resultFuture = tr->getRange(range, CLIENT_KNOBS->TOO_MANY);

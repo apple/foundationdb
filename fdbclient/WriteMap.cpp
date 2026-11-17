@@ -22,54 +22,48 @@
 
 void OperationStack::reset(RYWMutation initialEntry) {
 	defaultConstructed = false;
-	singletonOperation = initialEntry;
-	optionalOperations = Optional<std::vector<RYWMutation>>();
+	topOperation = initialEntry;
+	history.clear();
+	historyCount = 0;
 }
 
 void OperationStack::poppush(RYWMutation entry) {
-	if (hasVector()) {
-		optionalOperations.get().pop_back();
-		optionalOperations.get().push_back(entry);
-	} else {
-		singletonOperation = entry;
-	}
+	topOperation = entry;
 }
 
 void OperationStack::push(RYWMutation entry) {
 	if (defaultConstructed) {
-		singletonOperation = entry;
+		topOperation = entry;
 		defaultConstructed = false;
-	} else if (hasVector()) {
-		optionalOperations.get().push_back(entry);
-	} else {
-		optionalOperations = std::vector<RYWMutation>();
-		optionalOperations.get().push_back(entry);
+		return;
 	}
+	if (!history) {
+		history = makeReference<History>();
+	} else if ((int)history->entries.size() != historyCount) {
+		// Another copy already extended the shared entries past this stack's view.
+		auto prefix = makeReference<History>();
+		prefix->entries.assign(history->entries.begin(), history->entries.begin() + historyCount);
+		history = prefix;
+	}
+	history->entries.push_back(topOperation);
+	++historyCount;
+	topOperation = entry;
 }
 
 bool OperationStack::isDependent() const {
 	if (!size())
 		return false;
-	return singletonOperation.type != MutationRef::SetValue && singletonOperation.type != MutationRef::ClearRange &&
-	       singletonOperation.type != MutationRef::SetVersionstampedValue &&
-	       singletonOperation.type != MutationRef::SetVersionstampedKey;
+	const RYWMutation& bottom = at(0);
+	return bottom.type != MutationRef::SetValue && bottom.type != MutationRef::ClearRange &&
+	       bottom.type != MutationRef::SetVersionstampedValue && bottom.type != MutationRef::SetVersionstampedKey;
 }
 
 bool OperationStack::operator==(const OperationStack& r) const {
 	if (size() != r.size())
 		return false;
 
-	if (size() == 0)
-		return true;
-
-	if (singletonOperation != r.singletonOperation)
-		return false;
-
-	if (size() == 1)
-		return true;
-
-	for (int i = 0; i < optionalOperations.get().size(); i++) {
-		if (optionalOperations.get()[i] != r.optionalOperations.get()[i])
+	for (int i = 0; i < size(); i++) {
+		if (at(i) != r.at(i))
 			return false;
 	}
 
@@ -108,7 +102,7 @@ void WriteMap::mutate(KeyRef key, MutationRef::Type operation, ValueRef param, b
 			PTreeImpl::insert(writes,
 			                  ver,
 			                  WriteMapEntry(key,
-			                                std::move(op),
+			                                op,
 			                                FollowingKeysCleared::True,
 			                                FollowingKeysConflict(following_conflict),
 			                                IsConflict(is_conflict),
@@ -425,9 +419,6 @@ RYWMutation WriteMap::coalesce(RYWMutation existingEntry, RYWMutation newEntry, 
 		switch (existingEntry.type) {
 		case MutationRef::SetValue:
 			return RYWMutation(doAppendIfFits(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
-		case MutationRef::AppendIfFits:
-			return RYWMutation(doAppendIfFits(existingEntry.value, newEntry.value.get(), arena),
-			                   MutationRef::AppendIfFits);
 		default:
 			throw operation_failed();
 		}
@@ -519,7 +510,11 @@ RYWMutation WriteMap::coalesce(RYWMutation existingEntry, RYWMutation newEntry, 
 
 void WriteMap::coalesceOver(OperationStack& stack, RYWMutation newEntry, Arena& arena) {
 	RYWMutation existingEntry = stack.top();
-	if (existingEntry.type == newEntry.type && newEntry.type != MutationRef::CompareAndClear) {
+	// CompareAndClear and AppendIfFits are never merged with themselves: whether each applies depends on the base
+	// value, which is only known once the operands are replayed on it, so a merged operand can differ from sequential
+	// application.
+	if (existingEntry.type == newEntry.type && newEntry.type != MutationRef::CompareAndClear &&
+	    newEntry.type != MutationRef::AppendIfFits) {
 		if (isNonAssociativeOp(existingEntry.type) && existingEntry.value.present() &&
 		    existingEntry.value.get().size() != newEntry.value.get().size()) {
 			stack.push(newEntry);
@@ -535,12 +530,59 @@ void WriteMap::coalesceOver(OperationStack& stack, RYWMutation newEntry, Arena& 
 	}
 }
 
+// Applies stack[begin, end), all AppendIfFits, to `existing` in order, allocating only the final value.
+static ValueRef applyAppendIfFitsRun(Optional<ValueRef> const& existing,
+                                     OperationStack const& stack,
+                                     int begin,
+                                     int end,
+                                     Arena& arena) {
+	if (end - begin == 1) {
+		return doAppendIfFits(existing, stack.at(begin).value.get(), arena);
+	}
+	ValueRef base = existing.present() ? existing.get() : StringRef();
+	int totalSize = base.size();
+	for (int i = begin; i < end; ++i) {
+		int operandSize = stack.at(i).value.get().size();
+		if (appendIfFitsApplies(totalSize, operandSize)) {
+			totalSize += operandSize;
+		}
+	}
+	if (totalSize == base.size()) {
+		return base;
+	}
+
+	uint8_t* buf = new (arena) uint8_t[totalSize];
+	int offset = base.size();
+	if (offset > 0) {
+		memcpy(buf, base.begin(), offset);
+	}
+	for (int i = begin; i < end; ++i) {
+		ValueRef operand = stack.at(i).value.get();
+		if (appendIfFitsApplies(offset, operand.size()) && !operand.empty()) {
+			memcpy(buf + offset, operand.begin(), operand.size());
+			offset += operand.size();
+		}
+	}
+	return StringRef(buf, totalSize);
+}
+
 RYWMutation WriteMap::coalesceUnder(OperationStack const& stack, Optional<ValueRef> const& value, Arena& arena) {
 	if (!stack.isDependent() && stack.size() == 1)
 		return stack.at(0);
 
 	RYWMutation currentEntry = RYWMutation(value, MutationRef::SetValue);
 	for (int i = 0; i < stack.size(); ++i) {
+		if (stack.at(i).type == MutationRef::AppendIfFits) {
+			// Applying a run entry by entry would allocate every intermediate value.
+			int end = i + 1;
+			while (end < stack.size() && stack.at(end).type == MutationRef::AppendIfFits) {
+				++end;
+			}
+			currentEntry =
+			    RYWMutation(applyAppendIfFitsRun(currentEntry.value, stack, i, end, arena), MutationRef::SetValue);
+			i = end - 1;
+			continue;
+		}
 		currentEntry = coalesce(currentEntry, stack.at(i), arena);
 	}
 
