@@ -1,8 +1,4 @@
-# The range_lock database configuration turns enforcement on with the
-# ENABLE_READ_LOCK_ON_RANGE knob left false. A configuration change triggers a
-# recovery, and the commit proxies recruited afterwards read the setting from the
-# transaction state store, so the RangeLocking workload must see writes to a locked
-# range rejected after the change.
+# range_lock=enabled must turn enforcement on with ENABLE_READ_LOCK_ON_RANGE left false.
 [configuration]
 
 [[knobs]]

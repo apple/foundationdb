@@ -386,8 +386,7 @@ struct ProxyCommitData {
 		}
 	}
 
-	// The range_lock database configuration, when set, overrides the ENABLE_READ_LOCK_ON_RANGE knob. It is read once
-	// from the transaction state store when this proxy is recruited; a configuration change triggers a recovery.
+	// Overrides the ENABLE_READ_LOCK_ON_RANGE knob when set.
 	Optional<bool> rangeLockConfig;
 
 	// RangeLock feature currently does not support version vector

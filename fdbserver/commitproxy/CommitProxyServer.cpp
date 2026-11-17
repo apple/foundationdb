@@ -2816,8 +2816,7 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 		tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 	}
 
-	// Resolve range locking before any rangeLock row is loaded below: the range_lock configuration if set, else the
-	// knob.
+	// Must run before any rangeLock row is loaded below.
 	Optional<Value> rangeLockValue =
 	    pContext->pTxnStateStore
 	        ->readValue(StringRef(DatabaseConfiguration::RANGE_LOCK_KEY).withPrefix(configKeysPrefix))
@@ -2828,9 +2827,7 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 	}
 	if (pContext->pCommitData->rangeLockEnabled()) {
 		pContext->pCommitData->rangeLock = std::make_shared<RangeLock>(pContext->pCommitData);
-		TraceEvent(SevInfo, "CommitProxyRangeLockEnabled", pContext->pCommitData->dbgid)
-		    .detail("Configured", pContext->pCommitData->rangeLockConfig.present())
-		    .detail("Knob", SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
+		TraceEvent(SevInfo, "CommitProxyRangeLockEnabled", pContext->pCommitData->dbgid);
 	}
 
 	while (true) {
