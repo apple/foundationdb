@@ -932,18 +932,20 @@ struct RangeLockConfigGuard : TestWorkload {
 			co_await tr.onError(err);
 		}
 		ASSERT(rejected);
+
+		tr.reset();
+		Optional<Value> value;
 		while (true) {
-			Error readErr;
-			Transaction check(cx);
+			Error err;
 			try {
-				Optional<Value> value = co_await check.get(key);
-				ASSERT(!value.present());
+				value = co_await tr.get(key);
 				break;
 			} catch (Error& e) {
-				readErr = e;
+				err = e;
 			}
-			co_await check.onError(readErr);
+			co_await tr.onError(err);
 		}
+		ASSERT(!value.present());
 
 		res = co_await configure(cx, "range_lock=enabled");
 		ASSERT(res == ConfigurationResult::SUCCESS);

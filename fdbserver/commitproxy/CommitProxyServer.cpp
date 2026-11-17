@@ -197,7 +197,7 @@ struct ResolutionRequestBuilder {
 				isTXNStateTransaction = true;
 				// A lock value written while locking is off would be silently ignored by the proxies.
 				if (m.type == MutationRef::SetValue && m.param1.startsWith(rangeLockPrefix) &&
-				    !self->rangeLockEnabled() && !m.param2.empty() && !decodeRangeLockStateSet(m.param2).empty()) {
+				    !self->rangeLockEnabled() && isRangeLockHeld(m.param2)) {
 					takesRangeLockWhileDisabled = true;
 				}
 				auto& tr = getOutTransaction(0, trIn.read_snapshot);
@@ -2907,7 +2907,7 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 					ASSERT(pContext->pCommitData->rangeLock != nullptr);
 					Key keyInsert = kv.key.removePrefix(rangeLockPrefix);
 					pContext->pCommitData->rangeLock->initKeyPoint(keyInsert, kv.value);
-				} else if (!kv.value.empty() && !decodeRangeLockStateSet(kv.value).empty()) {
+				} else if (isRangeLockHeld(kv.value)) {
 					++ignoredRangeLockRows;
 				}
 			} else {

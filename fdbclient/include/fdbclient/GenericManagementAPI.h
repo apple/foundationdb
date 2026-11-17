@@ -32,7 +32,6 @@ the contents of the system key space.
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/ProcessClass.h"
-#include "fdbclient/RangeLock.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/SystemData.h"
@@ -207,7 +206,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					    tr->getRange(rangeLockKeys, CLIENT_KNOBS->TOO_MANY);
 					RangeResult locks = co_await safeThreadFutureToFuture(fLocksF);
 					for (const KeyValueRef& kv : locks) {
-						if (!kv.value.empty() && !decodeRangeLockStateSet(kv.value).empty()) {
+						if (isRangeLockHeld(kv.value)) {
 							co_return ConfigurationResult::RANGE_LOCKS_HELD;
 						}
 					}

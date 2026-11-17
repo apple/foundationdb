@@ -1551,6 +1551,10 @@ RangeLockStateSet decodeRangeLockStateSet(const ValueRef& value) {
 	return rangeLockStateSet;
 }
 
+bool isRangeLockHeld(const ValueRef& value) {
+	return !value.empty() && !decodeRangeLockStateSet(value).empty();
+}
+
 const KeyRangeRef rangeLockOwnerKeys = KeyRangeRef("\xff/rangeLockOwner/"_sr, "\xff/rangeLockOwner0"_sr);
 const KeyRef rangeLockOwnerPrefix = rangeLockOwnerKeys.begin;
 

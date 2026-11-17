@@ -691,6 +691,8 @@ extern const KeyRangeRef rangeLockKeys;
 extern const KeyRef rangeLockPrefix;
 Value rangeLockStateSetValue(const RangeLockStateSet& rangeLockStateSet);
 RangeLockStateSet decodeRangeLockStateSet(const ValueRef& value);
+// A released lock is stored as an encoded empty set, so a non-empty value does not imply a held lock.
+bool isRangeLockHeld(const ValueRef& value);
 
 extern const KeyRangeRef rangeLockOwnerKeys;
 extern const KeyRef rangeLockOwnerPrefix;
