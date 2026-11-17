@@ -971,6 +971,18 @@ public:
 
 	KeyBackedProperty<Key> destUidValue() { return configSpace.pack(__FUNCTION__sr); }
 
+	struct LogProgress {
+		Optional<MutationLogType> type;
+		Optional<Version> exclusiveLogEnd;
+		Optional<Version> restorable;
+		bool restorePointUnknown = false;
+		Optional<Version> sharedWorkerVersion = {};
+		Optional<Version> ordinaryDispatchEnd = {};
+		Version sharedWorkerLogEnd() const { return sharedWorkerVersion.get() + 1; }
+		std::string typeName() const { return type.present() ? mutationLogTypeToString(type.get()) : "unknown"; }
+	};
+	Future<LogProgress> getStatusLogProgress(Reference<ReadYourWritesTransaction> tr, EBackupState state);
+
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
