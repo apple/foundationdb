@@ -2934,21 +2934,8 @@ Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr) {
 }
 
 Future<bool> isRangeUnderBulkLoadJob(Reference<ReadYourWritesTransaction> tr, KeyRange range) {
-	Key beginKey = range.begin;
-	while (beginKey < range.end) {
-		RangeResult ranges = co_await krmGetRanges(tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, range.end));
-		for (int i = 0; i + 1 < static_cast<int>(ranges.size()); ++i) {
-			if (!ranges[i].value.empty() && decodeBulkLoadJobState(ranges[i].value).isValid()) {
-				co_return true;
-			}
-		}
-		// A page ends early at a row limit; its last key is where the next page resumes.
-		if (ranges.size() < 2) {
-			break;
-		}
-		beginKey = ranges.back().key;
-	}
-	co_return false;
+	Optional<BulkLoadJobState> job = co_await getSubmittedBulkLoadJob(&tr->getTransaction());
+	co_return job.present() && job.get().getJobRange().intersects(range);
 }
 
 Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
@@ -3064,6 +3051,7 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 			// range would record any earlier clear of it but never the loaded data.
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult logRanges = co_await tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!logRanges.more && logRanges.size() < CLIENT_KNOBS->TOO_MANY);
 			std::set<UID> loggingUids;
 			for (const auto& kv : logRanges) {
 				Key logEnd = logRangesDecodeValue(kv.value);
@@ -3080,10 +3068,21 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 					throw bulkload_range_under_backup();
 				}
 			}
-			// A backup or DR is recorded here when submitted, but registers its log range only when its start task
-			// runs. Its range is not yet known, so refuse for the whole window.
+			// Partitioned-log backups are written by backup workers from the TLogs, which bulkload also bypasses.
+			Optional<Value> backupStarted = co_await tr.get(backupStartedKey);
+			if (backupStarted.present() && !decodeBackupStartedValue(backupStarted.get()).empty()) {
+				TraceEvent(SevWarnAlways, "SubmitBulkLoadJobFailed")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "A partitioned-log backup is running")
+				    .detail("SubmitJob", jobState.toString());
+				throw bulkload_range_under_backup();
+			}
+			// A backup or DR writes backupLatestVersions before it registers its log range (a file backup at submit, a
+			// DR when its start task runs), and its range is unknown until then, so refuse for the whole window.
 			RangeResult submittedBackups =
 			    co_await tr.getRange(prefixRange(backupLatestVersionsPrefix), CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!submittedBackups.more && submittedBackups.size() < CLIENT_KNOBS->TOO_MANY);
 			for (const auto& kv : submittedBackups) {
 				UID destUid = BinaryReader::fromStringRef<UID>(
 				    kv.key.removePrefix(backupLatestVersionsPrefix).substr(0, sizeof(UID)), Unversioned());
@@ -3095,16 +3094,6 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 					    .detail("SubmitJob", jobState.toString());
 					throw bulkload_range_under_backup();
 				}
-			}
-			// Partitioned-log backups are written by backup workers from the TLogs, which bulkload also bypasses.
-			Optional<Value> backupStarted = co_await tr.get(backupStartedKey);
-			if (backupStarted.present() && !decodeBackupStartedValue(backupStarted.get()).empty()) {
-				TraceEvent(SevWarnAlways, "SubmitBulkLoadJobFailed")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Reason", "A partitioned-log backup is running")
-				    .detail("SubmitJob", jobState.toString());
-				throw bulkload_range_under_backup();
 			}
 			// Init the map of task states
 			co_await krmSetRange(
@@ -3130,41 +3119,20 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 }
 
 Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockAware) {
-	RangeResult rangeResult;
 	Transaction tr(cx);
-	Key beginKey = normalKeys.begin;
-	Key endKey = normalKeys.end;
-	while (beginKey < endKey) {
+	while (true) {
 		Error err;
 		try {
 			if (lockAware) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			}
-			rangeResult.clear();
-			rangeResult = co_await krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey));
-			if (rangeResult.empty()) {
-				break;
-			}
-			for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; i++) {
-				if (rangeResult[i].value.empty()) {
-					continue;
-				}
-				BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
-				if (!jobState.isValid()) {
-					continue;
-				}
-				// If a job is fully completed, the metadata should be removed from bulkLoadJobKeys
-				// The metadata is added to bulkload history.
-				co_return jobState;
-			}
-			beginKey = rangeResult.back().key;
-			continue;
+			// If a job is fully completed, the metadata is removed from bulkLoadJobKeys and added to bulkload history.
+			co_return co_await getSubmittedBulkLoadJob(&tr);
 		} catch (Error& e) {
 			err = e;
 		}
 		co_await tr.onError(err);
 	}
-	co_return Optional<BulkLoadJobState>();
 }
 
 Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange jobRange) {

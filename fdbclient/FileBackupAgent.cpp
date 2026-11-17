@@ -272,6 +272,20 @@ Key FileBackupAgent::getPauseKey() {
 	return backupAgent.taskBucket->getPauseKey();
 }
 
+Future<bool> FileBackupAgent::isBackupUnderBulkLoadJob(Reference<ReadYourWritesTransaction> tr,
+                                                       MutationLogType mutationLogType,
+                                                       Standalone<VectorRef<KeyRangeRef>> ranges) {
+	if (mutationLogType != MutationLogType::DEFAULT) {
+		co_return co_await isRangeUnderBulkLoadJob(tr, normalKeys);
+	}
+	for (const auto& range : ranges) {
+		if (co_await isRangeUnderBulkLoadJob(tr, range)) {
+			co_return true;
+		}
+	}
+	co_return false;
+}
+
 Optional<std::string> FileBackupAgent::bulkLoadRestoreRefusal(Key tagName,
                                                               Standalone<VectorRef<KeyRangeRef>> ranges,
                                                               Key addPrefix,
@@ -8005,18 +8019,10 @@ public:
 			throw backup_error();
 		}
 
-		// Bulkload ingests files without committing mutations, so a backup that starts while a load runs would
-		// never log the loaded data. Partitioned-log workers record the whole keyspace, whatever the backup ranges.
-		std::vector<KeyRange> bulkLoadCheckRanges =
-		    mutationLogType == MutationLogType::DEFAULT ? normalizedRanges : std::vector<KeyRange>{ normalKeys };
-		for (const auto& range : bulkLoadCheckRanges) {
-			if (co_await isRangeUnderBulkLoadJob(tr, range)) {
-				TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkLoadRunning")
-				    .detail("TagName", tagName)
-				    .detail("Range", range);
-				fprintf(stderr, "ERROR: A BulkLoad job is running over the backup range. Retry once it finishes.\n");
-				throw backup_range_under_bulkload();
-			}
+		// A load commits no mutations, so a backup starting under it would never log the loaded data.
+		if (co_await FileBackupAgent::isBackupUnderBulkLoadJob(tr, mutationLogType, backupRanges)) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkLoadRunning").detail("TagName", tagName);
+			throw backup_range_under_bulkload();
 		}
 
 		// This check will ensure that current backupUid is later than the last backup Uid

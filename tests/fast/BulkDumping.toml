@@ -74,3 +74,17 @@ waitForQuiescence = false
     # transaction can't commit in time and start() fails with timed_out. Raise the cap well
     # above worst-case recovery; the submit still retries underneath.
     jobSubmitTimeout = 600.0
+
+# Bulkload ingests files without committing mutations, so a backup running over the range would record the clear
+# before the load but never the loaded data: the two must exclude each other.
+[[test]]
+testTitle = 'BulkLoadBackupGuard'
+simBackupAgents = 'BackupToFile'
+useDB = true
+waitForQuiescence = false
+
+    [[test.workload]]
+    testName = 'BulkDumpingWorkload'
+    bulkLoadTransportMethod = 1
+    jobSubmitTimeout = 600.0
+    checkBackupGuard = true
