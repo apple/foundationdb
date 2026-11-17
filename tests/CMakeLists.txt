@@ -189,6 +189,7 @@ if(WITH_PYTHON)
 
   add_fdb_test(TEST_FILES fast/BulkDumping.toml)
   add_fdb_test(TEST_FILES slow/BulkDumpingPauseResume.toml)
+  add_fdb_test(TEST_FILES slow/BulkDumpingPacing.toml)
   add_fdb_test(TEST_FILES slow/BulkDumpingS3.toml)
   add_fdb_test(TEST_FILES slow/BulkDumpingS3WithChaos.toml)
   add_fdb_test(TEST_FILES slow/BackupS3BlobBulkLoadRestore.toml)

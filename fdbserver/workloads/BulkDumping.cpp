@@ -72,6 +72,10 @@ struct BulkDumping : TestWorkload {
 	int dataKeyCount = 1000;
 	int minAdmissionsToProbe = 5;
 
+	// Exercise admission pacing: give the job a target end time and check it is actually spread.
+	bool testPacing = false;
+	double pacingTargetSeconds = 600.0;
+
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
@@ -116,6 +120,8 @@ struct BulkDumping : TestWorkload {
 		pauseProbeTimeout = getOption(options, "pauseProbeTimeout"_sr, 600.0);
 		dataKeyCount = getOption(options, "dataKeyCount"_sr, 1000);
 		minAdmissionsToProbe = getOption(options, "minAdmissionsToProbe"_sr, 5);
+		testPacing = getOption(options, "testPacing"_sr, false);
+		pacingTargetSeconds = getOption(options, "pacingTargetSeconds"_sr, 600.0);
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
@@ -338,6 +344,38 @@ struct BulkDumping : TestWorkload {
 				co_return;
 			}
 			co_await delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
+		}
+	}
+
+	// Give the job a target end time and wait until it has enough tasks for pacing to mean anything.
+	//
+	// The target has to sit well above how long the job takes unpaced, or "it finished within the window"
+	// says nothing: an unpaced run would satisfy it too. The companion toml picks a target several times
+	// the unpaced duration measured on this configuration, and the elapsed time is asserted from below as
+	// well as above so that a run which ignored the target fails rather than passes early.
+	Future<Void> applyPacingTarget(BulkDumping* self, Database cx, UID jobId) {
+		co_await setBulkJobTargetEndTime(cx, jobId, now() + self->pacingTargetSeconds, /*isBulkDump=*/true);
+		TraceEvent("BulkDumpingPacingTargetSet")
+		    .detail("JobId", jobId)
+		    .detail("TargetSeconds", self->pacingTargetSeconds);
+
+		// Wait until dispatch is under way, measured on admissions rather than progress: progress counts
+		// dump batches, not tasks, so it cannot say whether the job has started handing work out.
+		double waitStart = now();
+		while (true) {
+			if (now() - waitStart > self->pauseProbeTimeout) {
+				TraceEvent(SevError, "BulkDumpingPacingNeverDispatched")
+				    .detail("JobId", jobId)
+				    .detail("Required", self->minAdmissionsToProbe)
+				    .detail("Elapsed", now() - waitStart);
+				co_return;
+			}
+			int64_t admitted = co_await getBulkDumpAdmittedCount(cx, jobId);
+			if (admitted >= self->minAdmissionsToProbe) {
+				TraceEvent("BulkDumpingPacingProbeReady").detail("JobId", jobId).detail("Admitted", admitted);
+				co_return;
+			}
+			co_await delay(1.0);
 		}
 	}
 
@@ -695,7 +733,29 @@ struct BulkDumping : TestWorkload {
 		if (testPauseResume) {
 			co_await probePauseResume(this, cx, bulkDumpJob.getJobId());
 		}
+		double pacingStart = now();
+		if (testPacing) {
+			co_await applyPacingTarget(this, cx, bulkDumpJob.getJobId());
+		}
 		co_await waitUntilDumpJobComplete(this, cx);
+		if (testPacing) {
+			double elapsed = now() - pacingStart;
+			TraceEvent("BulkDumpingPacingMeasured")
+			    .detail("JobId", bulkDumpJob.getJobId())
+			    .detail("TargetSeconds", pacingTargetSeconds)
+			    .detail("ElapsedSeconds", elapsed)
+			    .detail("FractionOfTarget", elapsed / pacingTargetSeconds);
+			// A job that ignored the target finishes in a fraction of the window, so the lower bound is
+			// what detects the regression. There is deliberately no upper bound: fault injection only
+			// ever makes a run slower, so a ceiling fails on a slow-but-correct run -- it did, on Joshua
+			// seed 2778683794.
+			//
+			// The cost is that this cannot tell a paced job from a merely slow one. Checking that the
+			// pacing code computed delays would settle it, but those decisions are only visible as trace
+			// events on the data distributor and a workload cannot read another process's traces, so the
+			// distinction is not covered here.
+			ASSERT(elapsed >= 0.5 * pacingTargetSeconds);
+		}
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Dump Job Complete").detail("Job", bulkDumpJob.toString());
 
 		co_return bulkDumpJob;
