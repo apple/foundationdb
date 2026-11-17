@@ -205,6 +205,15 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			out[p + key] = value;
 		}
 
+		if (key == DatabaseConfiguration::RANGE_LOCK_KEY) {
+			if (value != DatabaseConfiguration::RANGE_LOCK_ENABLED &&
+			    value != DatabaseConfiguration::RANGE_LOCK_DISABLED) {
+				printf("Error: range_lock must be `enabled' or `disabled'.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
+
 		if (key == "exclude") {
 			int p = 0;
 			while (p < value.size()) {

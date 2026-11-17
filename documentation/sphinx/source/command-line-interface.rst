@@ -134,7 +134,7 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>] [perpetual_storage_wiggle_engine=<ENGINE>] [storage_migration_type={disabled|aggressive|gradual}] [shard_metadata_format={original|encoded}] [shard_metadata_migration={enabled|disabled}]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>] [perpetual_storage_wiggle_engine=<ENGINE>] [storage_migration_type={disabled|aggressive|gradual}] [shard_metadata_format={original|encoded}] [shard_metadata_migration={enabled|disabled}] [range_lock={enabled|disabled}]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
 
@@ -364,6 +364,18 @@ and just enable migration; DD infers direction from the knob:
 For more details including the safety and observability story, see
 the ``design/shard-encode-location-metadata.md`` design document in
 the source tree.
+
+range lock
+^^^^^^^^^^
+
+``range_lock={enabled|disabled}`` — whether commit proxies enforce range
+locks. A range lock blocks writes to a key range; BulkLoad takes one on
+its target range, and operators can take one with ``rangelock``. When
+unset, commit proxies fall back to the ``ENABLE_READ_LOCK_ON_RANGE`` knob
+(default ``false``); an explicit value overrides the knob. Like any other
+configuration change, setting it triggers a recovery and takes effect when
+the new commit proxies are recruited, with no process restarts. Turning
+it on stores nothing new until a lock is taken.
 
 consistencyscan
 ----------------

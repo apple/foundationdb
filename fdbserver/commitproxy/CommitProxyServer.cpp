@@ -28,6 +28,7 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BuildIdempotencyIdMutations.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IdempotencyId.h"
@@ -2815,6 +2816,23 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 		tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 	}
 
+	// Resolve range locking before any rangeLock row is loaded below: the range_lock configuration if set, else the
+	// knob.
+	Optional<Value> rangeLockValue =
+	    pContext->pTxnStateStore
+	        ->readValue(StringRef(DatabaseConfiguration::RANGE_LOCK_KEY).withPrefix(configKeysPrefix))
+	        .get();
+	if (rangeLockValue.present()) {
+		pContext->pCommitData->rangeLockConfig =
+		    rangeLockValue.get() == StringRef(DatabaseConfiguration::RANGE_LOCK_ENABLED);
+	}
+	if (pContext->pCommitData->rangeLockEnabled()) {
+		pContext->pCommitData->rangeLock = std::make_shared<RangeLock>(pContext->pCommitData);
+		TraceEvent(SevInfo, "CommitProxyRangeLockEnabled", pContext->pCommitData->dbgid)
+		    .detail("Configured", pContext->pCommitData->rangeLockConfig.present())
+		    .detail("Knob", SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
+	}
+
 	while (true) {
 		co_await yield();
 
@@ -3216,12 +3234,6 @@ public:
 			                 SERVER_KNOBS->COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR));
 		}
 		TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
-
-		// Initialize RangeLock
-		if (commitData.rangeLockEnabled()) {
-			commitData.rangeLock = std::make_shared<RangeLock>(&commitData);
-			TraceEvent(SevInfo, "CommitProxyRangeLockEnabled", commitData.dbgid);
-		}
 
 		addActor.send(monitorRemoteCommitted(&commitData));
 		addActor.send(readRequestServer(proxy, addActor, &commitData));

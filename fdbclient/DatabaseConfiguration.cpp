@@ -59,6 +59,7 @@ void DatabaseConfiguration::resetInternal() {
 	storageMigrationType = StorageMigrationType::DEFAULT;
 	shardMetadataFormat = ShardMetadataFormat::UNSET;
 	shardMetadataMigration = ShardMetadataMigration::UNSET;
+	rangeLockSetting = RangeLockSetting::UNSET;
 }
 
 int toInt(ValueRef const& v) {
@@ -451,6 +452,10 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		                                           ? SHARD_METADATA_MIGRATION_ENABLED
 		                                           : SHARD_METADATA_MIGRATION_DISABLED;
 	}
+	if (rangeLockSetting != RangeLockSetting::UNSET) {
+		result[RANGE_LOCK_KEY] =
+		    (rangeLockSetting == RangeLockSetting::ENABLED) ? RANGE_LOCK_ENABLED : RANGE_LOCK_DISABLED;
+	}
 	result["storage_migration_type"] = storageMigrationType.toString();
 	return result;
 }
@@ -474,10 +479,13 @@ std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& j
 		} else if (kv.second.type() == json_spirit::str_type) {
 			// For string values, some properties can set with a "<name>=<value>" syntax in "configure"
 			// Such properties are listed here:
-			static std::set<std::string> directSet = {
-				"storage_migration_type",          "storage_engine",          "log_engine",
-				"perpetual_storage_wiggle_engine", SHARD_METADATA_FORMAT_KEY, SHARD_METADATA_MIGRATION_KEY
-			};
+			static std::set<std::string> directSet = { "storage_migration_type",
+				                                       "storage_engine",
+				                                       "log_engine",
+				                                       "perpetual_storage_wiggle_engine",
+				                                       SHARD_METADATA_FORMAT_KEY,
+				                                       SHARD_METADATA_MIGRATION_KEY,
+				                                       RANGE_LOCK_KEY };
 
 			if (directSet.contains(kv.first)) {
 				result += kv.first + "=" + kv.second.get_str();
@@ -751,6 +759,14 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 			shardMetadataMigration = ShardMetadataMigration::DISABLED;
 		} else if (value == StringRef(SHARD_METADATA_MIGRATION_ENABLED)) {
 			shardMetadataMigration = ShardMetadataMigration::ENABLED;
+		} else {
+			return false;
+		}
+	} else if (ck == StringRef(RANGE_LOCK_KEY)) {
+		if (value == StringRef(RANGE_LOCK_DISABLED)) {
+			rangeLockSetting = RangeLockSetting::DISABLED;
+		} else if (value == StringRef(RANGE_LOCK_ENABLED)) {
+			rangeLockSetting = RangeLockSetting::ENABLED;
 		} else {
 			return false;
 		}
