@@ -970,11 +970,17 @@ public:
 	struct LogProgress {
 		MutationLogType type;
 		Optional<Version> exclusiveLogEnd;
+		Optional<Error> fileError = {};
 	};
 
-	// Requires an absent mutationLogType read in the same transaction.
-	Future<bool> recoverLegacyWorkerRegistration(Reference<ReadYourWritesTransaction> tr);
-	Future<LogProgress> getStatusLogProgress(Reference<ReadYourWritesTransaction> tr, ReadLegacyLogMode readLegacy);
+	// Keep a file lookup across transaction retries within one status request.
+	struct StatusFileLookup {
+		UID uid;
+		Future<LogProgress> result;
+	};
+	Future<LogProgress> getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,
+	                                         ReadLegacyLogMode readLegacy,
+	                                         StatusFileLookup& lookup);
 
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);

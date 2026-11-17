@@ -255,7 +255,9 @@ Future<Void> checkBackupStatus(BackupConfig config,
                                MutationLogType expectedType,
                                Optional<Version> expectedEnd,
                                Optional<Version> expectedRestorable) {
-	auto logs = co_await config.getStatusLogProgress(tr, ReadLegacyLogMode::True);
+	BackupConfig::StatusFileLookup lookup;
+	auto logs = co_await config.getStatusLogProgress(tr, ReadLegacyLogMode::True, lookup);
+	ASSERT(!logs.fileError.present());
 	ASSERT(logs.type == expectedType);
 	ASSERT(logs.exclusiveLogEnd == expectedEnd);
 	ASSERT((co_await config.getLatestRestorableVersion(tr, logs.exclusiveLogEnd)) == expectedRestorable);
@@ -278,38 +280,60 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
 	tr->set(legacyKey, "\x15\x01"_sr); // 7.4 tuple encoding of true
 
-	// Queued on 7.4, with only another backup registered when the upgraded agent starts.
-	tr->set(backupStartedKey, encodeBackupStartedValue({ { UID(3, 4), 50 } }));
-	ASSERT(!(co_await config.recoverLegacyWorkerRegistration(tr)));
+	// A queued 7.4 backup can start ordinary logging on 8.0.
 	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
-
-	// The 7.4 start task registered this backup and was interrupted before finish.
-	tr->set(backupStartedKey, encodeBackupStartedValue({ { UID(3, 4), 50 }, { config.getUid(), 200 } }));
-	ASSERT(co_await config.recoverLegacyWorkerRegistration(tr));
-	ASSERT((co_await config.mutationLogType().get(tr)) == MutationLogType::PARTITIONED_LOG);
-
-	// An older backup's shared checkpoint does not establish coverage for this UID.
-	config.snapshotBeginVersion().set(tr, 250);
-	config.firstSnapshotEndVersion().clear(tr);
-	config.latestBackupWorkerSavedVersion().set(tr, 199);
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, {}, {});
-	config.latestBackupWorkerSavedVersion().set(tr, 220);
-	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, {}, {});
-
-	// Started entirely on 7.4, so no explicit mode was recorded.
-	config.mutationLogType().clear(tr);
-	config.latestBackupWorkerSavedVersion().clear(tr);
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	auto container = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await container->create();
+	config.backupContainer().set(tr, container);
 	config.allWorkerStarted().set(tr, true);
 	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, {}, {});
 
+	// 7.4 registered the workers, but 8.0 finished startup and wrote ordinary files.
+	auto range = co_await container->writeRangeFile(100, 0, 100, 1024);
+	co_await range->finish();
+	std::vector<std::string> names{ range->getFileName() };
+	std::vector<std::pair<Key, Key>> keys{ { "a"_sr, "z"_sr } };
+	co_await container->writeKeyspaceSnapshotFile(names, keys, 1, IncludeKeyRangeMap::True);
+	auto ordinary = co_await container->writeLogFile(100, 121, 1024);
+	co_await ordinary->finish();
+	config.logBytesWritten().set(tr, 0);
+	co_await checkBackupStatus(config, tr, MutationLogType::DEFAULT, 121, 120);
+
+	// A newly started backup does not own an earlier backup's shared checkpoint.
+	config.firstSnapshotEndVersion().clear(tr);
+	config.snapshotBeginVersion().set(tr, 250);
+	config.latestBackupWorkerSavedVersion().set(tr, 199);
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, {}, {});
+	auto tag0 = co_await container->writeTaggedLogFile(200, 301, 1024, 0, 2);
+	co_await tag0->finish();
+	config.latestBackupWorkerSavedVersion().set(tr, 220);
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, {}, {});
+	auto tag1 = co_await container->writeTaggedLogFile(200, 301, 1024, 1, 2);
+	co_await tag1->finish();
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 221, {});
+	config.latestBackupWorkerSavedVersion().set(tr, 280);
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 281, {});
 	config.firstSnapshotEndVersion().set(tr, 301);
+	config.snapshotBeginVersion().set(tr, 350);
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 281, {});
+
+	auto range2 = co_await container->writeRangeFile(250, 0, 301, 1024);
+	co_await range2->finish();
+	names = { range2->getFileName() };
+	co_await container->writeKeyspaceSnapshotFile(names, keys, 1, IncludeKeyRangeMap::True);
+	auto next0 = co_await container->writeTaggedLogFile(301, 402, 1024, 0, 2);
+	co_await next0->finish();
+	auto next1 = co_await container->writeTaggedLogFile(301, 402, 1024, 1, 2);
+	co_await next1->finish();
 	config.latestBackupWorkerSavedVersion().set(tr, 300);
 	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 301, {});
 	config.latestBackupWorkerSavedVersion().set(tr, 301);
 	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 302, 301);
 	config.latestBackupWorkerSavedVersion().set(tr, 401);
 	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 402, 401);
-	ASSERT((co_await config.getStatusLogProgress(tr, ReadLegacyLogMode::False)).exclusiveLogEnd == 121);
+	BackupConfig::StatusFileLookup lookup;
+	ASSERT((co_await config.getStatusLogProgress(tr, ReadLegacyLogMode::False, lookup)).exclusiveLogEnd == 121);
 
 	// A newly registered logs-only backup can see another backup's checkpoint before it has any files.
 	config.firstSnapshotEndVersion().clear(tr);
@@ -329,6 +353,11 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	config.mutationLogType().set(tr, MutationLogType::PARTITIONED_LOG);
 	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 402, 401);
 	ASSERT((co_await config.getLatestRestorableVersion(tr)) == 400);
+	config.firstSnapshotEndVersion().clear(tr);
+	config.incrementalBackupOnly().set(tr, true);
+	config.latestBackupWorkerSavedVersion().set(tr, 220);
+	co_await checkBackupStatus(config, tr, MutationLogType::PARTITIONED_LOG, 221, 220);
+	co_await container->deleteContainer();
 }
 } // namespace
 
