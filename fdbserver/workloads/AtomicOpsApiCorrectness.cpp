@@ -131,6 +131,35 @@ public:
 		    });
 		ASSERT(visible.present());
 		ASSERT(visible.get() == full);
+
+		// Regression for #13828: two AppendIfFits against a committed base must be applied
+		// sequentially. Coalescing the operands first truncates incorrectly when each append
+		// alone would fit but the concatenated operand would not.
+		const Value largeBase(std::string(70000, 'a'));
+		const Value firstChunk(std::string(20000, 'b'));
+		const Value secondChunk(std::string(20000, 'c'));
+		ASSERT(largeBase.size() + firstChunk.size() <= CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+		ASSERT(largeBase.size() + firstChunk.size() + secondChunk.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+		const Value expected = largeBase.withSuffix(firstChunk);
+
+		co_await runRYWTransactionVoid(cx, [key, largeBase](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->set(key, largeBase);
+			return Void();
+		});
+		Optional<Value> inTransaction = co_await runRYWTransaction(
+		    cx, [key, firstChunk, secondChunk](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+			    tr->atomicOp(key, firstChunk, MutationRef::AppendIfFits);
+			    tr->atomicOp(key, secondChunk, MutationRef::AppendIfFits);
+			    return tr->get(key);
+		    });
+		ASSERT(inTransaction.present());
+		ASSERT(inTransaction.get() == expected);
+
+		// The server applies the two appends in order too, so the committed value matches.
+		Optional<Value> committed = co_await runRYWTransaction(
+		    cx, [key](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
+		ASSERT(committed.present());
+		ASSERT(committed.get() == expected);
 	}
 
 	// Test Atomic ops on non existing keys that results in a set

@@ -61,6 +61,9 @@ public:
 		       e.code() == error_code_bulkload_manifest_decode_error;
 	}
 
+	// A bulkdump snapshot manifest holds only the job ID and a single key range, so it is far smaller than this.
+	static constexpr int64_t kMaxBulkDumpManifestSize = 1 << 20;
+
 	// Returns the bulkdump job id recorded in a keyspace snapshot, or empty if the snapshot has none or
 	// cannot be read. The job id is only in the snapshot's JSON body -- the filename carries the snapshot
 	// type but not the id -- and it is what locates the SST tree under bulkdump_data/<jobId>/.
@@ -74,7 +77,7 @@ public:
 		try {
 			Reference<IAsyncFile> f = co_await bc->readFile(snapshot.fileName);
 			int64_t size = co_await f->size();
-			if (restoring && size > (1 << 20)) {
+			if (restoring && size > kMaxBulkDumpManifestSize) {
 				// A bulkdump descriptor contains only the job ID and a single key range.
 				throw restore_corrupted_data();
 			}
@@ -82,13 +85,13 @@ public:
 			// rangefile manifest lists every range file and can reach hundreds of megabytes. Size is the
 			// only cheap discriminator available: the snapshot filename carries the type suffix solely in
 			// 'both' mode, so a plain bulkdump snapshot is indistinguishable from a rangefile one by name.
-			// Refusing to read anything over a chunk keeps expire from pulling in a huge manifest just to
-			// discover it has no job id.
-			if (!restoring && size > CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE) {
+			// Refusing to read anything over kMaxBulkDumpManifestSize keeps expire from pulling in a huge
+			// manifest just to discover it has no job id.
+			if (!restoring && size > kMaxBulkDumpManifestSize) {
 				TraceEvent("BackupContainerExpireSkipLargeSnapshotManifest")
 				    .detail("Snapshot", snapshot.fileName)
 				    .detail("Size", size)
-				    .detail("Limit", CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE);
+				    .detail("Limit", kMaxBulkDumpManifestSize);
 				co_return std::string();
 			}
 			auto buf = std::make_shared<std::string>(size, '\0');
@@ -1182,26 +1185,11 @@ public:
 		          store(ranges, bc->listRangeFiles(scanBegin, expireEndVersion - 1)));
 		logs.insert(logs.end(), std::make_move_iterator(pLogs.begin()), std::make_move_iterator(pLogs.end()));
 
-		// The new logBeginVersion will be taken from the last log file, if there is one
-		Optional<Version> newLogBeginVersion;
-		if (!logs.empty()) {
-			// Linear scan the unsorted logs to find the latest one in sorted order
-			LogFile& last = *std::max_element(logs.begin(), logs.end());
-
-			// If the last log ends at expireEndVersion then that will be the next log begin
-			if (last.endVersion == expireEndVersion) {
-				newLogBeginVersion = expireEndVersion;
-			} else {
-				// If the last log overlaps the expiredEnd then use the log's begin version and move the expiredEnd
-				// back to match it and keep the last log file
-				if (last.endVersion > expireEndVersion) {
-					newLogBeginVersion = last.beginVersion;
-
-					// Instead of modifying this potentially very large vector, just clear LogFile
-					last = LogFile();
-
-					expireEndVersion = newLogBeginVersion.get();
-				}
+		// Different log-router tags can have different file boundaries at the requested cutoff.
+		const Version requestedEnd = expireEndVersion;
+		for (const auto& log : logs) {
+			if (log.endVersion > requestedEnd) {
+				expireEndVersion = std::min(expireEndVersion, std::max(scanBegin, log.beginVersion));
 			}
 		}
 
@@ -1214,8 +1202,7 @@ public:
 
 		// Move filenames out of vector then destroy it to save memory
 		for (auto& f : logs) {
-			// We may have cleared the last log file earlier so skip any empty filenames
-			if (!f.fileName.empty()) {
+			if (f.endVersion <= expireEndVersion) {
 				toDelete.push_back(std::move(f.fileName));
 			}
 		}
@@ -3540,6 +3527,34 @@ Future<Void> testExpireProgressVersions(std::string url, Optional<std::string> p
 TEST_CASE("/backup/containers/localdir/expireProgressVersions") {
 	co_await testExpireProgressVersions(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
 	                                    Optional<std::string>());
+}
+
+TEST_CASE("/backup/containers/localdir/expireOverlappingTags") {
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	auto container = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await container->create();
+
+	auto range = co_await container->writeRangeFile(160, 0, 160, 1024);
+	co_await testWriteSnapshotFile(range, ""_sr, "z"_sr, 1024);
+	std::vector<std::string> rangeFiles{ range->getFileName() };
+	std::vector<std::pair<Key, Key>> bounds{ { ""_sr, "z"_sr } };
+	co_await container->writeKeyspaceSnapshotFile(rangeFiles, bounds, 1024, IncludeKeyRangeMap::False);
+
+	auto old = co_await container->writeTaggedLogFile(50, 80, 1024, 0, 3);
+	co_await old->finish();
+	for (int tag = 0; tag < 3; ++tag) {
+		auto log = co_await container->writeTaggedLogFile(tag == 0 ? 80 : 100, 200, 1024, tag, 3);
+		co_await log->finish();
+	}
+	IBackupContainer::ExpireProgress progress;
+	co_await container->expireData(150, false, &progress, 160);
+	ASSERT_EQ(progress.actualEndVersion, 80);
+	auto listing = co_await container->dumpFileList();
+	ASSERT_EQ(listing.logs.size(), 3);
+	auto restorable = co_await container->getRestoreSet(170);
+	ASSERT(restorable.present());
+	ASSERT_EQ(restorable.get().logs.size(), 3);
+	co_await container->deleteContainer();
 }
 
 // A bulkdump snapshot's data is an SST tree under bulkdump_data/<jobId>/, which expireData's file

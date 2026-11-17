@@ -125,6 +125,11 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <signal.h>
 /* Needed for gnu_dev_{major,minor} */
 #include <sys/sysmacros.h>
+/* Needed for ReadinessPoller and socketSendQueueBytes */
+#include <linux/sockios.h>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <sys/ioctl.h>
 #endif // __linux__
 
 #ifdef __FreeBSD__
@@ -155,6 +160,8 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <devstat.h>
 #include <kvm.h>
 #include <libutil.h>
+/* Needed for ReadinessPoller */
+#include <sys/event.h>
 #endif // __FreeBSD__
 
 #ifdef __APPLE__
@@ -173,6 +180,8 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <sys/sysctl.h>
 #include <sys/syslimits.h>
 #include <sys/uio.h>
+/* Needed for ReadinessPoller */
+#include <sys/event.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
@@ -2910,6 +2919,134 @@ void setCloseOnExec(int fd) {
 	}
 #endif
 }
+
+#ifdef __linux__
+
+ReadinessPoller::ReadinessPoller() {
+	pollFd = ::epoll_create1(EPOLL_CLOEXEC);
+	wakeFd = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+	// Level-triggered, and drained by wait(); a null tag marks it.
+	epoll_event ev{};
+	ev.events = EPOLLIN;
+	ev.data.ptr = nullptr;
+	if (pollFd < 0 || wakeFd < 0 || ::epoll_ctl(pollFd, EPOLL_CTL_ADD, wakeFd, &ev) != 0) {
+		for (int fd : { pollFd, wakeFd }) {
+			if (fd >= 0) {
+				::close(fd);
+			}
+		}
+		throw platform_error();
+	}
+}
+
+ReadinessPoller::~ReadinessPoller() {
+	::close(wakeFd);
+	::close(pollFd);
+}
+
+int ReadinessPoller::watch(int fd, void* tag) {
+	ASSERT(tag != nullptr);
+	epoll_event ev{};
+	// EPOLLERR and EPOLLHUP are always reported.
+	ev.events = EPOLLIN | EPOLLRDHUP | EPOLLET;
+	ev.data.ptr = tag;
+	return ::epoll_ctl(pollFd, EPOLL_CTL_ADD, fd, &ev) == 0 ? 0 : errno;
+}
+
+void ReadinessPoller::unwatch(int fd) {
+	// Kernels before 2.6.9 require a non-null event even for EPOLL_CTL_DEL.
+	epoll_event ev{};
+	[[maybe_unused]] int rc = ::epoll_ctl(pollFd, EPOLL_CTL_DEL, fd, &ev);
+}
+
+void ReadinessPoller::wait(int timeoutMs, std::vector<void*>& ready) {
+	// Descriptors beyond this batch stay ready in the kernel and are reported by the next call.
+	epoll_event events[128];
+	int n = ::epoll_wait(pollFd, events, 128, timeoutMs);
+	for (int i = 0; i < n; ++i) {
+		if (events[i].data.ptr != nullptr) {
+			ready.push_back(events[i].data.ptr);
+		} else {
+			uint64_t count;
+			[[maybe_unused]] auto rc = ::read(wakeFd, &count, sizeof(count));
+		}
+	}
+}
+
+void ReadinessPoller::wake() {
+	uint64_t one = 1;
+	[[maybe_unused]] auto rc = ::write(wakeFd, &one, sizeof(one));
+}
+
+int socketSendQueueBytes(int fd) {
+	int bytes = 0;
+	return ::ioctl(fd, SIOCOUTQ, &bytes) == 0 ? bytes : -1;
+}
+
+#elif defined(__APPLE__) || defined(__FreeBSD__)
+
+ReadinessPoller::ReadinessPoller() {
+	pollFd = ::kqueue();
+	if (pollFd < 0) {
+		throw platform_error();
+	}
+	setCloseOnExec(pollFd);
+	// wake() triggers this user event; EV_CLEAR resets it once reported.
+	struct kevent ev;
+	EV_SET(&ev, 0, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, nullptr);
+	if (::kevent(pollFd, &ev, 1, nullptr, 0, nullptr) != 0) {
+		::close(pollFd);
+		throw platform_error();
+	}
+}
+
+ReadinessPoller::~ReadinessPoller() {
+	::close(pollFd);
+}
+
+int ReadinessPoller::watch(int fd, void* tag) {
+	ASSERT(tag != nullptr);
+	// EV_CLEAR makes the read filter edge-triggered; hang-ups and errors are reported through it with EV_EOF.
+	struct kevent ev;
+	EV_SET(&ev, fd, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, tag);
+	return ::kevent(pollFd, &ev, 1, nullptr, 0, nullptr) == 0 ? 0 : errno;
+}
+
+void ReadinessPoller::unwatch(int fd) {
+	struct kevent ev;
+	EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, nullptr);
+	[[maybe_unused]] int rc = ::kevent(pollFd, &ev, 1, nullptr, 0, nullptr);
+}
+
+void ReadinessPoller::wait(int timeoutMs, std::vector<void*>& ready) {
+	timespec timeout{ timeoutMs / 1000, (timeoutMs % 1000) * 1000000L };
+	// Descriptors beyond this batch stay ready in the kernel and are reported by the next call.
+	struct kevent events[128];
+	int n = ::kevent(pollFd, nullptr, 0, events, 128, timeoutMs < 0 ? nullptr : &timeout);
+	for (int i = 0; i < n; ++i) {
+		if (events[i].filter == EVFILT_READ) {
+			ready.push_back(events[i].udata);
+		}
+	}
+}
+
+void ReadinessPoller::wake() {
+	struct kevent ev;
+	EV_SET(&ev, 0, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
+	[[maybe_unused]] int rc = ::kevent(pollFd, &ev, 1, nullptr, 0, nullptr);
+}
+
+int socketSendQueueBytes(int fd) {
+#ifdef __APPLE__
+	int bytes = 0;
+	socklen_t len = sizeof(bytes);
+	return ::getsockopt(fd, SOL_SOCKET, SO_NWRITE, &bytes, &len) == 0 ? bytes : -1;
+#else
+	return -1;
+#endif
+}
+
+#endif // __linux__
 
 } // namespace platform
 

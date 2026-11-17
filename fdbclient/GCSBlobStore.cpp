@@ -22,26 +22,12 @@
 #include "fdbclient/JSONDoc.h"
 #include "flow/Trace.h"
 
-GCSBlobStoreEndpoint::GCSBlobStoreEndpoint(std::string const& host,
-                                           std::string const& service,
-                                           Optional<std::string> const& proxyHost,
-                                           Optional<std::string> const& proxyPort,
+GCSBlobStoreEndpoint::GCSBlobStoreEndpoint(BlobStoreEndpointParams const& params,
                                            Optional<StringRef> const& creds,
-                                           std::string const& projectId,
-                                           BlobKnobs const& knobs,
-                                           HTTP::Headers extraHeaders,
-                                           Optional<std::string> const& serverSideEncryption,
-                                           Optional<std::string> const& proxyParameter)
-  : S3BlobStoreEndpoint(host,
-                        service,
+                                           std::string const& projectId)
+  : S3BlobStoreEndpoint(params,
                         "auto",
-                        proxyHost,
-                        proxyPort,
-                        Optional<StringRef>(), // Don't pass creds to S3 — we handle auth ourselves
-                        knobs,
-                        extraHeaders,
-                        serverSideEncryption,
-                        proxyParameter),
+                        Optional<StringRef>()), // Don't pass creds to S3 — we handle auth ourselves
     projectId(projectId) {
 	if (creds.present()) {
 		token = creds.get().toString();
@@ -182,9 +168,12 @@ TEST_CASE("/backup/gcs/fromString") {
 }
 
 TEST_CASE("/backup/gcs/setRequestHeaders") {
+	BlobStoreEndpointParams endpointParams;
+	endpointParams.host = "storage.googleapis.com";
+	endpointParams.service = "443";
 	// With token and projectId — all headers set
 	{
-		GCSBlobStoreEndpoint gcs("storage.googleapis.com", "443", {}, {}, "my-bearer-token"_sr, "my-project");
+		GCSBlobStoreEndpoint gcs(endpointParams, "my-bearer-token"_sr, "my-project");
 		HTTP::Headers headers;
 		gcs.setRequestHeaders("GET", "/bucket/object", headers);
 
@@ -195,7 +184,7 @@ TEST_CASE("/backup/gcs/setRequestHeaders") {
 
 	// Empty token — no Authorization header
 	{
-		GCSBlobStoreEndpoint gcs("storage.googleapis.com", "443", {}, {}, Optional<StringRef>(), "my-project");
+		GCSBlobStoreEndpoint gcs(endpointParams, Optional<StringRef>(), "my-project");
 		HTTP::Headers headers;
 		gcs.setRequestHeaders("PUT", "/bucket", headers);
 
@@ -206,7 +195,7 @@ TEST_CASE("/backup/gcs/setRequestHeaders") {
 
 	// Empty projectId — no x-goog-project-id header
 	{
-		GCSBlobStoreEndpoint gcs("storage.googleapis.com", "443", {}, {}, "tok"_sr, "");
+		GCSBlobStoreEndpoint gcs(endpointParams, "tok"_sr, "");
 		HTTP::Headers headers;
 		gcs.setRequestHeaders("GET", "/bucket/object", headers);
 
