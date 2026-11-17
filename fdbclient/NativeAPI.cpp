@@ -523,6 +523,31 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 	}
 }
 
+Optional<std::string> getClientTraceDirectory() {
+	return networkOptions.traceDirectory;
+}
+
+void initializeClientAuditTracing(Reference<IClusterConnectionRecord> connRecord, std::string const& directory) {
+	// Network must be created before initializing tracing
+	ASSERT(g_network && !g_network->isSimulated());
+
+	// Same address and options as the client trace file opened by initializeClientTracing.
+	Optional<NetworkAddress> localAddress;
+	if (connRecord) {
+		auto publicIP = connRecord->getConnectionString().determineLocalSourceIP();
+		localAddress = NetworkAddress(publicIP, ::getpid());
+	}
+	openAuditTraceFile(localAddress,
+	                   networkOptions.traceRollSize,
+	                   networkOptions.traceMaxLogsSize,
+	                   directory,
+	                   "trace",
+	                   networkOptions.traceLogGroup,
+	                   networkOptions.traceFileIdentifier,
+	                   networkOptions.tracePartialFileSuffix,
+	                   networkOptions.traceFormat);
+}
+
 // Creates a database object that represents a connection to a cluster
 // This constructor uses a preallocated DatabaseContext that may have been created
 // on another thread
