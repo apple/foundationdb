@@ -7722,6 +7722,13 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 	BackupConfig config = *this;
 	auto type = co_await config.mutationLogType().get(tr);
 	auto dispatch = config.latestLogEndVersion().get(tr);
+	if (schema == BackupStatusSchema::V2 &&
+	    (type == MutationLogType::PARTITIONED_LOG || type == MutationLogType::RANGE_PARTITIONED_LOG)) {
+		// Both worker modes poll the dispatcher independently of the files saved for this backup.
+		auto worker = co_await config.latestBackupWorkerSavedVersion().get(tr);
+		auto cursor = co_await dispatch;
+		co_return LogProgress{ type, {}, {}, true, worker, cursor };
+	}
 	KeyBackedProperty<bool> requested = config.configSpace.pack("partitionedLogEnabled"_sr);
 	if (schema == BackupStatusSchema::V2 && !type.present() && (co_await requested.getD(tr))) {
 		Optional<Version> worker;

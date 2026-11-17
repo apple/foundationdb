@@ -346,11 +346,14 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	config.mutationLogType().set(tr, MutationLogType::DEFAULT);
 	logs = co_await status();
 	ASSERT(logs.type == MutationLogType::DEFAULT && logs.exclusiveLogEnd == 402 && logs.restorable == 401);
-	config.mutationLogType().set(tr, MutationLogType::PARTITIONED_LOG);
 	config.latestBackupWorkerSavedVersion().set(tr, 301);
-	logs = co_await status();
-	ASSERT(logs.type == MutationLogType::PARTITIONED_LOG &&
-	       logs.restorable == (co_await config.getLatestRestorableVersion(tr)));
+	for (auto type : { MutationLogType::PARTITIONED_LOG, MutationLogType::RANGE_PARTITIONED_LOG }) {
+		config.mutationLogType().set(tr, type);
+		logs = co_await status();
+		ASSERT(logs.type == type && logs.logDispatchCursor == 402 && !logs.exclusiveLogEnd.present());
+		ASSERT(logs.sharedWorkerVersion == 301 && logs.sharedWorkerLogEnd() == 302);
+		ASSERT(logs.restorePointUnknown && !logs.restorable.present());
+	}
 }
 } // namespace
 
