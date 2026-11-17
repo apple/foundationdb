@@ -1069,12 +1069,8 @@ static void printRestoreUsage(bool devhelp) {
 	       "original database\n");
 	printf("                 is only needed to convert a --timestamp argument to a database version.\n");
 	printf("  --user-data\n"
-	       "                  Restore only the user keyspace. This option should NOT be used alongside "
-	       "--system-metadata (below) and CANNOT be used alongside other specified key ranges.\n");
-	printf(
-	    "  --system-metadata\n"
-	    "                 Restore only the relevant system keyspace. This option "
-	    "should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.\n");
+	       "                  Restore only the user keyspace. This option CANNOT be used alongside other specified "
+	       "key ranges.\n");
 
 	if (devhelp) {
 #ifdef _WIN32
@@ -4261,8 +4257,6 @@ int main(int argc, char* argv[]) {
 		if (restoreUserKeys) {
 			backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
 		} else if (restoreSystemKeys) {
-			// The ranges this selected belonged to tenants and blob granules, both since removed (#12583,
-			// #12435), so it can only produce an empty range list and trip the assert in runRestore.
 			fprintf(stderr,
 			        "ERROR: --system-metadata selects no key ranges in this version: the tenant and blob granule "
 			        "system ranges it covered have been removed. Use --user-data, or name ranges with -k.\n");
