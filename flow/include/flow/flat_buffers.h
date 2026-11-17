@@ -64,6 +64,11 @@ inline int RightAlign(int offset, int alignment, int* padding) {
 	return aligned;
 }
 
+namespace detail {
+// Throws serialization_failed. |reason| must be a string literal.
+[[noreturn]] void flat_buffer_load_failed(const char* reason);
+} // namespace detail
+
 template <class... Ts>
 struct struct_like_traits<std::tuple<Ts...>> : std::true_type {
 	using Member = std::tuple<Ts...>;
@@ -174,6 +179,10 @@ struct vector_like_traits<std::array<T, N>> : std::true_type {
 	// enough memory up front to hold |size| elements.
 	template <class Context>
 	static insert_iterator insert(Vec& v, size_t s, Context&) {
+		// The count comes from the wire and the array cannot grow.
+		if (s != N) {
+			detail::flat_buffer_load_failed("array length does not match its capacity");
+		}
 		return v.begin();
 	}
 
@@ -365,9 +374,6 @@ T interpret_as(const uint8_t* current) {
 	memcpy(&t, current, sizeof(t));
 	return t;
 }
-
-// Throws serialization_failed. |reason| must be a string literal.
-[[noreturn]] void flat_buffer_load_failed(const char* reason);
 
 // Loads treat the buffer as untrusted when the context can bound it. A context without checkRange() is for buffers
 // the caller produced itself.

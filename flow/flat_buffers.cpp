@@ -721,4 +721,47 @@ TEST_CASE("/flow/FlatBuffers/RejectsWrongFileIdentifier") {
 	return Void();
 }
 
+struct ByteVector {
+	std::vector<uint8_t> v;
+	template <class Archiver>
+	void serialize(Archiver& ar) {
+		serializer(ar, v);
+	}
+};
+
+struct ByteArray {
+	std::array<uint8_t, 16> a{};
+	template <class Archiver>
+	void serialize(Archiver& ar) {
+		serializer(ar, a);
+	}
+};
+
+TEST_CASE("/flow/FlatBuffers/RejectsWrongArrayLength") {
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+	// A std::vector and a std::array have the same wire format, so a vector stands in for a hostile peer.
+	for (size_t n : { 0, 15, 16, 17, 4096 }) {
+		ByteVector src;
+		src.v.assign(n, 0xab);
+		ObjectWriter writer(Unversioned());
+		writer.serialize(untrustedFileIdentifier, src);
+		Standalone<StringRef> msg(writer.toStringRef());
+
+		::Arena arena;
+		ByteArray dst;
+		try {
+			ArenaObjectReader reader(arena, msg, AssumeVersion(currentProtocolVersion()));
+			reader.deserialize(untrustedFileIdentifier, dst);
+			ASSERT_EQ(n, dst.a.size());
+			ASSERT(std::all_of(dst.a.begin(), dst.a.end(), [](uint8_t b) { return b == 0xab; }));
+		} catch (Error& e) {
+			ASSERT_NE(n, dst.a.size());
+			ASSERT_EQ(e.code(), error_code_serialization_failed);
+		}
+	}
+	return Void();
+}
+
 } // namespace unit_tests
