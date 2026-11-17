@@ -44,7 +44,7 @@ void swapWithThreadLocalGlobal(std::vector<int>& writeToOffsets) {
 void flat_buffer_load_failed(const char* reason) {
 	// In simulation a malformed buffer means a writer or the bounds checks are wrong, not that a peer is hostile.
 	ASSERT(!g_network || !g_network->isSimulated());
-	TraceEvent(SevWarnAlways, "MalformedObjectBuffer").suppressFor(1.0).detail("Reason", reason);
+	TraceEvent(SevWarnAlways, "SerializationFailed").suppressFor(1.0).detail("Reason", reason);
 	throw serialization_failed();
 }
 

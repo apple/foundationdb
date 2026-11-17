@@ -82,14 +82,11 @@ public:
 			bool expectMismatch = mProtocolVersion.get() >= ProtocolVersion(0x0FDB00B070000000LL) &&
 			                      currentProtocolVersion() < ProtocolVersion(0x0FDB00B070000000LL);
 			{
-				TraceEvent te(expectMismatch ? SevInfo : SevError, "MismatchedFileIdentifier");
-				if (expectMismatch) {
-					te.suppressFor(1.0);
-				}
-				te.detail("Expected", file_identifier).detail("Read", read_file_identifier(data));
+				TraceEvent te(expectMismatch ? SevInfo : SevWarnAlways, "MismatchedFileIdentifier");
+				te.suppressFor(1.0).detail("Expected", file_identifier).detail("Read", read_file_identifier(data));
 			}
 			if (!expectMismatch) {
-				throw serialization_failed();
+				detail::flat_buffer_load_failed("file identifier mismatch");
 			}
 		}
 		load_members(data, context, items...);

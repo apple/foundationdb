@@ -366,11 +366,11 @@ T interpret_as(const uint8_t* current) {
 	return t;
 }
 
-// Throws serialization_failed. |reason| must be a string literal.
+// Throws serialization_failed, after asserting in simulation where a malformed buffer is a bug. |reason| must be a
+// string literal.
 [[noreturn]] void flat_buffer_load_failed(const char* reason);
 
-// Loads treat the buffer as untrusted when the context can bound it. A context without checkRange() is for buffers
-// the caller produced itself.
+// Bounds-checks only when the context can bound the buffer; LoadContext::checkRange is a no-op for ObjectReader.
 template <class Context>
 void check_range(const Context& context, const uint8_t* p, size_t len) {
 	if constexpr (requires { context.checkRange(p, len); }) {
