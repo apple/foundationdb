@@ -356,6 +356,13 @@ if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${TEST_SCRATCH_DIR}" 9 "$
 fi
 log "FDB cluster is up"
 
+# BulkLoad needs encoded shard metadata and range locking.
+if ! "${build_dir}/bin/fdbcli" -C "${TEST_SCRATCH_DIR}/loopback_cluster/fdb.cluster" \
+    --exec "configure shard_metadata_format=encoded range_lock=enabled"; then
+  err "Failed to configure shard_metadata_format and range_lock"
+  exit 1
+fi
+
 # Run tests.
 test="test_basic_bulkdump_and_bulkload"
 url="blobstore://${host}/${url_path_prefix}/${test}?${query_str}"

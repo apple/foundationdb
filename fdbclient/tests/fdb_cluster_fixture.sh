@@ -105,8 +105,7 @@ function start_fdb_cluster {
   local local_scratch_dir="${3}"
   local ss_count="${4}"
   shift 4
-  #TODO(BulkLoad): enable_read_lock_on_range
-  local knobs="--knob_shard_encode_location_metadata=true"
+  local knobs=""
   if (( $# > 0 )); then
     for item in "${@}"; do
       knobs="${knobs} ${item}"
