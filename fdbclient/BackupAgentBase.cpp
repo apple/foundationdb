@@ -257,6 +257,9 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	BackupConfig config(UID(1, 2));
 	config.clear(tr);
+	const auto registration = encodeBackupStartedValue({ { config.getUid(), 80 } });
+	tr->set(backupStartedKey, registration);
+	tr->set(lastEpochEndKey, BinaryWriter::toValue<Version>(79, Unversioned()));
 	config.firstSnapshotEndVersion().set(tr, 100);
 	config.latestLogEndVersion().set(tr, 121);
 	UID destination(5, 6);
@@ -297,6 +300,11 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	logs = co_await status();
 	ASSERT(logs.exclusiveLogEnd == 302 && logs.restorable == 301 && !logs.restorePointUnknown);
 
+	tr->set(lastEpochEndKey, BinaryWriter::toValue<Version>(290, Unversioned()));
+	logs = co_await status();
+	ASSERT(logs.type == MutationLogType::PARTITIONED_LOG && logs.sharedWorkerVersion == 301);
+	ASSERT(logs.restorePointUnknown && !logs.restorable.present() && !logs.exclusiveLogEnd.present());
+
 	// Ordinary capture can belong to this backup after an interrupted start, or to another
 	// backup sharing the destination. Even copied empty files cannot distinguish those histories.
 	config.startMutationLogs(tr, KeyRangeRef("a"_sr, "z"_sr), dest);
@@ -321,11 +329,12 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	       !logs.exclusiveLogEnd.present());
 	config.latestBackupWorkerSavedVersion().set(tr, 250);
 	logs = co_await status();
-	ASSERT(logs.exclusiveLogEnd == 251 && logs.restorable == 250);
+	ASSERT(logs.sharedWorkerVersion == 250 && logs.restorePointUnknown && !logs.restorable.present());
 
 	// A completed backup has released its destination. The remaining counters cannot tell
 	// whether 8.0 finished the start task and installed ordinary capture rules.
 	tr->clear(config.getUidAsKey().withPrefix(dest).withPrefix(backupLatestVersionsPrefix));
+	tr->set(backupStartedKey, encodeBackupStartedValue({ { UID(9, 1), 100 } }));
 	config.incrementalBackupOnly().clear(tr);
 	config.firstSnapshotEndVersion().set(tr, 301);
 	logs = co_await status();
@@ -340,6 +349,9 @@ TEST_CASE("/backup/status/legacyPartitionedLog") {
 	ASSERT(logs.type == MutationLogType::PARTITIONED_LOG && logs.sharedWorkerVersion == 300);
 	ASSERT(!logs.exclusiveLogEnd.present() && !logs.restorable.present());
 	config.latestBackupWorkerSavedVersion().set(tr, 301);
+	logs = co_await status();
+	ASSERT(logs.restorePointUnknown && logs.sharedWorkerVersion == 301 && !logs.restorable.present());
+	tr->set(backupStartedKey, registration);
 	logs = co_await status();
 	ASSERT(logs.exclusiveLogEnd == 302 && logs.restorable == 301);
 	ASSERT(!(co_await config.getLatestRestorableVersion(tr)).present());

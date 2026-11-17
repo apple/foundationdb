@@ -7756,14 +7756,41 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 			co_return LogProgress{ {}, {}, {}, logsOnly || firstSnapshot.present(), worker, dispatchEnd };
 		}
 	}
-	// A shared watermark can predate this backup. The first completed snapshot is a
-	// per-backup lower bound. Logs-only backups keep their initial snapshot begin version.
+	// Incremental restore prefers ordinary files. An upgraded legacy dispatcher can write
+	// such files even when only the tagged stream captured mutations.
+	if (legacyWorkers && logsOnly) {
+		auto dispatchEnd = co_await config.latestLogEndVersion().get(tr);
+		co_return LogProgress{ MutationLogType::PARTITIONED_LOG, {}, {}, true, worker, dispatchEnd };
+	}
 	auto floor = firstSnapshot;
 	if (logsOnly) {
+		// Logs-only backups keep the begin version assigned after worker registration.
 		floor = co_await config.snapshotBeginVersion().get(tr);
 	}
+	LogProgress unconfirmed{ MutationLogType::PARTITIONED_LOG, {}, {}, logsOnly || firstSnapshot.present(), worker };
 	if (!worker.present() || !floor.present() || worker.get() < floor.get()) {
-		co_return LogProgress{ MutationLogType::PARTITIONED_LOG, {}, {}, logsOnly || firstSnapshot.present(), worker };
+		co_return unconfirmed;
+	}
+	// Workers observe deregistration independently. A shared watermark may still be
+	// published for a stopped backup after one partition stopped writing its files.
+	auto registered = co_await tr->get(backupStartedKey);
+	if (!registered.present()) {
+		co_return unconfirmed;
+	}
+	auto backups = decodeBackupStartedValue(registered.get());
+	auto current =
+	    std::find_if(backups.begin(), backups.end(), [&](const auto& entry) { return entry.first == config.getUid(); });
+	if (current == backups.end() || current->second > floor.get()) {
+		co_return unconfirmed;
+	}
+	if (legacyWorkers) {
+		// Cleanup on 8.0 can disable workers while a legacy backup is registered. A later
+		// epoch can resume publishing without files from the disabled epoch.
+		auto previousEpoch = co_await tr->get(lastEpochEndKey);
+		if (previousEpoch.present() &&
+		    BinaryReader::fromStringRef<Version>(previousEpoch.get(), Unversioned()) >= current->second) {
+			co_return unconfirmed;
+		}
 	}
 	Version end = worker.get() + 1; // Workers save an inclusive version.
 	auto restorable = co_await config.getLatestRestorableVersion(tr, Optional<Version>(end));
