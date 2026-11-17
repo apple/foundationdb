@@ -19,7 +19,7 @@ When a user wants to start a bulkload job, the user provides:
 BulkLoad requires the following server knobs to be enabled:
 
 - ``--knob_shard_encode_location_metadata=1``: Enables shard-aware location metadata
-- ``--knob_enable_read_lock_on_range=1``: Enables exclusive range locking during load operations
+- Range locking, either ``configure range_lock=enabled`` or ``--knob_enable_read_lock_on_range=1`` while that configuration is unset: Enables exclusive range locking during load operations. Submitting a job while range locking is not enabled fails with ``range_lock_disabled``.
 
 **Input File Structure:**
 BulkLoad expects the input files to be organized as produced by :doc:`BulkDump <bulkdump>`.

@@ -393,7 +393,7 @@ struct ProxyCommitData {
 	// So, if the version vector is enabled, the RangeLock is automatically disabled
 	// RangeLock feature currently rely on processing private mutations in commit proxy
 	// So, if PROXY_USE_RESOLVER_PRIVATE_MUTATIONS is on, the RangeLock is automatically disabled.
-	bool rangeLockEnabled() {
+	bool rangeLockEnabled() const {
 		return rangeLockConfig.orDefault(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE) &&
 		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR && !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST;
 	}

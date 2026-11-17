@@ -375,13 +375,12 @@ unset, commit proxies fall back to the ``ENABLE_READ_LOCK_ON_RANGE`` knob
 (default ``false``); an explicit value overrides the knob. Like any other
 configuration change, setting it triggers a recovery and takes effect when
 the new commit proxies are recruited, with no process restarts. Turning
-it on stores nothing new until a lock is taken. ``configure range_lock=disabled`` is refused while any lock is held.
+it on stores nothing new until a lock is taken. While range locking is not
+enabled, taking a lock fails with ``range_lock_disabled``, and
+``configure range_lock=disabled`` is refused while any lock is held.
 
-While range locking is disabled, commit proxies do not track lock changes
-in their transaction state. A lock taken while it is disabled is not
-enforced after it is enabled until the lock is taken again, and a lock
-released while it is disabled can still be enforced after it is enabled.
-Release all locks before turning it off, and take locks only after it is on.
+Commit proxies do not track lock changes while range locking is disabled, so
+a lock released then would be enforced again once it is enabled.
 
 consistencyscan
 ----------------

@@ -843,12 +843,14 @@ struct RangeLocking : TestWorkload {
 
 WorkloadFactory<RangeLocking> RangeLockingFactory;
 
-// Drives `configure range_lock=...`: the setting is refused while a lock is held.
+// Drives `configure range_lock=...`: the setting is refused while a lock is held, and taking a lock fails
+// atomically with range_lock_disabled while range locking is off.
 struct RangeLockConfigGuard : TestWorkload {
 	static constexpr auto NAME = "RangeLockConfigGuard";
 
 	const RangeLockOwnerName owner = "rangeLockConfigGuardOwner";
 	const KeyRange range = KeyRangeRef("rangeLockConfigGuard/a"_sr, "rangeLockConfigGuard/z"_sr);
+	const Key key = "rangeLockConfigGuard/m"_sr;
 
 	explicit RangeLockConfigGuard(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
@@ -867,21 +869,85 @@ struct RangeLockConfigGuard : TestWorkload {
 		}
 	}
 
+	// A configuration change takes effect when the recovery it triggers completes, so keep trying until the
+	// commit proxies behave as requested.
+	Future<Void> waitUntilTakeBehaves(Database cx, bool expectRejected) {
+		for (int attempt = 0; attempt < 200; attempt++) {
+			bool rejected = false;
+			try {
+				co_await takeExclusiveReadLockOnRange(cx, range, owner);
+			} catch (Error& e) {
+				if (e.code() != error_code_range_lock_disabled) {
+					throw;
+				}
+				rejected = true;
+			}
+			if (!rejected) {
+				co_await releaseExclusiveReadLockOnRange(cx, range, owner);
+			}
+			if (rejected == expectRejected) {
+				co_return;
+			}
+			co_await delay(1.0);
+		}
+		ASSERT(false);
+	}
+
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) {
 			co_return;
 		}
 		co_await registerRangeLockOwner(cx, owner, "range lock config guard");
 
-		// Range locking was enabled by an earlier test phase, so the proxies enforce this lock.
+		ConfigurationResult res = co_await configure(cx, "range_lock=enabled");
+		ASSERT(res == ConfigurationResult::SUCCESS);
+		co_await waitUntilTakeBehaves(cx, false);
 		co_await takeExclusiveReadLockOnRange(cx, range, owner);
 
-		ConfigurationResult res = co_await configure(cx, "range_lock=disabled");
+		res = co_await configure(cx, "range_lock=disabled");
 		ASSERT(res == ConfigurationResult::RANGE_LOCKS_HELD);
 
 		co_await releaseExclusiveReadLockOnRange(cx, range, owner);
 		res = co_await configure(cx, "range_lock=disabled");
 		ASSERT(res == ConfigurationResult::SUCCESS);
+		co_await waitUntilTakeBehaves(cx, true);
+
+		// A transaction that takes a lock while it is off is rejected as a whole, as BulkLoad submission is.
+		bool rejected = false;
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.set(key, "written"_sr);
+				co_await takeExclusiveReadLockOnRange(&tr, range, owner);
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_range_lock_disabled) {
+					rejected = true;
+					break;
+				}
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+		ASSERT(rejected);
+		while (true) {
+			Error readErr;
+			Transaction check(cx);
+			try {
+				Optional<Value> value = co_await check.get(key);
+				ASSERT(!value.present());
+				break;
+			} catch (Error& e) {
+				readErr = e;
+			}
+			co_await check.onError(readErr);
+		}
+
+		res = co_await configure(cx, "range_lock=enabled");
+		ASSERT(res == ConfigurationResult::SUCCESS);
+		co_await waitUntilTakeBehaves(cx, false);
 	}
 };
 

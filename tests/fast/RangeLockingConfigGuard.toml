@@ -1,4 +1,5 @@
-# `configure range_lock=disabled` is refused while a lock is held and accepted once it is released.
+# `configure range_lock=disabled` is refused while a lock is held. While range locking is off, taking a
+# lock fails with range_lock_disabled and the rest of the transaction is not committed.
 [configuration]
 
 [[knobs]]
@@ -6,16 +7,6 @@ enable_read_lock_on_range = false
 enable_version_vector = false
 enable_version_vector_tlog_unicast = false
 enable_version_vector_reply_recovery = false
-
-[[test]]
-testTitle = 'RangeLockingConfigGuardEnable'
-useDB = true
-
-    [[test.workload]]
-    testName = 'ChangeConfig'
-    configMode = 'range_lock=enabled'
-    minDelayBeforeChange = 1.0
-    maxDelayBeforeChange = 3.0
 
 [[test]]
 testTitle = 'RangeLockingConfigGuard'

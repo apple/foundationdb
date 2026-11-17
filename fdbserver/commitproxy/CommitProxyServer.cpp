@@ -86,6 +86,9 @@ struct ResolutionRequestBuilder {
 	// -> read_conflict_range's original index in the commitTransactionRef
 	std::vector<std::vector<std::vector<int>>> txReadConflictRangeIndexMap;
 
+	// Transactions that take a range lock while range locking is not enabled, rejected after resolution.
+	std::vector<int> rangeLockDisabledTransactions;
+
 	ResolutionRequestBuilder(ProxyCommitData* self,
 	                         Version version,
 	                         Version prevVersion,
@@ -181,6 +184,7 @@ struct ResolutionRequestBuilder {
 		ASSERT(transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768);
 
 		bool isTXNStateTransaction = false;
+		bool takesRangeLockWhileDisabled = false;
 		for (auto& m : trIn.mutations) {
 			DEBUG_MUTATION("AddTr", ver, m, self->dbgid).detail("Idx", transactionNumberInBatch);
 			if (m.type == MutationRef::SetVersionstampedKey) {
@@ -191,10 +195,18 @@ struct ResolutionRequestBuilder {
 			}
 			if (isMetadataMutation(m)) {
 				isTXNStateTransaction = true;
+				// A lock value written while locking is off would be silently ignored by the proxies.
+				if (m.type == MutationRef::SetValue && m.param1.startsWith(rangeLockPrefix) &&
+				    !self->rangeLockEnabled() && !m.param2.empty() && !decodeRangeLockStateSet(m.param2).empty()) {
+					takesRangeLockWhileDisabled = true;
+				}
 				auto& tr = getOutTransaction(0, trIn.read_snapshot);
 				tr.mutations.push_back(requests[0].arena, m);
 				tr.lock_aware = trRequest.isLockAware();
 			}
+		}
+		if (takesRangeLockWhileDisabled) {
+			rangeLockDisabledTransactions.push_back(transactionNumberInBatch);
 		}
 		if (isTXNStateTransaction && !trRequest.isLockAware()) {
 			// This mitigates https://github.com/apple/foundationdb/issues/3647. Since this transaction is not lock
@@ -533,6 +545,7 @@ struct CommitBatchContext {
 	int64_t maxTransactionBytes;
 	std::vector<std::vector<int>> transactionResolverMap;
 	std::vector<std::vector<std::vector<int>>> txReadConflictRangeIndexMap;
+	std::vector<int> rangeLockDisabledTransactions;
 
 	Future<Void> releaseDelay;
 	Future<Void> releaseFuture;
@@ -977,6 +990,7 @@ Future<Void> getResolution(CommitBatchContext* self) {
 	self->transactionResolverMap.swap(requests.transactionResolverMap);
 	// Used to report conflicting keys
 	self->txReadConflictRangeIndexMap.swap(requests.txReadConflictRangeIndexMap);
+	self->rangeLockDisabledTransactions.swap(requests.rangeLockDisabledTransactions);
 
 	self->releaseFuture = releaseResolvingAfter(pProxyCommitData, self->releaseDelay, self->localBatchNumber);
 
@@ -1153,6 +1167,19 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	}
 	for (int r = 0; r < self->resolution.size(); r++)
 		ASSERT(self->nextTr[r] == self->resolution[r].committed.size());
+
+	// Not with resolver private mutations: the resolvers apply the metadata of every transaction they committed, so
+	// demoting one here would leave them out of step with this proxy. That mode does not support range locks.
+	if (!SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+		for (int t : self->rangeLockDisabledTransactions) {
+			if (self->committed[t] == ConflictBatchStatus::TransactionCommitted) {
+				self->committed[t] = ConflictBatchStatus::TransactionLockReject;
+				self->trs[t].reply.sendError(range_lock_disabled());
+				TraceEvent(SevWarn, "RangeLockTakeRejectedFeatureOff", pProxyCommitData->dbgid)
+				    .detail("Configured", pProxyCommitData->rangeLockConfig.present());
+			}
+		}
+	}
 
 	pProxyCommitData->logAdapter->setNextVersion(self->commitVersion);
 
@@ -2825,6 +2852,7 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 		pContext->pCommitData->rangeLockConfig =
 		    rangeLockValue.get() == StringRef(DatabaseConfiguration::RANGE_LOCK_ENABLED);
 	}
+	int ignoredRangeLockRows = 0;
 	if (pContext->pCommitData->rangeLockEnabled()) {
 		pContext->pCommitData->rangeLock = std::make_shared<RangeLock>(pContext->pCommitData);
 		TraceEvent(SevInfo, "CommitProxyRangeLockEnabled", pContext->pCommitData->dbgid);
@@ -2879,6 +2907,8 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 					ASSERT(pContext->pCommitData->rangeLock != nullptr);
 					Key keyInsert = kv.key.removePrefix(rangeLockPrefix);
 					pContext->pCommitData->rangeLock->initKeyPoint(keyInsert, kv.value);
+				} else if (!kv.value.empty() && !decodeRangeLockStateSet(kv.value).empty()) {
+					++ignoredRangeLockRows;
 				}
 			} else {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
@@ -2903,6 +2933,12 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 		                       /* popVersion= */ 0,
 		                       /* initialCommit= */ true,
 		                       /* provisionalCommitProxy */ pContext->pCommitData->provisional);
+	}
+
+	if (ignoredRangeLockRows > 0) {
+		TraceEvent(SevWarnAlways, "RangeLockRowsIgnoredFeatureOff", pContext->pCommitData->dbgid)
+		    .detail("Rows", ignoredRangeLockRows)
+		    .detail("Configured", pContext->pCommitData->rangeLockConfig.present());
 	}
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
