@@ -2583,7 +2583,14 @@ TEST_CASE("special-key-space set transaction ID after write") {
 	}
 }
 
+static void wait_for_client_connection() {
+	// The external client may still be connecting. Keep the retrying read in a separate
+	// transaction so tracing options can be set before any reads in the test transaction.
+	get_value(key(""), /* snapshot */ true, {});
+}
+
 TEST_CASE("special-key-space decimal transaction ID") {
+	wait_for_client_connection();
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
 	constexpr std::string_view idKey = "\xff\xff/tracing/transaction_id";
@@ -2601,22 +2608,38 @@ TEST_CASE("special-key-space decimal transaction ID") {
 }
 
 TEST_CASE("special-key-space invalid tracing and maintenance values") {
+	wait_for_client_connection();
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-	SUBCASE("out-of-range decimal transaction ID") {
-		tr.set("\xff\xff/tracing/transaction_id", "18446744073709551616");
+	std::string_view expectedDetail;
+	SUBCASE("invalid tracing ID") {
+		constexpr std::string_view idKey = "\xff\xff/tracing/transaction_id";
+		expectedDetail = "transaction_id";
+		SUBCASE("out-of-range decimal transaction ID") {
+			tr.set(idKey, "18446744073709551616");
+		}
+		SUBCASE("non-hexadecimal digit in transaction ID") {
+			tr.set(idKey, "0000000000000001000000000000000g");
+		}
+		SUBCASE("zero decimal transaction ID") {
+			tr.set(idKey, "0");
+		}
+		SUBCASE("zero hexadecimal transaction ID") {
+			tr.set(idKey, "00000000000000000000000000000000");
+		}
 	}
-	SUBCASE("non-hexadecimal digit in transaction ID") {
-		tr.set("\xff\xff/tracing/transaction_id", "0000000000000001000000000000000g");
-	}
-	SUBCASE("non-numeric maintenance duration") {
-		tr.set("\xff\xff/management/maintenance/zone1", "abc");
-	}
-	SUBCASE("non-finite maintenance duration") {
-		tr.set("\xff\xff/management/maintenance/zone1", "nan");
-	}
-	SUBCASE("maintenance duration exceeds the version range") {
-		tr.set("\xff\xff/management/maintenance/zone1", "1e30");
+	SUBCASE("invalid maintenance duration") {
+		constexpr std::string_view zoneKey = "\xff\xff/management/maintenance/zone1";
+		expectedDetail = "duration";
+		SUBCASE("non-numeric maintenance duration") {
+			tr.set(zoneKey, "abc");
+		}
+		SUBCASE("non-finite maintenance duration") {
+			tr.set(zoneKey, "nan");
+		}
+		SUBCASE("maintenance duration exceeds the version range") {
+			tr.set(zoneKey, "1e30");
+		}
 	}
 	auto commit = tr.commit();
 	REQUIRE(wait_future(commit) == error_code_special_keys_api_failure);
@@ -2626,8 +2649,13 @@ TEST_CASE("special-key-space invalid tracing and maintenance values") {
 	const uint8_t* value;
 	int length;
 	fdb_check(message.get(&present, &value, &length));
-	CHECK(present);
-	CHECK(length > 0);
+	REQUIRE(present);
+	rapidjson::Document diagnostic;
+	diagnostic.Parse(reinterpret_cast<const char*>(value), length);
+	REQUIRE(diagnostic.IsObject());
+	REQUIRE(diagnostic.HasMember("message"));
+	REQUIRE(diagnostic["message"].IsString());
+	CHECK(std::string_view(diagnostic["message"].GetString()).find(expectedDetail) != std::string_view::npos);
 }
 
 TEST_CASE("special-key-space disable tracing") {

@@ -1765,11 +1765,11 @@ void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, 
 
 	if (key.endsWith(kTracingTransactionIdKey)) {
 		auto id = parseTracingTransactionId(value.toStringView());
-		if (!id.present()) {
+		if (!id.present() || !id.get().isValid()) {
 			ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
 			    false,
 			    "configure trace",
-			    "transaction_id must be an unsigned decimal 64-bit integer or 32 hex digits"));
+			    "transaction_id must be nonzero and specified as an unsigned 64-bit decimal integer or 32 hex digits"));
 			ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
 			return;
 		}
@@ -2566,6 +2566,28 @@ Future<RangeResult> MaintenanceImpl::getRange(ReadYourWritesTransaction* ryw,
 	return MaintenanceGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
+static Optional<Version> maintenanceEndVersion(Version readVersion, double seconds) {
+	constexpr Version maxVersion = std::numeric_limits<Version>::max();
+	const double duration = seconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+	if (!(duration >= 0 && duration < static_cast<double>(maxVersion))) {
+		return {};
+	}
+	const Version delta = static_cast<Version>(duration);
+	if (readVersion > maxVersion - delta) {
+		return {};
+	}
+	return readVersion + delta;
+}
+
+TEST_CASE("/fdbclient/SpecialKeySpace/MaintenanceEndVersion") {
+	constexpr Version maxVersion = std::numeric_limits<Version>::max();
+	const Version lastStart = maxVersion - CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+	auto end = maintenanceEndVersion(lastStart, 1.0);
+	ASSERT(end.present() && end.get() == maxVersion);
+	ASSERT(!maintenanceEndVersion(lastStart + 1, 1.0).present());
+	return Void();
+}
+
 // Commit the change to healthZoneKey
 // We do not allow more than one zone to be set in maintenance in one transaction
 // In addition, if the zoneId now is 'ignoreSSFailuresZoneString',
@@ -2618,16 +2640,13 @@ static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWritesTransa
 			    "The specified maintenance time " + boost::lexical_cast<std::string>(seconds) + " is a negative value";
 			co_return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
 		} else {
-			const Version readVersion = ryw->getTransaction().getReadVersion().get();
-			const double duration = seconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
-			if (!(duration < static_cast<double>(std::numeric_limits<Version>::max())) ||
-			    static_cast<Version>(duration) > std::numeric_limits<Version>::max() - readVersion) {
+			auto endVersion = maintenanceEndVersion(ryw->getTransaction().getReadVersion().get(), seconds);
+			if (!endVersion.present()) {
 				co_return Optional<std::string>(ManagementAPIError::toJsonString(
 				    false, "maintenance", "Maintenance duration must give a representable end version"));
 			}
 			TraceEvent(SevDebug, "SKSMaintenanceSet").detail("ZoneId", zoneId.toString());
-			ryw->getTransaction().set(healthyZoneKey,
-			                          healthyZoneValue(zoneId, readVersion + static_cast<Version>(duration)));
+			ryw->getTransaction().set(healthyZoneKey, healthyZoneValue(zoneId, endVersion.get()));
 		}
 	}
 	co_return Optional<std::string>();
