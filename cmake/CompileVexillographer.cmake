@@ -13,6 +13,7 @@ if(NOT DEFINED FDB_USE_CSHARP_TOOLS)
   set(FDB_USE_CSHARP_TOOLS TRUE)
 endif()
 set(VEXILLOGRAPHER_COMMAND "")
+set(VEXILLOGRAPHER_USES_CSHARP TRUE)
 
 if(WIN32 AND FDB_USE_CSHARP_TOOLS)
   add_executable(vexillographer ${VEXILLOGRAPHER_SRCS})
@@ -34,17 +35,19 @@ elseif(FDB_USE_CSHARP_TOOLS AND CSHARP_TOOLCHAIN_FOUND)
       DEPENDS ${VEXILLOGRAPHER_SRCS}
       COMMENT "Compile Vexillographer")
     add_custom_target(vexillographer DEPENDS ${VEXILLOGRAPHER_EXE})
-    set(VEXILLOGRAPHER_DEPENDS vexillographer)
+    # Depend on the vexillographer executable too, so generated files are re-created when it changes.
+    set(VEXILLOGRAPHER_DEPENDS vexillographer ${VEXILLOGRAPHER_EXE})
     set(VEXILLOGRAPHER_COMMAND ${MONO_EXECUTABLE} ${VEXILLOGRAPHER_EXE})
   else()
     dotnet_build(${VEXILLOGRAPHER_CSPROJ} SOURCE ${VEXILLOGRAPHER_SRCS})
     message(STATUS "Generated executable: ${vexillographer_EXECUTABLE_PATH}")
     set(VEXILLOGRAPHER_EXE ${vexillographer_EXECUTABLE_PATH})
     set(VEXILLOGRAPHER_COMMAND ${dotnet_EXECUTABLE} ${vexillographer_EXECUTABLE_PATH})
-    set(VEXILLOGRAPHER_DEPENDS ${vexillographer_EXECUTABLE_PATH})
+    set(VEXILLOGRAPHER_DEPENDS vexillographer ${vexillographer_EXECUTABLE_PATH})
   endif()
 else()
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  set(VEXILLOGRAPHER_USES_CSHARP FALSE)
   set(VEXILLOGRAPHER_COMMAND ${Python3_EXECUTABLE} ${VEXILLOGRAPHER_PY})
   set(VEXILLOGRAPHER_DEPENDS ${VEXILLOGRAPHER_PY})
 endif()
@@ -59,34 +62,14 @@ function(vexillographer_compile)
     set(VX_OUTPUT ${VX_OUT})
   endif()
 
-  if(WIN32 AND FDB_USE_CSHARP_TOOLS)
-    add_custom_command(
-      OUTPUT ${VX_OUTPUT}
-      COMMAND $<TARGET_FILE:vexillographer>
-        ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options ${VX_LANG}
-        ${VX_OUT}
-      DEPENDS ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
-              vexillographer
-      COMMENT "Generate FDBOptions ${VX_LANG} files")
-  elseif(FDB_USE_CSHARP_TOOLS AND CSHARP_TOOLCHAIN_FOUND AND CSHARP_USE_MONO)
-    add_custom_command(
-      OUTPUT ${VX_OUTPUT}
-      COMMAND ${VEXILLOGRAPHER_COMMAND}
-        ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options ${VX_LANG}
-        ${VX_OUT}
-      DEPENDS ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
-              vexillographer
-      COMMENT "Generate FDBOptions ${VX_LANG} files")
-  else()
-    add_custom_command(
-      OUTPUT ${VX_OUTPUT}
-      COMMAND ${VEXILLOGRAPHER_COMMAND}
-        ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options ${VX_LANG}
-        ${VX_OUT}
-      DEPENDS ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
-              ${VEXILLOGRAPHER_DEPENDS}
-      COMMENT "Generate FDBOptions ${VX_LANG} files")
-  endif()
+  add_custom_command(
+    OUTPUT ${VX_OUTPUT}
+    COMMAND ${VEXILLOGRAPHER_COMMAND}
+      ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options ${VX_LANG}
+      ${VX_OUT}
+    DEPENDS ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
+            ${VEXILLOGRAPHER_DEPENDS}
+    COMMENT "Generate FDBOptions ${VX_LANG} files")
 
   if(VX_ALL)
     add_custom_target(${VX_TARGET} ALL DEPENDS ${VX_OUTPUT})

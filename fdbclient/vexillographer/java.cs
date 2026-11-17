@@ -300,7 +300,7 @@ public class FDBException extends RuntimeException implements CloneableException
                                 System.IO.FileMode.Create, System.IO.FileAccess.Write))
                 {
                     TextWriter outFile = new StreamWriter(javaFile);
-                    outFile.NewLine = "\r";
+                    outFile.NewLine = "\n";
                     if (scopeDocOptions[s].isSettableOption) {
                         if(s == Scope.ErrorPredicate)
                             writePredicateClass(outFile, s, options.Where(o => o.scope == s).OrderBy(o=>o.comment==""));
