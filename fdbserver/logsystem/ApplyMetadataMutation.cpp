@@ -179,7 +179,7 @@ private:
 		} else if (rangeLock == nullptr) {
 			TraceEvent(SevWarnAlways, "MutationHasRangeLockPrefixButFeatureIsOff")
 			    .detail("Mutation", m.toString())
-			    .detail("Knob", SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
+			    .detail("FeatureFlag", SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
 			return;
 		}
 		ASSERT(!initialCommit);

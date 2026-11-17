@@ -41,15 +41,15 @@ static const std::string RANGELOCK_HELP_MESSAGE =
     RANGELOCK_REGISTER_USAGE + RANGELOCK_UNREGISTER_USAGE + RANGELOCK_OWNERS_USAGE + RANGELOCK_TAKE_USAGE +
     RANGELOCK_RELEASE_USAGE + RANGELOCK_RELEASE_ALL_USAGE + RANGELOCK_LIST_USAGE;
 
-// Range locks only take effect when commit proxies are started with
-// knob_enable_read_lock_on_range=true. The client cannot probe the knob
-// (server knobs aren't exposed to fdbclient), so we print this notice
+// Range locks only take effect when range locking is enabled, by `configure range_lock=enabled` or
+// by knob_enable_read_lock_on_range=true on the commit proxies (the configuration overrides the knob).
+// The client cannot probe the knob (server knobs aren't exposed to fdbclient), so we print this notice
 // after any operation that the user might assume blocks writes.
 static void printKnobReminder() {
-	fmt::println("NOTE: Range locks take effect only when commit proxies were started with");
-	fmt::println("      knob_enable_read_lock_on_range=true. If that knob is off cluster-wide,");
-	fmt::println("      this operation persists metadata but writes are not actually rejected.");
-	fmt::println("      Verify the knob in commit-proxy startup logs.");
+	fmt::println("NOTE: Range locks take effect only when range locking is enabled with");
+	fmt::println("      `configure range_lock=enabled`, or when commit proxies were started with");
+	fmt::println("      knob_enable_read_lock_on_range=true and range_lock is not set to disabled.");
+	fmt::println("      Otherwise this operation persists metadata but writes are not actually rejected.");
 }
 
 // Validate range bounds and return a Standalone KeyRange. Prints a user-facing
