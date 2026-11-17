@@ -2911,21 +2911,24 @@ Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId) {
 }
 
 Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr) {
-	RangeResult rangeResult;
-	// At most one job at a time, so looking at the first returned range is sufficient
-	rangeResult = co_await krmGetRanges(tr, bulkLoadJobPrefix, normalKeys);
-	if (rangeResult.empty()) {
-		co_return Optional<BulkLoadJobState>();
-	}
-	for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
-		if (rangeResult[i].value.empty()) {
-			continue;
+	Key beginKey = normalKeys.begin;
+	while (beginKey < normalKeys.end) {
+		RangeResult rangeResult = co_await krmGetRanges(tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, normalKeys.end));
+		for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
+			if (!jobState.isValid()) {
+				continue;
+			}
+			co_return jobState;
 		}
-		BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
-		if (!jobState.isValid()) {
-			continue;
+		// A page ends early at a row or byte limit; its last key is where the next page resumes.
+		if (rangeResult.size() < 2) {
+			break;
 		}
-		co_return jobState;
+		beginKey = rangeResult.back().key;
 	}
 	co_return Optional<BulkLoadJobState>();
 }
