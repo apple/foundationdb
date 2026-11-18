@@ -1185,26 +1185,11 @@ public:
 		          store(ranges, bc->listRangeFiles(scanBegin, expireEndVersion - 1)));
 		logs.insert(logs.end(), std::make_move_iterator(pLogs.begin()), std::make_move_iterator(pLogs.end()));
 
-		// The new logBeginVersion will be taken from the last log file, if there is one
-		Optional<Version> newLogBeginVersion;
-		if (!logs.empty()) {
-			// Linear scan the unsorted logs to find the latest one in sorted order
-			LogFile& last = *std::max_element(logs.begin(), logs.end());
-
-			// If the last log ends at expireEndVersion then that will be the next log begin
-			if (last.endVersion == expireEndVersion) {
-				newLogBeginVersion = expireEndVersion;
-			} else {
-				// If the last log overlaps the expiredEnd then use the log's begin version and move the expiredEnd
-				// back to match it and keep the last log file
-				if (last.endVersion > expireEndVersion) {
-					newLogBeginVersion = last.beginVersion;
-
-					// Instead of modifying this potentially very large vector, just clear LogFile
-					last = LogFile();
-
-					expireEndVersion = newLogBeginVersion.get();
-				}
+		// Different log-router tags can have different file boundaries at the requested cutoff.
+		const Version requestedEnd = expireEndVersion;
+		for (const auto& log : logs) {
+			if (log.endVersion > requestedEnd) {
+				expireEndVersion = std::min(expireEndVersion, std::max(scanBegin, log.beginVersion));
 			}
 		}
 
@@ -1217,8 +1202,7 @@ public:
 
 		// Move filenames out of vector then destroy it to save memory
 		for (auto& f : logs) {
-			// We may have cleared the last log file earlier so skip any empty filenames
-			if (!f.fileName.empty()) {
+			if (f.endVersion <= expireEndVersion) {
 				toDelete.push_back(std::move(f.fileName));
 			}
 		}
@@ -1466,7 +1450,7 @@ public:
 	                                                         RestorableFileSet restorable) {
 		Version end = logs.begin()->beginVersion;
 		computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
-		if (end >= targetVersion) {
+		if (end > targetVersion) {
 			restorable.continuousBeginVersion = logs.begin()->beginVersion;
 			restorable.continuousEndVersion = end;
 			return Optional<RestorableFileSet>(restorable);
@@ -1681,8 +1665,7 @@ public:
 			// it is valid restore set and proceed
 			if (!logs.empty() && logs.front().beginVersion <= minKeyRangeVersion) {
 				auto result = getRestoreSetFromLogs(logs, restorable.targetVersion, restorable);
-				if (!useBulkDump ||
-				    (result.present() && result.get().continuousEndVersion > restorable.targetVersion)) {
+				if (!useBulkDump || result.present()) {
 					if (latestBulkDump) {
 						best = std::move(result);
 						continue;
@@ -3271,6 +3254,10 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 	ASSERT_EQ(desc.snapshots[0].restorable, true);
 	ASSERT_EQ(desc.contiguousLogEnd, v);
 
+	Version nextLogBegin = v;
+	ASSERT((co_await c->getRestoreSet(nextLogBegin - 1)).present());
+	ASSERT(!(co_await c->getRestoreSet(nextLogBegin)).present());
+
 	// writing random number of more continuous log files
 	int newNumLogFiles = deterministicRandom()->randomInt(2, 8);
 	numLogFiles += newNumLogFiles;
@@ -3282,6 +3269,10 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 		v += logSize;
 	}
 	co_await waitForAll(writes);
+
+	auto extended = co_await c->getRestoreSet(nextLogBegin);
+	ASSERT(extended.present());
+	ASSERT_EQ(extended.get().logs.back().beginVersion, nextLogBegin);
 
 	BackupFileList fileList1 = co_await c->dumpFileList();
 	printFileList(fileList1);
@@ -3536,6 +3527,34 @@ Future<Void> testExpireProgressVersions(std::string url, Optional<std::string> p
 TEST_CASE("/backup/containers/localdir/expireProgressVersions") {
 	co_await testExpireProgressVersions(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
 	                                    Optional<std::string>());
+}
+
+TEST_CASE("/backup/containers/localdir/expireOverlappingTags") {
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	auto container = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await container->create();
+
+	auto range = co_await container->writeRangeFile(160, 0, 160, 1024);
+	co_await testWriteSnapshotFile(range, ""_sr, "z"_sr, 1024);
+	std::vector<std::string> rangeFiles{ range->getFileName() };
+	std::vector<std::pair<Key, Key>> bounds{ { ""_sr, "z"_sr } };
+	co_await container->writeKeyspaceSnapshotFile(rangeFiles, bounds, 1024, IncludeKeyRangeMap::False);
+
+	auto old = co_await container->writeTaggedLogFile(50, 80, 1024, 0, 3);
+	co_await old->finish();
+	for (int tag = 0; tag < 3; ++tag) {
+		auto log = co_await container->writeTaggedLogFile(tag == 0 ? 80 : 100, 200, 1024, tag, 3);
+		co_await log->finish();
+	}
+	IBackupContainer::ExpireProgress progress;
+	co_await container->expireData(150, false, &progress, 160);
+	ASSERT_EQ(progress.actualEndVersion, 80);
+	auto listing = co_await container->dumpFileList();
+	ASSERT_EQ(listing.logs.size(), 3);
+	auto restorable = co_await container->getRestoreSet(170);
+	ASSERT(restorable.present());
+	ASSERT_EQ(restorable.get().logs.size(), 3);
+	co_await container->deleteContainer();
 }
 
 // A bulkdump snapshot's data is an SST tree under bulkdump_data/<jobId>/, which expireData's file

@@ -65,6 +65,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BUSY_WAIT_THRESHOLD,                                   0 ); // 1e100 == never sleep
 	init( CLIENT_REQUEST_INTERVAL,                             1.0 ); if( randomize && buggify() ) CLIENT_REQUEST_INTERVAL = 2.0;
 	init( SERVER_REQUEST_INTERVAL,                             1.0 ); if( randomize && buggify() ) SERVER_REQUEST_INTERVAL = 2.0;
+	init( CLIENT_SKIP_AVAILABLE_PEER_PROBE,                  false ); if( randomize && buggify() ) CLIENT_SKIP_AVAILABLE_PEER_PROBE = deterministicRandom()->coinflip();
+	init( CLIENT_FAILED_PEER_PROBE_JITTER,                     0.0 ); if( randomize && buggify() ) CLIENT_FAILED_PEER_PROBE_JITTER = 2.0;
 
 	init( REACTOR_FLAGS,                                         0 );
 
@@ -150,6 +152,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
 	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               1 );
 	init( TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS,      false );
+	init( TLS_HANDSHAKE_TIMEOUT_IS_NOT_CONNECT_FAILURE,      false ); if( randomize && buggify() ) TLS_HANDSHAKE_TIMEOUT_IS_NOT_CONNECT_FAILURE = deterministicRandom()->coinflip();
+	init( CANCELLED_CONNECT_IS_NOT_CONNECT_FAILURE,          false ); if( randomize && buggify() ) CANCELLED_CONNECT_IS_NOT_CONNECT_FAILURE = deterministicRandom()->coinflip();
 	init( TLS_CLIENT_HANDSHAKE_THREADS,                          0 );
 	init( TLS_SERVER_HANDSHAKE_THREADS,                         64 );
 	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                64 * 1024 );

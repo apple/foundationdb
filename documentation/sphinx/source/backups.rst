@@ -566,10 +566,7 @@ The ``start`` command will start a new restore on the specified (or default) tag
   Ignore mutation log files during the restore to speedup the process. Because only range files are restored, this option gives an inconsistent snapshot in most cases and is not recommended to use.
 
 ``--user-data``
-  Restore only the user keyspace. This option should NOT be used alongside --system-metadata (below) and CANNOT be used alongside other specified key ranges.
-
-``--system-metadata``
-  Restore only the relevant system keyspace. This option should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.
+  Restore only the user keyspace. This option CANNOT be used alongside other specified key ranges.
 
 .. program:: fdbrestore abort
 

@@ -20,23 +20,36 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 )
 
-// setProcessVersion records the version of the configuration a subprocess was started from. A nil version clears the
-// entry, which must be done once the subprocess terminated.
-func (monitor *monitor) setProcessVersion(processNumber int, version *api.Version) {
+// setProcessVersion records the version of the configuration, the binary path and the start time of a subprocess. A nil
+// version clears the entry, which must be done once the subprocess terminated.
+func (monitor *monitor) setProcessVersion(processNumber int, version *api.Version, binaryPath string, startTime time.Time) {
 	monitor.mutex.Lock()
 	defer monitor.mutex.Unlock()
 
 	if version == nil {
 		delete(monitor.processVersions, processNumber)
+		delete(monitor.processBinaries, processNumber)
 		return
 	}
+
+	if monitor.processBinaries == nil {
+		monitor.processBinaries = make(map[int]processBinary)
+	}
+
+	monitor.processBinaries[processNumber] = processBinary{path: binaryPath, startTime: startTime}
 
 	if monitor.processVersions == nil {
 		monitor.processVersions = make(map[int]api.Version)
@@ -119,5 +132,180 @@ func (monitor *monitor) pruneSharedBinaries() {
 		}
 
 		monitor.logger.Info("Pruned unused binary directory", "path", versionDir)
+	}
+}
+
+// binaryReportInterval defines how often the staged versions and the running binaries are reported.
+const binaryReportInterval = 10 * time.Second
+
+// getStagedVersions returns the sorted versions that have a ready fdbserver binary in the shared binary directory.
+func getStagedVersions() ([]string, error) {
+	entries, err := os.ReadDir(sharedBinaryDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	versions := make([]api.Version, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		version, err := api.ParseFdbVersion(entry.Name())
+		if err != nil {
+			continue
+		}
+
+		if checkOwnerExecutable(path.Join(sharedBinaryDir, entry.Name(), "fdbserver")) != nil {
+			continue
+		}
+
+		versions = append(versions, version)
+	}
+
+	slices.SortFunc(versions, func(a, b api.Version) int {
+		switch {
+		case a.Equal(b):
+			return 0
+		case a.IsAtLeast(b):
+			return 1
+		default:
+			return -1
+		}
+	})
+
+	result := make([]string, 0, len(versions))
+	for _, version := range versions {
+		result = append(result, version.String())
+	}
+
+	return result, nil
+}
+
+// formatStagedVersions returns the representation of the staged versions that is reported in the pod annotation.
+func formatStagedVersions(versions []string) string {
+	return strings.Join(versions, ",")
+}
+
+// setStagedVersions records the formatted staged versions that were listed last.
+func (monitor *monitor) setStagedVersions(formatted string) {
+	monitor.mutex.Lock()
+	defer monitor.mutex.Unlock()
+
+	monitor.stagedVersions = formatted
+	monitor.stagedVersionsKnown = true
+}
+
+// getStagedVersions returns the formatted staged versions that were listed last and whether a listing succeeded yet.
+func (monitor *monitor) getStagedVersions() (string, bool) {
+	monitor.mutex.Lock()
+	defer monitor.mutex.Unlock()
+
+	return monitor.stagedVersions, monitor.stagedVersionsKnown
+}
+
+// reportStagedVersions updates the staged version metric and the pod annotations. The annotations are written on every
+// call, as the update is a no-op if the pod already has the value, and this repairs an annotation that got lost, e.g.
+// because a concurrent update applied an older view of the pod. It returns the last staged versions that are known to be
+// reported, which is only used to log changes.
+func (monitor *monitor) reportStagedVersions(ctx context.Context, previous string) string {
+	versions, err := getStagedVersions()
+	if err != nil {
+		monitor.logger.Error(err, "Could not list staged versions", "sharedBinaryDir", sharedBinaryDir)
+		return previous
+	}
+
+	monitor.metrics.registerStagedVersions(versions)
+	current := formatStagedVersions(versions)
+	if current != previous {
+		monitor.logger.Info("Staged versions changed", "stagedVersions", current)
+	}
+
+	monitor.mutex.Lock()
+	hasConfiguration := monitor.activeConfiguration != nil
+	monitor.mutex.Unlock()
+	// Without a configuration the annotations are written once the first configuration is loaded.
+	if !hasConfiguration {
+		return current
+	}
+
+	err = monitor.podClient.updateAnnotations(ctx, monitor)
+	if err != nil {
+		monitor.logger.Error(err, "Error updating pod annotations with the staged versions")
+		// Report the previous value to retry in the next iteration.
+		return previous
+	}
+
+	return current
+}
+
+// formatRunningBinaries returns the representation of the running binaries that is reported in the pod annotation.
+func (monitor *monitor) formatRunningBinaries() (string, error) {
+	monitor.mutex.Lock()
+	running := make(map[string]api.RunningBinary, len(monitor.processVersions))
+	for processNumber, version := range monitor.processVersions {
+		running[strconv.Itoa(processNumber)] = api.RunningBinary{
+			Version:        version.String(),
+			BinaryPath:     monitor.processBinaries[processNumber].path,
+			StartTimestamp: monitor.processBinaries[processNumber].startTime.Unix(),
+		}
+	}
+	monitor.mutex.Unlock()
+
+	// The keys of a map are sorted by the encoder, which keeps the value stable if nothing changed.
+	formatted, err := json.Marshal(running)
+	if err != nil {
+		return "", err
+	}
+
+	return string(formatted), nil
+}
+
+// reportRunningBinaries updates the running binaries annotation and returns the last value that is known to be
+// reported. Like reportStagedVersions it writes on every call to repair a lost annotation, previous is only used to log
+// changes. The annotation doesn't depend on the active configuration, as it describes the processes that were started,
+// and it is also reported while no process is running.
+func (monitor *monitor) reportRunningBinaries(ctx context.Context, previous string) string {
+	current, err := monitor.formatRunningBinaries()
+	if err != nil {
+		monitor.logger.Error(err, "Could not format the running binaries")
+		return previous
+	}
+
+	err = monitor.podClient.updateAnnotationsOnPod(ctx, map[string]string{
+		api.RunningBinariesAnnotation: current,
+	})
+	if err != nil {
+		monitor.logger.Error(err, "Error updating pod annotations with the running binaries")
+		// Report the previous value to retry in the next iteration.
+		return previous
+	}
+
+	if current != previous {
+		monitor.logger.Info("Running binaries changed", "runningBinaries", current)
+	}
+
+	return current
+}
+
+// watchBinaries periodically reports the staged versions and the running binaries until the context is cancelled.
+func (monitor *monitor) watchBinaries(ctx context.Context) {
+	ticker := time.NewTicker(binaryReportInterval)
+	defer ticker.Stop()
+
+	var reportedStaged, reportedRunning string
+	for {
+		reportedStaged = monitor.reportStagedVersions(ctx, reportedStaged)
+		reportedRunning = monitor.reportRunningBinaries(ctx, reportedRunning)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }

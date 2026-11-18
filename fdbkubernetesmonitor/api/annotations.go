@@ -44,4 +44,26 @@ const (
 	// process groups will shutdown the fdbserver instance but keep the Pod and other Kubernetes resources running
 	// for debugging purpose.
 	IsolateProcessGroupAnnotation = "foundationdb.org/isolate-process-group"
+
+	// RunningBinariesAnnotation is the annotation that reports the binary each fdbserver process of the Pod was started
+	// from. The value is a JSON object that maps the process number to a RunningBinary. Processes that are not running
+	// have no entry, so an empty object means that no fdbserver process is running. The annotation is absent if the
+	// monitor doesn't report it.
+	RunningBinariesAnnotation = "foundationdb.org/running-binaries"
+
+	// StagedVersionsKey is the key in the environment annotation that lists the versions with a ready fdbserver
+	// binary in the shared binary directory as a sorted, comma separated list.
+	StagedVersionsKey = "STAGED_VERSIONS"
 )
+
+// RunningBinary describes the binary a running fdbserver process was started from. It reflects the process as it was
+// started, so it differs from the desired configuration until the process was restarted.
+type RunningBinary struct {
+	// Version is the version of the configuration the process was started from.
+	Version string `json:"version"`
+	// BinaryPath is the path of the fdbserver binary the process was started from.
+	BinaryPath string `json:"binaryPath"`
+	// StartTimestamp is the unix timestamp in seconds when the process was started. It changes whenever the process
+	// is restarted, even if the binary stays the same.
+	StartTimestamp int64 `json:"startTimestamp"`
+}

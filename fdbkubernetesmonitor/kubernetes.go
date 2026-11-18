@@ -26,6 +26,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -69,6 +70,10 @@ type kubernetesClient struct {
 	// nodeName defines the node name of the Pod where the fdbkubernetesmonitor instance is running in.
 	// This value is only set if the fdbkubernetesmonitor should watch node events.
 	nodeName string
+
+	// annotationMutex serializes updateAnnotationsOnPod. The update reads the annotations and applies the full set
+	// again, so concurrent updates could otherwise drop the keys of each other.
+	annotationMutex sync.Mutex
 }
 
 func setupCache(namespace string, podName string, nodeName string) (client.WithWatch, cache.Cache, error) {
@@ -209,16 +214,16 @@ func (podClient *kubernetesClient) getNodeMetadata(ctx context.Context) (*metav1
 
 // retrieveEnvironmentVariables extracts the environment variables we have for
 // an argument into a map.
-func retrieveEnvironmentVariables(monitor *monitor, argument api.Argument, target map[string]string) {
+func retrieveEnvironmentVariables(customEnvironment map[string]string, argument api.Argument, target map[string]string) {
 	if argument.Source != "" {
-		value, err := argument.LookupEnv(monitor.customEnvironment)
+		value, err := argument.LookupEnv(customEnvironment)
 		if err == nil {
 			target[argument.Source] = value
 		}
 	}
 	if argument.Values != nil {
 		for _, childArgument := range argument.Values {
-			retrieveEnvironmentVariables(monitor, childArgument, target)
+			retrieveEnvironmentVariables(customEnvironment, childArgument, target)
 		}
 	}
 }
@@ -226,18 +231,38 @@ func retrieveEnvironmentVariables(monitor *monitor, argument api.Argument, targe
 // updateAnnotations updates annotations on the pod after loading new
 // configuration.
 func (podClient *kubernetesClient) updateAnnotations(ctx context.Context, monitor *monitor) error {
+	// The state is replaced by other goroutines, so work on a snapshot.
+	monitor.mutex.Lock()
+	activeConfiguration := monitor.activeConfiguration
+	activeConfigurationBytes := monitor.activeConfigurationBytes
+	monitor.mutex.Unlock()
+	customEnvironment := monitor.copyCustomEnvironment()
+
 	environment := make(map[string]string)
-	for _, argument := range monitor.activeConfiguration.Arguments {
-		retrieveEnvironmentVariables(monitor, argument, environment)
+	for _, argument := range activeConfiguration.Arguments {
+		retrieveEnvironmentVariables(customEnvironment, argument, environment)
 	}
-	environment["BINARY_DIR"] = path.Dir(monitor.activeConfiguration.BinaryPath)
+	environment["BINARY_DIR"] = path.Dir(activeConfiguration.BinaryPath)
+
+	stagedVersions, err := getStagedVersions()
+	if err != nil {
+		podClient.Logger.Error(err, "Could not list staged versions", "sharedBinaryDir", sharedBinaryDir)
+	} else {
+		monitor.setStagedVersions(formatStagedVersions(stagedVersions))
+	}
+
+	// If the listing failed keep reporting the last known value, omitting the key would look like nothing is staged.
+	if value, known := monitor.getStagedVersions(); known {
+		environment[api.StagedVersionsKey] = value
+	}
+
 	jsonEnvironment, err := json.Marshal(environment)
 	if err != nil {
 		return err
 	}
 
 	return podClient.updateAnnotationsOnPod(ctx, map[string]string{
-		api.CurrentConfigurationAnnotation: string(monitor.activeConfigurationBytes),
+		api.CurrentConfigurationAnnotation: string(activeConfigurationBytes),
 		api.EnvironmentAnnotation:          string(jsonEnvironment),
 	})
 }
@@ -253,6 +278,9 @@ func (podClient *kubernetesClient) updateFdbClusterTimestampAnnotation(ctx conte
 // updateAnnotationsOnPod will update the annotations with the provided annotationChanges. If an annotation exists, it
 // will be updated if the annotation is absent it will be added.
 func (podClient *kubernetesClient) updateAnnotationsOnPod(ctx context.Context, annotationChanges map[string]string) error {
+	podClient.annotationMutex.Lock()
+	defer podClient.annotationMutex.Unlock()
+
 	meta, err := podClient.getPodMetadata(ctx)
 	if err != nil {
 		return err
