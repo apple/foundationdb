@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Administration &#8212; FoundationDB 8.0.0 documentation</title>
+    <title>Administration &#8212; FoundationDB 8.0.1 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -94,7 +94,10 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#fdbmonitor-and-fdbserver"><code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code></a></li>
-<li><a class="reference internal" href="#managing-trace-files">Managing trace files</a></li>
+<li><a class="reference internal" href="#managing-trace-files">Managing trace files</a><ul>
+<li><a class="reference internal" href="#trace-event-severities">Trace event severities</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#disaster-recovery">Disaster Recovery</a></li>
 <li><a class="reference internal" href="#managing-traffic">Managing traffic</a></li>
 <li><a class="reference internal" href="#other-administrative-concerns">Other administrative concerns</a><ul>
@@ -199,7 +202,10 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#fdbmonitor-and-fdbserver"><code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code></a></li>
-<li><a class="reference internal" href="#managing-trace-files">Managing trace files</a></li>
+<li><a class="reference internal" href="#managing-trace-files">Managing trace files</a><ul>
+<li><a class="reference internal" href="#trace-event-severities">Trace event severities</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#disaster-recovery">Disaster Recovery</a></li>
 <li><a class="reference internal" href="#managing-traffic">Managing traffic</a></li>
 <li><a class="reference internal" href="#other-administrative-concerns">Other administrative concerns</a><ul>
@@ -884,6 +890,50 @@ From the output of <code class="docutils literal notranslate"><span class="pre">
 <li><p><code class="docutils literal notranslate"><span class="pre">/usr/local/foundationdb/logs/</span></code> on macOS</p></li>
 </ul>
 <p>Trace files are rolled every 10MB. These files are valuable to the FoundationDB development team for diagnostic purposes, and should be retained in case you need support from FoundationDB. Old trace files are automatically deleted so that there are no more than 100 MB worth of trace files per process. Both the log size and the maximum total size of the log files are configurable on a per process basis in the <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">configuration file</span></a>.</p>
+<section id="trace-event-severities">
+<span id="administration-trace-severities"></span><h3>Trace event severities</h3>
+<p>Every trace event has a <code class="docutils literal notranslate"><span class="pre">Severity</span></code> field holding one of the numeric levels below. A process writes only the events at or above its minimum trace severity, which is 10 by default, so events below that level do not appear in trace files.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 12.0%" />
+<col style="width: 22.0%" />
+<col style="width: 66.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p><code class="docutils literal notranslate"><span class="pre">Severity</span></code></p></th>
+<th class="head"><p>Name</p></th>
+<th class="head"><p>Meaning</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>40</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">SevError</span></code></p></td>
+<td><p>A serious problem that is not expected to happen, often one that ends the process or the role running in it. A failed <code class="docutils literal notranslate"><span class="pre">ASSERT</span></code> is logged at this severity. Each event includes a backtrace, and the most recent one for a process is reported in that process’s <code class="docutils literal notranslate"><span class="pre">messages</span></code> in <a class="reference internal" href="mr-status.html"><span class="doc">machine-readable status</span></a>. In simulation tests, any event at this severity fails the test.</p></td>
+</tr>
+<tr class="row-odd"><td><p>30</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">SevWarnAlways</span></code></p></td>
+<td><p>A condition that is not fatal but is worth knowing about, which makes it a candidate for monitoring. Simulation tests report these events as warnings without failing.</p></td>
+</tr>
+<tr class="row-even"><td><p>20</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">SevWarn</span></code></p></td>
+<td><p>A condition that may be worth looking at when diagnosing a problem. Events at this severity are not expected to be monitored individually.</p></td>
+</tr>
+<tr class="row-odd"><td><p>10</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">SevInfo</span></code></p></td>
+<td><p>Ordinary events that are useful in production. This is the default severity of a trace event and the lowest severity written by default.</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">SevDebug</span></code></p></td>
+<td><p>Detail for testing and debugging that is not needed in production. Not written by default.</p></td>
+</tr>
+<tr class="row-odd"><td><p>1, 0</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">SevSample</span></code>, <code class="docutils literal notranslate"><span class="pre">SevVerbose</span></code></p></td>
+<td><p>Very frequent or very detailed events. Not written by default.</p></td>
+</tr>
+</tbody>
+</table>
+<p>See <a class="reference internal" href="monitored-metrics.html"><span class="doc">Monitored Metrics</span></a> for how the two highest levels are used in monitoring.</p>
+</section>
 </section>
 <section id="disaster-recovery">
 <span id="administration-disaster-recovery"></span><h2>Disaster Recovery</h2>
@@ -992,11 +1042,11 @@ From the output of <code class="docutils literal notranslate"><span class="pre">
 <section id="perform-the-upgrade">
 <h3>Perform the upgrade</h3>
 <p>For <strong>Ubuntu</strong>, perform the upgrade using the dpkg command:</p>
-<pre class="literal-block">user&#64;host$ sudo dpkg -i foundationdb-clients_8.0.0-1_amd64.deb \
-foundationdb-server_8.0.0-1_amd64.deb</pre>
+<pre class="literal-block">user&#64;host$ sudo dpkg -i foundationdb-clients_8.0.1-1_amd64.deb \
+foundationdb-server_8.0.1-1_amd64.deb</pre>
 <p>For <strong>RHEL/CentOS</strong>, perform the upgrade using the rpm command:</p>
-<pre class="literal-block">user&#64;host$ sudo rpm -Uvh foundationdb-clients-8.0.0-1.el9.x86_64.rpm \
-foundationdb-server-8.0.0-1.el9.x86_64.rpm</pre>
+<pre class="literal-block">user&#64;host$ sudo rpm -Uvh foundationdb-clients-8.0.1-1.el9.x86_64.rpm \
+foundationdb-server-8.0.1-1.el9.x86_64.rpm</pre>
 <p>The <code class="docutils literal notranslate"><span class="pre">foundationdb-clients</span></code> package also installs the <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> API. If your clients use <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a>, <a class="reference external" href="https://www.javadoc.io/doc/org.foundationdb/fdb-java/latest/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a>, follow the instructions in the corresponding language documentation to install the APIs.</p>
 </section>
 <section id="test-the-database">
@@ -1085,7 +1135,7 @@ For how <strong class="command">BulkDump</strong> works, see <a class="reference
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 02, 2026.<br/>
+      Last updated on Nov 17, 2026.<br/>
     </p>
   </div>
 </footer>

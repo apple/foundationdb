@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Release Notes (8.0) &#8212; FoundationDB 8.0.0 documentation</title>
+    <title>Release Notes &#8212; FoundationDB 8.0.1 documentation</title>
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
     <script src="../_static/jquery.js"></script>
@@ -14,7 +14,7 @@
     <script src="../_static/doctools.js"></script>
     <script src="../_static/sphinx_highlight.js"></script>
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="prev" title="Release Notes" href="release-notes-740.html" />
+    <link rel="prev" title="Release Notes - 7.4" href="release-notes-740.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
@@ -37,7 +37,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -66,8 +66,9 @@
   <ul class="dropdown-menu localtoc"
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
-<li><a class="reference internal" href="#">Release Notes (8.0)</a><ul>
-<li><a class="reference internal" href="#id1">8.0.0</a><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#id2">8.0.1</a></li>
+<li><a class="reference internal" href="#id4">8.0.0</a><ul>
 <li><a class="reference internal" href="#compatibility-and-removed-features">Compatibility and removed features</a></li>
 <li><a class="reference internal" href="#features-experimental">Features (Experimental)</a></li>
 <li><a class="reference internal" href="#client-apis-and-bindings">Client APIs and bindings</a></li>
@@ -89,7 +90,7 @@
               
                 
   <li>
-    <a href="release-notes-740.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
+    <a href="release-notes-740.html" title="Previous Chapter: Release Notes - 7.4"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes - 7.4</span>
     </a>
   </li>
               
@@ -117,8 +118,9 @@
   <div class="row">
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
-<li><a class="reference internal" href="#">Release Notes (8.0)</a><ul>
-<li><a class="reference internal" href="#id1">8.0.0</a><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#id2">8.0.1</a></li>
+<li><a class="reference internal" href="#id4">8.0.0</a><ul>
 <li><a class="reference internal" href="#compatibility-and-removed-features">Compatibility and removed features</a></li>
 <li><a class="reference internal" href="#features-experimental">Features (Experimental)</a></li>
 <li><a class="reference internal" href="#client-apis-and-bindings">Client APIs and bindings</a></li>
@@ -137,9 +139,44 @@
       </div>
     <div class="body col-md-9 content" role="main">
       
-  <section id="release-notes-8-0">
-<span id="release-notes-800"></span><h1>Release Notes (8.0)</h1>
-<section id="id1">
+  <section id="release-notes">
+<span id="id1"></span><h1>Release Notes</h1>
+<section id="id2">
+<h2>8.0.1</h2>
+<p>AVX enabled release.</p>
+<ul class="simple">
+<li><p>Raised the protocol versions that 8.0 binaries treat as the next release from 8.1 to 9.0 (future protocol version 9.0, minimum invalid protocol version 9.1). 8.0.0 rejects data stamped with protocol 8.2 or later, so a future 9.0 cluster can be downgraded only to 8.0.1 or later 8.0.x releases, not to 8.0.0. The current protocol version, minimum compatible version and API version are unchanged. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14423">(PR #14423)</a></p></li>
+<li><p>Rejected file and object names that are absolute or contain a <code class="docutils literal notranslate"><span class="pre">..</span></code> component in places where a name is joined onto a base directory: local directory backup containers, backup file listing, S3 copy-down, bulk load job and task manifests, the profiler output file, and SST file names in fetched checkpoints. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14421">(PR #14421)</a></p></li>
+<li><p>Avoided linking newer glibc symbols into RHEL 9 builds that prevented binaries built on RHEL 9.7 from starting on RHEL 9.6 systems and containers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14278">(PR #14278)</a></p></li>
+<li><p>Fixed network setup failures when older multiversion clients load the 8.0 client, even when the application does not use blob granules. Restored the required blob granule C symbols as stubs that abort the process when called. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14239">(PR #14239)</a></p></li>
+<li><p>Removed the unused blob granule types <code class="docutils literal notranslate"><span class="pre">FDBBGMutationType</span></code> and the <code class="docutils literal notranslate"><span class="pre">FDBBG*</span></code> file description structs from <code class="docutils literal notranslate"><span class="pre">fdb_c.h</span></code>. They were only used by the blob granule read API removed in 8.0.0. <code class="docutils literal notranslate"><span class="pre">FDBGranuleSummary</span></code> and <code class="docutils literal notranslate"><span class="pre">FDBReadBlobGranuleContext</span></code> are kept for the compatibility stubs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14247">(PR #14247)</a></p></li>
+<li><p>Outbound TLS connections that fdbserver opens by hostname (S3 and other HTTPS blob stores, REST and KMS servers, including connections through an HTTP proxy) are now verified by CA chain and hostname instead of the cluster’s <code class="docutils literal notranslate"><span class="pre">--tls-verify-peers</span></code> rules. Previously, on clusters that set peer rules, every S3 server certificate was rejected, which broke bulk dump and bulk load uploads. Cluster traffic keeps using the peer rules. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14469">(PR #14469)</a></p></li>
+<li><p>Fixed an interrupted remote-region recovery possibly starting the next generation one version too late and leaving a storage server behind, because a new log router reported its synthetic startup pop floor as committed progress. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14295">(PR #14295)</a></p></li>
+<li><p>Added the <code class="docutils literal notranslate"><span class="pre">SS_SKIP_DELIVERED_TO_NOT_ASSIGNED_VERSION</span></code> server knob (default <code class="docutils literal notranslate"><span class="pre">0</span></code>, disabled) to recover a storage server that crash-loops on a mutation delivered to a shard it is not assigned. Setting it to that one version makes the storage server drop such mutations at that version instead of asserting. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14480">(PR #14480)</a></p></li>
+<li><p>Fixed DR (<code class="docutils literal notranslate"><span class="pre">fdbdr</span></code>) mutation log copying possibly skipping mutations when a copy step timed out. Copying now finishes the current version and resumes at the first version it did not copy. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14296">(PR #14296)</a></p></li>
+<li><p>Fixed a race in the client library where an application thread could destroy a result while the network thread was still completing it, which could crash the client. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14373">(PR #14373)</a></p></li>
+<li><p>Fixed a client memory leak when setting watches on many distinct keys. Watch reference-count entries are now removed once no watch uses them. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14490">(PR #14490)</a></p></li>
+<li><p>Retried <code class="docutils literal notranslate"><span class="pre">fallocate()</span></code> and <code class="docutils literal notranslate"><span class="pre">ftruncate()</span></code> when they fail with <code class="docutils literal notranslate"><span class="pre">EINTR</span></code> in the Linux KAIO file truncate path, instead of failing the operation. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14326">(PR #14326)</a></p></li>
+<li><p>Fixed Redwood page-cache memory accounting when a reused page ID changes size, so cache eviction uses the current page size. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14291">(PR #14291)</a></p></li>
+<li><p>Fixed a Linux <code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> memory leak when changes to a configuration-file symlink caused its target path to be resolved again. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14253">(PR #14253)</a></p></li>
+<li><p>Remote-region TLogs reuse recent disk-space samples in the low-disk admission check instead of calling <code class="docutils literal notranslate"><span class="pre">statvfs()</span></code> for every version they pull. On a two-region cluster under write load, the per-version disk checks made spilling fall behind, and remote TLogs ran out of memory during a machine exclude. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14345">(PR #14345)</a></p></li>
+<li><p>Reduced CPU spent on every completed RPC reply. Cancelling the per-request failure monitor wait no longer throws C++ exceptions. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14352">(PR #14352)</a></p></li>
+<li><p>Cached the network interface name used for network-traffic metrics to reduce periodic network-thread stalls on hosts with many interfaces. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14283">(PR #14283)</a></p></li>
+<li><p>Fixed one backup with a missing or invalid container URL dropping every backup from the backup layer status in <code class="docutils literal notranslate"><span class="pre">status</span> <span class="pre">json</span></code> (<code class="docutils literal notranslate"><span class="pre">layers.backup</span></code>). The other backups are still reported, and the failing one gets an <code class="docutils literal notranslate"><span class="pre">error</span></code> field. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14484">(PR #14484)</a></p></li>
+<li><p>Mutation log tasks of a backup whose snapshot has finished now run ahead of other backups’ initial snapshot tasks, so a new backup’s first snapshot no longer starves other backups’ logs and increases their backup lag. This raises the <code class="docutils literal notranslate"><span class="pre">TASKBUCKET_MAX_PRIORITY</span></code> client knob default from 1 to 2. Backup agents older than 8.0.1 (and older than 7.4.9 on 7.4) only run tasks up to priority 1, so keep at least one 8.0.1 or newer backup agent running for backups that ran under 8.0.1, and do not downgrade all backup agents while a backup is running. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14499">(PR #14499)</a></p></li>
+<li><p>Added bounded retries for disk errors when opening or reading backup encryption-key files, allowing transient failures to recover before the backup container retains a failed initialization result. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14294">(PR #14294)</a></p></li>
+<li><p>Added per-URL blobstore parameters for backups: <code class="docutils literal notranslate"><span class="pre">server_side_encryption</span></code> (or <code class="docutils literal notranslate"><span class="pre">sse</span></code>) overrides the <code class="docutils literal notranslate"><span class="pre">BLOBSTORE_ENCRYPTION_TYPE</span></code> knob (<code class="docutils literal notranslate"><span class="pre">sse=none</span></code> sends no server-side encryption header), <code class="docutils literal notranslate"><span class="pre">proxy</span></code> overrides the <code class="docutils literal notranslate"><span class="pre">--proxy</span></code> option and proxy environment variables (<code class="docutils literal notranslate"><span class="pre">proxy=none</span></code> connects directly), and <code class="docutils literal notranslate"><span class="pre">aws_v4_header</span></code> (or <code class="docutils literal notranslate"><span class="pre">v4</span></code>) overrides the <code class="docutils literal notranslate"><span class="pre">HTTP_REQUEST_AWS_V4_HEADER</span></code> knob. The URL is saved with the backup, so each backup on a cluster can use its own values. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14519">(PR #14519)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/14521">(PR #14521)</a></p></li>
+<li><p>Range file restores now send one clear per restore transaction instead of one clear per gap between restored keys, and skip that clear when the range has no existing keys. In tests on 20-storage-server clusters this made restores about 2x faster and roughly halved storage server CPU. Setting the client knobs <code class="docutils literal notranslate"><span class="pre">RESTORE_RANGE_DISABLE_RYW</span></code> or <code class="docutils literal notranslate"><span class="pre">RESTORE_RANGE_READ_BEFORE_CLEAR</span></code> (both default <code class="docutils literal notranslate"><span class="pre">true</span></code>) to <code class="docutils literal notranslate"><span class="pre">false</span></code> on the backup agents restores the previous behavior. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14513">(PR #14513)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/14525">(PR #14525)</a></p></li>
+<li><p>Bulk dump now picks its target DC from the region configuration: the primary region by default, or the remote region when the new <code class="docutils literal notranslate"><span class="pre">DD_BULKDUMP_USE_REMOTE_REGION</span></code> knob is set and the cluster has more than one usable region. Previously the target was decided by the lexicographic order of DC ids. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14275">(PR #14275)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/14384">(PR #14384)</a></p></li>
+<li><p>Added opt-in audit logging to fdbcli. With <code class="docutils literal notranslate"><span class="pre">--audit-log</span></code> (or <code class="docutils literal notranslate"><span class="pre">FDB_CLI_AUDIT_LOG_ENABLE</span></code>), every key returned by <code class="docutils literal notranslate"><span class="pre">get</span></code>, <code class="docutils literal notranslate"><span class="pre">getrange</span></code>, <code class="docutils literal notranslate"><span class="pre">getrangekeys</span></code> and <code class="docutils literal notranslate"><span class="pre">getall</span></code> is logged as an <code class="docutils literal notranslate"><span class="pre">FdbCliAudit</span></code> trace event. <code class="docutils literal notranslate"><span class="pre">--audit-log-values</span></code> (<code class="docutils literal notranslate"><span class="pre">none</span></code>, <code class="docutils literal notranslate"><span class="pre">system</span></code> or <code class="docutils literal notranslate"><span class="pre">all</span></code>, default <code class="docutils literal notranslate"><span class="pre">system</span></code>) picks which values are logged. Audit events go to their own <code class="docutils literal notranslate"><span class="pre">trace_audit.*</span></code> files, in the <code class="docutils literal notranslate"><span class="pre">FDB_CLI_AUDIT_LOG_ENABLE</span></code> value or <code class="docutils literal notranslate"><span class="pre">--audit-log-dir</span></code> if set, else next to the trace files, else the current directory. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14486">(PR #14486)</a></p></li>
+<li><p>Added opt-in JSON audit logging to <code class="docutils literal notranslate"><span class="pre">transaction_profiling_analyzer.py</span></code>. With <code class="docutils literal notranslate"><span class="pre">--audit-log</span></code> (or <code class="docutils literal notranslate"><span class="pre">FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE</span></code>), every key, range and mutation it prints is appended to <code class="docutils literal notranslate"><span class="pre">transaction_profiling_analyzer_audit.json</span></code>, in the <code class="docutils literal notranslate"><span class="pre">FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE</span></code> value or <code class="docutils literal notranslate"><span class="pre">--audit-log-dir</span></code> if set, else the <code class="docutils literal notranslate"><span class="pre">FDB_NETWORK_OPTION_TRACE_ENABLE</span></code> directory, else the current directory. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14486">(PR #14486)</a></p></li>
+<li><p>Fixed truth testing of an absent value in the Python bindings on Python 3. <code class="docutils literal notranslate"><span class="pre">if</span> <span class="pre">not</span> <span class="pre">tr[key]:</span></code> raised <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> for a missing key and now evaluates as false. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14517">(PR #14517)</a></p></li>
+<li><p>Fixed <code class="docutils literal notranslate"><span class="pre">FDB::Tuple.compare</span></code> and <code class="docutils literal notranslate"><span class="pre">FDB::Tuple::SingleFloat</span></code> comparisons raising <code class="docutils literal notranslate"><span class="pre">ArgumentError</span></code> on Ruby 3.3 and later when comparing floating point values. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14518">(PR #14518)</a></p></li>
+<li><p>Changed the Kubernetes monitor image to declare its existing non-root user numerically, allowing it to start with <code class="docutils literal notranslate"><span class="pre">runAsNonRoot:</span> <span class="pre">true</span></code> when <code class="docutils literal notranslate"><span class="pre">runAsUser</span></code> is not specified. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14248">(PR #14248)</a></p></li>
+<li><p>Updated <code class="docutils literal notranslate"><span class="pre">fdb-kubernetes-monitor</span></code>: it retries loading its configuration while the <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> binary is missing, empty or not executable, can be configured to always use the shared binaries (useful for compatible version upgrades without recreating pods), and exposes the staged and running <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> versions in a pod annotation for the operator. Its Go toolchain and dependencies now match <code class="docutils literal notranslate"><span class="pre">main</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14556">(PR #14556)</a></p></li>
+</ul>
+</section>
+<section id="id4">
 <h2>8.0.0</h2>
 <p>AVX enabled release.</p>
 <section id="compatibility-and-removed-features">
@@ -404,6 +441,7 @@ It requires Swift 6.1 or newer and Clang; Linux builds also require libc++.
 <h3>Earlier release notes</h3>
 <ul class="simple">
 <li><p><a class="reference internal" href="release-notes-740.html"><span class="doc">7.4 (API Version 740)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-730.html"><span class="doc">7.3 (API Version 730)</span></a></p></li>
 <li><p><a class="reference internal" href="../earlier-release-notes.html"><span class="doc">All earlier releases</span></a></p></li>
 </ul>
 </section>
@@ -430,7 +468,7 @@ It requires Swift 6.1 or newer and Clang; Linux builds also require libc++.
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 02, 2026.<br/>
+      Last updated on Nov 17, 2026.<br/>
     </p>
   </div>
 </footer>

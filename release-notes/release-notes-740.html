@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Release Notes &#8212; FoundationDB 8.0.0 documentation</title>
+    <title>Release Notes - 7.4 &#8212; FoundationDB 8.0.1 documentation</title>
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
     <script src="../_static/jquery.js"></script>
@@ -14,7 +14,7 @@
     <script src="../_static/doctools.js"></script>
     <script src="../_static/sphinx_highlight.js"></script>
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Release Notes (8.0)" href="release-notes-800.html" />
+    <link rel="next" title="Release Notes" href="release-notes-800.html" />
     <link rel="prev" title="Release Notes - 7.3" href="release-notes-730.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -67,16 +67,18 @@
   <ul class="dropdown-menu localtoc"
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
-<li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">7.4.8</a></li>
-<li><a class="reference internal" href="#id4">7.4.7</a></li>
-<li><a class="reference internal" href="#id5">7.4.6</a></li>
-<li><a class="reference internal" href="#id6">7.4.5</a></li>
-<li><a class="reference internal" href="#id7">7.4.4</a></li>
-<li><a class="reference internal" href="#id8">7.4.3</a></li>
-<li><a class="reference internal" href="#id9">7.4.2</a></li>
-<li><a class="reference internal" href="#id10">7.4.1</a></li>
-<li><a class="reference internal" href="#id11">7.4.0</a><ul>
+<li><a class="reference internal" href="#">Release Notes - 7.4</a><ul>
+<li><a class="reference internal" href="#id1">7.4.10</a></li>
+<li><a class="reference internal" href="#id2">7.4.9</a></li>
+<li><a class="reference internal" href="#id4">7.4.8</a></li>
+<li><a class="reference internal" href="#id6">7.4.7</a></li>
+<li><a class="reference internal" href="#id7">7.4.6</a></li>
+<li><a class="reference internal" href="#id8">7.4.5</a></li>
+<li><a class="reference internal" href="#id9">7.4.4</a></li>
+<li><a class="reference internal" href="#id10">7.4.3</a></li>
+<li><a class="reference internal" href="#id11">7.4.2</a></li>
+<li><a class="reference internal" href="#id12">7.4.1</a></li>
+<li><a class="reference internal" href="#id13">7.4.0</a><ul>
 <li><a class="reference internal" href="#features-supported">Features (Supported)</a></li>
 <li><a class="reference internal" href="#features-experimental">Features (Experimental)</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
@@ -103,7 +105,7 @@
     </a>
   </li>
   <li>
-    <a href="release-notes-800.html" title="Next Chapter: Release Notes (8.0)"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes (8.0) &raquo;</span>
+    <a href="release-notes-800.html" title="Next Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes &raquo;</span>
     </a>
   </li>
               
@@ -131,16 +133,18 @@
   <div class="row">
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
-<li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">7.4.8</a></li>
-<li><a class="reference internal" href="#id4">7.4.7</a></li>
-<li><a class="reference internal" href="#id5">7.4.6</a></li>
-<li><a class="reference internal" href="#id6">7.4.5</a></li>
-<li><a class="reference internal" href="#id7">7.4.4</a></li>
-<li><a class="reference internal" href="#id8">7.4.3</a></li>
-<li><a class="reference internal" href="#id9">7.4.2</a></li>
-<li><a class="reference internal" href="#id10">7.4.1</a></li>
-<li><a class="reference internal" href="#id11">7.4.0</a><ul>
+<li><a class="reference internal" href="#">Release Notes - 7.4</a><ul>
+<li><a class="reference internal" href="#id1">7.4.10</a></li>
+<li><a class="reference internal" href="#id2">7.4.9</a></li>
+<li><a class="reference internal" href="#id4">7.4.8</a></li>
+<li><a class="reference internal" href="#id6">7.4.7</a></li>
+<li><a class="reference internal" href="#id7">7.4.6</a></li>
+<li><a class="reference internal" href="#id8">7.4.5</a></li>
+<li><a class="reference internal" href="#id9">7.4.4</a></li>
+<li><a class="reference internal" href="#id10">7.4.3</a></li>
+<li><a class="reference internal" href="#id11">7.4.2</a></li>
+<li><a class="reference internal" href="#id12">7.4.1</a></li>
+<li><a class="reference internal" href="#id13">7.4.0</a><ul>
 <li><a class="reference internal" href="#features-supported">Features (Supported)</a></li>
 <li><a class="reference internal" href="#features-experimental">Features (Experimental)</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
@@ -160,9 +164,79 @@
       </div>
     <div class="body col-md-9 content" role="main">
       
-  <section id="release-notes">
-<span id="id1"></span><h1>Release Notes</h1>
+  <section id="release-notes-7-4">
+<h1>Release Notes - 7.4</h1>
+<section id="id1">
+<h2>7.4.10</h2>
+<p>AVX enabled release.</p>
+<ul class="simple">
+<li><p>Update to RocksDB 8.11.5 again. This contains a disk format change (originally made in RocksDB 9.0) such that it cannot be downgraded back to RocksDB 8.11.4 or lower, and no other changes. This new disk format is fully forwards and backwards compatible with RocksDB 9+ (for how FDB uses it). Note that RocksDB-9.7.3 was used in FoundationDB-7.4.0, downgraded to RocksDB-8.11.5 in FoundationDB-7.4.6, and then to RocksDB-8.11.4 in FoundationDB-7.4.7. All 7.4 releases before FoundationDB-7.4.7 were considered pre-stable-release, apologies for the confusion. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14042">(PR #14042)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/14554">(PR #14554)</a></p></li>
+</ul>
+<p>If you use the RocksDB storage engine, and care about the possibility of rolling-back a deployment, this FoundationDB release is meant to be useful as a step to the new RocksDB disk format. Once you have upgraded to FDB 7.4.9 and have confidence in that version, this FDB 7.4.10 release should have identical behavior in all respects, but cannot be downgraded back.</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>FoundationDB</p></th>
+<th class="head"><p>RocksDB</p></th>
+<th class="head"><p>Can Downgrade FDB</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>7.3.40+</p></td>
+<td><p>8.11.4</p></td>
+<td><p>YES</p></td>
+</tr>
+<tr class="row-odd"><td><p>7.4.0</p></td>
+<td><p>9.7.3</p></td>
+<td><p>NO</p></td>
+</tr>
+<tr class="row-even"><td><p>7.4.6</p></td>
+<td><p>8.11.5</p></td>
+<td><p>TO 7.4.0 - 7.4.5</p></td>
+</tr>
+<tr class="row-odd"><td><p>7.4.7</p></td>
+<td><p>8.11.4</p></td>
+<td><p>TO 7.3.x</p></td>
+</tr>
+<tr class="row-even"><td><p>7.4.9</p></td>
+<td><p>8.11.4</p></td>
+<td><p>TO 7.3.x, 7.4.7, 7.4.8</p></td>
+</tr>
+<tr class="row-odd"><td><p>7.4.10</p></td>
+<td><p>8.11.5</p></td>
+<td><p>TO 7.4.0 - 7.4.6</p></td>
+</tr>
+<tr class="row-even"><td><p>8.0.0</p></td>
+<td><p>11.1.2</p></td>
+<td><p>TO 7.4.10, 7.4.0 - 7.4.6</p></td>
+</tr>
+</tbody>
+</table>
+<p>See also <a class="reference internal" href="#enc-backup-stable"><span class="std std-ref">note about encrypted backups</span></a> in release 7.4.7 below.</p>
+</section>
 <section id="id2">
+<h2>7.4.9</h2>
+<p>AVX enabled release.</p>
+<ul class="simple">
+<li><p>Rejected file and object names that are absolute or contain a <code class="docutils literal notranslate"><span class="pre">..</span></code> component in places where a name is joined onto a base directory: local directory backup containers, backup file listing, S3 copy-down, bulk load job and task manifests, the profiler output file, and SST file names in fetched checkpoints. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14334">(PR #14334)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/14433">(PR #14433)</a></p></li>
+<li><p>On rhel9 based distros, avoid linking GLIBC_2.35 symbols. This fixes compatibility with RHEL 9.6 (and equivalent), and other linux distributions with glibc-2.34 (which lack some symbol backports added in RHEL 9.7). This issue affected FoundationDB 7.4.7 and 7.4.8. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14274">(PR #14274)</a></p></li>
+<li><p>Fixed a client crash (SIGSEGV) when opening a tenant on a database whose cluster file could not be used (missing, or not a valid connection string). Operations on the tenant now fail with the database’s error instead. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14308">(PR #14308)</a></p></li>
+<li><p>Fixed clients hanging, with every transaction timing out (error 1031) under the multi-version client, when the connection string still listed a coordinator hostname that no longer resolves in DNS. The client’s protocol version check kept retrying that hostname instead of following the switch to a working coordinator. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14338">(PR #14338)</a></p></li>
+<li><p>Fixed global configuration permanently missing the latest committed update after a protocol upgrade, when a refresh accepted an older cached GRV proxy snapshot. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14363">(PR #14363)</a></p></li>
+<li><p>Fixed data distribution picking its primary DC from the highest-priority configured region instead of the active master’s DC, which after a region failover made it treat the old primary region as active. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14387">(PR #14387)</a></p></li>
+<li><p>Fixed a memory leak in fdbmonitor on Linux each time a watched configuration file symlink is re-resolved. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14379">(PR #14379)</a></p></li>
+<li><p>Fixed <code class="docutils literal notranslate"><span class="pre">can_clean_bounce</span></code> always being false in <code class="docutils literal notranslate"><span class="pre">status</span> <span class="pre">json</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14272">(PR #14272)</a></p></li>
+<li><p>Fixed storage server <code class="docutils literal notranslate"><span class="pre">finished_queries</span></code> drifting below <code class="docutils literal notranslate"><span class="pre">total_queries</span></code> when a read was cancelled or failed, which made <code class="docutils literal notranslate"><span class="pre">query_queue_max</span></code> in status json grow permanently. <a class="reference external" href="https://github.com/apple/foundationdb/pull/13908">(PR #13908)</a></p></li>
+<li><p>Fixed one backup with a missing or invalid container URL dropping every backup from the backup layer status in <code class="docutils literal notranslate"><span class="pre">status</span> <span class="pre">json</span></code> (<code class="docutils literal notranslate"><span class="pre">layers.backup</span></code>). The other backups are still reported, and the failing one gets an <code class="docutils literal notranslate"><span class="pre">error</span></code> field. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14491">(PR #14491)</a></p></li>
+<li><p>Mutation log tasks of a backup whose snapshot has finished now run ahead of other backups’ initial snapshot tasks, so a new backup’s first snapshot no longer starves other backups’ logs and increases their backup lag. This raises the <code class="docutils literal notranslate"><span class="pre">TASKBUCKET_MAX_PRIORITY</span></code> client knob default from 1 to 2. Backup agents older than 7.4.9 only run tasks up to priority 1, so keep at least one 7.4.9 or newer backup agent running for backups that ran under 7.4.9. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14390">(PR #14390)</a></p></li>
+<li><p>Added per-URL blobstore parameters for backups: <code class="docutils literal notranslate"><span class="pre">server_side_encryption</span></code> (or <code class="docutils literal notranslate"><span class="pre">sse</span></code>) overrides the <code class="docutils literal notranslate"><span class="pre">BLOBSTORE_ENCRYPTION_TYPE</span></code> knob (<code class="docutils literal notranslate"><span class="pre">sse=none</span></code> sends no server-side encryption header), <code class="docutils literal notranslate"><span class="pre">proxy</span></code> overrides the <code class="docutils literal notranslate"><span class="pre">--proxy</span></code> option and proxy environment variables (<code class="docutils literal notranslate"><span class="pre">proxy=none</span></code> connects directly), and <code class="docutils literal notranslate"><span class="pre">aws_v4_header</span></code> (or <code class="docutils literal notranslate"><span class="pre">v4</span></code>) overrides the <code class="docutils literal notranslate"><span class="pre">HTTP_REQUEST_AWS_V4_HEADER</span></code> knob. The URL is saved with the backup, so each backup on a cluster can use its own values. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14420">(PR #14420)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/14471">(PR #14471)</a></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fdbbackup</span> <span class="pre">status</span></code> now shows the backup’s mutation log type (<code class="docutils literal notranslate"><span class="pre">default</span></code> or <code class="docutils literal notranslate"><span class="pre">partitioned-log-experimental</span></code>). The same value is in <code class="docutils literal notranslate"><span class="pre">fdbbackup</span> <span class="pre">status</span> <span class="pre">--json</span></code> (<code class="docutils literal notranslate"><span class="pre">MutationLogType</span></code>), in <code class="docutils literal notranslate"><span class="pre">status</span> <span class="pre">json</span></code> on each backup tag under <code class="docutils literal notranslate"><span class="pre">layers.backup</span></code> (<code class="docutils literal notranslate"><span class="pre">mutation_log_type</span></code>), and in <code class="docutils literal notranslate"><span class="pre">fdbrestore</span> <span class="pre">status</span></code> (<code class="docutils literal notranslate"><span class="pre">Mutation</span> <span class="pre">Log</span> <span class="pre">Type:</span></code>). <a class="reference external" href="https://github.com/apple/foundationdb/pull/14335">(PR #14335)</a></p></li>
+<li><p>Added a bounded-time rollback for shard-encoded location metadata (<code class="docutils literal notranslate"><span class="pre">SHARD_ENCODE_LOCATION_METADATA</span></code>). New <code class="docutils literal notranslate"><span class="pre">configure</span></code> options <code class="docutils literal notranslate"><span class="pre">shard_metadata_format={original|encoded}</span></code> and <code class="docutils literal notranslate"><span class="pre">shard_metadata_migration={enabled|disabled}</span></code> (default <code class="docutils literal notranslate"><span class="pre">disabled</span></code>) let data distribution actively rewrite shard-encoded metadata back to the original format when it starts, so the binary can be downgraded (moving to <code class="docutils literal notranslate"><span class="pre">encoded</span></code> still happens through normal data moves), and <code class="docutils literal notranslate"><span class="pre">audit_storage</span> <span class="pre">metadata_encoding</span></code> in fdbcli reports the encoding state of the cluster. Nothing changes until an operator sets these options. <a class="reference external" href="https://github.com/apple/foundationdb/pull/13965">(PR #13965)</a></p></li>
+<li><p>Bulk dump now picks its target DC from the region configuration: the primary region by default, or the remote region when the new <code class="docutils literal notranslate"><span class="pre">DD_BULKDUMP_USE_REMOTE_REGION</span></code> knob is set and the cluster has more than one usable region. Previously the target was decided by the lexicographic order of DC ids. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14276">(PR #14276)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/14385">(PR #14385)</a></p></li>
+<li><p>Added opt-in audit logging to fdbcli. With <code class="docutils literal notranslate"><span class="pre">--audit-log</span></code> (or <code class="docutils literal notranslate"><span class="pre">FDB_CLI_AUDIT_LOG_ENABLE</span></code>), every key returned by <code class="docutils literal notranslate"><span class="pre">get</span></code>, <code class="docutils literal notranslate"><span class="pre">getrange</span></code>, <code class="docutils literal notranslate"><span class="pre">getrangekeys</span></code> and <code class="docutils literal notranslate"><span class="pre">getall</span></code> is logged as an <code class="docutils literal notranslate"><span class="pre">FdbCliAudit</span></code> trace event. <code class="docutils literal notranslate"><span class="pre">--audit-log-values</span></code> (<code class="docutils literal notranslate"><span class="pre">none</span></code>, <code class="docutils literal notranslate"><span class="pre">system</span></code> or <code class="docutils literal notranslate"><span class="pre">all</span></code>, default <code class="docutils literal notranslate"><span class="pre">system</span></code>) picks which values are logged. Audit events go to their own <code class="docutils literal notranslate"><span class="pre">trace_audit.*</span></code> files, in the <code class="docutils literal notranslate"><span class="pre">FDB_CLI_AUDIT_LOG_ENABLE</span></code> value or <code class="docutils literal notranslate"><span class="pre">--audit-log-dir</span></code> if set, else next to the trace files, else the current directory. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14485">(PR #14485)</a></p></li>
+<li><p>Added opt-in JSON audit logging to <code class="docutils literal notranslate"><span class="pre">transaction_profiling_analyzer.py</span></code>. With <code class="docutils literal notranslate"><span class="pre">--audit-log</span></code> (or <code class="docutils literal notranslate"><span class="pre">FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE</span></code>), every key, range and mutation it prints is appended to <code class="docutils literal notranslate"><span class="pre">transaction_profiling_analyzer_audit.json</span></code>, in the <code class="docutils literal notranslate"><span class="pre">FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE</span></code> value or <code class="docutils literal notranslate"><span class="pre">--audit-log-dir</span></code> if set, else the <code class="docutils literal notranslate"><span class="pre">FDB_NETWORK_OPTION_TRACE_ENABLE</span></code> directory, else the current directory. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14485">(PR #14485)</a></p></li>
+</ul>
+</section>
+<section id="id4">
 <h2>7.4.8</h2>
 <p>AVX enabled release.</p>
 <ul class="simple">
@@ -171,7 +245,7 @@
 <li><p>Changed debug level to “-g1” and enabled compression for “*.debug” release artifacts, to make them much smaller. Also changed to include the main executable in the “*.debug” release artifact so it can optionally be run directly, on its own. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14103">(PR #14103)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/14131">(PR #14131)</a></p></li>
 </ul>
 </section>
-<section id="id4">
+<section id="id6">
 <h2>7.4.7</h2>
 <p>AVX enabled release.</p>
 <ul class="simple">
@@ -199,9 +273,11 @@
 <li><p>Fixed <code class="docutils literal notranslate"><span class="pre">minRestorableVersion</span></code> and <code class="docutils literal notranslate"><span class="pre">maxRestorableVersion</span></code> updates when mutation logs are missing. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12710">(PR #12710)</a></p></li>
 <li><p>Restricted <code class="docutils literal notranslate"><span class="pre">backup_worker_enabled</span></code> configuration through <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12711">(PR #12711)</a></p></li>
 <li><p>Enabled TLS hostname validation against certificate CN and SAN values. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12730">(PR #12730)</a></p></li>
+<li><p>Downgraded RocksDB to 8.11.4. <a class="reference external" href="https://github.com/apple/foundationdb/pull/13830">(PR #13830)</a></p></li>
 </ul>
+<p id="enc-backup-stable">Encrypted Backups are production-ready starting with 7.4.7. Encrypted backups created with earlier versions are not compatible with 7.4.7+ and cannot be restored due to a format change. If using this feature, create a new encrypted backup with 7.4.7+.</p>
 </section>
-<section id="id5">
+<section id="id7">
 <h2>7.4.6</h2>
 <p>AVX enabled release.</p>
 <ul class="simple">
@@ -221,13 +297,13 @@
 <li><p>Downgraded RocksDB to 8.11.5. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12651">(PR #12651)</a></p></li>
 </ul>
 </section>
-<section id="id6">
+<section id="id8">
 <h2>7.4.5</h2>
 <ul class="simple">
 <li><p>Same as 7.4.4 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id7">
+<section id="id9">
 <h2>7.4.4</h2>
 <ul class="simple">
 <li><p>Fixed a race that could cause recovery to be stuck when purging old generations. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12214">(PR #12214)</a></p></li>
@@ -239,13 +315,13 @@
 <li><p>Fixed an issue in TLog server code that was causing OOMs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12298">(PR #12298)</a></p></li>
 </ul>
 </section>
-<section id="id8">
+<section id="id10">
 <h2>7.4.3</h2>
 <ul class="simple">
 <li><p>Same as 7.4.2 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id9">
+<section id="id11">
 <h2>7.4.2</h2>
 <ul class="simple">
 <li><p>Fixed a backup restore speed regression. <a class="reference external" href="https://github.com/apple/foundationdb/issues/12098">(PR #12098)</a></p></li>
@@ -258,13 +334,13 @@
 <li><p>Optimized keyInfo lookup in commit proxy. <a class="reference external" href="https://github.com/apple/foundationdb/issues/12106">(PR #12106)</a></p></li>
 </ul>
 </section>
-<section id="id10">
+<section id="id12">
 <h2>7.4.1</h2>
 <ul class="simple">
 <li><p>Same as 7.4.0 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id11">
+<section id="id13">
 <h2>7.4.0</h2>
 <section id="features-supported">
 <h3>Features (Supported)</h3>
@@ -361,23 +437,7 @@
 <li><p><a class="reference internal" href="release-notes-720.html"><span class="doc">7.2 (API Version 720)</span></a></p></li>
 <li><p><a class="reference internal" href="release-notes-710.html"><span class="doc">7.1 (API Version 710)</span></a></p></li>
 <li><p><a class="reference internal" href="release-notes-700.html"><span class="doc">7.0 (API Version 700)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-630.html"><span class="doc">6.3 (API Version 630)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-620.html"><span class="doc">6.2 (API Version 620)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-610.html"><span class="doc">6.1 (API Version 610)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-600.html"><span class="doc">6.0 (API Version 600)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-520.html"><span class="doc">5.2 (API Version 520)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-510.html"><span class="doc">5.1 (API Version 510)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-500.html"><span class="doc">5.0 (API Version 500)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-460.html"><span class="doc">4.6 (API Version 460)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-450.html"><span class="doc">4.5 (API Version 450)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-440.html"><span class="doc">4.4 (API Version 440)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-430.html"><span class="doc">4.3 (API Version 430)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-420.html"><span class="doc">4.2 (API Version 420)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-410.html"><span class="doc">4.1 (API Version 410)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-400.html"><span class="doc">4.0 (API Version 400)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-300.html"><span class="doc">3.0 (API Version 300)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-200.html"><span class="doc">2.0 (API Version 200)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-100.html"><span class="doc">1.0 (API Version 100)</span></a></p></li>
+<li><p><a class="reference internal" href="../earlier-release-notes.html"><span class="doc">All earlier releases</span></a></p></li>
 </ul>
 </section>
 </section>
@@ -403,7 +463,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 02, 2026.<br/>
+      Last updated on Nov 17, 2026.<br/>
     </p>
   </div>
 </footer>

@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Restore Validation Testing Guide &#8212; FoundationDB 8.0.0 documentation</title>
+    <title>Restore Validation Testing Guide &#8212; FoundationDB 8.0.1 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -386,7 +386,7 @@
 <p>The <code class="docutils literal notranslate"><span class="pre">\xff\x02/rlog/</span></code> prefix is the <code class="docutils literal notranslate"><span class="pre">validateRestoreLogKeys</span></code> range where validation looks for restored data.</p>
 <div class="admonition important">
 <p class="admonition-title">Important</p>
-<p><strong>Restore will clear and overwrite any existing data at the destination range.</strong> This is standard restore behavior. The restore process explicitly clears the destination range before writing restored data, so any pre-existing keys in <code class="docutils literal notranslate"><span class="pre">\xff\x02/rlog/</span></code> will be replaced.</p>
+<p><strong>Restore will clear and overwrite any existing data at the destination range.</strong> This is standard restore behavior. The restore clears the key span of each block of a snapshot (range) file in the same transaction that writes the block’s keys, so any pre-existing keys in <code class="docutils literal notranslate"><span class="pre">\xff\x02/rlog/</span></code> inside those spans will be replaced.</p>
 </div>
 </section>
 <section id="verify-restored-data-exists">
@@ -638,7 +638,7 @@
 <p><strong>Fix</strong>: When restoring for validation, you must use the <code class="docutils literal notranslate"><span class="pre">addPrefix</span></code> parameter to restore
 to a different keyspace (e.g., <code class="docutils literal notranslate"><span class="pre">\xff\x02/rlog/</span></code>). This bypasses the empty destination check
 that’s enforced for regular restores (which protect against accidental data loss).</p>
-<p><strong>Note</strong>: All restores (with or without prefix) will clear and overwrite the destination range.
+<p><strong>Note</strong>: All restores (with or without prefix) clear and overwrite the key span of each restored block of a snapshot file.
 The difference is that regular restores (no prefix) check for existing data and fail to prevent
 accidents, while validation restores (with prefix) proceed because they’re intentionally writing
 to a dedicated validation keyspace.</p>
@@ -756,7 +756,7 @@ to a dedicated validation keyspace.</p>
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 02, 2026.<br/>
+      Last updated on Nov 17, 2026.<br/>
     </p>
   </div>
 </footer>

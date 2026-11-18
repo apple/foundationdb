@@ -151,7 +151,7 @@ Restore with Prefix
 The ``\xff\x02/rlog/`` prefix is the ``validateRestoreLogKeys`` range where validation looks for restored data.
 
 .. important::
-   **Restore will clear and overwrite any existing data at the destination range.** This is standard restore behavior. The restore process explicitly clears the destination range before writing restored data, so any pre-existing keys in ``\xff\x02/rlog/`` will be replaced.
+   **Restore will clear and overwrite any existing data at the destination range.** This is standard restore behavior. The restore clears the key span of each block of a snapshot (range) file in the same transaction that writes the block's keys, so any pre-existing keys in ``\xff\x02/rlog/`` inside those spans will be replaced.
 
 Verify Restored Data Exists
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -441,7 +441,7 @@ Troubleshooting
 to a different keyspace (e.g., ``\xff\x02/rlog/``). This bypasses the empty destination check 
 that's enforced for regular restores (which protect against accidental data loss).
 
-**Note**: All restores (with or without prefix) will clear and overwrite the destination range. 
+**Note**: All restores (with or without prefix) clear and overwrite the key span of each restored block of a snapshot file. 
 The difference is that regular restores (no prefix) check for existing data and fail to prevent 
 accidents, while validation restores (with prefix) proceed because they're intentionally writing 
 to a dedicated validation keyspace.

@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Command Line Interface &#8212; FoundationDB 8.0.0 documentation</title>
+    <title>Command Line Interface &#8212; FoundationDB 8.0.1 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -36,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -67,6 +67,7 @@
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">Command Line Interface</a><ul>
 <li><a class="reference internal" href="#invocation-at-the-command-line">Invocation at the Command Line</a></li>
+<li><a class="reference internal" href="#audit-logging">Audit logging</a></li>
 <li><a class="reference internal" href="#commands-within-fdbcli">Commands within <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code></a><ul>
 <li><a class="reference internal" href="#advanceversion">advanceversion</a></li>
 <li><a class="reference internal" href="#begin">begin</a></li>
@@ -178,6 +179,7 @@
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">Command Line Interface</a><ul>
 <li><a class="reference internal" href="#invocation-at-the-command-line">Invocation at the Command Line</a></li>
+<li><a class="reference internal" href="#audit-logging">Audit logging</a></li>
 <li><a class="reference internal" href="#commands-within-fdbcli">Commands within <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code></a><ul>
 <li><a class="reference internal" href="#advanceversion">advanceversion</a></li>
 <li><a class="reference internal" href="#begin">begin</a></li>
@@ -276,6 +278,41 @@ fdb&gt;
 </pre></div>
 </div>
 <p>This will result in <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> connecting to the <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a> (<code class="docutils literal notranslate"><span class="pre">/etc/foundationdb/fdb.cluster</span></code> for Linux.) You can also specify a cluster file as an argument to <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> using the <code class="docutils literal notranslate"><span class="pre">-C</span></code> option. For further information, see <a class="reference internal" href="administration.html#specifying-a-cluster-file"><span class="std std-ref">Specifying the cluster file</span></a>.</p>
+</section>
+<section id="audit-logging">
+<span id="cli-audit-logging"></span><h2>Audit logging</h2>
+<p><code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> can log every key returned by <code class="docutils literal notranslate"><span class="pre">get</span></code>, <code class="docutils literal notranslate"><span class="pre">getrange</span></code>, <code class="docutils literal notranslate"><span class="pre">getrangekeys</span></code> and <code class="docutils literal notranslate"><span class="pre">getall</span></code> as an <code class="docutils literal notranslate"><span class="pre">FdbCliAudit</span></code> trace event. Audit events go to their own <code class="docutils literal notranslate"><span class="pre">trace_audit.*</span></code> trace files, separate from the regular <code class="docutils literal notranslate"><span class="pre">trace.*</span></code> files. Audit logging is turned on and pointed at a directory the same way tracing is, but separately:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"></th>
+<th class="head"><p>Tracing</p></th>
+<th class="head"><p>Audit logging</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Turn on</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--log</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--audit-log</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Directory</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--log-dir</span> <span class="pre">PATH</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--audit-log-dir</span> <span class="pre">PATH</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Environment variable (set = on, value = directory)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">FDB_NETWORK_OPTION_TRACE_ENABLE</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">FDB_CLI_AUDIT_LOG_ENABLE</span></code></p></td>
+</tr>
+</tbody>
+</table>
+<p>Audit logging doesn’t require tracing. The audit directory is the <code class="docutils literal notranslate"><span class="pre">FDB_CLI_AUDIT_LOG_ENABLE</span></code> value if it’s set, otherwise <code class="docutils literal notranslate"><span class="pre">--audit-log-dir</span></code>. If that’s empty, audit files go next to the trace files if tracing is on, otherwise in the current directory. Like <code class="docutils literal notranslate"><span class="pre">FDB_NETWORK_OPTION_TRACE_ENABLE</span></code> over <code class="docutils literal notranslate"><span class="pre">--log-dir</span></code>, the environment variable wins over <code class="docutils literal notranslate"><span class="pre">--audit-log-dir</span></code>, even when it’s set to an empty value. <code class="docutils literal notranslate"><span class="pre">--trace-format</span></code>, <code class="docutils literal notranslate"><span class="pre">--log-group</span></code> and the <code class="docutils literal notranslate"><span class="pre">FDB_NETWORK_OPTION_TRACE_*</span></code> environment variables (roll size, max logs size, file identifier, partial file suffix) apply to audit files too. Audit files roll and get deleted on their own size budget.</p>
+<p><code class="docutils literal notranslate"><span class="pre">--audit-log-values</span> <span class="pre">none|system|all</span></code> picks which returned values are logged. The default is <code class="docutils literal notranslate"><span class="pre">system</span></code>: only values of system keys (<code class="docutils literal notranslate"><span class="pre">\xff</span></code> prefix). Keys are always logged.</p>
+<p>Each <code class="docutils literal notranslate"><span class="pre">FdbCliAudit</span></code> event has <code class="docutils literal notranslate"><span class="pre">Command</span></code>, <code class="docutils literal notranslate"><span class="pre">AuditID</span></code> (the same for every key returned by one command), <code class="docutils literal notranslate"><span class="pre">Cluster</span></code> (the cluster file’s description), <code class="docutils literal notranslate"><span class="pre">IPAddress</span></code> (the client’s IP), <code class="docutils literal notranslate"><span class="pre">Key</span></code>, <code class="docutils literal notranslate"><span class="pre">Value</span></code> (per <code class="docutils literal notranslate"><span class="pre">--audit-log-values</span></code>) and <code class="docutils literal notranslate"><span class="pre">StorageServer</span></code> (<code class="docutils literal notranslate"><span class="pre">getall</span></code> only), plus the usual <code class="docutils literal notranslate"><span class="pre">Machine</span></code> and <code class="docutils literal notranslate"><span class="pre">LogGroup</span></code>. Missing keys, empty ranges and failed reads log nothing.</p>
+<p>So reads can’t silently go unaudited:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">--audit-log-dir</span></code> without <code class="docutils literal notranslate"><span class="pre">--audit-log</span></code> or <code class="docutils literal notranslate"><span class="pre">FDB_CLI_AUDIT_LOG_ENABLE</span></code> is an error (unlike <code class="docutils literal notranslate"><span class="pre">--log-dir</span></code> without <code class="docutils literal notranslate"><span class="pre">--log</span></code>, which is ignored).</p></li>
+<li><p>If the audit directory doesn’t exist or isn’t writable, <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> aborts before running any command. <code class="docutils literal notranslate"><span class="pre">FDB_CLI_AUDIT_LOG_ENABLE=1</span></code> means a directory named <code class="docutils literal notranslate"><span class="pre">1</span></code>.</p></li>
+</ul>
+<p>For now, <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> is the only process that writes audit trace files. Other processes and clients using <code class="docutils literal notranslate"><span class="pre">libfdb_c</span></code> through the C API or a language binding have no way to turn them on.</p>
 </section>
 <section id="commands-within-fdbcli">
 <h2>Commands within <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code></h2>
@@ -909,7 +946,7 @@ print cluster statistics.</p>
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 02, 2026.<br/>
+      Last updated on Nov 17, 2026.<br/>
     </p>
   </div>
 </footer>

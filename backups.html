@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Backup, Restore, and Replication for Disaster Recovery &#8212; FoundationDB 8.0.0 documentation</title>
+    <title>Backup, Restore, and Replication for Disaster Recovery &#8212; FoundationDB 8.0.1 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -36,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -325,7 +325,10 @@ To pickup the &lt;api_key&gt;, &lt;secret&gt;, and &lt;security_token&gt; from <
 <p><em>max_recv_bytes_per_second</em> (or <em>rbps</em>) - Max receive bytes per second for all requests combined.</p>
 <p><em>max_delay_retryable_error (or *dre</em>) - Max seconds to delay before retry again when seeing an retryable error.</p>
 <p><em>max_delay_connection_failed (or *dcf</em>) - Max seconds to delay before retry again when seeing an connection failure.</p>
+<p><em>aws_v4_header</em> (or <em>v4</em>) - Set 1 to sign requests with AWS Signature Version 4, or 0 to use Version 2.  Overrides the <code class="docutils literal notranslate"><span class="pre">HTTP_REQUEST_AWS_V4_HEADER</span></code> knob for this URL. The URL is saved with the backup, so each backup can use its own value.</p>
 <p><em>header</em> - Add an additional HTTP header to each blob store REST API request.  Can be specified multiple times.  Format is <em>header=&lt;FieldName&gt;:&lt;FieldValue&gt;</em> where both strings are non-empty.</p>
+<p><em>server_side_encryption</em> (or <em>sse</em>) - Value of the <em>x-amz-server-side-encryption</em> header sent on requests that create objects, for example <em>AES256</em> or <em>aws:kms</em>.  Overrides the <code class="docutils literal notranslate"><span class="pre">BLOBSTORE_ENCRYPTION_TYPE</span></code> knob for this URL.  Use <em>sse=none</em> to send no server-side encryption header even when the knob is set.  The URL is saved with the backup, so each backup can use its own value.</p>
+<p><em>proxy</em> - Proxy to use for this URL, as <em>host:port</em> or <em>IP:port</em>.  Overrides the <code class="docutils literal notranslate"><span class="pre">--proxy</span></code> option of <code class="docutils literal notranslate"><span class="pre">fdbbackup</span></code>, <code class="docutils literal notranslate"><span class="pre">backup_agent</span></code>, and <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code>, and the proxy environment variables.  Use <em>proxy=none</em> to connect directly even when a proxy is configured.  The URL is saved with the backup, so each backup can use its own proxy.</p>
 <p><em>sdk_auth</em> (or <em>sa</em>) - Use the AWS SDK to do credentials and authentication. This supports all aws authentication types, including credential-less iam role-based authentication in aws. Experimental, and only works if FDB was compiled with BUILD_AWS_BACKUP=ON. When this parameter is set, all other credential parts of the backup url can be ignored.</p>
 <blockquote>
 <div><p><strong>Example</strong>: The URL parameter <em>header=x-amz-storage-class:REDUCED_REDUNDANCY</em> would send the HTTP header required to use the reduced redundancy storage option in the S3 API.</p>
@@ -589,7 +592,7 @@ user@host$ fdbbackup start -k '@pp1e b*n*nn*' -k '#an&amp;0 p^n3app!e' -d &lt;BA
 </section>
 <section id="fdbrestore-command-line-tool">
 <h2><code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> command line tool</h2>
-<p>The <code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> command line tool is used to control restore tasks.  Note that a restore operation will not clear the target key ranges, for safety reasons, so you must manually clear the ranges to be restored prior to starting the restore.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> command line tool is used to control restore tasks.  Note that a restore operation will not clear the target key ranges up front, for safety reasons, so you must manually clear the ranges to be restored prior to starting the restore; starting a restore from range files into a range that already contains keys fails with <code class="docutils literal notranslate"><span class="pre">restore_destination_not_empty</span></code> (restores under the validation prefix are exempt). While the restore runs, it clears the key span of each block of a snapshot (range) file in the same transaction that writes the block’s keys, so any key inside that span that is not in the backup is removed.</p>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
 <p>It is your responsibility to ensure that no clients are accessing the database while it is being restored. During the restore process the database is in an inconsistent state, and writes that happen during the restore process might be partially or completely overwritten by restored data.</p>
@@ -908,7 +911,7 @@ user@host$ fdbbackup start -k '@pp1e b*n*nn*' -k '#an&amp;0 p^n3app!e' -d &lt;BA
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 02, 2026.<br/>
+      Last updated on Nov 17, 2026.<br/>
     </p>
   </div>
 </footer>

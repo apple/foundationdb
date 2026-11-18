@@ -5,7 +5,7 @@ FoundationDB Architecture
 Coordinators
 ============
 
-All clients and servers connect to a FoundationDB cluster with a cluster file, which contains the IP:PORT of the coordinators. Both the clients and servers use the coordinators to connect with the cluster controller. The servers will attempt to become the cluster controller if one does not exist, and register with the cluster controller once one has been elected. Clients use the cluster controller to keep an up-to-date list of GRV proxies and commit proxies.
+All clients and servers connect to a FoundationDB cluster with a cluster file, which contains the IP:PORT or HOSTNAME:PORT of the coordinators. Both the clients and servers use the coordinators to connect with the cluster controller. The servers will attempt to become the cluster controller if one does not exist, and register with the cluster controller once one has been elected. Clients use the cluster controller to keep an up-to-date list of GRV proxies and commit proxies.
 
 Cluster Controller
 ==================
