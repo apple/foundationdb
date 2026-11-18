@@ -40,7 +40,7 @@ struct Mixed {
 	static Mixed make(int) {
 		Mixed m;
 		for (int i = 0; i < 100; ++i) {
-			m.ints.push_back(i * 7919);
+			m.ints.push_back(static_cast<int64_t>(i) * 7919);
 		}
 		for (int i = 0; i < 20; ++i) {
 			m.optionals.push_back(i % 2 ? Optional<int>(i) : Optional<int>());
