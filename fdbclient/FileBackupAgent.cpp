@@ -4666,6 +4666,52 @@ struct RestoreFileTaskFuncBase : RestoreTaskFuncBase {
 	}
 };
 
+// Optional observer for the deterministic writer recovery simulation. The size limit applies only to
+// writer transactions, so task setup and unrelated cluster activity retain their normal limits.
+struct RestoreWriterTestState {
+	int rejections = 0;
+	int commits = 0;
+	int committedRecords = 0;
+	int lastRejectedLimit = 0;
+	int lastCommittedLimit = 0;
+	std::vector<int> batchLimits;
+	std::vector<int> batchCommits;
+
+	void beginBatch(int limit) {
+		if (lastCommittedLimit) {
+			ASSERT_EQ(limit, lastCommittedLimit);
+		}
+		batchLimits.push_back(limit);
+		batchCommits.push_back(0);
+	}
+
+	Future<Void> commit(Reference<ReadYourWritesTransaction> tr, int limit, int records) {
+		ASSERT(g_network->isSimulated());
+		int64_t sizeLimit = 4096;
+		tr->setOption(FDBTransactionOptions::SIZE_LIMIT, StringRef((uint8_t*)&sizeLimit, sizeof(sizeLimit)));
+		try {
+			co_await tr->commit();
+		} catch (Error& e) {
+			if (e.code() == error_code_transaction_too_large) {
+				++rejections;
+				lastRejectedLimit = limit;
+			}
+			throw;
+		}
+		ASSERT_GT(rejections, 0);
+		ASSERT_LT(limit, lastRejectedLimit);
+		if (lastCommittedLimit) {
+			ASSERT_LE(limit, lastCommittedLimit);
+		}
+		lastCommittedLimit = limit;
+		++commits;
+		committedRecords += records;
+		if (!batchCommits.empty()) {
+			++batchCommits.back();
+		}
+	}
+};
+
 struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	static struct : InputParams {
 		// The range of data that the (possibly empty) data represented, which is set if it intersects the target
@@ -4695,7 +4741,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	static Future<Void> _execute(Database cx,
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
-	                             Reference<Task> task) {
+	                             Reference<Task> task,
+	                             RestoreWriterTestState* test = nullptr) {
 		RestoreConfig restore(task);
 
 		RestoreFile rangeFile = Params.inputFile().get(task);
@@ -4802,8 +4849,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 			int start = 0;
 			int end = data.size();
-			int dataSizeLimit =
-			    buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+			int dataSizeLimit = !test && buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6)
+			                                       : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 			tr->reset();
 			while (true) {
@@ -4867,7 +4914,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 					co_await checkLock;
 
-					co_await tr->commit();
+					co_await (test ? test->commit(tr, dataSizeLimit, i - start) : tr->commit());
 
 					TraceEvent("FileRestoreCommittedRange")
 					    .suppressFor(60)
@@ -4896,10 +4943,12 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.code() == error_code_transaction_too_large)
+				if (err.code() == error_code_transaction_too_large && dataSizeLimit > 1) {
 					dataSizeLimit /= 2;
-				else
+					tr->reset();
+				} else {
 					co_await tr->onError(err);
+				}
 			}
 		}
 		if (!originalFileRanges.empty()) {
@@ -5156,7 +5205,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 	static Future<Void> _execute(Database cx,
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
-	                             Reference<Task> task) {
+	                             Reference<Task> task,
+	                             RestoreWriterTestState* test = nullptr) {
 		RestoreConfig restore(task);
 
 		RestoreFile logFile = Params.inputFile().get(task);
@@ -5210,8 +5260,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		int start = 0;
 		int end = dataFiltered.size();
-		int dataSizeLimit =
-		    buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+		int dataSizeLimit = !test && buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6)
+		                                       : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 		tr->reset();
 		while (true) {
@@ -5240,7 +5290,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				// Add to bytes written count
 				restore.bytesWritten().atomicOp(tr, txBytes, MutationRef::Type::AddValue);
 
-				co_await tr->commit();
+				co_await (test ? test->commit(tr, dataSizeLimit, i - start) : tr->commit());
 
 				TraceEvent("FileRestoreCommittedLog")
 				    .suppressFor(60)
@@ -5265,10 +5315,12 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.code() == error_code_transaction_too_large)
+			if (err.code() == error_code_transaction_too_large && dataSizeLimit > 1) {
 				dataSizeLimit /= 2;
-			else
+				tr->reset();
+			} else {
 				co_await tr->onError(err);
+			}
 		}
 	}
 
@@ -5520,22 +5572,26 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	}
 
 	// Writes backup mutations to the database
-	static Future<Void> writeMutations(Database cx,
-	                                   std::vector<Standalone<VectorRef<KeyValueRef>>> mutations,
-	                                   Key mutationLogPrefix,
-	                                   Reference<Task> task,
-	                                   Reference<TaskBucket> taskBucket) {
+	static Future<int> writeMutations(Database cx,
+	                                  std::vector<Standalone<VectorRef<KeyValueRef>>> mutations,
+	                                  Key mutationLogPrefix,
+	                                  Reference<Task> task,
+	                                  Reference<TaskBucket> taskBucket,
+	                                  int txBytesLimit,
+	                                  RestoreWriterTestState* test = nullptr) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Standalone<VectorRef<KeyValueRef>> oldFormatMutations;
 		int mutationIndex = 0;
 		int mutationCount = 0;
 		int txBytes = 0;
-		int txBytesLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 		for (const auto& data : mutations) {
 			oldFormatMutations.append(oldFormatMutations.arena(), data.begin(), data.size());
 		}
 		int totalMutation = oldFormatMutations.size();
+		if (test && totalMutation > 0) {
+			test->beginBatch(txBytesLimit);
+		}
 
 		// multiple transactions are needed, so this has to be in a _execute method rather than
 		// a _finish method
@@ -5562,7 +5618,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 					++mutationCount;
 				}
 				co_await taskBucket->keepRunning(tr, task);
-				co_await tr->commit();
+				co_await (test ? test->commit(tr, txBytesLimit, mutationCount) : tr->commit());
 
 				int64_t oldBytes = Params.bytesWritten().get(task);
 				Params.bytesWritten().set(task, oldBytes + txBytes);
@@ -5572,23 +5628,26 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				    .detail("TotalMutation", totalMutation)
 				    .detail("Bytes", txBytes);
 				mutationIndex += mutationCount; // update mutationIndex after the commit succeeds
+				tr->reset();
 				continue;
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.code() == error_code_transaction_too_large) {
+			if (err.code() == error_code_transaction_too_large && txBytesLimit > 1 && mutationCount > 1) {
 				txBytesLimit /= 2;
+				tr->reset();
 			} else {
 				co_await tr->onError(err);
 			}
 		}
-		co_return;
+		co_return txBytesLimit;
 	}
 
 	static Future<Void> _execute(Database cx,
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
-	                             Reference<Task> task) {
+	                             Reference<Task> task,
+	                             RestoreWriterTestState* test = nullptr) {
 		RestoreConfig restore(task);
 
 		int64_t maxTagID = Params.maxTagID().get(task);
@@ -5666,6 +5725,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		Future<Void> reader = readLogData(mutationStream, iterators, begin, end);
 
 		std::vector<Standalone<VectorRef<KeyValueRef>>> mutations;
+		int txBytesLimit = std::max(1, CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE);
 		int64_t totalBytes = 0;
 		Standalone<VectorRef<KeyValueRef>> oneVersionData;
 		while (true) {
@@ -5676,8 +5736,9 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 
 				// batching mutations from multiple versions together before writing to the database
 				int64_t bytes = oneVersionData.expectedSize();
-				if (totalBytes + bytes > CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE) {
-					co_await writeMutations(cx, mutations, restore.mutationLogPrefix(), task, taskBucket);
+				if (totalBytes + bytes > txBytesLimit) {
+					txBytesLimit = co_await writeMutations(
+					    cx, mutations, restore.mutationLogPrefix(), task, taskBucket, txBytesLimit, test);
 					mutations.clear();
 					totalBytes = 0;
 				}
@@ -5689,7 +5750,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			}
 			if (err.code() == error_code_end_of_stream) {
 				if (!mutations.empty()) {
-					co_await writeMutations(cx, mutations, restore.mutationLogPrefix(), task, taskBucket);
+					txBytesLimit = co_await writeMutations(
+					    cx, mutations, restore.mutationLogPrefix(), task, taskBucket, txBytesLimit, test);
 				}
 				break;
 			} else {
@@ -5772,6 +5834,172 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 };
 StringRef RestoreLogDataPartitionedTaskFunc::name = "restore_log_data_partitioned"_sr;
 REGISTER_TASKFUNC(RestoreLogDataPartitionedTaskFunc);
+
+// Runs the actual writers against a database, including the partitioned reader's batch handoff.
+Future<Void> testRestoreWriterRecovery(Database cx) {
+	ASSERT(g_network->isSimulated());
+	ASSERT_EQ(CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE, 16384);
+	constexpr int recordCount = 96;
+	const int blockSize = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+	KeyRange dataRange = KeyRangeRef("restore-writer/"_sr, "restore-writer0"_sr);
+	for (int writer = 0; writer < 3; ++writer) {
+		RestoreConfig restore(deterministicRandom()->randomUniqueID());
+		Reference<IBackupContainer> bc = IBackupContainer::openContainer(
+		    "file://" + abspath("simfdb/restore-writer-" + restore.getUid().toString()), {}, {}, 0);
+		co_await bc->create();
+		Reference<IBackupFile> file;
+		StringRef taskName;
+		if (writer == 0) {
+			taskName = RestoreRangeTaskFunc::name;
+			file = co_await bc->writeRangeFile(1, 0, 1, blockSize);
+		} else if (writer == 1) {
+			taskName = RestoreLogDataTaskFunc::name;
+			file = co_await bc->writeLogFile(1, recordCount + 1, blockSize);
+		} else {
+			taskName = RestoreLogDataPartitionedTaskFunc::name;
+			file = co_await bc->writeTaggedLogFile(1, recordCount + 1, blockSize, 0, 1);
+			co_await file->append((uint8_t*)&PARTITIONED_MLOG_VERSION, sizeof(PARTITIONED_MLOG_VERSION));
+		}
+		fileBackup::RangeFileWriter rangeWriter(file, blockSize);
+		fileBackup::LogFileWriter logWriter(file, blockSize);
+		std::map<Key, Value> expected;
+		if (writer == 0) {
+			co_await rangeWriter.writeKey(dataRange.begin);
+		}
+		for (int i = 0; i < recordCount; ++i) {
+			Key key = StringRef(format("restore-writer/%04d", i));
+			Value value = StringRef(std::string(512, 'a' + i % 26));
+			if (writer == 0) {
+				co_await rangeWriter.writeKV(key, value);
+				expected[key] = value;
+			} else {
+				Standalone<VectorRef<VersionedMutation>> versionMutations;
+				VersionedMutation vm;
+				vm.version = i + 1;
+				vm.subsequence = 0;
+				vm.mutation = MutationRef(MutationRef::SetValue, key, value);
+				versionMutations.push_back_deep(versionMutations.arena(), vm);
+				auto oldFormat = generateOldFormatMutations(vm.version, { versionMutations });
+				ASSERT_EQ(oldFormat.size(), 1);
+				expected[oldFormat[0].key.withPrefix(restore.mutationLogPrefix())] = oldFormat[0].value;
+				if (writer == 1) {
+					co_await logWriter.writeKV(oldFormat[0].key, oldFormat[0].value);
+				} else {
+					BinaryWriter mutation(AssumeVersion(g_network->protocolVersion()));
+					mutation << vm.mutation;
+					BinaryWriter header(Unversioned());
+					header << bigEndian64(vm.version) << bigEndian32(vm.subsequence)
+					       << bigEndian32(mutation.getLength());
+					co_await file->append(header.getData(), header.getLength());
+					co_await file->append(mutation.getData(), mutation.getLength());
+				}
+			}
+		}
+		if (writer == 0) {
+			co_await rangeWriter.writeKey(dataRange.end);
+			co_await rangeWriter.finish();
+		}
+		co_await file->finish();
+		ASSERT_LT(file->size(), blockSize);
+		if (writer == 0) {
+			// A bare range file is not a complete backup; deletion requires a snapshot manifest or log.
+			std::vector<std::string> snapshotFiles{ file->getFileName() };
+			std::vector<std::pair<Key, Key>> snapshotRanges{ { dataRange.begin, dataRange.end } };
+			co_await bc->writeKeyspaceSnapshotFile(
+			    snapshotFiles, snapshotRanges, file->size(), IncludeKeyRangeMap::True);
+		}
+		RestoreFile input{ 1, file->getFileName(), writer == 0, blockSize, file->size(), recordCount + 1, 0, 1 };
+		auto task = makeReference<Task>(taskName, 1);
+		RestoreFileTaskFuncBase::InputParams::inputFile().set(task, input);
+		RestoreFileTaskFuncBase::InputParams::readOffset().set(task, 0);
+		RestoreFileTaskFuncBase::InputParams::readLen().set(task, file->size());
+		RestoreLogDataPartitionedTaskFunc::Params.logs().set(task, { input });
+		RestoreLogDataPartitionedTaskFunc::Params.maxTagID().set(task, 0);
+		RestoreLogDataPartitionedTaskFunc::Params.beginVersion().set(task, 1);
+		RestoreLogDataPartitionedTaskFunc::Params.endVersion().set(task, recordCount + 1);
+		RestoreLogDataPartitionedTaskFunc::Params.bytesWritten().set(task, 0);
+		KeyBackedTaskConfig::TaskParams.uid().set(task, restore.getUid());
+		Key taskPrefix = "writer-tasks/"_sr.withPrefix(restore.mutationLogPrefix());
+		auto taskBucket = makeReference<TaskBucket>(Subspace(taskPrefix), AccessSystemKeys::True);
+		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			restore.sourceContainer().set(tr, bc);
+			restore.restoreRange().set(tr, dataRange);
+			restore.bytesWritten().set(tr, 0);
+			taskBucket->addTask(
+			    tr, task, restore.sourceContainer().key, TupleCodec<Reference<IBackupContainer>>::pack(bc));
+			return Future<Void>(Void());
+		});
+		// An unknown commit result can leave the task leased; retry until its lease expires and it is requeued.
+		while (true) {
+			task = co_await taskBucket->getOne(cx);
+			if (task) {
+				break;
+			}
+			co_await delay(1.0);
+		}
+		RestoreWriterTestState test;
+		if (writer == 0) {
+			while (true) {
+				try {
+					co_await RestoreRangeTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+					break;
+				} catch (Error& e) {
+					// The direct call bypasses TaskBucket's retry of transient errors injected by the range decoder.
+					// Only restart before writing, so retries cannot hide a writer failure or duplicate the counters.
+					if (test.commits != 0 ||
+					    (e.code() != error_code_http_request_failed && e.code() != error_code_connection_failed &&
+					     e.code() != error_code_timed_out && e.code() != error_code_lookup_failed)) {
+						throw;
+					}
+				}
+				co_await delay(1.0);
+			}
+		} else if (writer == 1) {
+			co_await RestoreLogDataTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+		} else {
+			co_await RestoreLogDataPartitionedTaskFunc::_execute(cx, taskBucket, {}, task, &test);
+			ASSERT_GE(test.batchLimits.size(), 3);
+			ASSERT_EQ(test.batchLimits.front(), CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE);
+			ASSERT_GT(test.batchCommits.front(), 1);
+			for (int i = 1; i < test.batchLimits.size(); ++i) {
+				ASSERT_EQ(test.batchLimits[i], test.lastCommittedLimit);
+				ASSERT_GT(test.batchCommits[i], 0);
+			}
+		}
+		ASSERT_GT(test.rejections, 0);
+		ASSERT_GT(test.commits, 1);
+		ASSERT_EQ(test.committedRecords, recordCount);
+		KeyRange outputRange = writer == 0 ? dataRange : prefixRange(restore.mutationLogPrefix());
+		co_await taskBucket->clear(cx);
+		RangeResult rows = co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			return tr->getRange(outputRange, recordCount + 1);
+		});
+		ASSERT(!rows.more);
+		ASSERT_EQ(rows.size(), expected.size());
+		int i = 0;
+		for (const auto& [key, value] : expected) {
+			ASSERT_EQ(rows[i].key, key);
+			ASSERT_EQ(rows[i].value, value);
+			++i;
+		}
+		// A successful cleanup with an unknown commit result must not retry verification against deleted data.
+		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->clear(outputRange);
+			restore.clear(tr);
+			return Void();
+		});
+		co_await bc->deleteContainer();
+		TraceEvent("RestoreWriterRecoveryTestPassed")
+		    .detail("Writer", writer)
+		    .detail("Rejections", test.rejections)
+		    .detail("Commits", test.commits)
+		    .detail("Batches", test.batchLimits.size())
+		    .detail("ReducedLimit", test.lastCommittedLimit);
+	}
+}
 
 // each task can be partitioned to smaller ranges because commit proxy would
 // only start to commit alog/ prefix mutations to original prefix when
