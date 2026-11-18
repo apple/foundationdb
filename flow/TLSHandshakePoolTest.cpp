@@ -47,6 +47,7 @@
 #include "flow/Arena.h"
 #include "flow/flow.h"
 #include "flow/IConnection.h"
+#include "flow/IThreadPool.h"
 #include "flow/Knobs.h"
 #include "flow/MkCert.h"
 #include "flow/SimpleCounter.h"
@@ -151,6 +152,15 @@ Future<Void> acceptLoop(Reference<IListener> listener, std::vector<Future<Void>>
 	}
 }
 
+// Server: once the client is done, waits for every handshake started so far to finish, then stops the network. A
+// handshake still running on a handshake thread when the network stops would deliver its result on that thread,
+// racing with this thread's teardown of the same connections.
+Future<Void> stopWhenHandshakesDone(Future<Void> clientDone, std::vector<Future<Void>>* handshakes) {
+	co_await clientDone;
+	co_await waitForAllReady(*handshakes);
+	g_network->stop();
+}
+
 // Server: starts Net2 as a TLS server listening on a free loopback port. Clients present the same self-signed
 // certificate, so it is also the CA.
 Reference<IListener> startServer(const Creds& creds) {
@@ -164,10 +174,11 @@ Reference<IListener> startServer(const Creds& creds) {
 }
 
 // Server: accepts connections and starts each one's TLS handshake, which Net2 runs where the knobs direct it. Runs
-// Net2's network thread on the calling thread until g_network->stop().
-void runServer(Reference<IListener> listener) {
+// Net2's network thread on the calling thread until the client is done and every handshake has finished.
+void runServer(Reference<IListener> listener, Future<Void> clientDone) {
 	std::vector<Future<Void>> handshakes;
 	Future<Void> accepting = acceptLoop(listener, &handshakes);
+	Future<Void> stopping = stopWhenHandshakesDone(clientDone, &handshakes);
 	g_network->run();
 }
 
@@ -211,13 +222,16 @@ bool runTest(bool legacy) {
 	Reference<IListener> listener = startServer(creds);
 	tcp::endpoint server(boost::asio::ip::make_address("127.0.0.1"), listener->getListenAddress().port);
 
-	// The client uses blocking sockets, so it runs on its own thread while the server runs on this one.
+	// The client uses blocking sockets, so it runs on its own thread while the server runs on this one. It only
+	// signals that it is done: the server stops the network once no handshake is still in progress.
 	bool ok = false;
+	ThreadReturnPromise<Void> clientDone;
+	Future<Void> clientDoneFuture = clientDone.getFuture();
 	std::thread client([&] {
 		ok = runClient(creds, server);
-		g_network->stop();
+		clientDone.send(Void());
 	});
-	runServer(listener);
+	runServer(listener, clientDoneFuture);
 	client.join();
 	return ok;
 }
