@@ -3429,7 +3429,7 @@ Future<Optional<BulkDumpOwnerInfo>> getBulkOwner(Database cx, UID jobId, bool is
 				co_return Optional<BulkDumpOwnerInfo>();
 			}
 			BulkDumpOwnerInfo info;
-			ObjectReader reader(value.get().begin(), IncludeVersion());
+			ObjectReader reader(value.get(), IncludeVersion());
 			reader.deserialize(info);
 			co_return info;
 		} catch (Error& e) {
