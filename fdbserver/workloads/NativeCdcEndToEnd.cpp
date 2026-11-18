@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -33,6 +34,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/cdcproxy/CDCProxy.h"
 #include "fdbserver/clustercontroller/NativeCdcProxyBalancer.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RecoveryState.h"
@@ -2941,7 +2943,15 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 		const Key name = streams.back().name;
 		const CDCStreamId streamId = streams.back().consumer->position().streamId;
-		co_await setAllProxyPopsPaused(cx, true);
+		std::optional<ScopedRetiredPopPauseForSimulation> retiredPopPause;
+		if (blockRetiredPopWithLiveStream) {
+			co_await setAllProxyPopsPaused(cx, true);
+		} else {
+			while (!cx->clientInfo->get().clusterId.isValid()) {
+				co_await cx->clientInfo->onChange();
+			}
+			retiredPopPause.emplace(cx->clientInfo->get().clusterId);
+		}
 		const NativeCdcRemoveResult removed =
 		    co_await timeoutError(removeNativeCdcStreamGuarded(cx, name, streamId), operationTimeout);
 		ASSERT(removed == NativeCdcRemoveResult::Removed);
@@ -2968,17 +2978,19 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 		co_await forceTransactionSystemRecovery();
 		TraceEvent("NativeCdcRetiredRecoveryComplete").log();
+		const NativeCdcStatus recoveredStatus = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
+		ASSERT(recoveredStatus.metadataComplete);
+		ASSERT_EQ(recoveredStatus.streams.size(), blockRetiredPopWithLiveStream ? 1 : 0);
+		ASSERT(std::any_of(recoveredStatus.tags.begin(),
+		                   recoveredStatus.tags.end(),
+		                   [](NativeCdcTagStatus const& tag) { return tag.pendingRetiredPop; }));
 		if (blockRetiredPopWithLiveStream) {
-			const NativeCdcStatus recoveredStatus = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
-			ASSERT(recoveredStatus.metadataComplete);
-			ASSERT_EQ(recoveredStatus.streams.size(), 1);
-			ASSERT(std::any_of(recoveredStatus.tags.begin(),
-			                   recoveredStatus.tags.end(),
-			                   [](NativeCdcTagStatus const& tag) { return tag.pendingRetiredPop; }));
 			co_await timeoutError(removeNativeCdcStreamClient(cx, streams.front().name), operationTimeout);
 			streams.clear();
+			co_await setAllProxyPopsPaused(cx, false);
+		} else {
+			retiredPopPause.reset();
 		}
-		co_await setAllProxyPopsPaused(cx, false);
 		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 		TraceEvent("NativeCdcRetiredCleanupComplete").log();
 		co_await timeoutError(waitForFullyRecovered(), operationTimeout);

@@ -52,6 +52,8 @@
 
 namespace {
 
+std::multiset<UID> simulatedRetiredPopPauses;
+
 // Snapshot from one durable metadata read, used while initializing or validating one stream.
 struct CDCStreamReadState {
 	Optional<std::vector<KeyRange>> ranges;
@@ -1936,6 +1938,13 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 	const Optional<Version> recoveredAt = popLogSystemConfig.recoveredAt;
 	const Optional<Version> recoveryEnd =
 	    recoveredAt.present() ? Optional<Version>(recoveredAt.get() + 1) : Optional<Version>();
+	if (g_network->isSimulated() && !simulatedRetiredPopPauses.empty()) {
+		const UID clusterId = dbInfo->get().client.clusterId;
+		// A newly recruited controller can publish its durable cluster ID after the proxy starts.
+		if (!clusterId.isValid() || simulatedRetiredPopPauses.contains(clusterId)) {
+			co_return;
+		}
+	}
 	for (const auto& [tag, retiredVersion] : popState.retiredTagPopVersions) {
 		if (popsPausedForTesting) {
 			co_return;
@@ -2545,6 +2554,15 @@ Future<Void> CDCProxy::run(CDCProxyInterface proxy, uint64_t recoveryCount) {
 }
 
 } // namespace
+
+ScopedRetiredPopPauseForSimulation::ScopedRetiredPopPauseForSimulation(UID clusterId) : clusterId(clusterId) {
+	ASSERT(g_network->isSimulated() && clusterId.isValid());
+	simulatedRetiredPopPauses.insert(clusterId);
+}
+
+ScopedRetiredPopPauseForSimulation::~ScopedRetiredPopPauseForSimulation() {
+	simulatedRetiredPopPauses.erase(simulatedRetiredPopPauses.find(clusterId));
+}
 
 Future<Void> cdcProxyServer(CDCProxyInterface proxy,
                             uint64_t recoveryCount,
