@@ -45,8 +45,16 @@ struct CompareBackupsWorkload : TestWorkload {
 	// be logged by any backup.
 	Key prefixA;
 	Key prefixB;
-	// The ranges to restore and compare, as the backups have them.
+	// The ranges to restore and compare, as the backups have them. With rangeBytes they are picked once the version is
+	// chosen (see below) and `ranges` is empty until then.
 	Standalone<VectorRef<KeyRangeRef>> ranges;
+	// With rangeBytes > 0: compare a random key range of about this many bytes of snapshot data instead of all of
+	// `ranges`. It is picked once, from the files of backup A at the chosen version, inside the given ranges (anywhere
+	// in the backup when none are given), and the same range is restored from both backups. The pick is repeatable with
+	// a non-zero seed.
+	int64_t rangeBytes;
+	int64_t rangeSeed;
+	Standalone<VectorRef<KeyRangeRef>> pool;
 	BackupSteps::BackupVersion version;
 	double delayFor;
 	// How long to wait for both backups to be restorable.
@@ -74,6 +82,8 @@ struct CompareBackupsWorkload : TestWorkload {
 			prefixB = Key("compare/b/"_sr);
 		}
 		auto requested = BackupRangeSpec::readOptionalRanges(options, "ranges"_sr, "rangePrefix"_sr);
+		rangeBytes = getOption(options, "rangeBytes"_sr, static_cast<int64_t>(0));
+		rangeSeed = getOption(options, "rangeSeed"_sr, static_cast<int64_t>(0));
 		version = BackupSteps::parseBackupVersion(getOption(options, "version"_sr, "v1"_sr));
 		delayFor = getOption(options, "delayFor"_sr, 0.0);
 		waitRestorableSeconds = getOption(options, "waitRestorableSeconds"_sr, 600.0);
@@ -83,14 +93,21 @@ struct CompareBackupsWorkload : TestWorkload {
 		parallelism = getOption(options, "parallelism"_sr, 8);
 		shardBytes = getOption(options, "shardBytes"_sr, static_cast<int64_t>(50000000));
 		pageRows = getOption(options, "pageRows"_sr, RangeCompare::defaultPageRows);
-		if (backupDirA.empty() || backupDirB.empty() || !requested.present() || prefixA == prefixB) {
+		if (backupDirA.empty() || backupDirB.empty() || (!requested.present() && rangeBytes <= 0) || rangeBytes < 0 ||
+		    prefixA == prefixB) {
 			TraceEvent(SevWarnAlways, "CompareBackupsInvalidOptions")
 			    .detail("HasDirectories", !backupDirA.empty() && !backupDirB.empty())
 			    .detail("HasRanges", requested.present())
 			    .detail("PrefixesDiffer", prefixA != prefixB);
 			throw test_specification_invalid();
 		}
-		ranges = requested.get();
+		if (rangeBytes > 0) {
+			if (requested.present()) {
+				pool = requested.get();
+			}
+		} else {
+			ranges = requested.get();
+		}
 
 		encryptionKeyFileName = BackupSteps::testEncryptionKeyFile();
 	}
@@ -210,6 +227,21 @@ struct CompareBackupsWorkload : TestWorkload {
 		Reference<IBackupContainer> containerA;
 		Reference<IBackupContainer> containerB;
 		Version target = co_await chooseVersion(&containerA, &containerB);
+		if (rangeBytes > 0) {
+			BackupSteps::PickedRange picked =
+			    co_await BackupSteps::pickRandomRange(containerA, target, rangeBytes, rangeSeed, pool);
+			ranges.push_back_deep(ranges.arena(), picked.range);
+			metrics.emplace_back("Picked range files", picked.files, Averaged::False);
+			metrics.emplace_back("Picked range data (MB)", picked.bytes / 1e6, Averaged::False);
+			// Backup B must hold the whole range.
+			Optional<RestorableFileSet> second = co_await containerB->getRestoreSet(target, ranges);
+			if (!second.present() || second.get().ranges.empty()) {
+				TraceEvent(SevWarnAlways, "CompareBackupsRangeNotInSecondBackup")
+				    .detail("Range", BackupSteps::describeRange(picked.range))
+				    .detail("Target", target);
+				throw restore_error();
+			}
+		}
 		// A backup that logs the destinations would copy the restores' writes into its log.
 		co_await BackupSteps::prepareEmptyRanges(
 		    cx, destinations(), "CompareBackups", BackupSteps::OnLoggedRanges::Fail);

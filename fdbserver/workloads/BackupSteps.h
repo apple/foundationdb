@@ -190,6 +190,118 @@ struct RestoreSpec {
 	Optional<std::string> encryptionKeyFileName;
 };
 
+// A key range of about `bytes` of snapshot data, picked at random from the range files of the restore set of
+// `container` at `targetVersion` (the latest restorable version when invalid).
+struct PickedRange {
+	KeyRange range;
+	int files = 0;
+	int64_t bytes = 0;
+	int64_t poolFiles = 0;
+	int64_t poolBytes = 0;
+};
+
+// Picks consecutive range files, in key order, until their sizes add up to `bytes`, and returns the key range they
+// cover. The files come from the restore set at `targetVersion`, which partitions the backed-up keys, so the range lies
+// inside the backup. When `within` is not empty only files that lie entirely inside one of its ranges are candidates,
+// and the picked files all lie inside the same one, so the range never spans keys outside `within`. `seed` makes the
+// pick repeatable (0 for a different pick each time). Fails with restore_error when the restore set has no key ranges
+// (a backup older than 6.3) or no candidate run of files holds `bytes`.
+inline Future<PickedRange> pickRandomRange(Reference<IBackupContainer> container,
+                                           Version targetVersion,
+                                           int64_t bytes,
+                                           int64_t seed,
+                                           Standalone<VectorRef<KeyRangeRef>> within) {
+	if (targetVersion == ::invalidVersion) {
+		BackupDescription desc = co_await container->describeBackup();
+		Optional<RestorableWindow> window = restorableWindow(desc);
+		if (!window.present()) {
+			TraceEvent(SevWarnAlways, "PickRandomRangeNothingRestorable");
+			throw restore_error();
+		}
+		targetVersion = window.get().end;
+	}
+	Optional<RestorableFileSet> restoreSet = co_await container->getRestoreSet(targetVersion);
+	if (!restoreSet.present()) {
+		TraceEvent(SevWarnAlways, "PickRandomRangeNoRestoreSet").detail("TargetVersion", targetVersion);
+		throw restore_error();
+	}
+	struct Candidate {
+		KeyRange range;
+		int64_t size;
+		int pool;
+	};
+	std::vector<Candidate> candidates;
+	for (auto const& file : restoreSet.get().ranges) {
+		auto found = restoreSet.get().keyRanges.find(file.fileName);
+		if (found == restoreSet.get().keyRanges.end()) {
+			TraceEvent(SevWarnAlways, "PickRandomRangeNoKeyRanges")
+			    .detail("TargetVersion", targetVersion)
+			    .detail("File", file.fileName);
+			throw restore_error();
+		}
+		int pool = 0;
+		if (!within.empty()) {
+			pool = -1;
+			for (int i = 0; i < within.size(); ++i) {
+				if (within[i].begin <= found->second.begin && found->second.end <= within[i].end) {
+					pool = i;
+					break;
+				}
+			}
+			if (pool < 0) {
+				continue;
+			}
+		}
+		candidates.push_back({ found->second, file.fileSize, pool });
+	}
+	std::sort(candidates.begin(), candidates.end(), [](Candidate const& a, Candidate const& b) {
+		return a.pool != b.pool ? a.pool < b.pool : a.range.begin < b.range.begin;
+	});
+	PickedRange picked;
+	picked.poolFiles = candidates.size();
+	for (auto const& c : candidates) {
+		picked.poolBytes += c.size;
+	}
+	// A start is valid when the files from it, up to the end of its pool range, hold `bytes`.
+	std::vector<size_t> starts;
+	std::vector<int64_t> remaining(candidates.size(), 0);
+	for (size_t i = candidates.size(); i-- > 0;) {
+		bool sameAsNext = i + 1 < candidates.size() && candidates[i + 1].pool == candidates[i].pool;
+		remaining[i] = candidates[i].size + (sameAsNext ? remaining[i + 1] : 0);
+		if (remaining[i] >= bytes) {
+			starts.push_back(i);
+		}
+	}
+	if (starts.empty()) {
+		TraceEvent(SevWarnAlways, "PickRandomRangeTooLarge")
+		    .detail("Bytes", bytes)
+		    .detail("CandidateFiles", picked.poolFiles)
+		    .detail("CandidateBytes", picked.poolBytes);
+		throw restore_error();
+	}
+	DeterministicRandom seeded(seed != 0 ? static_cast<uint32_t>(seed) : deterministicRandom()->randomUInt32());
+	size_t first = starts[seeded.randomInt(0, static_cast<int>(starts.size()))];
+	size_t last = first;
+	int64_t total = candidates[first].size;
+	while (total < bytes) {
+		++last;
+		total += candidates[last].size;
+	}
+	picked.range = KeyRangeRef(candidates[first].range.begin, candidates[last].range.end);
+	picked.files = static_cast<int>(last - first + 1);
+	picked.bytes = total;
+	TraceEvent("PickedRestoreRange")
+	    .detail("TargetVersion", targetVersion)
+	    .detail("Bytes", picked.bytes)
+	    .detail("Files", picked.files)
+	    .detail("PoolFiles", picked.poolFiles)
+	    .detail("PoolBytes", picked.poolBytes)
+	    .detail("Seed", seed)
+	    .detail("Begin", printable(picked.range.begin).substr(0, 120))
+	    .detail("End", printable(picked.range.end).substr(0, 120));
+	co_return picked;
+}
+
 // A restore of `ranges` (as the backup has them) from `container` under `addPrefix`, to `targetVersion` (the latest
 // restorable one when invalid).
 inline RestoreSpec prefixedRestoreSpec(Reference<IBackupContainer> container,
