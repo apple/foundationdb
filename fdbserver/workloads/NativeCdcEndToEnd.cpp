@@ -2931,6 +2931,38 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await timeoutError(waitForTransactionSystemRecoveryAfter(recoveryCount), operationTimeout);
 	}
 
+	Future<Void> replaceProxyWithRetiredPopPending(Database cx, Version retiredVersion) {
+		while (cx->clientInfo->get().cdcProxies.empty()) {
+			co_await cx->clientInfo->onChange();
+		}
+		const auto previousProxies = cx->clientInfo->get().cdcProxies;
+		co_await haltProxyUntilReplaced(cx, previousProxies.front(), false);
+		std::unordered_map<UID, int64_t> completionsAtWatermark;
+		while (true) {
+			const NativeCdcStatus status = co_await getNativeCdcStatus(cx);
+			for (const auto& proxy : status.proxies) {
+				// A new proxy with no streams learns the committed version from its durable pop scan.
+				if (std::ranges::find(previousProxies, proxy.id, &CDCProxyInterface::id) != previousProxies.end() ||
+				    !proxy.sample.present() || proxy.sample.get().latestCommittedVersion < retiredVersion) {
+					continue;
+				}
+				// Reading the snapshot precedes waitForPopped and marker cleanup. Let the scan finish before recovery.
+				const int64_t completions = proxy.sample.get().popCompletions;
+				const int64_t initial = completionsAtWatermark.emplace(proxy.id, completions).first->second;
+				if (completions > initial) {
+					TraceEvent("NativeCdcRetiredProxyReplaced")
+					    .detail("PreviousProxy", previousProxies.front().id())
+					    .detail("ReplacementProxy", proxy.id)
+					    .detail("InitialPopCompletions", initial)
+					    .detail("PopCompletions", completions)
+					    .detail("RetiredVersion", retiredVersion);
+					co_return;
+				}
+			}
+			co_await delay(0.1);
+		}
+	}
+
 	Future<Void> validateRetiredCleanupAcrossRecovery(Database cx) {
 		ASSERT_EQ(streams.size(), 1);
 		co_await timeoutError(waitForTransactionSystemAvailable(), operationTimeout);
@@ -2971,19 +3003,27 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			ASSERT_EQ(tag.blockingStreams.front(), streams.front().consumer->position().streamId);
 			ASSERT_LT(tag.safePopVersion, tag.retiredPopVersion);
 		}
-		ASSERT(std::any_of(pendingStatus.tags.begin(), pendingStatus.tags.end(), [](NativeCdcTagStatus const& tag) {
-			return tag.pendingRetiredPop;
-		}));
-		TraceEvent("NativeCdcRetiredMarkerCreated").log();
+		// Removal stamps its commit version on the tag, ahead of any earlier pending removal.
+		const auto retired = std::ranges::max_element(pendingStatus.tags, {}, &NativeCdcTagStatus::retiredPopVersion);
+		ASSERT(retired != pendingStatus.tags.end() && retired->pendingRetiredPop);
+		TraceEvent("NativeCdcRetiredMarkerCreated")
+		    .detail("Tag", retired->tag)
+		    .detail("RetiredVersion", retired->retiredPopVersion);
 
+		const auto checkRetiredMarker = [&](const NativeCdcStatus& status) {
+			ASSERT(status.metadataComplete);
+			ASSERT_EQ(status.streams.size(), streams.size());
+			const auto tag = std::ranges::find(status.tags, retired->tag, &NativeCdcTagStatus::tag);
+			ASSERT(tag != status.tags.end() && tag->pendingRetiredPop);
+			ASSERT_EQ(tag->retiredPopVersion, retired->retiredPopVersion);
+		};
+		if (!blockRetiredPopWithLiveStream) {
+			co_await timeoutError(replaceProxyWithRetiredPopPending(cx, retired->retiredPopVersion), operationTimeout);
+			checkRetiredMarker(co_await timeoutError(getNativeCdcStatus(cx), operationTimeout));
+		}
 		co_await forceTransactionSystemRecovery();
 		TraceEvent("NativeCdcRetiredRecoveryComplete").log();
-		const NativeCdcStatus recoveredStatus = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
-		ASSERT(recoveredStatus.metadataComplete);
-		ASSERT_EQ(recoveredStatus.streams.size(), blockRetiredPopWithLiveStream ? 1 : 0);
-		ASSERT(std::any_of(recoveredStatus.tags.begin(),
-		                   recoveredStatus.tags.end(),
-		                   [](NativeCdcTagStatus const& tag) { return tag.pendingRetiredPop; }));
+		checkRetiredMarker(co_await timeoutError(getNativeCdcStatus(cx), operationTimeout));
 		if (blockRetiredPopWithLiveStream) {
 			co_await timeoutError(removeNativeCdcStreamClient(cx, streams.front().name), operationTimeout);
 			streams.clear();
