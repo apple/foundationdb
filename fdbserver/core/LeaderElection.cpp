@@ -110,45 +110,6 @@ Future<Void> changeLeaderCoordinators(ServerCoordinators const& coordinators, Va
 	return changeLeaderCoordinatorsImpl(coordinators, forwardingInfo);
 }
 
-// Long-polls one coordinator at a time for the elected leader and publishes it, without submitting a candidacy.
-// Never returns; the caller cancels it.
-static Future<Void> monitorLeaderDuringCandidacyDelay(ServerCoordinators coordinators,
-                                                      Reference<AsyncVar<Value>> outSerializedLeader) {
-	ClusterConnectionString cs = coordinators.ccr->getConnectionString();
-	ElectionResultRequest request;
-	int index = deterministicRandom()->randomInt(0, coordinators.leaderElectionServers.size());
-	int successIndex = index;
-	request.key = coordinators.clusterKey;
-	request.hostnames = cs.hostnames;
-	request.coordinators = cs.coords;
-
-	while (true) {
-		LeaderElectionRegInterface interf = coordinators.leaderElectionServers[index];
-		request.reply = ReplyPromise<Optional<LeaderInfo>>();
-		ErrorOr<Optional<LeaderInfo>> leader;
-		if (interf.hostname.present()) {
-			leader = co_await tryGetReplyFromHostname(
-			    request, interf.hostname.get(), WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT);
-		} else {
-			leader = co_await interf.electionResult.tryGetReply(request);
-		}
-
-		if (leader.present()) {
-			successIndex = index;
-			if (leader.get().present() && !leader.get().get().forward) {
-				request.knownLeader = leader.get().get().changeID;
-				TraceEvent("LeaderLearnedDuringCandidacyDelay").detail("LeaderID", leader.get().get().changeID);
-				outSerializedLeader->set(leader.get().get().serializedInfo);
-			}
-		} else {
-			index = (index + 1) % coordinators.leaderElectionServers.size();
-			if (index == successIndex) {
-				co_await delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY);
-			}
-		}
-	}
-}
-
 Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
                                      Value proposedSerializedInterface,
                                      Reference<AsyncVar<Value>> outSerializedLeader,
@@ -173,10 +134,13 @@ Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 
 	if (candidacyDelay > 0) {
 		if (SERVER_KNOBS->MONITOR_LEADER_DURING_CANDIDACY_DELAY) {
-			// The delay only lets better candidates win the election. Publishing the current leader meanwhile lets
-			// this process register with it, so recruitment does not wait for the delay to expire.
-			Future<Void> leaderMonitor = monitorLeaderDuringCandidacyDelay(coordinators, outSerializedLeader);
-			co_await (delay(candidacyDelay) || leaderMonitor);
+			// The delay only lets better candidates win the election. Learning the current leader meanwhile, the way
+			// processes that never run for leader do, lets this process register with it, so recruitment does not wait
+			// for the delay to expire.
+			// The monitor runs only until the delay ends, when it goes out of scope; an error only stops it early.
+			Future<Void> leaderMonitor = monitorLeaderInternal(coordinators.ccr, outSerializedLeader);
+			co_await delay(candidacyDelay);
+			TraceEvent("CandidacyDelayLeaderMonitor").detail("LeaderKnown", !outSerializedLeader->get().empty());
 		} else {
 			co_await delay(candidacyDelay);
 		}
