@@ -407,6 +407,15 @@ const uint8_t* follow_offset(const Context& context, const uint8_t* current) {
 	return current + offset;
 }
 
+// As above, but checks that |targetLen| bytes are readable at the target in place of the broader check.
+template <class Context>
+const uint8_t* follow_offset(const Context& context, const uint8_t* current, size_t targetLen) {
+	check_range(context, current, sizeof(uint32_t));
+	const uint8_t* target = current + interpret_as<uint32_t>(current);
+	check_range(context, target, targetLen);
+	return target;
+}
+
 // Used to select an overload for |MessageWriter::write| that fixes relative
 // offsets.
 struct RelativeOffset {
@@ -1045,11 +1054,9 @@ struct LoadMember {
 			const uint8_t* offsets_slot = &message[vtable[i++]];
 			using VectorTraits = vector_like_traits<Member>;
 			using T = typename Member::value_type;
-			const uint8_t* types_current = follow_offset(context, types_slot);
-			check_range(context, types_current, sizeof(uint32_t)); // num entries in types vector
+			const uint8_t* types_current = follow_offset(context, types_slot, sizeof(uint32_t)); // num entries
 			types_current += sizeof(uint32_t);
-			const uint8_t* current = follow_offset(context, offsets_slot);
-			check_range(context, current, sizeof(uint32_t));
+			const uint8_t* current = follow_offset(context, offsets_slot, sizeof(uint32_t));
 			uint32_t numEntries = interpret_as<uint32_t>(current);
 			current += sizeof(uint32_t);
 			// The types vector's own length is not trusted, so bound it by the offsets vector's.
@@ -1143,8 +1150,7 @@ struct LoadSaveHelper : Context {
 	template <class U>
 	    requires(is_dynamic_size<U>)
 	void load(U& member, const uint8_t* current) {
-		current = follow_offset(*this, current);
-		check_range(*this, current, sizeof(uint32_t));
+		current = follow_offset(*this, current, sizeof(uint32_t));
 		uint32_t size = interpret_as<uint32_t>(current);
 		current += sizeof(size);
 		check_range(*this, current, size);
@@ -1165,8 +1171,7 @@ struct LoadSaveHelper : Context {
 			if (sizeof...(Args) == 0) {
 				return;
 			}
-			current = follow_offset(this->context(), current);
-			check_range(this->context(), current, sizeof(int32_t));
+			current = follow_offset(this->context(), current, sizeof(int32_t));
 			int32_t vtable_offset = interpret_as<int32_t>(current);
 			const uint8_t* vtable_bytes = reinterpret_cast<const uint8_t*>(reinterpret_cast<uintptr_t>(current) -
 			                                                               static_cast<uintptr_t>(vtable_offset));
@@ -1197,8 +1202,7 @@ struct LoadSaveHelper : Context {
 	void load(VectorLike& member, const uint8_t* current) {
 		using VectorTraits = vector_like_traits<VectorLike>;
 		using T = typename VectorTraits::value_type;
-		current = follow_offset(*this, current);
-		check_range(*this, current, sizeof(uint32_t));
+		current = follow_offset(*this, current, sizeof(uint32_t));
 		uint32_t numEntries = interpret_as<uint32_t>(current);
 		current += sizeof(uint32_t);
 		check_range(*this, current, static_cast<size_t>(numEntries) * fb_size<T>);
@@ -1208,7 +1212,12 @@ struct LoadSaveHelper : Context {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wuninitialized"
 			T value;
-			load_helper(value, current, this->context());
+			if constexpr (is_scalar<T>) {
+				// The range check on the whole vector above already covers every element.
+				scalar_traits<T>::load(current, value, this->context());
+			} else {
+				load_helper(value, current, this->context());
+			}
 			*inserter = std::move(value);
 #pragma GCC diagnostic pop
 			++inserter;
@@ -1300,8 +1309,7 @@ struct LoadSaveHelper<std::vector<bool, Alloc>, Context> : Context {
 	explicit LoadSaveHelper(const Context& context) : Context(context) {}
 
 	void load(std::vector<bool, Alloc>& member, const uint8_t* current) {
-		current = follow_offset(*this, current);
-		check_range(*this, current, sizeof(uint32_t));
+		current = follow_offset(*this, current, sizeof(uint32_t));
 		uint32_t length = interpret_as<uint32_t>(current);
 		current += sizeof(uint32_t);
 		check_range(*this, current, static_cast<size_t>(length) * fb_size<bool>);
@@ -1309,7 +1317,7 @@ struct LoadSaveHelper<std::vector<bool, Alloc>, Context> : Context {
 		member.resize(length);
 		uint8_t m;
 		for (uint32_t i = 0; i < length; ++i) {
-			load_helper(m, current, *this);
+			scalar_traits<uint8_t>::load(current, m, this->context());
 			member[i] = m != 0;
 			current += fb_size<bool>;
 		}
