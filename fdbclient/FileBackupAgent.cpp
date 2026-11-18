@@ -47,6 +47,7 @@
 #include "FileBackupAgentFileFormat.h"
 #include "flow/network.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/Util.h"
 
 #include <cinttypes>
@@ -266,6 +267,108 @@ Key FileBackupAgent::getPauseKey() {
 	return backupAgent.taskBucket->getPauseKey();
 }
 
+static bool bulkRangesCoverNormalKeys(const VectorRef<KeyRangeRef>& ranges) {
+	KeyRangeMap<int> selected;
+	for (const auto& range : ranges) {
+		selected.insert(range, 1);
+	}
+	selected.coalesce(allKeys);
+	bool full = false;
+	for (auto& range : selected.ranges()) {
+		if (range.value()) {
+			if (range.range() != normalKeys) {
+				return false;
+			}
+			full = true;
+		}
+	}
+	return full;
+}
+
+Optional<std::string> FileBackupAgent::bulkBackupRefusal(SnapshotMode mode,
+                                                         const VectorRef<KeyRangeRef>& ranges,
+                                                         IncrementalBackupOnly logsOnly,
+                                                         bool encrypted) {
+	if (mode == SnapshotMode::RANGEFILE) {
+		return {};
+	}
+	if (!bulkRangesCoverNormalKeys(ranges)) {
+		return std::string(
+		    "Bulk backups on 8.0 require the full user keyspace. Use --mode rangefile for a key-range backup.");
+	}
+	if (logsOnly) {
+		return std::string(
+		    "--incremental cannot be combined with --mode bulkdump or --mode both because it suppresses the snapshot.");
+	}
+	if (encrypted) {
+		return std::string("--encryption-key-file cannot be combined with --mode bulkdump or --mode both because the "
+		                   "SST files are written unencrypted. Use --mode rangefile.");
+	}
+	return {};
+}
+
+void FileBackupAgent::checkRestoreLogLayout(const RestorableFileSet& files, RestoreMode mode) {
+	if (mode == RestoreMode::BULKLOAD &&
+	    std::any_of(files.logs.begin(), files.logs.end(), [](const LogFile& log) { return log.isPartitionedLog(); })) {
+		// The 8.0 bulkload path schedules the classic log dispatcher after ingesting the SSTs.
+		TraceEvent(SevWarn, "BulkLoadRestoreCannotReplayPartitionedLogs").detail("TargetVersion", files.targetVersion);
+		throw restore_unsupported_file_version();
+	}
+}
+
+Optional<std::string> FileBackupAgent::bulkLoadRestoreRefusal(Key tagName,
+                                                              Standalone<VectorRef<KeyRangeRef>> ranges,
+                                                              Key addPrefix,
+                                                              Key removePrefix,
+                                                              OnlyApplyMutationLogs onlyApplyMutationLogs,
+                                                              Optional<std::string> encryptionKeyFileName,
+                                                              bool useRangeFileRestore) {
+	if (useRangeFileRestore) {
+		return {};
+	}
+
+	if (!bulkRangesCoverNormalKeys(ranges)) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadRanges").detail("TagName", tagName);
+		return std::string("--mode bulkload on 8.0 requires the full user keyspace. Use --mode rangefile "
+		                   "for a key-range restore.");
+	}
+
+	// Mirror of the backup-side rejection. A bulkload restore ingests the snapshot via SST, which is
+	// precisely the range data --incremental declines, and StartFullRestoreTaskFunc picks the bulkload
+	// branch without consulting the flag. Accepting the pair would restore the whole snapshot the
+	// caller asked to skip, then overwrite their setting so even status misreports it.
+	if (onlyApplyMutationLogs) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadIncremental").detail("TagName", tagName);
+		return std::string("--incremental cannot be combined with --mode bulkload; bulkload restores the "
+		                   "snapshot that --incremental skips. Use --mode rangefile for a logs-only restore.");
+	}
+
+	// Mirror of the backup-side encryption refusal. Nothing on the SST path can decrypt, so a
+	// bulkload restore of an encrypted backup cannot work; refusing here says so plainly instead of
+	// failing later with an abort that blames the backup for having no bulkdump data.
+	if (encryptionKeyFileName.present()) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadEncryption").detail("TagName", tagName);
+		return std::string("--encryption-key-file cannot be combined with --mode bulkload; the SST files a "
+		                   "bulkload restore ingests are not encrypted. Use --mode rangefile.");
+	}
+
+	// A bulkload restore ingests SST files into the key range they were dumped from and has no way to
+	// rewrite keys, so a prefix cannot reach the snapshot. Log replay applies it regardless, so
+	// accepting the pair would split the result across two key spaces: snapshot at the original
+	// keys, mutations at the prefixed ones.
+	if (!addPrefix.empty() || !removePrefix.empty()) {
+		TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadPrefix")
+		    .detail("TagName", tagName)
+		    .detail("AddPrefix", addPrefix)
+		    .detail("RemovePrefix", removePrefix);
+		return std::string("--add-prefix and --remove-prefix cannot be combined with --mode bulkload; the SST "
+		                   "files it ingests cannot be rewritten to a new prefix, so only the mutation log would "
+		                   "be prefixed and the restored data would be split across two key spaces. Use --mode "
+		                   "rangefile.");
+	}
+	return {};
+}
+
 Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap* tagsMap,
                                                          Reference<ReadYourWritesTransaction> tr,
                                                          Snapshot snapshot) {
@@ -342,6 +445,38 @@ Future<bool> anyRangePartitionedBackupRunning(Reference<ReadYourWritesTransactio
 		}
 	}
 	co_return false;
+}
+
+Future<Optional<std::string>> FileBackupAgent::findRunningBackupAtLocation(Reference<ReadYourWritesTransaction> tr,
+                                                                           Reference<IBackupContainer> bc,
+                                                                           std::string excludeTag) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
+
+	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
+	futures.reserve(tags.size());
+	for (const auto& tag : tags) {
+		futures.push_back(tag.get(tr));
+	}
+
+	co_await waitForAll(futures);
+	std::string location = bc->getLocation();
+	for (int i = 0; i < futures.size(); i++) {
+		if (!futures[i].get().present() || tags[i].tagName == excludeTag) {
+			continue;
+		}
+		BackupConfig config(futures[i].get().get().first);
+		EBackupState eState = co_await config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN);
+		if (!FileBackupAgent::isRunnable(eState)) {
+			continue;
+		}
+		Optional<Reference<IBackupContainer>> other = co_await config.backupContainer().get(tr);
+		if (other.present() && other.get() && other.get()->getLocation() == location) {
+			co_return tags[i].tagName;
+		}
+	}
+	co_return Optional<std::string>();
 }
 
 class RestoreConfig : public KeyBackedTaskConfig {
@@ -3804,9 +3939,6 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					// Enable BulkDump mode at the DD level before submitting the job
 					co_await setBulkDumpMode(cx, 1);
 
-					// Configure BulkDump job for the full keyspace
-					// BulkDump/BulkLoad requires the load range to be a subset of the dump range.
-					// Using normalKeys for both ensures compatibility regardless of user-specified ranges.
 					// Store data under data/<container>/bulkdump_data/ to be consistent with backup container layout
 					std::string bulkDumpRoot = getBackupDataPath(bc->getURL(), "bulkdump_data");
 					bulkDumpJob = createBulkDumpJob(normalKeys, bulkDumpRoot, BulkLoadType::SST, transportMethod);
@@ -4296,14 +4428,16 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 		{
 			Error savedError;
 			try {
-				// Open backup container for metadata access
-				Reference<IBackupContainer> bcRef = IBackupContainer::openContainer(backupUrl, {}, {}, 0);
-
 				// Get restore ranges using a transaction
 				auto tr = makeReference<ReadYourWritesTransaction>(cx);
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				std::vector<KeyRange> restoreRanges = co_await restore.getRestoreRangesOrDefault(tr);
+
+				// Take the container from the restore config rather than reopening it from the bare URL:
+				// the config's codec round-trips the proxy, encryption key file and block size the caller
+				// supplied, and reopening dropped all three. Losing the proxy made a proxied container
+				// unreadable here, and the resulting abort blamed the backup for having no bulkdump data.
+				Reference<IBackupContainer> bcRef = co_await restore.sourceContainer().getOrThrow(tr);
 
 				// If bulkDumpJobId is empty, read it from the snapshot file metadata
 				if (bulkDumpJobId.empty()) {
@@ -4396,8 +4530,6 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				BulkLoadTransportMethod loadTransportMethod =
 				    isBlobstoreUrl(backupUrl) ? BulkLoadTransportMethod::BLOBSTORE : BulkLoadTransportMethod::CP;
 
-				// BulkLoad range must match the BulkDump range (normalKeys)
-				// The actual restore ranges will be applied via mutation log replay
 				BulkLoadJobState bulkLoadJob = createBulkLoadJob(dumpJobUid, normalKeys, jobRoot, loadTransportMethod);
 
 				TraceEvent("BulkLoadRestoreJobCreated")
@@ -6868,8 +7000,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			                                          bulkDumpJobId,
 			                                          TaskCompletionKey::signal(bulkLoadDone));
 
-			// After BulkLoad completes, run RestoreDispatch to apply mutation logs
-			// Set onlyApplyMutationLogs so it only processes logs, not range files
+			// Sequencing, not user intent: the SSTs carry the range data, so the dispatch that follows must
+			// replay logs only. submitRestore rejects --incremental with bulkload, so this can only ever
+			// overwrite false.
 			restore.onlyApplyMutationLogs().set(tr, true);
 
 			// Add RestoreDispatch task that waits for BulkLoad to complete
@@ -7089,6 +7222,32 @@ public:
 		BackupConfig config(deterministicRandom()->randomUniqueID());
 		UID uid = config.getUid();
 
+		KeyRangeMap<int> backupRangeSet;
+		for (auto& backupRange : backupRanges) {
+			backupRangeSet.insert(backupRange, 1);
+		}
+
+		backupRangeSet.coalesce(allKeys);
+		std::vector<KeyRange> normalizedRanges;
+
+		for (auto& backupRange : backupRangeSet.ranges()) {
+			if (backupRange.value()) {
+				normalizedRanges.push_back(KeyRange(KeyRangeRef(backupRange.range().begin, backupRange.range().end)));
+			}
+		}
+
+		if (auto refusal = FileBackupAgent::bulkBackupRefusal(static_cast<SnapshotMode>(snapshotMode),
+		                                                      backupRanges,
+		                                                      incrementalBackupOnly,
+		                                                      encryptionKeyFileName.present());
+		    refusal.present()) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkDumpRefused")
+			    .detail("TagName", tagName)
+			    .detail("Reason", refusal.get());
+			fprintf(stderr, "ERROR: %s\n", refusal.get().c_str());
+			throw backup_error();
+		}
+
 		// This check will ensure that current backupUid is later than the last backup Uid
 		Standalone<StringRef> nowStr = BackupAgentBase::getCurrentTime();
 		std::string backupContainer = outContainer.toString();
@@ -7101,6 +7260,22 @@ public:
 
 		Reference<IBackupContainer> bc =
 		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName, encryptionBlockSize);
+
+		// Two backups writing the same files would corrupt each other. The tagName of the backup we are
+		// starting is skipped. It's okay to skip because if it were already running, backup_duplicate
+		// would have been thrown above.
+		Optional<std::string> conflictingTag = co_await FileBackupAgent::findRunningBackupAtLocation(tr, bc, tagName);
+		if (conflictingTag.present()) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupLocationInUse")
+			    .detail("TagName", tagName)
+			    .detail("ConflictingTag", conflictingTag.get())
+			    .detail("Location", bc->getLocation());
+			fprintf(stderr,
+			        "ERROR: The backup location is already in use by the running backup on tag `%s'.\n",
+			        printable(StringRef(conflictingTag.get())).c_str());
+			throw backup_error();
+		}
+
 		try {
 			// Use longer timeout for blobstore:// URLs in simulation to handle slow S3 mock operations
 			double createTimeout = (g_network->isSimulated() && isBlobstoreUrl(backupContainer)) ? 300.0 : 30.0;
@@ -7119,20 +7294,6 @@ public:
 			        "ERROR: The last backup `%s' happened in the future.\n",
 			        printable(lastBackupTimestamp.get()).c_str());
 			throw backup_error();
-		}
-
-		KeyRangeMap<int> backupRangeSet;
-		for (auto& backupRange : backupRanges) {
-			backupRangeSet.insert(backupRange, 1);
-		}
-
-		backupRangeSet.coalesce(allKeys);
-		std::vector<KeyRange> normalizedRanges;
-
-		for (auto& backupRange : backupRangeSet.ranges()) {
-			if (backupRange.value()) {
-				normalizedRanges.push_back(KeyRange(KeyRangeRef(backupRange.range().begin, backupRange.range().end)));
-			}
 		}
 
 		config.clear(tr);
@@ -7207,6 +7368,18 @@ public:
 	                                  Optional<std::string> encryptionKeyFileName,
 	                                  int encryptionBlockSize,
 	                                  bool useRangeFileRestore = true) {
+		if (auto refusal = FileBackupAgent::bulkLoadRestoreRefusal(tagName,
+		                                                           ranges,
+		                                                           addPrefix,
+		                                                           removePrefix,
+		                                                           onlyApplyMutationLogs,
+		                                                           encryptionKeyFileName,
+		                                                           useRangeFileRestore);
+		    refusal.present()) {
+			fprintf(stderr, "ERROR: %s\n", refusal.get().c_str());
+			throw restore_error();
+		}
+
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -8132,6 +8305,9 @@ public:
 			throw restore_invalid_version();
 		}
 
+		FileBackupAgent::checkRestoreLogLayout(restoreSet.get(),
+		                                       useRangeFileRestore ? RestoreMode::RANGEFILE : RestoreMode::BULKLOAD);
+
 		if (verbose) {
 			printf("Restoring backup to version: %lld\n", (long long)targetVersion);
 		}
@@ -8611,4 +8787,68 @@ Future<EBackupState> FileBackupAgent::waitBackup(Database cx,
 
 Future<Void> FileBackupAgent::changePause(Database db, bool pause) {
 	return FileBackupAgentImpl::changePause(this, db, pause);
+}
+
+TEST_CASE("/backup/restore/bulkLoadLogLayout") {
+	RestorableFileSet files{};
+	files.targetVersion = 99;
+	FileBackupAgent::checkRestoreLogLayout(files, RestoreMode::BULKLOAD);
+	files.logs.push_back({ 0, 100, 10, "classic", 100 });
+	FileBackupAgent::checkRestoreLogLayout(files, RestoreMode::BULKLOAD);
+	files.logs.push_back({ 0, 100, 10, "partitioned", 100, 0, 1 });
+	FileBackupAgent::checkRestoreLogLayout(files, RestoreMode::RANGEFILE);
+	try {
+		FileBackupAgent::checkRestoreLogLayout(files, RestoreMode::BULKLOAD);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_restore_unsupported_file_version);
+		return Void();
+	}
+	ASSERT(false);
+	return Void();
+}
+
+TEST_CASE("/backup/restore/bulkLoadRestoreRefusal") {
+	auto refusal = [](std::vector<KeyRange> ranges,
+	                  Key addPrefix,
+	                  Key removePrefix,
+	                  OnlyApplyMutationLogs onlyApplyMutationLogs,
+	                  Optional<std::string> encryptionKeyFileName,
+	                  bool useRangeFileRestore) {
+		Standalone<VectorRef<KeyRangeRef>> rangeRefs;
+		for (auto& range : ranges) {
+			rangeRefs.push_back_deep(rangeRefs.arena(), range);
+		}
+		return FileBackupAgent::bulkLoadRestoreRefusal("tag"_sr,
+		                                               rangeRefs,
+		                                               addPrefix,
+		                                               removePrefix,
+		                                               onlyApplyMutationLogs,
+		                                               encryptionKeyFileName,
+		                                               useRangeFileRestore)
+		    .orDefault("");
+	};
+	const std::vector<KeyRange> one = { normalKeys };
+	const auto full = OnlyApplyMutationLogs::False, incremental = OnlyApplyMutationLogs::True;
+	const Optional<std::string> noKey, key = std::string("key");
+	const bool rangefile = true, bulkload = false;
+
+	ASSERT(refusal(one, "p"_sr, "a"_sr, full, noKey, rangefile).empty());
+	ASSERT(refusal(one, Key(), Key(), full, noKey, bulkload).empty());
+	ASSERT(refusal(one, "p"_sr, Key(), full, noKey, bulkload).starts_with("--add-prefix"));
+	ASSERT(refusal(one, Key(), "a"_sr, full, noKey, bulkload).starts_with("--add-prefix"));
+	ASSERT(refusal(one, "p"_sr, "a"_sr, full, noKey, bulkload).starts_with("--add-prefix"));
+
+	ASSERT(refusal(one, Key(), Key(), incremental, noKey, bulkload).starts_with("--incremental"));
+	ASSERT(refusal(one, Key(), Key(), full, key, bulkload).starts_with("--encryption-key-file"));
+	ASSERT(refusal(one, Key(), Key(), incremental, key, rangefile).empty());
+
+	const std::vector<KeyRange> adjacent = { KeyRangeRef(normalKeys.begin, "b"_sr),
+		                                     KeyRangeRef("b"_sr, normalKeys.end) };
+	const std::vector<KeyRange> subset = { KeyRangeRef("a"_sr, "z"_sr) };
+	ASSERT(refusal(subset, Key(), Key(), full, noKey, bulkload).starts_with("--mode bulkload"));
+	const std::vector<KeyRange> disjoint = { KeyRangeRef("a"_sr, "b"_sr), KeyRangeRef("c"_sr, "d"_sr) };
+	ASSERT(refusal(adjacent, Key(), Key(), full, noKey, bulkload).empty());
+	ASSERT(refusal(disjoint, Key(), Key(), full, noKey, bulkload).starts_with("--mode bulkload"));
+
+	return Void();
 }
