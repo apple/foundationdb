@@ -2610,6 +2610,22 @@ TEST_CASE("special-key-space disable tracing") {
 	}
 }
 
+TEST_CASE("special-key-space tracing options after a management read") {
+	fdb::Transaction tr(db);
+	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+	auto lock = tr.get("\xff\xff/management/db_locked", false);
+	REQUIRE(wait_future(lock) == 0);
+
+	SUBCASE("token") {
+		tr.set("\xff\xff/tracing/token", "false");
+	}
+	SUBCASE("transaction ID") {
+		tr.set("\xff\xff/tracing/transaction_id", UID(1, 2).toString());
+	}
+	auto commit = tr.commit();
+	CHECK(wait_future(commit) == error_code_special_keys_api_failure);
+}
+
 TEST_CASE("special-key-space tracing get range") {
 	std::string tracingBegin = "\xff\xff/tracing/";
 	std::string tracingEnd = "\xff\xff/tracing0";
