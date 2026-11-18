@@ -61,7 +61,7 @@ Clearing a job is achieved by erasing the entire user range space of the bulkdum
 FDBCLI provides following interfaces to do the operations:
 
 1. Submit a job: bulkdump dump (BeginKey) (EndKey) (RootFolder) // ...where RootFolder is a local directory on the filesystem or a blobstore URL.
-2. Clear a job: bulkdump clear (JobID)
+2. Cancel a job: bulkdump cancel (JobID)
 3. Enable the feature: bulkdump mode on \| off // "bulkdump mode" command prints the current value (on or off) of the mode.
 
 For usage examples, see :doc:`bulkload-user`.
