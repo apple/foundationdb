@@ -20,6 +20,7 @@ package main
 
 import (
 	"strconv"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -41,8 +42,14 @@ const (
 	startTimestampMetricName = "start_timestamp"
 	// runningVersionMetricName represents the running_version metric.
 	runningVersionMetricName = "running_version"
+	// binaryPathLabel represents the binary path label for the prometheus metrics.
+	binaryPathLabel = "binary_path"
+	// runningBinaryMetricName represents the running_binary metric.
+	runningBinaryMetricName = "running_binary"
 	// desiredVersionMetricName represents the desired_version metric.
 	desiredVersionMetricName = "desired_version"
+	// stagedVersionMetricName represents the staged_version metric.
+	stagedVersionMetricName = "staged_version"
 )
 
 // metrics represents the custom prometheus metrics for the monitor.
@@ -59,6 +66,21 @@ type metrics struct {
 	runningVersion *prometheus.GaugeVec
 	// desiredVersion represents the desired running version of the binaries.
 	desiredVersion *prometheus.GaugeVec
+	// runningBinary reports the version and binary path each running fdbserver process was started from. The value is
+	// always 1 and the series of a process is removed once the process terminated.
+	runningBinary *prometheus.GaugeVec
+	// runningBinaryMutex guards previousRunningBinaries.
+	runningBinaryMutex sync.Mutex
+	// previousRunningBinaries keeps the label values that were reported for each process.
+	previousRunningBinaries map[int]prometheus.Labels
+	// stagedVersion represents the versions with a ready binary in the shared binary directory.
+	stagedVersion *prometheus.GaugeVec
+	// stagedVersionMutex guards previousStagedVersions.
+	stagedVersionMutex sync.Mutex
+	// previousStagedVersions keeps the staged versions that were reported last.
+	previousStagedVersions map[string]struct{}
+	// runningVersionMutex guards previousRunningVersion, as the processes are started concurrently.
+	runningVersionMutex sync.Mutex
 	// previousDesiredVersion keeps the previous seen desired version.
 	previousDesiredVersion string
 	// previousRunningVersion keeps the prvious seen running version.
@@ -82,6 +104,9 @@ func (metrics *metrics) registerConfigurationChange(version string) {
 
 // registerProcessStartup will update the current prometheus metrics related to process startup and running versions.
 func (metrics *metrics) registerProcessStartup(processNumber int, version string) {
+	metrics.runningVersionMutex.Lock()
+	defer metrics.runningVersionMutex.Unlock()
+
 	castedProcessNumber := strconv.Itoa(processNumber)
 	metrics.restartCount.With(prometheus.Labels{processLabel: castedProcessNumber}).Inc()
 	metrics.startTimestamp.With(prometheus.Labels{processLabel: castedProcessNumber}).SetToCurrentTime()
@@ -91,6 +116,63 @@ func (metrics *metrics) registerProcessStartup(processNumber int, version string
 		metrics.runningVersion.With(prometheus.Labels{versionLabel: metrics.previousRunningVersion}).Set(0.0)
 	}
 	metrics.previousRunningVersion = version
+}
+
+// registerRunningBinary sets the running_binary metric for the process and removes the series of the binary the process
+// was started from before.
+func (metrics *metrics) registerRunningBinary(processNumber int, version string, binaryPath string) {
+	metrics.runningBinaryMutex.Lock()
+	defer metrics.runningBinaryMutex.Unlock()
+
+	metrics.deleteRunningBinary(processNumber)
+	labels := prometheus.Labels{
+		processLabel:    strconv.Itoa(processNumber),
+		versionLabel:    version,
+		binaryPathLabel: binaryPath,
+	}
+	metrics.runningBinary.With(labels).Set(1.0)
+	if metrics.previousRunningBinaries == nil {
+		metrics.previousRunningBinaries = make(map[int]prometheus.Labels)
+	}
+
+	metrics.previousRunningBinaries[processNumber] = labels
+}
+
+// unregisterRunningBinary removes the running_binary series of a terminated process.
+func (metrics *metrics) unregisterRunningBinary(processNumber int) {
+	metrics.runningBinaryMutex.Lock()
+	defer metrics.runningBinaryMutex.Unlock()
+
+	metrics.deleteRunningBinary(processNumber)
+}
+
+// deleteRunningBinary requires runningBinaryMutex to be held.
+func (metrics *metrics) deleteRunningBinary(processNumber int) {
+	if labels, present := metrics.previousRunningBinaries[processNumber]; present {
+		metrics.runningBinary.Delete(labels)
+		delete(metrics.previousRunningBinaries, processNumber)
+	}
+}
+
+// registerStagedVersions sets the staged_version metric for the provided versions and removes the series of versions
+// that are no longer staged.
+func (metrics *metrics) registerStagedVersions(versions []string) {
+	metrics.stagedVersionMutex.Lock()
+	defer metrics.stagedVersionMutex.Unlock()
+
+	current := make(map[string]struct{}, len(versions))
+	for _, version := range versions {
+		current[version] = struct{}{}
+		metrics.stagedVersion.With(prometheus.Labels{versionLabel: version}).Set(1.0)
+	}
+
+	for version := range metrics.previousStagedVersions {
+		if _, present := current[version]; !present {
+			metrics.stagedVersion.DeleteLabelValues(version)
+		}
+	}
+
+	metrics.previousStagedVersions = current
 }
 
 // registerMetrics will register the monitor metrics and returns a metrics struct to update the current metrics.
@@ -127,6 +209,16 @@ func registerMetrics(reg prometheus.Registerer) *metrics {
 			Name:      desiredVersionMetricName,
 			Help:      "The desired running version of the fdbserver processes started by this monitor.",
 		}, []string{versionLabel}),
+		runningBinary: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: prometheusNamespace,
+			Name:      runningBinaryMetricName,
+			Help:      "The version and binary path each running fdbserver process was started from.",
+		}, []string{processLabel, versionLabel, binaryPathLabel}),
+		stagedVersion: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: prometheusNamespace,
+			Name:      stagedVersionMetricName,
+			Help:      "The versions with a ready fdbserver binary in the shared binary directory.",
+		}, []string{versionLabel}),
 	}
 
 	reg.MustRegister(monitorMetrics.restartCount)
@@ -135,6 +227,8 @@ func registerMetrics(reg prometheus.Registerer) *metrics {
 	reg.MustRegister(monitorMetrics.startTimestamp)
 	reg.MustRegister(monitorMetrics.runningVersion)
 	reg.MustRegister(monitorMetrics.desiredVersion)
+	reg.MustRegister(monitorMetrics.runningBinary)
+	reg.MustRegister(monitorMetrics.stagedVersion)
 
 	return monitorMetrics
 }

@@ -411,7 +411,7 @@ public:
 			std::string byteSampleFileName = stringRemovePrefix(parts[5], "[ByteSampleFileName]: ");
 			std::string checksumValue = stringRemovePrefix(parts[6], "[ChecksumValue]: ");
 			std::string checksumMethod = stringRemovePrefix(parts[7], "[ChecksumMethod]: ");
-			BulkLoadChecksum checksum(checksumValue, checksumMethod);
+			BulkLoadChecksum checksum(checksumMethod, checksumValue);
 			fileSet =
 			    BulkLoadFileSet(rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName, checksum);
 			beginKey = getKeyFromHexString(stringRemovePrefix(parts[8], "[BeginKey]: "));
