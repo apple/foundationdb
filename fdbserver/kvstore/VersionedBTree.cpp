@@ -6330,10 +6330,7 @@ private:
 
 	struct InternalPageModifier {
 		InternalPageModifier() = default;
-		InternalPageModifier(Reference<const ArenaPage> p,
-		                     bool alreadyCloned,
-		                     bool updating,
-		                     int maxHeightAllowed)
+		InternalPageModifier(Reference<const ArenaPage> p, bool alreadyCloned, bool updating, int maxHeightAllowed)
 		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false),
 		    maxHeightAllowed(maxHeightAllowed) {}
 
