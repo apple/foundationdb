@@ -174,6 +174,7 @@ public:
 		enGrpcState = 21,
 		enProxy = 22,
 		enS3FaultInjector = 23,
+		enGlobalCipherKey = 24,
 		COUNT // Add new fields before this enumerator
 	};
 
