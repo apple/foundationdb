@@ -105,6 +105,7 @@ BulkLoad uses FoundationDB's range locking mechanism to ensure data consistency:
 Invariants
 ----------
 - At any time, FDB cluster accepts at most one bulkload job. ``submitBulkLoadJob()`` checks for existing BulkLoad or BulkDump jobs and rejects with ``bulkload_task_failed()`` if conflicts exist
+- A BulkLoad job commits no mutations, so a backup or DR would never record the loaded data. ``submitBulkLoadJob()`` rejects with ``bulkload_range_under_backup()`` while a backup or DR is running, submitted, or covers the job range, and ``fdbbackup start`` and ``fdbdr start`` reject with ``backup_range_under_bulkload()`` while a BulkLoad job covers their range. Stop the backup or DR, or wait for the load to finish, and retry
 - DD partitions jobs into tasks where each task contains up to ``MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK`` manifest entries
 - Task ranges are determined by the union of all manifest ranges within the job range
 - Tasks are assigned to data movement operations that target the appropriate storage servers for each shard

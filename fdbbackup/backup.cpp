@@ -1948,6 +1948,14 @@ Future<Void> submitBackup(Database db,
 				}
 			}
 
+			bool underBulkLoad = co_await runRYWTransaction(db, [=](Reference<ReadYourWritesTransaction> tr) {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				return FileBackupAgent::isBackupUnderBulkLoadJob(tr, mutationLogType, backupRanges);
+			});
+			if (underBulkLoad) {
+				throw backup_range_under_bulkload();
+			}
+
 			// submitBackup appends a unique directory to file:// URLs, so only blobstore locations can collide.
 			if (url.find("file://") != 0) {
 				Reference<IBackupContainer> bc = IBackupContainer::openContainer(url, proxy, {}, 0);

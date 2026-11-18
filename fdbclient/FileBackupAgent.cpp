@@ -272,6 +272,20 @@ Key FileBackupAgent::getPauseKey() {
 	return backupAgent.taskBucket->getPauseKey();
 }
 
+Future<bool> FileBackupAgent::isBackupUnderBulkLoadJob(Reference<ReadYourWritesTransaction> tr,
+                                                       MutationLogType mutationLogType,
+                                                       Standalone<VectorRef<KeyRangeRef>> ranges) {
+	if (mutationLogType != MutationLogType::DEFAULT) {
+		co_return co_await isRangeUnderBulkLoadJob(tr, normalKeys);
+	}
+	for (const auto& range : ranges) {
+		if (co_await isRangeUnderBulkLoadJob(tr, range)) {
+			co_return true;
+		}
+	}
+	co_return false;
+}
+
 Optional<std::string> FileBackupAgent::bulkLoadRestoreRefusal(Key tagName,
                                                               Standalone<VectorRef<KeyRangeRef>> ranges,
                                                               Key addPrefix,
@@ -4672,7 +4686,23 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("BulkLoadJobId", bulkLoadJob.getJobId());
 
 				// Submit BulkLoad job (must be lockAware since DB is locked during restore)
-				co_await submitBulkLoadJob(cx, bulkLoadJob, true /* lockAware */);
+				bool underBackup = false;
+				try {
+					co_await submitBulkLoadJob(cx, bulkLoadJob, true /* lockAware */);
+				} catch (Error& e) {
+					if (e.code() != error_code_bulkload_range_under_backup) {
+						throw;
+					}
+					underBackup = true;
+				}
+				if (underBackup) {
+					// A retry fails the same way while the backup runs, and the restore holds the database lock.
+					co_await abortBulkLoadRestore(
+					    cx,
+					    restore,
+					    "A backup or DR covers the restore range; stop it, or restore with --mode rangefile");
+					throw restore_bulkload_failed();
+				}
 
 				TraceEvent("BulkLoadRestoreJobSubmitted")
 				    .detail("RestoreUID", restore.getUid())
@@ -7987,6 +8017,12 @@ public:
 			        "SST files those modes produce are not encrypted, so the backup would be only partly "
 			        "encrypted. Use --mode rangefile.\n");
 			throw backup_error();
+		}
+
+		// A load commits no mutations, so a backup starting under it would never log the loaded data.
+		if (co_await FileBackupAgent::isBackupUnderBulkLoadJob(tr, mutationLogType, backupRanges)) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkLoadRunning").detail("TagName", tagName);
+			throw backup_range_under_bulkload();
 		}
 
 		// This check will ensure that current backupUid is later than the last backup Uid

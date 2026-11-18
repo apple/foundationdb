@@ -28,6 +28,7 @@
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/mocks3/MockS3Server.h"
 #include "fdbserver/mocks3/MockS3ServerChaos.h"
+#include "BackupSteps.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
@@ -59,6 +60,7 @@ struct BulkDumping : TestWorkload {
 	bool runLoad = true;
 	bool generateInitialData = true;
 	std::string sourceJobId = "";
+	bool checkBackupGuard = false;
 
 	// Timeout configuration
 	double jobCompletionTimeout = 1800.0; // Timeout for waiting on bulk dump/load job completion
@@ -91,6 +93,7 @@ struct BulkDumping : TestWorkload {
 		runLoad = getOption(options, "runLoad"_sr, true);
 		generateInitialData = getOption(options, "generateInitialData"_sr, true);
 		sourceJobId = getOption(options, "sourceJobId"_sr, ""_sr).toString();
+		checkBackupGuard = getOption(options, "checkBackupGuard"_sr, false);
 
 		// Initialize chaos options
 		enableChaos = getOption(options, "enableChaos"_sr, false);
@@ -569,6 +572,74 @@ struct BulkDumping : TestWorkload {
 		co_return bulkDumpJob;
 	}
 
+	static Future<Void> waitForLogRanges(Database cx, bool present) {
+		while ((co_await BackupSteps::firstKeyIn(cx, logRangesRange)).present() != present) {
+			co_await delay(1.0);
+		}
+	}
+
+	static Future<Void> expectRejected(Future<Void> attempt, int errorCode, std::string phase) {
+		bool rejected = false;
+		try {
+			co_await attempt;
+		} catch (Error& e) {
+			if (e.code() != errorCode) {
+				throw;
+			}
+			rejected = true;
+		}
+		if (!rejected) {
+			TraceEvent(SevError, "BulkDumpingWorkLoadBackupGuardMissed").detail("Phase", phase);
+			throw operation_failed();
+		}
+		TraceEvent("BulkDumpingWorkLoad")
+		    .detail("Phase", "Backup Guard Checked")
+		    .detail("Check", phase)
+		    .detail("Rejected", rejected);
+	}
+
+	// While a backup is registered, submitBulkLoadJob must fail with bulkload_range_under_backup, both once its log
+	// range is registered and while its start task has not yet run; once it is aborted the job must be accepted
+	// again. Conversely, while a job is live, submitBackup must fail with backup_range_under_bulkload.
+	Future<Void> checkBackupBlocksLoad(Database cx, BulkDumpState bulkDumpJob) {
+		FileBackupAgent backupAgent;
+		BulkLoadJobState job = createBulkLoadJob(
+		    bulkDumpJob.getJobId(), bulkDumpJob.getJobRange(), bulkDumpJob.getJobRoot(), bulkLoadTransportMethod);
+		// Only the backup's mutation-log registration matters here: keep the snapshot slow and the backup running
+		// (StopWhenDone::False) so the log range stays registered until it is aborted below.
+		constexpr int slowSnapshotSeconds = 100000;
+		BackupSteps::SubmitSpec spec;
+		spec.backupDir = "file://simfdb/backups/"_sr;
+		spec.tag = "bulkload_backup_guard"_sr;
+		spec.ranges.push_back_deep(spec.ranges.arena(), normalKeys);
+		spec.initSnapshotInterval = slowSnapshotSeconds;
+		spec.snapshotInterval = slowSnapshotSeconds;
+		spec.stopWhenDone = StopWhenDone::False;
+		auto submitBackup = [&]() {
+			return BackupSteps::submitBackup(cx, &backupAgent, BackupSteps::BackupVersion::V1, spec);
+		};
+		auto submitLoad = [&]() { return timeoutError(submitBulkLoadJob(cx, job), jobSubmitTimeout); };
+
+		// Paused agents leave the start task unrun: the backup is submitted but has registered no log range.
+		co_await backupAgent.changePause(cx, true);
+		co_await submitBackup();
+		co_await expectRejected(submitLoad(), error_code_bulkload_range_under_backup, "SubmittedNotStarted");
+		co_await backupAgent.abortBackup(cx, spec.tag.toString());
+		co_await backupAgent.changePause(cx, false);
+
+		co_await submitBackup();
+		// The mutation-log range is registered by the backup's first task, not by submitBackup.
+		co_await waitForLogRanges(cx, true);
+		co_await expectRejected(submitLoad(), error_code_bulkload_range_under_backup, "LogRangeRegistered");
+		co_await backupAgent.abortBackup(cx, spec.tag.toString());
+		co_await waitForLogRanges(cx, false);
+
+		// The bulkload mode is still off, so DD does not dispatch the job and it stays live.
+		co_await submitLoad();
+		co_await expectRejected(submitBackup(), error_code_backup_range_under_bulkload, "BackupDuringLoad");
+		co_await cancelBulkLoadJob(cx, job.getJobId());
+	}
+
 	Future<Void> _runLoad(Database const& cx,
 	                      BulkDumpState bulkDumpJob,
 	                      KeyRangeRef bulkDumpJobRange,
@@ -581,6 +652,10 @@ struct BulkDumping : TestWorkload {
 		// Clear database
 		co_await clearDatabase(cx);
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Clear DB").detail("Job", bulkDumpJob.toString());
+
+		if (checkBackupGuard) {
+			co_await checkBackupBlocksLoad(cx, bulkDumpJob);
+		}
 
 		// Submit a bulk load job
 		int oldBulkLoadMode = 0;

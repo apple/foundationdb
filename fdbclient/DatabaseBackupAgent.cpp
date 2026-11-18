@@ -2071,6 +2071,18 @@ struct BackupRestorableTaskFunc : TaskFuncBase {
 StringRef BackupRestorableTaskFunc::name = "dr_backup_restorable"_sr;
 REGISTER_TASKFUNC(BackupRestorableTaskFunc);
 
+// Bulkload ingests files without committing mutations, so a DR never copies data a load adds to its source ranges.
+static Future<Void> checkSourceNotUnderBulkLoadJob(Database src, Standalone<VectorRef<KeyRangeRef>> ranges) {
+	bool underBulkLoad = co_await runRYWTransaction(src, [=](Reference<ReadYourWritesTransaction> tr) {
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		return FileBackupAgent::isBackupUnderBulkLoadJob(tr, MutationLogType::DEFAULT, ranges);
+	});
+	if (underBulkLoad) {
+		throw backup_range_under_bulkload();
+	}
+}
+
 struct StartFullBackupTaskFunc : TaskFuncBase {
 	static StringRef name;
 	static constexpr uint32_t version = 1;
@@ -2125,6 +2137,12 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 
 				Version bVersion = co_await srcTr->getReadVersion();
 				beginVersionKey = BinaryWriter::toValue(bVersion, Unversioned());
+
+				// Atomic with writing backupLatestVersions, the row that makes a bulkload submit refuse. A throw fails
+				// the task, which is retried.
+				if (co_await FileBackupAgent::isBackupUnderBulkLoadJob(srcTr, MutationLogType::DEFAULT, backupRanges)) {
+					throw backup_range_under_bulkload();
+				}
 
 				Key versionKey = logUidValue.withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix);
 				Optional<Key> versionRecord = co_await srcTr->get(versionKey);
@@ -2617,6 +2635,9 @@ public:
 			}
 		}
 
+		// The source is a separate cluster, so this check is not atomic with the submit; the start task rechecks.
+		co_await dbBackup::checkSourceNotUnderBulkLoadJob(backupAgent->taskBucket->src, backupRanges);
+
 		if (backupAction == DatabaseBackupAgent::PreBackupAction::VERIFY) {
 			// Make sure all of the ranges are empty before we backup into them.
 			std::vector<Future<RangeResult>> backupIntoResults;
@@ -2738,6 +2759,9 @@ public:
 			StatusObject destStatus = co_await StatusClient::statusFetcher(dest);
 			checkAtomicSwitchOverConfig(srcStatus, destStatus, tagName);
 		}
+
+		// Refuse before locking the source: the reverse DR below would throw after the switchover is half done.
+		co_await dbBackup::checkSourceNotUnderBulkLoadJob(dest, backupRanges);
 
 		UID logUid = deterministicRandom()->randomUniqueID();
 		Key logUidValue = BinaryWriter::toValue(logUid, Unversioned());
