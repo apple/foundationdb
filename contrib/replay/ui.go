@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,61 +16,61 @@ import (
 
 // model holds the UI state for the Bubbletea application
 type model struct {
-	traceData         *TraceData
-	currentTime       float64
-	currentEventIndex int // Index of current event in traceData.Events
-	clusterState      *ClusterState
-	width             int
-	height            int
-	layout            int // 0 = 2-column (topology + events), 1 = events only, 2 = topology only
-	timeInputMode     bool
-	timeInput         textinput.Model
-	configViewMode    bool
-	configScrollOffset int // Vertical scroll offset for config popup
-	helpViewMode      bool // Help popup mode
-	healthViewMode    bool // Health popup mode
-	healthScrollOffset int // Vertical scroll offset for health popup
-	searchMode        bool // Search input mode
-	searchDirection   string // "forward" or "backward"
-	searchInput       textinput.Model
-	searchPattern     string // Current search pattern
-	searchActive      bool // Whether search highlighting is active
+	traceData          *TraceData
+	currentTime        float64
+	currentEventIndex  int // Index of current event in traceData.Events
+	clusterState       *ClusterState
+	width              int
+	height             int
+	layout             int // 0 = 2-column (topology + events), 1 = events only, 2 = topology only
+	timeInputMode      bool
+	timeInput          textinput.Model
+	configViewMode     bool
+	configScrollOffset int    // Vertical scroll offset for config popup
+	helpViewMode       bool   // Help popup mode
+	healthViewMode     bool   // Health popup mode
+	healthScrollOffset int    // Vertical scroll offset for health popup
+	searchMode         bool   // Search input mode
+	searchDirection    string // "forward" or "backward"
+	searchInput        textinput.Model
+	searchPattern      string // Current search pattern
+	searchActive       bool   // Whether search highlighting is active
 	// Filter state
-	filterViewMode          bool     // Filter popup mode
-	filterShowAll           bool     // Whether "All" is checked (default true)
-	filterCurrentCategory   int      // 0=Raw, 1=Machine, 2=Time, 3=Message
+	filterViewMode        bool // Filter popup mode
+	filterShowAll         bool // Whether "All" is checked (default true)
+	filterCurrentCategory int  // 0=Raw, 1=Machine, 2=Time, 3=Message
 	// Category 1: Raw filters (OR logic)
-	filterRawList           []string // Raw filter patterns
-	filterRawInput          textinput.Model
-	filterRawSelectedIndex  int
-	filterRawInputActive    bool
-	filterRawColumn         int           // Current column in raw filter list (for ctrl+f/ctrl+b navigation)
-	filterRawDisabled       map[int]bool  // Track disabled raw filters (map[index]disabled)
-	filterRawCompiledRegex  []*regexp.Regexp // Pre-compiled regex patterns for raw filters (parallel to filterRawList)
-	filterTypeSearchMode    bool          // Type search popup mode
-	filterTypeSearchInput   textinput.Model
-	filterTypeSearchList    []string      // All unique Type values from trace
-	filterTypeSearchSelected int          // Currently selected Type in list
+	filterRawList            []string // Raw filter patterns
+	filterRawInput           textinput.Model
+	filterRawSelectedIndex   int
+	filterRawInputActive     bool
+	filterRawColumn          int              // Current column in raw filter list (for ctrl+f/ctrl+b navigation)
+	filterRawDisabled        map[int]bool     // Track disabled raw filters (map[index]disabled)
+	filterRawCompiledRegex   []*regexp.Regexp // Pre-compiled regex patterns for raw filters (parallel to filterRawList)
+	filterTypeSearchMode     bool             // Type search popup mode
+	filterTypeSearchInput    textinput.Model
+	filterTypeSearchList     []string // All unique Type values from trace
+	filterTypeSearchSelected int      // Currently selected Type in list
 	// Category 2: Machine filters (OR logic)
-	filterMachineList       []string // Selected machine addresses
+	filterMachineList       []string        // Selected machine addresses
 	filterMachineSet        map[string]bool // Set for O(1) lookup of selected machines
-	filterMachineSelectMode bool     // In machine selection popup
+	filterMachineSelectMode bool            // In machine selection popup
 	filterMachineInput      textinput.Model // For fuzzy search in machine popup
 	filterMachineDCs        map[string]bool // Selected DCs (map[dcID]selected)
-	filterMachineScroll     int // Scroll offset in machine popup (deprecated, using columns now)
-	filterMachineSelected   int // Currently highlighted item in machine popup
-	filterMachineColumn     int // Current column in machine popup (for ctrl+f/ctrl+b navigation)
+	filterMachineScroll     int             // Scroll offset in machine popup (deprecated, using columns now)
+	filterMachineSelected   int             // Currently highlighted item in machine popup
+	filterMachineColumn     int             // Current column in machine popup (for ctrl+f/ctrl+b navigation)
 	// Category 3: Time range filter
-	filterTimeEnabled       bool    // Whether time filter is active
-	filterTimeStart         float64 // Start time
-	filterTimeEnd           float64 // End time
-	filterTimeInputMode     bool    // Configuring time range
-	filterTimeEditingStart  bool    // true=editing start, false=editing end
-	filterTimeInput         textinput.Model
+	filterTimeEnabled      bool    // Whether time filter is active
+	filterTimeStart        float64 // Start time
+	filterTimeEnd          float64 // End time
+	filterTimeInputMode    bool    // Configuring time range
+	filterTimeEditingStart bool    // true=editing start, false=editing end
+	filterTimeInput        textinput.Model
 	// Category 4: Message filter (NetworkMessageSent events only)
-	filterMessageEnabled    bool    // Whether message filter is active
+	filterMessageEnabled bool // Whether message filter is active
 	// Performance caches
-	machineDCCache          map[string]string // Cache DC extraction results (map[machineAddr]dcID)
+	machineDCCache map[string]string // Cache DC extraction results (map[machineAddr]dcID)
 }
 
 // newModel creates a new model with the given trace data
@@ -140,36 +141,36 @@ func newModel(traceData *TraceData) model {
 		searchPattern:      "",
 		searchActive:       false,
 		// Filter initialization
-		filterViewMode:         false,
-		filterShowAll:          true, // Default: show all events
-		filterCurrentCategory:  0,    // Start in Raw category
-		filterRawList:          []string{},
-		filterRawInput:         rawInput,
-		filterRawSelectedIndex: -1,
-		filterRawInputActive:   false,
-		filterRawColumn:        0,
-		filterRawDisabled:      make(map[int]bool),
-		filterRawCompiledRegex: []*regexp.Regexp{},
-		filterTypeSearchMode:    false,
-		filterTypeSearchInput:   typeSearchInput,
-		filterTypeSearchList:    allTypes,
+		filterViewMode:           false,
+		filterShowAll:            true, // Default: show all events
+		filterCurrentCategory:    0,    // Start in Raw category
+		filterRawList:            []string{},
+		filterRawInput:           rawInput,
+		filterRawSelectedIndex:   -1,
+		filterRawInputActive:     false,
+		filterRawColumn:          0,
+		filterRawDisabled:        make(map[int]bool),
+		filterRawCompiledRegex:   []*regexp.Regexp{},
+		filterTypeSearchMode:     false,
+		filterTypeSearchInput:    typeSearchInput,
+		filterTypeSearchList:     allTypes,
 		filterTypeSearchSelected: 0,
-		filterMachineList:      []string{},
-		filterMachineSet:       make(map[string]bool),
-		filterMachineSelectMode: false,
-		filterMachineInput:     machineInput,
-		filterMachineDCs:       make(map[string]bool),
-		filterMachineScroll:    0,
-		filterMachineSelected:  0,
-		filterMachineColumn:    0,
-		filterTimeEnabled:      false,
-		filterTimeStart:        traceData.MinTime,
-		filterTimeEnd:          traceData.MaxTime,
-		filterTimeInputMode:    false,
-		filterTimeEditingStart: true,
-		filterTimeInput:        timeFilterInput,
-		filterMessageEnabled:   false,
-		machineDCCache:         make(map[string]string),
+		filterMachineList:        []string{},
+		filterMachineSet:         make(map[string]bool),
+		filterMachineSelectMode:  false,
+		filterMachineInput:       machineInput,
+		filterMachineDCs:         make(map[string]bool),
+		filterMachineScroll:      0,
+		filterMachineSelected:    0,
+		filterMachineColumn:      0,
+		filterTimeEnabled:        false,
+		filterTimeStart:          traceData.MinTime,
+		filterTimeEnd:            traceData.MaxTime,
+		filterTimeInputMode:      false,
+		filterTimeEditingStart:   true,
+		filterTimeInput:          timeFilterInput,
+		filterMessageEnabled:     false,
+		machineDCCache:           make(map[string]string),
 	}
 }
 
@@ -266,7 +267,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 
 						// Check if we can move down within this column
-						if m.filterRawSelectedIndex < endIdx - 1 {
+						if m.filterRawSelectedIndex < endIdx-1 {
 							// Move down within this column
 							m.filterRawSelectedIndex++
 							return m, nil
@@ -464,11 +465,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Check if any common filters exist
 					hasCommonFilters := false
 					for _, filter := range m.filterRawList {
-						for _, common := range commonTypes {
-							if filter == common {
-								hasCommonFilters = true
-								break
-							}
+						if slices.Contains(commonTypes, filter) {
+							hasCommonFilters = true
 						}
 						if hasCommonFilters {
 							break
@@ -481,13 +479,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						newDisabled := make(map[int]bool)
 						newIdx := 0
 						for i, filter := range m.filterRawList {
-							isCommon := false
-							for _, common := range commonTypes {
-								if filter == common {
-									isCommon = true
-									break
-								}
-							}
+							isCommon := slices.Contains(commonTypes, filter)
 							if !isCommon {
 								newList = append(newList, filter)
 								// Preserve disabled state for non-common filters
@@ -726,9 +718,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Search for match
 					var matchIndex int
 					if m.searchDirection == "forward" {
-						matchIndex = m.searchForward(m.currentEventIndex + 1, m.searchPattern)
+						matchIndex = m.searchForward(m.currentEventIndex+1, m.searchPattern)
 					} else {
-						matchIndex = m.searchBackward(m.currentEventIndex - 1, m.searchPattern)
+						matchIndex = m.searchBackward(m.currentEventIndex-1, m.searchPattern)
 					}
 
 					if matchIndex >= 0 {
@@ -1003,9 +995,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.searchActive && m.searchPattern != "" {
 				var matchIndex int
 				if m.searchDirection == "forward" {
-					matchIndex = m.searchForward(m.currentEventIndex + 1, m.searchPattern)
+					matchIndex = m.searchForward(m.currentEventIndex+1, m.searchPattern)
 				} else {
-					matchIndex = m.searchBackward(m.currentEventIndex - 1, m.searchPattern)
+					matchIndex = m.searchBackward(m.currentEventIndex-1, m.searchPattern)
 				}
 				if matchIndex >= 0 {
 					m.currentEventIndex = matchIndex
@@ -1020,10 +1012,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var matchIndex int
 				if m.searchDirection == "forward" {
 					// Original was forward, so N goes backward
-					matchIndex = m.searchBackward(m.currentEventIndex - 1, m.searchPattern)
+					matchIndex = m.searchBackward(m.currentEventIndex-1, m.searchPattern)
 				} else {
 					// Original was backward, so N goes forward
-					matchIndex = m.searchForward(m.currentEventIndex + 1, m.searchPattern)
+					matchIndex = m.searchForward(m.currentEventIndex+1, m.searchPattern)
 				}
 				if matchIndex >= 0 {
 					m.currentEventIndex = matchIndex
@@ -1133,17 +1125,17 @@ func formatNumberWithCommas(n int64) string {
 func formatTraceEvent(event *TraceEvent, isCurrent bool, searchPattern string) string {
 	// Skip fields as per config.fish and fields shown in topology
 	skipFields := map[string]bool{
-		"DateTime":         true,
-		"ThreadID":         true,
-		"LogGroup":         true,
-		"TrackLatestType":  true,
-		"Roles":            true, // Shown in topology
+		"DateTime":        true,
+		"ThreadID":        true,
+		"LogGroup":        true,
+		"TrackLatestType": true,
+		"Roles":           true, // Shown in topology
 	}
 
 	// Color styles
-	fieldNameStyle := lipgloss.NewStyle().Foreground(colTextDim) // Dim
-	fieldValueStyle := lipgloss.NewStyle().Foreground(colOk)  // Green
-	currentLineStyle := lipgloss.NewStyle().Background(colHighlightBg) // Dark yellowish highlight
+	fieldNameStyle := lipgloss.NewStyle().Foreground(colTextDim)           // Dim
+	fieldValueStyle := lipgloss.NewStyle().Foreground(colOk)               // Green
+	currentLineStyle := lipgloss.NewStyle().Background(colHighlightBg)     // Dark yellowish highlight
 	searchHighlightStyle := lipgloss.NewStyle().Background(colHighlightBg) // Same as current line highlight
 
 	var parts []string
@@ -1309,7 +1301,7 @@ func (m model) handleMachineSelectionPopup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			currentColumn := []SelectableItem{}
 			currentHeight := 0
 
-			for i := 0; i < len(items); i++ {
+			for i := range items {
 				item := items[i]
 				itemLines := 1
 				if item.Type == "machine" && item.Worker != nil {
@@ -1359,7 +1351,7 @@ func (m model) handleMachineSelectionPopup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			currentColumn := []SelectableItem{}
 			currentHeight := 0
 
-			for i := 0; i < len(items); i++ {
+			for i := range items {
 				item := items[i]
 				itemLines := 1
 				if item.Type == "machine" && item.Worker != nil {
@@ -1408,7 +1400,7 @@ func (m model) handleMachineSelectionPopup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			currentColumn := []SelectableItem{}
 			currentHeight := 0
 
-			for i := 0; i < len(items); i++ {
+			for i := range items {
 				item := items[i]
 				itemLines := 1
 				if item.Type == "machine" && item.Worker != nil {
@@ -1445,7 +1437,7 @@ func (m model) handleMachineSelectionPopup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			currentColumn := []SelectableItem{}
 			currentHeight := 0
 
-			for i := 0; i < len(items); i++ {
+			for i := range items {
 				item := items[i]
 				itemLines := 1
 				if item.Type == "machine" && item.Worker != nil {
@@ -1483,7 +1475,7 @@ func (m model) handleMachineSelectionPopup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			currentColumn := []SelectableItem{}
 			currentHeight := 0
 
-			for i := 0; i < len(items); i++ {
+			for i := range items {
 				item := items[i]
 				itemLines := 1
 				if item.Type == "machine" && item.Worker != nil {
@@ -1857,7 +1849,6 @@ func (m model) getMachineSelectionItems() []SelectableItem {
 	return items
 }
 
-
 func (m *model) updateClusterState() {
 	// Get events up to and including the current event index
 	events := m.traceData.Events[:m.currentEventIndex+1]
@@ -1934,8 +1925,8 @@ func (m model) buildEventListPane(availableHeight int, paneWidth int, searchPatt
 		}
 
 		// Prepend to linesAbove (we're going backwards)
-		for j := len(wrappedLines) - 1; j >= 0; j-- {
-			linesAbove = append([]string{wrappedLines[j]}, linesAbove...)
+		for _, wrappedLine := range slices.Backward(wrappedLines) {
+			linesAbove = append([]string{wrappedLine}, linesAbove...)
 		}
 		lineCount += len(wrappedLines)
 	}
@@ -1997,7 +1988,6 @@ func wrapText(text string, width int) []string {
 	return lines
 }
 
-
 // View renders the UI (required by Bubbletea)
 func (m model) View() string {
 	// Get current event's machine and ID for highlighting in topology
@@ -2018,10 +2008,9 @@ func (m model) View() string {
 	//   - help line = 1 line
 	//   - epoch info line = 1 line
 	//   Total bottom = 9 lines
-	availableHeight := m.height - 9
-	if availableHeight < 1 {
-		availableHeight = 1 // Minimum 1 line
-	}
+	availableHeight := max(m.height-9,
+		// Minimum 1 line
+		1)
 
 	// Styles
 	dcHeaderStyle := lipgloss.NewStyle().
@@ -2466,7 +2455,7 @@ func (m model) View() string {
 				}
 
 				// If adding this group would overflow, start new column
-				if len(currentColumn) + groupSize > availableHeight {
+				if len(currentColumn)+groupSize > availableHeight {
 					columns = append(columns, currentColumn)
 					currentColumn = []string{}
 				}
@@ -2561,7 +2550,7 @@ func (m model) View() string {
 	var splitContent strings.Builder
 	borderStyle := lipgloss.NewStyle().Foreground(colTextDim)
 
-	for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
+	for lineIdx := range maxLines {
 		switch m.layout {
 		case 0: // 2-column layout (topology + events)
 			// Render all topology columns for this line
@@ -2885,12 +2874,12 @@ func (m model) renderFilterPopup(baseView string) string {
 
 			// Build columns
 			type ColumnItems struct {
-				items      []int // Indices into m.filterRawList
-				startIdx   int
-				endIdx     int
+				items    []int // Indices into m.filterRawList
+				startIdx int
+				endIdx   int
 			}
 			var columns []ColumnItems
-			for col := 0; col < numColumns; col++ {
+			for col := range numColumns {
 				startIdx := col * maxRows
 				endIdx := startIdx + maxRows
 				if endIdx > len(m.filterRawList) {
@@ -3206,7 +3195,7 @@ func (m model) renderMachineSelectionPopup(baseView string) string {
 	currentColumn := []SelectableItem{}
 	currentHeight := 0
 
-	for i := 0; i < len(items); i++ {
+	for i := range items {
 		item := items[i]
 
 		// Calculate how many lines this item will take
@@ -3281,13 +3270,7 @@ func (m model) renderMachineSelectionPopup(baseView string) string {
 
 			} else if item.Type == "machine" {
 				// Check if machine or DC is selected
-				isSelected := false
-				for _, m2 := range m.filterMachineList {
-					if m2 == item.Machine {
-						isSelected = true
-						break
-					}
-				}
+				isSelected := slices.Contains(m.filterMachineList, item.Machine)
 				dc := extractDCFromAddress(item.Machine)
 				if !isSelected && dc != "" && m.filterMachineDCs[dc] {
 					isSelected = true
@@ -3437,14 +3420,6 @@ func (m model) renderTypeSearchPopup(baseView string) string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup, lipgloss.WithWhitespaceChars(" "))
 }
 
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // NetworkMetric represents a single network latency measurement
 type NetworkMetric struct {
 	Time          string
@@ -3460,16 +3435,16 @@ type NetworkMetric struct {
 
 // DegradedPeerMetric represents a degraded peer detection event
 type DegradedPeerMetric struct {
-	Time                      string
-	TimeValue                 float64
-	Src                       string
-	Dst                       string
-	Disconnected              string
-	MinLatency                float64
-	MaxLatency                float64
-	MedianLatency             float64
-	CheckedPercentileLatency  float64
-	ConnectionFailureCount    int
+	Time                     string
+	TimeValue                float64
+	Src                      string
+	Dst                      string
+	Disconnected             string
+	MinLatency               float64
+	MaxLatency               float64
+	MedianLatency            float64
+	CheckedPercentileLatency float64
+	ConnectionFailureCount   int
 }
 
 // ConnectionMetric represents a Sim2Connection or SimulatedDisconnection event
@@ -3948,21 +3923,14 @@ func (m model) renderHealthPopup(baseView string) string {
 
 	// Calculate available height for content
 	// Account for: title (1 line) + top margin (1) + help text (2) + bottom margin (1) + padding (2) + border (2) = 9 lines
-	maxContentHeight := m.height - 9
-	if maxContentHeight < 5 {
-		maxContentHeight = 5 // Minimum visible lines
-	}
+	maxContentHeight := max(m.height-9,
+		// Minimum visible lines
+		5)
 
 	// Clamp scroll offset
-	maxScrollOffset := totalLines - maxContentHeight
-	if maxScrollOffset < 0 {
-		maxScrollOffset = 0
-	}
+	maxScrollOffset := max(totalLines-maxContentHeight, 0)
 
-	displayScrollOffset := m.healthScrollOffset
-	if displayScrollOffset < 0 {
-		displayScrollOffset = 0
-	}
+	displayScrollOffset := max(m.healthScrollOffset, 0)
 	if displayScrollOffset > maxScrollOffset {
 		displayScrollOffset = maxScrollOffset
 	}
@@ -4258,21 +4226,14 @@ func (m model) renderConfigPopup(baseView string, config *DBConfig) string {
 
 	// Calculate available height for JSON content
 	// Account for: title (1 line) + top margin (1) + help text (1) + bottom margin (1) + padding (2) + border (2) = 8 lines
-	maxContentHeight := m.height - 12
-	if maxContentHeight < 5 {
-		maxContentHeight = 5 // Minimum visible lines
-	}
+	maxContentHeight := max(m.height-12,
+		// Minimum visible lines
+		5)
 
 	// Clamp scroll offset
-	maxScrollOffset := totalLines - maxContentHeight
-	if maxScrollOffset < 0 {
-		maxScrollOffset = 0
-	}
+	maxScrollOffset := max(totalLines-maxContentHeight, 0)
 
-	displayScrollOffset := m.configScrollOffset
-	if displayScrollOffset < 0 {
-		displayScrollOffset = 0
-	}
+	displayScrollOffset := max(m.configScrollOffset, 0)
 	if displayScrollOffset > maxScrollOffset {
 		displayScrollOffset = maxScrollOffset
 	}
@@ -4468,7 +4429,7 @@ func (m *model) searchForward(startIndex int, pattern string) int {
 	}
 
 	// Wrap around to beginning
-	for i := 0; i < startIndex; i++ {
+	for i := range startIndex {
 		event := &m.traceData.Events[i]
 
 		// Skip filtered events

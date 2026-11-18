@@ -104,19 +104,19 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 			}
 
 			var wg sync.WaitGroup
-			for i := 0; i < 4; i++ {
+			for range 4 {
 				wg.Add(2)
 				go func() {
 					defer wg.Done()
 					defer GinkgoRecover()
-					for j := 0; j < 200; j++ {
+					for range 200 {
 						Expect(mon.updateCustomEnvironmentFromNodeMetadata(context.Background())).To(Succeed())
 					}
 				}()
 				go func() {
 					defer wg.Done()
 					defer GinkgoRecover()
-					for j := 0; j < 200; j++ {
+					for range 200 {
 						Expect(mon.copyCustomEnvironment()).To(HaveKeyWithValue("testing", "testing"))
 					}
 				}()

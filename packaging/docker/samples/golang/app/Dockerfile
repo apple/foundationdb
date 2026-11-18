@@ -21,7 +21,7 @@
 # see https://github.com/moby/moby/issues/34129
 ARG FDB_VERSION
 FROM foundationdb/foundationdb:${FDB_VERSION} as fdb
-FROM golang:1.22
+FROM golang:1.27.3-bookworm
 ARG FDB_VERSION
 
 WORKDIR /tmp

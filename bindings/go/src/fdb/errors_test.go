@@ -54,7 +54,7 @@ func TestErrorWrapping(t *testing.T) {
 	}
 
 	for _, inputError := range testCases {
-		_, outputError := db.ReadTransact(func(rtr ReadTransaction) (interface{}, error) {
+		_, outputError := db.ReadTransact(func(rtr ReadTransaction) (any, error) {
 			return nil, inputError
 		})
 		if inputError != outputError {

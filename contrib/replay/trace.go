@@ -31,20 +31,20 @@ type TraceEvent struct {
 
 // DBConfig represents the database configuration
 type DBConfig struct {
-	Time                  float64
-	RedundancyMode        string `json:"redundancy_mode"`
-	UsableRegions         int    `json:"usable_regions"`
-	Logs                  int    `json:"logs"`
-	LogRouters            int    `json:"log_routers"`
-	RemoteLogs            int    `json:"remote_logs"`
-	Proxies               int    `json:"proxies"`
-	GrvProxies            int    `json:"grv_proxies"`
-	BackupWorkerEnabled   int    `json:"backup_worker_enabled"`
-	StorageEngine         string `json:"storage_engine"`
-	RemoteRedundancyMode  string `json:"remote_redundancy_mode"`
-	TenantMode            string `json:"tenant_mode"`
+	Time                 float64
+	RedundancyMode       string `json:"redundancy_mode"`
+	UsableRegions        int    `json:"usable_regions"`
+	Logs                 int    `json:"logs"`
+	LogRouters           int    `json:"log_routers"`
+	RemoteLogs           int    `json:"remote_logs"`
+	Proxies              int    `json:"proxies"`
+	GrvProxies           int    `json:"grv_proxies"`
+	BackupWorkerEnabled  int    `json:"backup_worker_enabled"`
+	StorageEngine        string `json:"storage_engine"`
+	RemoteRedundancyMode string `json:"remote_redundancy_mode"`
+	TenantMode           string `json:"tenant_mode"`
 	// Add other fields as needed
-	RawJSON map[string]interface{} // Full JSON for reference
+	RawJSON map[string]any // Full JSON for reference
 }
 
 // RecoveryState represents a MasterRecoveryState event
@@ -92,10 +92,7 @@ func parseTraceFile(filepath string) (*TraceData, error) {
 	fileInfo, _ := file.Stat()
 	fileSize := fileInfo.Size()
 	// Estimate ~400 bytes per event on average, pre-allocate to reduce reallocations
-	estimatedEvents := int(fileSize / 400)
-	if estimatedEvents < 1000 {
-		estimatedEvents = 1000
-	}
+	estimatedEvents := max(int(fileSize/400), 1000)
 
 	decoder := xml.NewDecoder(file)
 	events := make([]TraceEvent, 0, estimatedEvents)
@@ -313,7 +310,7 @@ func parseDBConfig(confStr string, time float64) *DBConfig {
 	decoded := html.UnescapeString(confStr)
 
 	// Parse JSON
-	var rawConfig map[string]interface{}
+	var rawConfig map[string]any
 	if err := json.Unmarshal([]byte(decoded), &rawConfig); err != nil {
 		return nil
 	}

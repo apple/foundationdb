@@ -177,7 +177,7 @@ func (dl directoryLayer) createOrOpen(rtr fdb.ReadTransaction, tr *fdb.Transacti
 }
 
 func (dl directoryLayer) CreateOrOpen(t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error) {
-	r, err := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	r, err := t.Transact(func(tr fdb.Transaction) (any, error) {
 		return dl.createOrOpen(tr, &tr, path, layer, nil, true, true)
 	})
 	if err != nil {
@@ -187,7 +187,7 @@ func (dl directoryLayer) CreateOrOpen(t fdb.Transactor, path []string, layer []b
 }
 
 func (dl directoryLayer) Create(t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error) {
-	r, err := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	r, err := t.Transact(func(tr fdb.Transaction) (any, error) {
 		return dl.createOrOpen(tr, &tr, path, layer, nil, true, false)
 	})
 	if err != nil {
@@ -200,7 +200,7 @@ func (dl directoryLayer) CreatePrefix(t fdb.Transactor, path []string, layer []b
 	if prefix == nil {
 		prefix = []byte{}
 	}
-	r, err := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	r, err := t.Transact(func(tr fdb.Transaction) (any, error) {
 		return dl.createOrOpen(tr, &tr, path, layer, prefix, true, false)
 	})
 	if err != nil {
@@ -210,7 +210,7 @@ func (dl directoryLayer) CreatePrefix(t fdb.Transactor, path []string, layer []b
 }
 
 func (dl directoryLayer) Open(rt fdb.ReadTransactor, path []string, layer []byte) (DirectorySubspace, error) {
-	r, err := rt.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
+	r, err := rt.ReadTransact(func(rtr fdb.ReadTransaction) (any, error) {
 		return dl.createOrOpen(rtr, nil, path, layer, nil, false, true)
 	})
 	if err != nil {
@@ -220,7 +220,7 @@ func (dl directoryLayer) Open(rt fdb.ReadTransactor, path []string, layer []byte
 }
 
 func (dl directoryLayer) Exists(rt fdb.ReadTransactor, path []string) (bool, error) {
-	r, err := rt.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
+	r, err := rt.ReadTransact(func(rtr fdb.ReadTransaction) (any, error) {
 		if err := dl.checkVersion(rtr, nil); err != nil {
 			return false, err
 		}
@@ -247,7 +247,7 @@ func (dl directoryLayer) Exists(rt fdb.ReadTransactor, path []string) (bool, err
 }
 
 func (dl directoryLayer) List(rt fdb.ReadTransactor, path []string) ([]string, error) {
-	r, err := rt.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
+	r, err := rt.ReadTransact(func(rtr fdb.ReadTransaction) (any, error) {
 		if err := dl.checkVersion(rtr, nil); err != nil {
 			return nil, err
 		}
@@ -278,15 +278,12 @@ func (dl directoryLayer) MoveTo(t fdb.Transactor, newAbsolutePath []string) (Dir
 }
 
 func (dl directoryLayer) Move(t fdb.Transactor, oldPath []string, newPath []string) (DirectorySubspace, error) {
-	r, err := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	r, err := t.Transact(func(tr fdb.Transaction) (any, error) {
 		if err := dl.checkVersion(tr, &tr); err != nil {
 			return nil, err
 		}
 
-		sliceEnd := len(oldPath)
-		if sliceEnd > len(newPath) {
-			sliceEnd = len(newPath)
-		}
+		sliceEnd := min(len(oldPath), len(newPath))
 		if stringsEqual(oldPath, newPath[:sliceEnd]) {
 			return nil, errors.New("the destination directory cannot be a subdirectory of the source directory")
 		}
@@ -340,7 +337,7 @@ func (dl directoryLayer) Move(t fdb.Transactor, oldPath []string, newPath []stri
 }
 
 func (dl directoryLayer) Remove(t fdb.Transactor, path []string) (bool, error) {
-	r, err := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	r, err := t.Transact(func(tr fdb.Transaction) (any, error) {
 		if err := dl.checkVersion(tr, &tr); err != nil {
 			return false, err
 		}
@@ -522,7 +519,7 @@ func (dl directoryLayer) checkVersion(rtr fdb.ReadTransaction, tr *fdb.Transacti
 	var versions []int32
 	buf := bytes.NewBuffer(version)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		var v int32
 		err := binary.Read(buf, binary.LittleEndian, &v)
 		if err != nil {

@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.13)
 # Find Go (required for building replay)
 find_program(GO_EXECUTABLE go)
 if(NOT GO_EXECUTABLE)
-    message(WARNING "Go not found. The 'replay' target will not be available. Install Go 1.21+ to build replay.")
+    message(WARNING "Go not found. The 'replay' target will not be available. Install Go 1.26+ to build replay.")
     return()
 endif()
 

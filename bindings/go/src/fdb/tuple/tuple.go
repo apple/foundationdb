@@ -57,7 +57,7 @@ import (
 // The valid types for TupleElement are []byte (or fdb.KeyConvertible), string,
 // int64 (or int, uint, uint64), *big.Int (or big.Int), float, double, bool,
 // UUID, Tuple, and nil.
-type TupleElement interface{}
+type TupleElement any
 
 // Tuple is a slice of objects that can be encoded as FoundationDB tuples. If
 // any of the TupleElements are of unsupported types, a runtime panic will occur
@@ -200,7 +200,7 @@ func bisectLeft(u uint64) int {
 func adjustFloatBytes(b []byte, encode bool) {
 	if (encode && b[0]&0x80 != 0x00) || (!encode && b[0]&0x80 == 0x00) {
 		// Negative numbers: flip all of the bytes.
-		for i := 0; i < len(b); i++ {
+		for i := range b {
 			b[i] = b[i] ^ 0xff
 		}
 	} else {
@@ -546,7 +546,7 @@ func decodeString(b []byte) (string, int) {
 	return string(bp), idx
 }
 
-func decodeInt(b []byte) (interface{}, int) {
+func decodeInt(b []byte) (any, int) {
 	if b[0] == intZeroCode {
 		return int64(0), 1
 	}
@@ -581,7 +581,7 @@ func decodeInt(b []byte) (interface{}, int) {
 	return uint64(ret), n + 1
 }
 
-func decodeBigInt(b []byte) (interface{}, int) {
+func decodeBigInt(b []byte) (any, int) {
 	val := new(big.Int)
 	offset := 1
 	var length int
@@ -658,7 +658,7 @@ func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
 	var i int
 
 	for i < len(b) {
-		var el interface{}
+		var el any
 		var off int
 
 		switch {

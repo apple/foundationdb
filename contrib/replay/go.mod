@@ -1,6 +1,6 @@
 module github.com/apple/foundationdb/contrib/replay
 
-go 1.21
+go 1.26
 
 require (
 	github.com/charmbracelet/bubbles v0.18.0
