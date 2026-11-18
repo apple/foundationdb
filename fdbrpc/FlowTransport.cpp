@@ -1344,10 +1344,17 @@ static void deliverNow(TransportData* self,
 				g_currentDeliveryPeerDisconnect = nullptr;
 			});
 			StringRef data = reader.arenaReadAll();
-			ASSERT_GT(data.size(), 8);
 			ArenaObjectReader objReader(std::move(reader.arena()), data, AssumeVersion(reader.protocolVersion()));
 			receiver->receive(objReader);
 		} catch (Error& e) {
+			if (e.code() == error_code_serialization_failed) {
+				// Malformed peer input is not a local invariant violation.
+				TraceEvent(SevWarnAlways, "ReceiverDeserializationFailed")
+				    .suppressFor(1.0)
+				    .detail("Token", destination.token.toString())
+				    .detail("PeerAddress", peerAddress);
+				return;
+			}
 			TraceEvent(SevError, "ReceiverError")
 			    .error(e)
 			    .detail("Token", destination.token.toString())

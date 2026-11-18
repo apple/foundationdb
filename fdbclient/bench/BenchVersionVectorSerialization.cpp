@@ -49,7 +49,7 @@ static void bench_serializable_traits_version(benchmark::State& state) {
 		size = msg.size();
 		state.ResumeTiming();
 
-		ObjectReader rd(msg.begin(), Unversioned());
+		ObjectReader rd(msg, Unversioned());
 		rd.deserialize(deserializedVV);
 	}
 	ASSERT(serializedVV.compare(deserializedVV));

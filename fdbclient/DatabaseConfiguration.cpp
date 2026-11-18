@@ -1005,7 +1005,7 @@ TEST_CASE("/fdbclient/databaseConfiguration/snapshotSerialization") {
 	ObjectWriter writer(IncludeVersion());
 	writer.serialize(id, config);
 	const auto object = writer.toString();
-	ObjectReader reader(object.begin(), IncludeVersion());
+	ObjectReader reader(object, IncludeVersion());
 	loaded.set("\xff/conf/obsolete"_sr, "old"_sr);
 	reader.deserialize(id, loaded);
 	ASSERT(!loaded.get("\xff/conf/obsolete"_sr).present());
