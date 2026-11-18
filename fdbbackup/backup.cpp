@@ -2349,7 +2349,8 @@ Future<Void> runRestore(Database db,
 				fmt::print("Restored to version {}\n", restoredVersion);
 			}
 		} else {
-			Optional<RestorableFileSet> rset = co_await bc->getRestoreSet(targetVersion, ranges);
+			Optional<RestorableFileSet> rset =
+			    co_await bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion);
 
 			if (!rset.present()) {
 				fmt::print(stderr,
