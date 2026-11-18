@@ -2263,7 +2263,7 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					clientInfo.history.clear();
 
 					for (const auto& kv : globalConfigHistory) {
-						ObjectReader reader(kv.value.begin(), IncludeVersion());
+						ObjectReader reader(kv.value, IncludeVersion());
 						if (reader.protocolVersion() != g_network->protocolVersion() || buggify(0.01)) {
 							// If the protocol version has changed, the
 							// GlobalConfig actor should refresh its view by

@@ -1525,21 +1525,21 @@ std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint) {
 	RocksDBColumnFamilyCheckpoint rocksCF;
-	ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
+	ObjectReader reader(checkpoint.getSerializedCheckpoint(), IncludeVersion());
 	reader.deserialize(rocksCF);
 	return rocksCF;
 }
 
 RocksDBCheckpoint getRocksCheckpoint(const CheckpointMetaData& checkpoint) {
 	RocksDBCheckpoint rocksCheckpoint;
-	ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
+	ObjectReader reader(checkpoint.getSerializedCheckpoint(), IncludeVersion());
 	reader.deserialize(rocksCheckpoint);
 	return rocksCheckpoint;
 }
 
 RocksDBCheckpointKeyValues getRocksKeyValuesCheckpoint(const CheckpointMetaData& checkpoint) {
 	RocksDBCheckpointKeyValues rocksCheckpoint;
-	ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
+	ObjectReader reader(checkpoint.getSerializedCheckpoint(), IncludeVersion());
 	reader.deserialize(rocksCheckpoint);
 	return rocksCheckpoint;
 }

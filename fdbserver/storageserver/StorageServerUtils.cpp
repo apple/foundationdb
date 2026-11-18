@@ -108,7 +108,7 @@ Value moveInShardValue(const MoveInShardMetaData& meta) {
 
 MoveInShardMetaData decodeMoveInShardValue(const ValueRef& value) {
 	MoveInShardMetaData shard;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(shard);
 	return shard;
 }

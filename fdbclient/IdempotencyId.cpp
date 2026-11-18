@@ -167,7 +167,7 @@ TEST_CASE("/fdbclient/IdempotencyId/serialization") {
 		auto id = generate(arena);
 		auto serialized = ObjectWriter::toValue(id, Unversioned());
 		IdempotencyIdRef t;
-		ObjectReader reader(serialized.begin(), Unversioned());
+		ObjectReader reader(serialized, Unversioned());
 		reader.deserialize(t);
 		ASSERT(t == id);
 	}

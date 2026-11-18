@@ -2525,7 +2525,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) override {
 		if (checkpoint.format == DataMoveRocksCF) {
 			RocksDBColumnFamilyCheckpoint rocksCF;
-			ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
+			ObjectReader reader(checkpoint.getSerializedCheckpoint(), IncludeVersion());
 			reader.deserialize(rocksCF);
 
 			std::unordered_set<std::string> dirs;

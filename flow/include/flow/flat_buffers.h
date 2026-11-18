@@ -157,6 +157,26 @@ struct vector_like_traits<std::deque<T, Alloc>> : std::true_type {
 	}
 };
 
+namespace detail {
+// Throws serialization_failed, after asserting in simulation where a malformed buffer is a bug. |reason| must be a
+// string literal.
+[[noreturn]] void flat_buffer_load_failed(const char* reason);
+
+// Traces and aborts the process. |reason| must be a string literal.
+[[noreturn]] void flat_buffer_load_fatal(const char* reason);
+
+// Reports a malformed buffer through the loading context, which picks between the two above. Contexts that cannot
+// bound the buffer throw.
+template <class Context>
+[[noreturn]] void load_failed(const Context& context, const char* reason) {
+	if constexpr (requires { context.loadFailed(reason); }) {
+		context.loadFailed(reason);
+	} else {
+		flat_buffer_load_failed(reason);
+	}
+}
+} // namespace detail
+
 template <class T, size_t N>
 struct vector_like_traits<std::array<T, N>> : std::true_type {
 	using Vec = std::array<T, N>;
@@ -173,7 +193,11 @@ struct vector_like_traits<std::array<T, N>> : std::true_type {
 	// number of elements to be inserted. Implementations may want to allocate
 	// enough memory up front to hold |size| elements.
 	template <class Context>
-	static insert_iterator insert(Vec& v, size_t s, Context&) {
+	static insert_iterator insert(Vec& v, size_t s, Context& context) {
+		// The load loop writes |s| elements through the returned iterator, whatever the buffer-range checks allowed.
+		if (s != N) {
+			detail::load_failed(context, "array length mismatch");
+		}
 		return v.begin();
 	}
 
@@ -366,11 +390,7 @@ T interpret_as(const uint8_t* current) {
 	return t;
 }
 
-// Throws serialization_failed, after asserting in simulation where a malformed buffer is a bug. |reason| must be a
-// string literal.
-[[noreturn]] void flat_buffer_load_failed(const char* reason);
-
-// Bounds-checks only when the context can bound the buffer; LoadContext::checkRange is a no-op for ObjectReader.
+// Bounds-checks only when the context can bound the buffer; test contexts that load from a bare pointer cannot.
 template <class Context>
 void check_range(const Context& context, const uint8_t* p, size_t len) {
 	if constexpr (requires { context.checkRange(p, len); }) {
@@ -1020,7 +1040,7 @@ struct LoadMember {
 			}
 			const uint8_t* types_slot = &message[vtable[i++]];
 			if (!field_present()) {
-				flat_buffer_load_failed("union vector has no offsets slot");
+				load_failed(context, "union vector has no offsets slot");
 			}
 			const uint8_t* offsets_slot = &message[vtable[i++]];
 			using VectorTraits = vector_like_traits<Member>;

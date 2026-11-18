@@ -294,7 +294,7 @@ Value accumulativeChecksumValue(const AccumulativeChecksumState& acsState) {
 
 AccumulativeChecksumState decodeAccumulativeChecksum(const ValueRef& value) {
 	AccumulativeChecksumState acsState;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(acsState);
 	return acsState;
 }
@@ -387,7 +387,7 @@ Value auditStorageStateValue(const AuditStorageState& auditStorageState) {
 
 AuditStorageState decodeAuditStorageState(const ValueRef& value) {
 	AuditStorageState auditState;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(auditState);
 	return auditState;
 }
@@ -414,7 +414,7 @@ UID decodeCheckpointKey(const KeyRef& key) {
 
 CheckpointMetaData decodeCheckpointValue(const ValueRef& value) {
 	CheckpointMetaData checkpoint;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(checkpoint);
 	return checkpoint;
 }
@@ -449,7 +449,7 @@ UID decodeDataMoveKey(const KeyRef& key) {
 
 DataMoveMetaData decodeDataMoveValue(const ValueRef& value) {
 	DataMoveMetaData dataMove;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(dataMove);
 	return dataMove;
 }
@@ -674,7 +674,7 @@ UID decodeServerMetadataKey(const KeyRef& key) {
 
 StorageMetadataType decodeServerMetadataValue(const KeyRef& value) {
 	StorageMetadataType type;
-	ObjectReader rd(value.begin(), IncludeVersion());
+	ObjectReader rd(value, IncludeVersion());
 	rd.deserialize(type);
 	return type;
 }
@@ -1126,7 +1126,7 @@ UID decodeServerListKey(KeyRef const& key) {
 
 StorageServerInterface decodeServerListValueFB(ValueRef const& value) {
 	StorageServerInterface s;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(s);
 	return s;
 }
@@ -1148,7 +1148,7 @@ Value swVersionValue(SWVersion const& swversion) {
 
 SWVersion decodeSWVersionValue(ValueRef const& value) {
 	SWVersion s;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(s);
 	return s;
 }
@@ -1454,7 +1454,7 @@ Value bulkLoadTaskStateValue(const BulkLoadTaskState& bulkLoadTaskState) {
 
 BulkLoadTaskState decodeBulkLoadTaskState(const ValueRef& value) {
 	BulkLoadTaskState bulkLoadTaskState;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(bulkLoadTaskState);
 	return bulkLoadTaskState;
 }
@@ -1465,7 +1465,7 @@ Value ssBulkLoadMetadataValue(const SSBulkLoadMetadata& ssBulkLoadMetadata) {
 
 SSBulkLoadMetadata decodeSSBulkLoadMetadata(const ValueRef& value) {
 	SSBulkLoadMetadata ssBulkLoadMetadata;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(ssBulkLoadMetadata);
 	return ssBulkLoadMetadata;
 }
@@ -1479,7 +1479,7 @@ Value bulkLoadJobValue(const BulkLoadJobState& bulkLoadJobState) {
 
 BulkLoadJobState decodeBulkLoadJobState(const ValueRef& value) {
 	BulkLoadJobState bulkLoadJobState;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(bulkLoadJobState);
 	return bulkLoadJobState;
 }
@@ -1507,7 +1507,7 @@ Value bulkDumpStateValue(const BulkDumpState& bulkDumpState) {
 
 BulkDumpState decodeBulkDumpState(const ValueRef& value) {
 	BulkDumpState bulkDumpState;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(bulkDumpState);
 	return bulkDumpState;
 }
@@ -1546,7 +1546,7 @@ Value rangeLockStateSetValue(const RangeLockStateSet& rangeLockStateSet) {
 
 RangeLockStateSet decodeRangeLockStateSet(const ValueRef& value) {
 	RangeLockStateSet rangeLockStateSet;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(rangeLockStateSet);
 	return rangeLockStateSet;
 }
@@ -1567,7 +1567,7 @@ Value rangeLockOwnerValue(const RangeLockOwner& rangeLockOwner) {
 
 RangeLockOwner decodeRangeLockOwner(const ValueRef& value) {
 	RangeLockOwner rangeLockOwner;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(rangeLockOwner);
 	return rangeLockOwner;
 }
