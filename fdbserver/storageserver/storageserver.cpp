@@ -10337,6 +10337,35 @@ Future<Void> tssDelayForever() {
 	}
 }
 
+SpanContext readV6SpanContext(ArenaReader& reader) {
+	SpanContextMessage message;
+	reader >> message;
+	// Pre-OTEL writers used the second word as a sampling token. OTEL writers put the entire
+	// trace ID in the V6 record and reserve the all-zero ID for unsampled transactions.
+	const UID id = message.spanContext;
+	const bool sampled = reader.protocolVersion().hasOTELSpanContext() ? id.isValid() : id.second() != 0;
+	return SpanContext(id, 0, sampled ? TraceFlags::sampled : TraceFlags::unsampled);
+}
+
+TEST_CASE("/fdbserver/storageserver/readV6SpanContext") {
+	auto check = [](ProtocolVersion version, UID id, bool sampled) {
+		auto record = BinaryWriter::toValue(SpanContextMessage(id), AssumeVersion(version));
+		ArenaReader reader(record.arena(), record, AssumeVersion(version));
+		const SpanContext context = readV6SpanContext(reader);
+		ASSERT(context.traceID == id);
+		ASSERT(context.spanID == 0);
+		ASSERT(context.isSampled() == sampled);
+	};
+	const auto otel = ProtocolVersion::withOTELSpanContext();
+	check(otel, UID(0, 12345), true);
+	check(otel, UID(12345, 0), true);
+	check(otel, UID(), false);
+	const auto legacy = ProtocolVersion::withSpanContext();
+	check(legacy, UID(12345, 0), false);
+	check(legacy, UID(12345, 1), true);
+	return Void();
+}
+
 Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	double updateStart = g_network->timer();
 	double start{ 0 };
@@ -10610,14 +10639,8 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					cloneCursor2->setProtocolVersion(rd.protocolVersion());
 					spanContext.traceID = UID();
 				} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
-					SpanContextMessage scm;
-					rd >> scm;
 					CODE_PROBE(true, "storageserveractor converting SpanContextMessage into OTEL SpanContext");
-					spanContext = SpanContext(UID(scm.spanContext.first(), scm.spanContext.second()),
-					                          0,
-					                          scm.spanContext.first() != 0 && scm.spanContext.second() != 0
-					                              ? TraceFlags::sampled
-					                              : TraceFlags::unsampled);
+					spanContext = readV6SpanContext(rd);
 				} else if (rd.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(rd)) {
 					CODE_PROBE(true, "storageserveractor reading OTELSpanContextMessage");
 					OTELSpanContextMessage scm;
