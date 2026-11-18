@@ -61,6 +61,9 @@ public:
 		       e.code() == error_code_bulkload_manifest_decode_error;
 	}
 
+	// A bulkdump snapshot manifest holds only the job ID and a single key range, so it is far smaller than this.
+	static constexpr int64_t kMaxBulkDumpManifestSize = 1 << 20;
+
 	// Returns the bulkdump job id recorded in a keyspace snapshot, or empty if the snapshot has none or
 	// cannot be read. The job id is only in the snapshot's JSON body -- the filename carries the snapshot
 	// type but not the id -- and it is what locates the SST tree under bulkdump_data/<jobId>/.
@@ -74,7 +77,7 @@ public:
 		try {
 			Reference<IAsyncFile> f = co_await bc->readFile(snapshot.fileName);
 			int64_t size = co_await f->size();
-			if (restoring && size > (1 << 20)) {
+			if (restoring && size > kMaxBulkDumpManifestSize) {
 				// A bulkdump descriptor contains only the job ID and a single key range.
 				throw restore_corrupted_data();
 			}
@@ -82,13 +85,13 @@ public:
 			// rangefile manifest lists every range file and can reach hundreds of megabytes. Size is the
 			// only cheap discriminator available: the snapshot filename carries the type suffix solely in
 			// 'both' mode, so a plain bulkdump snapshot is indistinguishable from a rangefile one by name.
-			// Refusing to read anything over a chunk keeps expire from pulling in a huge manifest just to
-			// discover it has no job id.
-			if (!restoring && size > CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE) {
+			// Refusing to read anything over kMaxBulkDumpManifestSize keeps expire from pulling in a huge
+			// manifest just to discover it has no job id.
+			if (!restoring && size > kMaxBulkDumpManifestSize) {
 				TraceEvent("BackupContainerExpireSkipLargeSnapshotManifest")
 				    .detail("Snapshot", snapshot.fileName)
 				    .detail("Size", size)
-				    .detail("Limit", CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE);
+				    .detail("Limit", kMaxBulkDumpManifestSize);
 				co_return std::string();
 			}
 			auto buf = std::make_shared<std::string>(size, '\0');
@@ -502,7 +505,7 @@ public:
 		return lastBegin != invalidVersion && lastEnd > end;
 	}
 
-	// Returns the end version such that [begin, end] is continuous.
+	// Returns the end version such that [begin, end] is continuous, or 0 if there is no such end version > begin.
 	// "logs" should be already sorted.
 	static Version getPartitionedLogsContinuousEndVersion(const std::vector<LogFile>& logs, Version begin) {
 		Version end = 0;
@@ -1086,8 +1089,8 @@ public:
 				// Find the continuousLogEnd after snapshotEndVersion and set it as
 				// maxRestorableVersion.
 				if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
-					// TO DO: Yet to implement similar function findContinuousLogEnd for partitioned logs.
-					desc.maxRestorableVersion = s.endVersion;
+					Version maxContinuousLogEnd = getPartitionedLogsContinuousEndVersion(logs, s.endVersion);
+					desc.maxRestorableVersion = std::max(s.endVersion, maxContinuousLogEnd);
 				} else {
 					Version maxContinuousLogEnd = findContinuousLogEnd(logs, s.endVersion);
 					desc.maxRestorableVersion =
@@ -1182,26 +1185,11 @@ public:
 		          store(ranges, bc->listRangeFiles(scanBegin, expireEndVersion - 1)));
 		logs.insert(logs.end(), std::make_move_iterator(pLogs.begin()), std::make_move_iterator(pLogs.end()));
 
-		// The new logBeginVersion will be taken from the last log file, if there is one
-		Optional<Version> newLogBeginVersion;
-		if (!logs.empty()) {
-			// Linear scan the unsorted logs to find the latest one in sorted order
-			LogFile& last = *std::max_element(logs.begin(), logs.end());
-
-			// If the last log ends at expireEndVersion then that will be the next log begin
-			if (last.endVersion == expireEndVersion) {
-				newLogBeginVersion = expireEndVersion;
-			} else {
-				// If the last log overlaps the expiredEnd then use the log's begin version and move the expiredEnd
-				// back to match it and keep the last log file
-				if (last.endVersion > expireEndVersion) {
-					newLogBeginVersion = last.beginVersion;
-
-					// Instead of modifying this potentially very large vector, just clear LogFile
-					last = LogFile();
-
-					expireEndVersion = newLogBeginVersion.get();
-				}
+		// Different log-router tags can have different file boundaries at the requested cutoff.
+		const Version requestedEnd = expireEndVersion;
+		for (const auto& log : logs) {
+			if (log.endVersion > requestedEnd) {
+				expireEndVersion = std::min(expireEndVersion, std::max(scanBegin, log.beginVersion));
 			}
 		}
 
@@ -1214,8 +1202,7 @@ public:
 
 		// Move filenames out of vector then destroy it to save memory
 		for (auto& f : logs) {
-			// We may have cleared the last log file earlier so skip any empty filenames
-			if (!f.fileName.empty()) {
+			if (f.endVersion <= expireEndVersion) {
 				toDelete.push_back(std::move(f.fileName));
 			}
 		}
@@ -1463,7 +1450,7 @@ public:
 	                                                         RestorableFileSet restorable) {
 		Version end = logs.begin()->beginVersion;
 		computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
-		if (end >= targetVersion) {
+		if (end > targetVersion) {
 			restorable.continuousBeginVersion = logs.begin()->beginVersion;
 			restorable.continuousEndVersion = end;
 			return Optional<RestorableFileSet>(restorable);
@@ -1678,8 +1665,7 @@ public:
 			// it is valid restore set and proceed
 			if (!logs.empty() && logs.front().beginVersion <= minKeyRangeVersion) {
 				auto result = getRestoreSetFromLogs(logs, restorable.targetVersion, restorable);
-				if (!useBulkDump ||
-				    (result.present() && result.get().continuousEndVersion > restorable.targetVersion)) {
+				if (!useBulkDump || result.present()) {
 					if (latestBulkDump) {
 						best = std::move(result);
 						continue;
@@ -1847,8 +1833,8 @@ public:
 
 	static constexpr int ENCRYPTION_KEY_MAX_RETRIES = 5;
 
-	static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
-		StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
+	static Future<std::shared_ptr<const StreamCipherKey>> readEncryptionKey(std::string encryptionKeyFileName) {
+		auto cipherKey = std::make_shared<StreamCipherKey>(AES_256_KEY_LENGTH);
 		for (int retries = 0;; ++retries) {
 			const char* errorEvent = "FailedToOpenEncryptionKeyFile";
 			try {
@@ -1857,7 +1843,8 @@ public:
 				    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
 				    0400);
 				errorEvent = "FailedToReadEncryptionKeyFile";
-				int bytesRead = co_await uncancellable(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
+				int bytesRead = co_await uncancellable(
+				    holdWhile(cipherKey, keyFile->read(cipherKey->data(), cipherKey->size(), 0)));
 				if (bytesRead != cipherKey->size()) {
 					TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
 					    .detail("ExpectedSize", cipherKey->size())
@@ -1865,7 +1852,7 @@ public:
 					    .detail("FileName", encryptionKeyFileName);
 					throw invalid_encryption_key_file();
 				}
-				co_return;
+				co_return cipherKey;
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) {
 					throw;
@@ -2334,10 +2321,18 @@ std::string BackupContainerFileSystem::encryptionMetadataFileName() {
 }
 
 bool BackupContainerFileSystem::usesEncryption() const {
-	return encryptionSetupFuture.isValid();
+	return encryptionKey.isValid();
 }
 Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
-	return encryptionSetupFuture;
+	return usesEncryption() ? success(encryptionKey) : Future<Void>();
+}
+
+Future<Reference<IAsyncFile>> BackupContainerFileSystem::encryptedFile(Future<Reference<IAsyncFile>> file,
+                                                                       AsyncFileEncrypted::Mode mode) const {
+	return map(success(file) && encryptionSetupComplete(),
+	           [file, key = encryptionKey, mode, blockSize = encryptionBlockSize](Void) -> Reference<IAsyncFile> {
+		           return makeReference<AsyncFileEncrypted>(file.get(), mode, blockSize, key.get());
+	           });
 }
 
 Future<Void> BackupContainerFileSystem::writeEntireFileFallback(const std::string& fileName,
@@ -2348,7 +2343,7 @@ Future<Void> BackupContainerFileSystem::writeEntireFileFallback(const std::strin
 
 void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
 	if (encryptionKeyFileName.present()) {
-		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
+		encryptionKey = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
 	}
 }
 
@@ -2365,6 +2360,37 @@ int chooseFileSize(std::vector<int>& sizes) {
 		return size;
 	}
 	return deterministicRandom()->randomInt(0, 2e6);
+}
+
+TEST_CASE("/backup/containers/localdir/independentEncryptionKeys") {
+	const std::string base = joinPath(params.getDataDir(), deterministicRandom()->randomUniqueID().toString());
+	auto open = [&](const std::string& name) {
+		return makeReference<BackupContainerLocalDirectory>("file://" + base + name, base + name + ".key", 4096);
+	};
+	co_await BackupContainerFileSystem::createTestEncryptionKeyFile(base + "A.key");
+	co_await BackupContainerFileSystem::createTestEncryptionKeyFile(base + "B.key");
+
+	auto a = open("A");
+	auto fileA = co_await a->writeFile("payload");
+	auto b = open("B");
+	auto fileB = co_await b->writeFile("payload");
+	co_await fileA->append("first", 5);
+	co_await fileB->append("other", 5);
+	co_await fileB->finish();
+	co_await fileA->finish();
+
+	a = open("A");
+	auto readerA = co_await a->readFile("payload");
+	uint8_t bytes[5];
+	ASSERT_EQ(co_await readerA->read(bytes, sizeof(bytes), 0), 5);
+	ASSERT(StringRef(bytes, sizeof(bytes)) == "first"_sr);
+
+	b = open("B");
+	auto readerB = co_await b->readFile("payload");
+	ASSERT_EQ(co_await readerB->read(bytes, sizeof(bytes), 0), 5);
+	ASSERT(StringRef(bytes, sizeof(bytes)) == "other"_sr);
+	ASSERT_EQ(co_await readerA->read(bytes, sizeof(bytes), 0), 5);
+	ASSERT(StringRef(bytes, sizeof(bytes)) == "first"_sr);
 }
 
 Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size, FlowLock* lock) {
@@ -3228,6 +3254,10 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 	ASSERT_EQ(desc.snapshots[0].restorable, true);
 	ASSERT_EQ(desc.contiguousLogEnd, v);
 
+	Version nextLogBegin = v;
+	ASSERT((co_await c->getRestoreSet(nextLogBegin - 1)).present());
+	ASSERT(!(co_await c->getRestoreSet(nextLogBegin)).present());
+
 	// writing random number of more continuous log files
 	int newNumLogFiles = deterministicRandom()->randomInt(2, 8);
 	numLogFiles += newNumLogFiles;
@@ -3239,6 +3269,10 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 		v += logSize;
 	}
 	co_await waitForAll(writes);
+
+	auto extended = co_await c->getRestoreSet(nextLogBegin);
+	ASSERT(extended.present());
+	ASSERT_EQ(extended.get().logs.back().beginVersion, nextLogBegin);
 
 	BackupFileList fileList1 = co_await c->dumpFileList();
 	printFileList(fileList1);
@@ -3259,6 +3293,157 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 TEST_CASE("/backup/containers/localdir/continuousLogEndVersion") {
 	co_await testBackupContinuousLogEndVer(
 	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), Optional<std::string>());
+}
+
+// Writes tagRanges[t] as the [begin, end) partitioned log files of tag t out of tagRanges.size() tags, and one
+// snapshot per entry of snapshotVersions made of range files at those versions. Then checks describeBackup()'s
+// restorable range and getRestoreSet() at min, max, a version in between, max + 1 and extraRestoreChecks.
+// Callers create the Future before co_await-ing it, because gcc 13 hits an internal compiler error on braced-init-list
+// arguments inside a co_await expression.
+Future<Void> testPartitionedLogsRestorability(std::string url,
+                                              std::vector<std::vector<std::pair<Version, Version>>> tagRanges,
+                                              std::vector<std::vector<Version>> snapshotVersions,
+                                              Version expectedMinRestorable,
+                                              Version expectedMaxRestorable,
+                                              std::vector<std::pair<Version, bool>> extraRestoreChecks = {}) {
+	FlowLock lock(100e6);
+	printf("BackupContainerTest URL %s\n", url.c_str());
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	try {
+		co_await c->deleteContainer();
+	} catch (Error& e) {
+		if (e.code() != error_code_backup_invalid_url && e.code() != error_code_backup_does_not_exist)
+			throw;
+	}
+	co_await c->create();
+
+	int blockSize = 1024;
+	Key begin = randomKeyBetween(normalKeys);
+	Key end = randomKeyBetween(KeyRangeRef(begin, normalKeys.end));
+	std::vector<Future<Void>> writes;
+	int numLogFiles = 0;
+	for (int tagId = 0; tagId < tagRanges.size(); tagId++) {
+		for (const auto& [logBegin, logEnd] : tagRanges[tagId]) {
+			Reference<IBackupFile> log =
+			    co_await c->writeTaggedLogFile(logBegin, logEnd, blockSize, tagId, tagRanges.size());
+			writes.push_back(writeAndVerifyFile(c, log, 100, &lock));
+			++numLogFiles;
+		}
+	}
+	for (const auto& versions : snapshotVersions) {
+		std::vector<std::string> rangeFileNames;
+		std::vector<std::pair<Key, Key>> snapshotBeginEndKeys;
+		for (int i = 0; i < versions.size(); i++) {
+			Reference<IBackupFile> range = co_await c->writeRangeFile(versions.front(), i, versions[i], blockSize);
+			writes.push_back(writeAndVerifyFile(c, range, 100, &lock));
+			rangeFileNames.push_back(range->getFileName());
+			snapshotBeginEndKeys.emplace_back(begin, end);
+		}
+		writes.push_back(
+		    c->writeKeyspaceSnapshotFile(rangeFileNames, snapshotBeginEndKeys, 100, IncludeKeyRangeMap(buggify())));
+	}
+	co_await waitForAll(writes);
+
+	BackupFileList listing = co_await c->dumpFileList();
+	printFileList(listing);
+	ASSERT_EQ(listing.logs.size(), numLogFiles);
+	ASSERT_EQ(listing.snapshots.size(), snapshotVersions.size());
+
+	BackupDescription desc = co_await c->describeBackup();
+	printf("\n%s\n", desc.toString().c_str());
+	ASSERT(desc.mutationLogType == MutationLogType::PARTITIONED_LOG);
+	ASSERT_EQ(desc.minRestorableVersion, expectedMinRestorable);
+	ASSERT_EQ(desc.maxRestorableVersion, expectedMaxRestorable);
+
+	// This describe starts from the log begin/end metadata saved by the first one.
+	BackupDescription desc2 = co_await c->describeBackup();
+	printf("\n%s\n", desc2.toString().c_str());
+	ASSERT_EQ(desc2.minRestorableVersion, expectedMinRestorable);
+	ASSERT_EQ(desc2.maxRestorableVersion, expectedMaxRestorable);
+
+	std::vector<std::pair<Version, bool>> restoreChecks = {
+		{ expectedMinRestorable, true },
+		{ (expectedMinRestorable + expectedMaxRestorable) / 2, true },
+		{ expectedMaxRestorable, true },
+		{ expectedMaxRestorable + 1, false },
+	};
+	restoreChecks.insert(restoreChecks.end(), extraRestoreChecks.begin(), extraRestoreChecks.end());
+	for (const auto& [version, restorable] : restoreChecks) {
+		Optional<RestorableFileSet> rest = co_await c->getRestoreSet(version);
+		fmt::print("getRestoreSet({}) present={} expected={}\n", version, rest.present(), restorable);
+		ASSERT_EQ(rest.present(), restorable);
+	}
+
+	co_await c->deleteContainer();
+	printf("BackupContainerTest URL=%s PASSED.\n", url.c_str());
+}
+
+// All tags: [0, 100), gap, [200, 400).
+TEST_CASE("/backup/containers/localdir/partitionedLogs/restorableAfterGap") {
+	std::vector<std::pair<Version, Version>> logs = { { 0, 100 }, { 200, 300 }, { 300, 400 } };
+	Future<Void> test =
+	    testPartitionedLogsRestorability(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
+	                                     { logs, logs },
+	                                     { { 10, 50 }, { 250, 280 } },
+	                                     280,
+	                                     399,
+	                                     { { 50, true }, { 99, true }, { 100, false } });
+	co_await test;
+}
+
+// All tags: [0, 100), gap, [200, 500), except that tag 1 is missing [350, 400).
+TEST_CASE("/backup/containers/localdir/partitionedLogs/restorableAfterGap/singleTagGap") {
+	std::vector<std::pair<Version, Version>> logs = { { 0, 100 }, { 200, 300 }, { 300, 400 }, { 400, 500 } };
+	std::vector<std::pair<Version, Version>> tag1Logs = { { 0, 100 }, { 200, 300 }, { 300, 350 }, { 400, 500 } };
+	Future<Void> test =
+	    testPartitionedLogsRestorability(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
+	                                     { logs, tag1Logs, logs },
+	                                     { { 10, 50 }, { 250, 280 } },
+	                                     280,
+	                                     349,
+	                                     { { 450, false } });
+	co_await test;
+}
+
+// All tags: [0, 100), gap, [200, 300), ending right after the last snapshot.
+TEST_CASE("/backup/containers/localdir/partitionedLogs/restorableAfterGap/noLogsAfterSnapshot") {
+	std::vector<std::pair<Version, Version>> logs = { { 0, 100 }, { 200, 300 } };
+	Future<Void> test =
+	    testPartitionedLogsRestorability(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
+	                                     { logs, logs },
+	                                     { { 10, 50 }, { 250, 299 } },
+	                                     299,
+	                                     299);
+	co_await test;
+}
+
+// All tags: [0, 100), gap, [200, 700), except that tag 1 is missing [400, 500).
+TEST_CASE("/backup/containers/localdir/partitionedLogs/restorableAfterGap/multipleSnapshots") {
+	std::vector<std::pair<Version, Version>> logs = { { 0, 100 },   { 200, 300 }, { 300, 400 },
+		                                              { 400, 500 }, { 500, 600 }, { 600, 700 } };
+	std::vector<std::pair<Version, Version>> tag1Logs = {
+		{ 0, 100 }, { 200, 300 }, { 300, 400 }, { 500, 600 }, { 600, 700 }
+	};
+	Future<Void> test = testPartitionedLogsRestorability(
+	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
+	    { logs, tag1Logs },
+	    { { 10, 50 }, { 250, 280 }, { 550, 580 } },
+	    580,
+	    699,
+	    { { 50, true }, { 99, true }, { 100, false }, { 280, true }, { 399, true }, { 400, false }, { 450, false } });
+	co_await test;
+}
+
+// All tags: [0, 100), gap, [200, 400), with a single-version snapshot after the gap.
+TEST_CASE("/backup/containers/localdir/partitionedLogs/restorableAfterGap/singleVersionSnapshot") {
+	std::vector<std::pair<Version, Version>> logs = { { 0, 100 }, { 200, 300 }, { 300, 400 } };
+	Future<Void> test =
+	    testPartitionedLogsRestorability(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
+	                                     { logs, logs },
+	                                     { { 10, 50 }, { 250 } },
+	                                     250,
+	                                     399);
+	co_await test;
 }
 
 // Verifies that IBackupContainer::ExpireProgress reports both the requested expire version and
@@ -3342,6 +3527,34 @@ Future<Void> testExpireProgressVersions(std::string url, Optional<std::string> p
 TEST_CASE("/backup/containers/localdir/expireProgressVersions") {
 	co_await testExpireProgressVersions(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
 	                                    Optional<std::string>());
+}
+
+TEST_CASE("/backup/containers/localdir/expireOverlappingTags") {
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	auto container = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await container->create();
+
+	auto range = co_await container->writeRangeFile(160, 0, 160, 1024);
+	co_await testWriteSnapshotFile(range, ""_sr, "z"_sr, 1024);
+	std::vector<std::string> rangeFiles{ range->getFileName() };
+	std::vector<std::pair<Key, Key>> bounds{ { ""_sr, "z"_sr } };
+	co_await container->writeKeyspaceSnapshotFile(rangeFiles, bounds, 1024, IncludeKeyRangeMap::False);
+
+	auto old = co_await container->writeTaggedLogFile(50, 80, 1024, 0, 3);
+	co_await old->finish();
+	for (int tag = 0; tag < 3; ++tag) {
+		auto log = co_await container->writeTaggedLogFile(tag == 0 ? 80 : 100, 200, 1024, tag, 3);
+		co_await log->finish();
+	}
+	IBackupContainer::ExpireProgress progress;
+	co_await container->expireData(150, false, &progress, 160);
+	ASSERT_EQ(progress.actualEndVersion, 80);
+	auto listing = co_await container->dumpFileList();
+	ASSERT_EQ(listing.logs.size(), 3);
+	auto restorable = co_await container->getRestoreSet(170);
+	ASSERT(restorable.present());
+	ASSERT_EQ(restorable.get().logs.size(), 3);
+	co_await container->deleteContainer();
 }
 
 // A bulkdump snapshot's data is an SST tree under bulkdump_data/<jobId>/, which expireData's file
