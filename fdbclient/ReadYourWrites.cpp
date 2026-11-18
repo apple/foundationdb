@@ -315,6 +315,10 @@ public:
 		if (result.readThroughEnd && read.end.offset > 0)
 			rangeEnd = ryw->getMaxReadKey();
 
+		if (result.readThrough.present()) {
+			// The next reverse page excludes this boundary, even when this page returned no rows.
+			rangeBegin = std::min(rangeBegin, result.readThrough.get());
+		}
 		if (result.size()) {
 			rangeBegin = std::min(rangeBegin, result.end()[-1].key);
 			if (read.end.offset > 0 && rangeEnd <= result[0].key) {
