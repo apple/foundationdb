@@ -15,6 +15,9 @@ Usage
 - Then you can run `bin/flowbench --help` to see possible uses of `flowbench`.
 - Running `bin/flowbench` directly will run all registered benchmarks, but you may want to limit your run to a subset of benchmarks. This can be done by running `bin/flowbench --benchmark_filter=<regex>`
 - All benchmark names can be listed with `bin/flowbench --benchmark_list_tests`
+- To compare the TraceEvent benchmarks (`BenchTrace.cpp`) between two builds, run
+  `python3 bench_trace_compare.py --before <before build>/bin/flowbench --after <after build>/bin/flowbench`. It runs
+  them interleaved on both and prints a before/after table.
 - Example output:
 
 ```

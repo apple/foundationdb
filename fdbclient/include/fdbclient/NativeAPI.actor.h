@@ -128,6 +128,15 @@ private:
 
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
+// The directory client trace files go to if tracing is enabled (TRACE_ENABLE), where empty means the current directory.
+Optional<std::string> getClientTraceDirectory();
+
+// Opens the client audit trace file (see openAuditTraceFile) in directory, with the same address and trace options
+// (format, roll size, max logs size, log group, identifier, partial file suffix) as client trace files. Works with or
+// without tracing enabled.
+// Only fdbcli calls this for now (for --audit-log / --audit-log-dir / FDB_CLI_AUDIT_LOG_ENABLE).
+void initializeClientAuditTracing(Reference<IClusterConnectionRecord> connRecord, std::string const& directory);
+
 // Configures the global networking machinery
 void setupNetwork(uint64_t transportId = 0, UseMetrics = UseMetrics::False);
 

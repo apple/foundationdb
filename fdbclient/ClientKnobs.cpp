@@ -144,7 +144,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	// TaskBucket
 	init( TASKBUCKET_LOGGING_DELAY,                5.0 );
-	init( TASKBUCKET_MAX_PRIORITY,                   1 );
+	init( TASKBUCKET_MAX_PRIORITY,                   2 );
 	init( TASKBUCKET_CHECK_TIMEOUT_CHANCE,        0.02 ); if( randomize && BUGGIFY ) TASKBUCKET_CHECK_TIMEOUT_CHANCE = 1.0;
 	init( TASKBUCKET_TIMEOUT_JITTER_OFFSET,        0.9 );
 	init( TASKBUCKET_TIMEOUT_JITTER_RANGE,         0.2 );

@@ -85,10 +85,11 @@ struct SayHelloTaskFunc : TaskFuncBase {
 
 			if (currTaskNumber < subtaskCount - 1) {
 				state std::vector<Reference<TaskFuture>> vectorFuture;
-				auto new_task = makeReference<Task>(SayHelloTaskFunc::name,
-				                                    SayHelloTaskFunc::version,
-				                                    StringRef(),
-				                                    deterministicRandom()->randomInt(0, 2));
+				auto new_task =
+				    makeReference<Task>(SayHelloTaskFunc::name,
+				                        SayHelloTaskFunc::version,
+				                        StringRef(),
+				                        deterministicRandom()->randomInt(0, CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY + 1));
 				new_task->params["name"_sr] = StringRef(format("task_%d", currTaskNumber + 1));
 				new_task->params["chained"_sr] = task->params["chained"_sr];
 				new_task->params["subtaskCount"_sr] = task->params["subtaskCount"_sr];
@@ -140,8 +141,11 @@ struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 			subtaskCount = atoi(task->params["subtaskCount"_sr].toString().c_str());
 		}
 		for (int i = 0; i < subtaskCount; ++i) {
-			auto new_task = makeReference<Task>(
-			    SayHelloTaskFunc::name, SayHelloTaskFunc::version, StringRef(), deterministicRandom()->randomInt(0, 2));
+			auto new_task =
+			    makeReference<Task>(SayHelloTaskFunc::name,
+			                        SayHelloTaskFunc::version,
+			                        StringRef(),
+			                        deterministicRandom()->randomInt(0, CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY + 1));
 			new_task->params["name"_sr] = StringRef(format("task_%d", i));
 			new_task->params["chained"_sr] = task->params["chained"_sr];
 			new_task->params["subtaskCount"_sr] = task->params["subtaskCount"_sr];
@@ -233,13 +237,16 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		auto task = makeReference<Task>(SayHelloToEveryoneTaskFunc::name,
 		                                SayHelloToEveryoneTaskFunc::version,
 		                                allDone->key,
-		                                deterministicRandom()->randomInt(0, 2));
+		                                deterministicRandom()->randomInt(0, CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY + 1));
 
 		task->params["chained"_sr] = chained ? "true"_sr : "false"_sr;
 		task->params["subtaskCount"_sr] = StringRef(format("%d", subtaskCount));
 		taskBucket->addTask(tr, task);
-		auto taskDone = makeReference<Task>(
-		    SaidHelloTaskFunc::name, SaidHelloTaskFunc::version, StringRef(), deterministicRandom()->randomInt(0, 2));
+		auto taskDone =
+		    makeReference<Task>(SaidHelloTaskFunc::name,
+		                        SaidHelloTaskFunc::version,
+		                        StringRef(),
+		                        deterministicRandom()->randomInt(0, CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY + 1));
 		wait(allDone->onSetAddTask(tr, taskBucket, taskDone));
 		return Void();
 	}
