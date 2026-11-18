@@ -1302,8 +1302,11 @@ public:
 			restorable.snapshot = snapshots[i];
 
 			// No logs needed if there is a complete filtered key space snapshot at the target version.
-			if ((!logsOnly || beginVersion == invalidVersion) && minKeyRangeVersion == maxKeyRangeVersion &&
-			    maxKeyRangeVersion == restorable.targetVersion) {
+			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion) {
+				// Older workers select this snapshot without logs. They cannot replay an incremental interval.
+				if (logsOnly && beginVersion != invalidVersion) {
+					co_return Optional<RestorableFileSet>();
+				}
 				restorable.continuousBeginVersion = restorable.continuousEndVersion = invalidVersion;
 				TraceEvent("BackupContainerGetRestorableFilesWithoutLogs")
 				    .detail("KeyRangeVersion", restorable.targetVersion)
@@ -2739,6 +2742,15 @@ TEST_CASE("/backup/containers/localdir/incrementalBeginVersion") {
 	co_await container->create();
 	auto getLogs = [&](Version begin) { return container->getRestoreSet(190, {}, true, begin); };
 
+	auto range = co_await container->writeRangeFile(190, 0, 190, 1024);
+	co_await testWriteSnapshotFile(range, ""_sr, "z"_sr, 1024);
+	std::vector<std::string> rangeFiles{ range->getFileName() };
+	std::vector<std::pair<Key, Key>> bounds{ { ""_sr, "z"_sr } };
+	co_await container->writeKeyspaceSnapshotFile(rangeFiles, bounds, 1024, IncludeKeyRangeMap::False);
+	auto tagged = co_await container->writeTaggedLogFile(120, 200, 1024, 0, 1);
+	co_await tagged->finish();
+	ASSERT(!(co_await getLogs(120)).present());
+
 	auto log = co_await container->writeLogFile(150, 200, 1024);
 	co_await log->finish();
 	ASSERT(!(co_await getLogs(100)).present());
@@ -2747,8 +2759,6 @@ TEST_CASE("/backup/containers/localdir/incrementalBeginVersion") {
 	ASSERT(!(co_await getLogs(191)).present());
 	ASSERT((co_await getLogs(invalidVersion)).present());
 
-	auto tagged = co_await container->writeTaggedLogFile(120, 200, 1024, 0, 1);
-	co_await tagged->finish();
 	ASSERT(!(co_await getLogs(100)).present());
 	ASSERT(!(co_await getLogs(120)).present());
 	auto ordinarySet = co_await getLogs(150);
