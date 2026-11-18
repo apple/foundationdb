@@ -1361,7 +1361,6 @@ static void deliverNow(TransportData* self,
 				g_currentDeliveryPeerDisconnect = nullptr;
 			});
 			StringRef data = reader.arenaReadAll();
-			ASSERT_GT(data.size(), 8);
 			ArenaObjectReader objReader(std::move(reader.arena()), data, AssumeVersion(reader.protocolVersion()));
 			receiver->receive(objReader);
 		} catch (Error& e) {

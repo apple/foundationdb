@@ -839,4 +839,38 @@ TEST_CASE("/flow/FlatBuffers/RejectsWrongFileIdentifier") {
 	return Void();
 }
 
+TEST_CASE("/flow/FlatBuffers/BoundsChecksKnob") {
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+	Untrusted src;
+	src.s = "hello world";
+	src.v = { 1, 2, 3 };
+	ObjectWriter writer(Unversioned());
+	writer.serialize(untrustedFileIdentifier, src);
+	StringRef good = writer.toStringRef();
+
+	// Presents only the first 8 bytes to the reader while the rest of the buffer stays valid memory.
+	auto decodeTruncated = [&]() {
+		::Arena arena;
+		Untrusted dst;
+		try {
+			ArenaObjectReader reader(arena, StringRef(good.begin(), 8), AssumeVersion(currentProtocolVersion()));
+			reader.deserialize(untrustedFileIdentifier, dst);
+			return dst.s == src.s && dst.v == src.v;
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_serialization_failed);
+			return false;
+		}
+	};
+
+	auto* knobs = const_cast<FlowKnobs*>(FLOW_KNOBS);
+	ASSERT(knobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED);
+	ASSERT(!decodeTruncated());
+	knobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED = false;
+	auto restoreKnob = ScopeExit([&]() { knobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED = true; });
+	ASSERT(decodeTruncated());
+	return Void();
+}
+
 } // namespace unit_tests

@@ -20,6 +20,7 @@
 
 #pragma once
 #include "flow/Error.h"
+#include "flow/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/flat_buffers.h"
 #include "flow/ProtocolVersion.h"
@@ -79,9 +80,11 @@ protected:
 	const uint8_t* _data;
 	const uint8_t* _begin; // start of the flatbuffer, after any protocol version prefix
 	const uint8_t* _end;
+	bool _checksEnabled; // Cached so each field read avoids the knob lookup.
 
 	template <class VersionOptions>
-	_ObjectReader(const StringRef& input, VersionOptions vo) : _data(input.begin()), _end(input.end()) {
+	_ObjectReader(const StringRef& input, VersionOptions vo)
+	  : _data(input.begin()), _end(input.end()), _checksEnabled(FLOW_KNOBS->FLATBUFFERS_BOUNDS_CHECKS_ENABLED) {
 		vo.read(*this);
 		_begin = _data;
 	}
@@ -93,7 +96,7 @@ public:
 	const uint8_t* data() { return _data; }
 
 	void checkRange(const uint8_t* ptr, size_t len) const {
-		if (len == 0) {
+		if (!_checksEnabled || len == 0) {
 			return;
 		}
 		auto p = reinterpret_cast<uintptr_t>(ptr);
@@ -108,7 +111,9 @@ public:
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
 		LoadContext<ReaderImpl> context(static_cast<ReaderImpl*>(this));
 		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
-		context.checkRange(data, 2 * sizeof(uint32_t)); // root offset and file identifier
+		if (static_cast<size_t>(_end - data) < 2 * sizeof(uint32_t)) { // root offset and file identifier
+			ReaderImpl::loadFailed("buffer too short for header");
+		}
 		if (read_file_identifier(data) != file_identifier) {
 			// Some file identifiers are changed in 7.0, so file identifier mismatches
 			// are expected during a downgrade from 7.0 to 6.3
@@ -138,7 +143,7 @@ public:
 class ObjectReader : public _ObjectReader<ObjectReader> {
 public:
 	static constexpr bool ownsUnderlyingMemory = false;
-	// Callers read stored or nested values, none of which handle a malformed buffer, so it stops the process.
+	// ObjectReader has no error path for a malformed buffer, so it aborts rather than throw.
 	static constexpr bool failsFatally = true;
 	[[noreturn]] static void loadFailed(const char* reason) { detail::flat_buffer_load_fatal(reason); }
 

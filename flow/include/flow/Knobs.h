@@ -446,6 +446,9 @@ public:
 	int RESTCLIENT_REQUEST_TIMEOUT_SEC;
 	int REST_LOG_LEVEL;
 
+	// Serialization
+	bool FLATBUFFERS_BOUNDS_CHECKS_ENABLED;
+
 	FlowKnobs(class Randomize, class IsSimulated);
 	void initialize(class Randomize, class IsSimulated);
 };

@@ -361,6 +361,10 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( RESTCLIENT_REQUEST_TRIES,                             10 );
 	init( RESTCLIENT_REQUEST_TIMEOUT_SEC,                        6 );
 	init( REST_LOG_LEVEL,                                        3 );
+
+	// Serialization
+	// When false, readers stop bounds-checking untrusted buffers. The std::array length check stays on.
+	init( FLATBUFFERS_BOUNDS_CHECKS_ENABLED,                  true );
 }
 // clang-format on
 
