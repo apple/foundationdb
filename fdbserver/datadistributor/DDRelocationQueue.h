@@ -55,6 +55,7 @@ public:
 	std::vector<UID> completeSources;
 	std::vector<UID> completeDests;
 	bool wantsNewServers;
+	bool destinationFailureRetry = false;
 	bool cancellable;
 	TraceInterval interval;
 	std::shared_ptr<DataMove> dataMove;
@@ -109,6 +110,9 @@ struct DDQueueInitParams {
 	MoveKeysLock const& lock;
 	Reference<IDDTxnProcessor> db;
 	std::vector<TeamCollectionInterface> const& teamCollections;
+	KeyRangeMap<ShardTrackedData> const& trackedShards;
+	Future<Void> shardBoundariesReady;
+	PromiseStream<RelocateShard> deferredRetries;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
 	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
@@ -242,6 +246,10 @@ public:
 	Reference<IDDTxnProcessor> txnProcessor;
 
 	std::vector<TeamCollectionInterface> teamCollections;
+	// Owned by dataDistribution() for the lifetime of the queue's running actors.
+	KeyRangeMap<ShardTrackedData> const* trackedShards = nullptr;
+	Future<Void> shardBoundariesReady;
+	PromiseStream<RelocateShard> deferredRetries;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
 	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
@@ -301,6 +309,7 @@ public:
 	Promise<Void> error;
 	PromiseStream<RelocateData> dataTransferComplete;
 	PromiseStream<RelocateData> relocationComplete;
+	PromiseStream<KeyRange> rangesToLaunch;
 	PromiseStream<RelocateData> fetchSourceServersComplete; // find source SSs for a relocate range
 
 	PromiseStream<RelocateShard> output;
@@ -395,6 +404,7 @@ public:
 	UID bulkLoadInjectionTargetTaskId;
 
 	void processRelocationComplete(const RelocateData& done);
+	void scheduleRangeLaunch(KeyRange const& keys);
 
 	Future<SrcDestTeamPair> getSrcDestTeams(const int& teamCollectionIndex,
 	                                        const GetTeamRequest& srcReq,

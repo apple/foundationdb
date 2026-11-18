@@ -1466,8 +1466,8 @@ Future<Void> abortMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore,
 	resource += format("?uploadId=%s", uploadID.c_str());
 
 	HTTP::Headers headers;
-	Reference<HTTP::IncomingResponse> r =
-	    co_await bstore->doRequest("DELETE", resource, headers, nullptr, 0, { 200, 204 });
+	// A lost completion response or a previous abort can already have retired this upload ID.
+	co_await bstore->doRequest("DELETE", resource, headers, nullptr, 0, { 200, 204, 404 });
 }
 
 Future<Void> S3BlobStoreEndpoint::abortMultiPartUpload(std::string const& bucket,

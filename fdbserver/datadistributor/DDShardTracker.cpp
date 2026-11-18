@@ -1314,6 +1314,11 @@ struct DataDistributionTrackerImpl {
 	static Future<Void> serveRestartShardTrackerReqs(DataDistributionTracker* self,
 	                                                 FutureStream<KeyRange> restartShardTrackerReqs) {
 		while (true) {
+			// Recovery queues its boundary changes before the tracker starts. The initial shard map
+			// is authoritative for retries once the tracker has applied the last of those changes.
+			if (!self->shardBoundariesReady.isSet() && !restartShardTrackerReqs.isReady()) {
+				self->shardBoundariesReady.send(Void());
+			}
 			KeyRange req = co_await restartShardTrackerReqs;
 			restartShardTrackers(self, req);
 		}

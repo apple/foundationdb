@@ -52,6 +52,7 @@ struct BlobKnobs {
 	    max_delay_retryable_error, max_delay_connection_failed, multipart_retry_delay_ms, aws_v4_header;
 
 	bool set(StringRef name, int value);
+	int requestTimeout(int contentLen) const;
 	std::string getURLParameters() const;
 	static std::vector<std::string> getKnobDescriptions() {
 		return {
@@ -389,6 +390,9 @@ public:
 	                                                            std::string const& uploadID,
 	                                                            MultiPartSetT const& parts,
 	                                                            int64_t totalSize = 0) = 0;
+	virtual Future<Void> abortMultiPartUpload(std::string const& bucket,
+	                                         std::string const& object,
+	                                         std::string const& uploadID) = 0;
 
 	// Get bucket contents via a stream, since listing large buckets will take many serial blob requests.
 	// If a delimiter is passed then common prefixes will be read in parallel, recursively, depending on recurseFilter.
