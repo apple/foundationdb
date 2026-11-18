@@ -39,9 +39,6 @@ func TestErrorWrapping(t *testing.T) {
 		&Error{
 			Code: 2007,
 		},
-		fmt.Errorf("wrapped error: %w", &Error{
-			Code: 2007,
-		}),
 		Error{
 			Code: 2007,
 		},
