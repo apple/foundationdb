@@ -1106,7 +1106,6 @@ public:
 
 		Promise<Void> connected;
 		doAcceptHandshake(self, connected);
-		state bool timedOut = false;
 		try {
 			choose {
 				when(wait(connected.getFuture())) {
@@ -1116,13 +1115,13 @@ public:
 					static SimpleCounter<int64_t>* countServerTLSHandshakesTimedout =
 					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesTimedout");
 					countServerTLSHandshakesTimedout->increment(1);
-					timedOut = true;
+					self->handshakeTimedOut = true;
 					throw connection_failed();
 				}
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
-				self->recordHandshakeFailure(peerIP, FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT, timedOut);
+				self->recordHandshakeFailure(peerIP, FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT);
 			}
 			// Either the connection failed, or was cancelled by the caller
 			self->closeSocket();
@@ -1202,7 +1201,6 @@ public:
 
 		Promise<Void> connected;
 		doConnectHandshake(self, connected);
-		state bool timedOut = false;
 		try {
 			choose {
 				when(wait(connected.getFuture())) {
@@ -1212,7 +1210,7 @@ public:
 					static SimpleCounter<int64_t>* countClientTLSHandshakesTimedout =
 					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesTimedout");
 					countClientTLSHandshakesTimedout->increment(1);
-					timedOut = true;
+					self->handshakeTimedOut = true;
 					throw connection_failed();
 				}
 			}
@@ -1220,8 +1218,7 @@ public:
 			// Either the connection failed, or was cancelled by the caller
 			if (e.code() != error_code_actor_cancelled) {
 				self->recordHandshakeFailure(std::make_pair(self->peer_address.ip, self->peer_address.port),
-				                             FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,
-				                             timedOut);
+				                             FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT);
 			}
 			self->closeSocket();
 			throw;
@@ -1313,6 +1310,13 @@ public:
 
 	bool hasTrustedPeer() const override { return has_trusted_peer; }
 
+	// Must not be called while the handshake may still be running, i.e. after it was cancelled.
+	bool handshakeTimedOutOrDisconnected() const override {
+		// After our timeout the handshake may still be running on another thread, writing handshakeError, so it is only
+		// read if the handshake finished.
+		return handshakeTimedOut || isTimeoutOrDisconnect(handshakeError);
+	}
+
 	UID getDebugID() const override { return id; }
 
 	tcp::socket& getSocket() override { return socket; }
@@ -1329,15 +1333,14 @@ private:
 	std::string sni_hostname; // For Server Name Indication
 	// The error the TLS handshake failed with, if any.
 	boost::system::error_code handshakeError;
+	// Set when the handshake timeout fires before the handshake finishes.
+	bool handshakeTimedOut = false;
 
 	// Records a failed handshake toward TLS connection throttling of `peer`, which is throttled for `throttleTimeout`
 	// once its failures reach the limit. With TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS, timeouts and disconnects
 	// are not recorded. Must not be called if the handshake was cancelled, since it may still be running then.
-	void recordHandshakeFailure(std::pair<IPAddress, uint16_t> peer, double throttleTimeout, bool timedOut) {
-		// After a timeout the handshake may still be running on another thread, writing handshakeError, so it is only
-		// read if the handshake finished.
-		const bool timeoutOrDisconnect = timedOut || isTimeoutOrDisconnect(handshakeError);
-		if (FLOW_KNOBS->TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS && timeoutOrDisconnect) {
+	void recordHandshakeFailure(std::pair<IPAddress, uint16_t> peer, double throttleTimeout) {
+		if (FLOW_KNOBS->TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS && handshakeTimedOutOrDisconnected()) {
 			return;
 		}
 		auto& throttler = g_network->networkInfo.serverTLSConnectionThrottler;

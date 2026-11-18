@@ -854,39 +854,55 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 						}
 					}
 				} catch (Error& e) {
-					++self->connectFailedCount;
-					// Track per-address cumulative connect failures + last-failure time. The map
-					// potentially has unbounded list of peers as they're having connection issues.
-					// To make the map bounded, evict based on TTL.
-					//
-					// Note: this prune only runs here, inside the connect-failure path, so it is
-					// failure-driven rather than on a timer. If connect failures stop across all
-					// addresses, the scan does not run again and stale entries can linger past their
-					// TTL until the next failure on any address. The map is still bounded -- by the
-					// set of addresses ever contacted, and the next failure prunes the stale ones --
-					// so this is not unbounded growth, just not strictly time-based eviction.
-					{
-						double ttl = FLOW_KNOBS->PERSISTENT_CONNECT_FAILED_COUNT_TTL;
-						double tNow = now();
-						auto& failCounts = self->transport->persistentConnectFailedCount;
-						auto& info = failCounts[self->destination];
-						info.count++;
-						info.lastFailed = tNow;
-						TraceEvent("PersistentConnectFailed")
-						    .suppressFor(5.0)
-						    .detail("PeerAddr", self->destination)
-						    .detail("ConnectFailedTotal", info.count);
-						if (ttl > 0 && tNow - self->transport->persistentConnectFailedLastPrune >= ttl) {
-							self->transport->persistentConnectFailedLastPrune = tNow;
-							for (auto it = failCounts.begin(); it != failCounts.end();) {
-								if (tNow - it->second.lastFailed >= ttl) {
-									TraceEvent("PersistentConnectFailedPrune")
-									    .suppressFor(5.0)
-									    .detail("PeerAddr", it->first)
-									    .detail("ConnectFailedTotal", it->second.count);
-									it = failCounts.erase(it);
-								} else {
-									++it;
+					const bool cancelled = e.code() == error_code_actor_cancelled;
+					bool handshakeOverload = false;
+					bool countFailure = true; // Every failure counts unless a knob below says otherwise.
+					if (FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_IS_NOT_CONNECT_FAILURE && !cancelled) {
+						// TCP connected, then the handshake timed out or was dropped: overload on either end, not a
+						// down peer. Not checked after a cancellation, since the handshake may still be running and
+						// recording its error.
+						handshakeOverload = conn && conn->handshakeTimedOutOrDisconnected();
+						countFailure = !handshakeOverload;
+					}
+					if (FLOW_KNOBS->CANCELLED_CONNECT_IS_NOT_CONNECT_FAILURE && cancelled) {
+						// This process stopped trying, which says nothing about the peer.
+						countFailure = false;
+					}
+					if (countFailure) {
+						++self->connectFailedCount;
+						// Track per-address cumulative connect failures + last-failure time. The map
+						// potentially has unbounded list of peers as they're having connection issues.
+						// To make the map bounded, evict based on TTL.
+						//
+						// Note: this prune only runs here, inside the connect-failure path, so it is
+						// failure-driven rather than on a timer. If connect failures stop across all
+						// addresses, the scan does not run again and stale entries can linger past their
+						// TTL until the next failure on any address. The map is still bounded -- by the
+						// set of addresses ever contacted, and the next failure prunes the stale ones --
+						// so this is not unbounded growth, just not strictly time-based eviction.
+						{
+							double ttl = FLOW_KNOBS->PERSISTENT_CONNECT_FAILED_COUNT_TTL;
+							double tNow = now();
+							auto& failCounts = self->transport->persistentConnectFailedCount;
+							auto& info = failCounts[self->destination];
+							info.count++;
+							info.lastFailed = tNow;
+							TraceEvent("PersistentConnectFailed")
+							    .suppressFor(5.0)
+							    .detail("PeerAddr", self->destination)
+							    .detail("ConnectFailedTotal", info.count);
+							if (ttl > 0 && tNow - self->transport->persistentConnectFailedLastPrune >= ttl) {
+								self->transport->persistentConnectFailedLastPrune = tNow;
+								for (auto it = failCounts.begin(); it != failCounts.end();) {
+									if (tNow - it->second.lastFailed >= ttl) {
+										TraceEvent("PersistentConnectFailedPrune")
+										    .suppressFor(5.0)
+										    .detail("PeerAddr", it->first)
+										    .detail("ConnectFailedTotal", it->second.count);
+										it = failCounts.erase(it);
+									} else {
+										++it;
+									}
 								}
 							}
 						}
@@ -904,6 +920,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 					    .detail("UnsentEmpty", self->unsent.empty())
 					    .detail("OutstandingReplies", self->outstandingReplies)
 					    .detail("ConnectFailedCount", self->connectFailedCount)
+					    .detail("HandshakeOverload", handshakeOverload)
 					    .detail("Connected", self->connected);
 
 					throw;

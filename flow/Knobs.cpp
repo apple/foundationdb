@@ -136,6 +136,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
 	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               1 );
 	init( TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS,      false );
+	init( TLS_HANDSHAKE_TIMEOUT_IS_NOT_CONNECT_FAILURE,      false ); if( randomize && BUGGIFY ) TLS_HANDSHAKE_TIMEOUT_IS_NOT_CONNECT_FAILURE = deterministicRandom()->coinflip();
+	init( CANCELLED_CONNECT_IS_NOT_CONNECT_FAILURE,          false ); if( randomize && BUGGIFY ) CANCELLED_CONNECT_IS_NOT_CONNECT_FAILURE = deterministicRandom()->coinflip();
 	init( TLS_CLIENT_HANDSHAKE_THREADS,                          0 );
 	init( TLS_SERVER_HANDSHAKE_THREADS,                         64 );
 	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                64 * 1024 );
