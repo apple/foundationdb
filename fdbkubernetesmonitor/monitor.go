@@ -27,11 +27,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"math/rand/v2"
 	"net/http"
 	"net/http/pprof"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path"
 	"strconv"
 	"strings"
@@ -51,9 +52,9 @@ import (
 )
 
 const (
-	// maxErrorBackoffSeconds is the maximum time to wait after a process fails before starting another process.
-	// The actual delay will be based on the observed errors and will increase until maxErrorBackoffSeconds is hit.
-	maxErrorBackoffSeconds = 60 * time.Second
+	// maxErrorBackoffDuration is the maximum time to wait after a process fails before starting another process.
+	// The actual delay will be based on the observed errors and will increase until maxErrorBackoffDuration is hit.
+	maxErrorBackoffDuration = 60 * time.Second
 
 	// fdbClusterFilePath defines the default path to the fdb cluster file that contains the current connection string.
 	// This file is managed by the fdbserver processes itself and they will automatically update the file if the
@@ -93,6 +94,22 @@ type monitor struct {
 	// the subprocess.
 	processIDs []int
 
+	// processVersions stores the version of the configuration each running subprocess was started from. Processes
+	// that are not running have no entry. Access is guarded by mutex.
+	processVersions map[int]api.Version
+
+	// processBinaries stores the binary path and the start time of each running subprocess. It has the same entries
+	// as processVersions. Access is guarded by mutex.
+	processBinaries map[int]processBinary
+
+	// stagedVersions is the formatted list of staged versions that was listed last. It is only meaningful if
+	// stagedVersionsKnown is set. Access is guarded by mutex.
+	stagedVersions      string
+	stagedVersionsKnown bool
+
+	// pruneMutex serializes the pruning of the shared binary directory.
+	pruneMutex sync.Mutex
+
 	// mutex defines a mutex around working with configuration.
 	// This is used to synchronize access to local state like the active
 	// configuration and the process IDs from multiple goroutines.
@@ -107,6 +124,20 @@ type monitor struct {
 
 	// metrics represents the prometheus monitor metrics.
 	metrics *metrics
+
+	// binaryRetryCancel cancels the running retry for a configuration whose binary was not ready. It may be
+	// non-nil after the retry has finished, cancelling it is then a no-op. Access is guarded by mutex.
+	binaryRetryCancel context.CancelFunc
+
+	// binaryRetryBackoff returns the wait time before the given retry attempt. If nil getBinaryRetryBackoff is used.
+	// This is used to overwrite the default retry mechanism in unit-tests.
+	binaryRetryBackoff func(attempt int) time.Duration
+}
+
+// processBinary describes the binary a running subprocess was started from and when.
+type processBinary struct {
+	path      string
+	startTime time.Time
 }
 
 type httpConfig struct {
@@ -131,7 +162,7 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 		currentContainerVersion: currentContainerVersion,
 	}
 
-	go func() { mon.watchPodTimestamps() }()
+	go func() { mon.watchPodTimestamps(ctx) }()
 
 	mux := http.NewServeMux()
 	// Enable pprof endpoints for debugging purposes.
@@ -154,6 +185,7 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 	reg.MustRegister(collectors.NewGoCollector())
 	monitorMetrics := registerMetrics(reg)
 	mon.metrics = monitorMetrics
+	go func() { mon.watchBinaries(ctx) }()
 	promHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
 
 	// Add Prometheus support
@@ -163,6 +195,7 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 			certLoader := certloader.NewCertLoader(logger, promConfig.certPath, promConfig.keyPath)
 			tlsConfig := &tls.Config{
 				GetCertificate: certLoader.GetCertificate,
+				MinVersion:     tls.VersionTLS12,
 			}
 			server := &http.Server{
 				Addr:      promConfig.listenAddr,
@@ -182,19 +215,28 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 		}
 	}()
 
-	mon.run()
+	mon.run(ctx)
 }
 
 // updateCustomEnvironment will add the node labels and their values to the custom environment map. All the generated
 // environment variables will start with NODE_LABEL and "/" and "." will be replaced in the key as "_", e.g. from the
 // label "foundationdb.org/testing = awesome" the env variables NODE_LABEL_FOUNDATIONDB_ORG_TESTING = awesome" will be
 // generated.
-func (monitor *monitor) updateCustomEnvironmentFromNodeMetadata() {
-	if monitor.podClient.nodeMetadata == nil {
-		return
+func (monitor *monitor) updateCustomEnvironmentFromNodeMetadata(ctx context.Context) error {
+	nodeMeta, err := monitor.podClient.getNodeMetadata(ctx)
+	if err != nil {
+		return err
 	}
 
-	nodeLabels := monitor.podClient.nodeMetadata.Labels
+	if nodeMeta == nil {
+		return nil
+	}
+
+	// The map is read by the process runners and the configuration loaders, so all writes must hold the mutex.
+	monitor.mutex.Lock()
+	defer monitor.mutex.Unlock()
+
+	nodeLabels := nodeMeta.Labels
 	for key, value := range nodeLabels {
 		sanitizedKey := strings.ReplaceAll(key, "/", "_")
 		sanitizedKey = strings.ReplaceAll(sanitizedKey, ".", "_")
@@ -214,14 +256,32 @@ func (monitor *monitor) updateCustomEnvironmentFromNodeMetadata() {
 		monitor.customEnvironment[envKey] = value
 		continue
 	}
+
+	return nil
 }
 
-// readConfiguration reads the latest configuration from the monitor file.
-func (monitor *monitor) readConfiguration() (*api.ProcessConfiguration, []byte) {
+// copyCustomEnvironment returns a snapshot of the custom environment.
+func (monitor *monitor) copyCustomEnvironment() map[string]string {
+	monitor.mutex.Lock()
+	defer monitor.mutex.Unlock()
+
+	customEnv := make(map[string]string, len(monitor.customEnvironment))
+	maps.Copy(customEnv, monitor.customEnvironment)
+	return customEnv
+}
+
+// errBinaryNotReady is returned if the binary of a configuration is missing, empty or not executable. Unlike other
+// configuration errors this can resolve without a new configuration, e.g. once a sidecar finished copying the binary.
+var errBinaryNotReady = errors.New("binary is not ready")
+
+// readConfiguration reads the latest configuration from the monitor file. A nil configuration is returned if no usable
+// configuration could be read. The returned error is only non-nil, and wraps errBinaryNotReady, if retrying the same
+// configuration later can succeed.
+func (monitor *monitor) readConfiguration(ctx context.Context) (*api.ProcessConfiguration, []byte, error) {
 	file, err := os.Open(monitor.configFile)
 	if err != nil {
 		monitor.logger.Error(err, "Error reading monitor config file", "monitorConfigPath", monitor.configFile)
-		return nil, nil
+		return nil, nil, nil
 	}
 	defer func() {
 		err := file.Close()
@@ -237,17 +297,18 @@ func (monitor *monitor) readConfiguration() (*api.ProcessConfiguration, []byte) 
 	err = json.Unmarshal(configurationBytes, configuration)
 	if err != nil {
 		monitor.logger.Error(err, "Error parsing monitor configuration", "rawConfiguration", string(configurationBytes))
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	if configuration.Version == nil {
 		monitor.logger.Error(err, "Error could not parse configured version", "rawConfiguration", string(configurationBytes))
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	// If the versions are protocol compatible don't try to point to another binary path. Otherwise, the processes will
-	// cannot restart when a process crashes during a patch upgrade.
-	if monitor.currentContainerVersion.IsProtocolCompatible(*configuration.Version) {
+	// If the versions are protocol compatible don't try to point to another binary path. Otherwise, the processes
+	// cannot restart when a process crashes during a patch upgrade. This is skipped if the configuration explicitly
+	// requests the shared binary.
+	if !configuration.ShouldUseSharedBinary() && monitor.currentContainerVersion.IsProtocolCompatible(*configuration.Version) {
 		configuration.BinaryPath = fdbserverPath
 	} else {
 		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version.String(), "fdbserver")
@@ -255,50 +316,138 @@ func (monitor *monitor) readConfiguration() (*api.ProcessConfiguration, []byte) 
 
 	err = checkOwnerExecutable(configuration.BinaryPath)
 	if err != nil {
-		monitor.logger.Error(err, "Error with binary path for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
-		return nil, nil
+		monitor.logger.Error(err, "Error with binary path for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath, "error", err.Error())
+		return nil, nil, fmt.Errorf("%w: %w", errBinaryNotReady, err)
 	}
 
-	monitor.updateCustomEnvironmentFromNodeMetadata()
-	_, err = configuration.GenerateArguments(1, monitor.customEnvironment)
+	err = monitor.updateCustomEnvironmentFromNodeMetadata(ctx)
+	if err != nil {
+		monitor.logger.Error(err, "Error updating custom environment from node metadata", "configuration", configuration, "binaryPath", configuration.BinaryPath)
+		return nil, nil, nil
+	}
+	_, err = configuration.GenerateArguments(1, monitor.copyCustomEnvironment())
 	if err != nil {
 		monitor.logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	if configuration.ShouldRunServers() {
 		// In case that the process is isolated we don't want to start the servers and we should terminate the running fdbserver
 		// instances.
-		if monitor.processIsIsolated() {
+		if monitor.processIsIsolated(ctx) {
 			configuration.RunServers = pointer.Bool(false)
 		}
 	}
 
-	return configuration, configurationBytes
+	return configuration, configurationBytes, nil
 }
 
-// loadConfiguration loads the latest configuration from the config file.
-func (monitor *monitor) loadConfiguration() {
-	configuration, configurationBytes := monitor.readConfiguration()
-	if configuration == nil || len(configurationBytes) == 0 {
-		return
+// loadConfiguration loads the latest configuration from the config file. If the binary of the configuration is not
+// ready, the load is retried with a quadratic backoff until it succeeds or the next call supersedes it.
+func (monitor *monitor) loadConfiguration(ctx context.Context) {
+	// Any pending retry is stale once a new load is triggered, since the load below reads the latest file anyway.
+	monitor.cancelBinaryRetry()
+
+	err := monitor.tryLoadConfiguration(ctx)
+	if errors.Is(err, errBinaryNotReady) {
+		monitor.startBinaryRetry(ctx)
+	}
+}
+
+// tryLoadConfiguration performs a single attempt to load and accept the latest configuration. It only returns an error
+// wrapping errBinaryNotReady, other failures are logged and require a new configuration to resolve.
+func (monitor *monitor) tryLoadConfiguration(ctx context.Context) error {
+	configuration, configurationBytes, err := monitor.readConfiguration(ctx)
+	if err != nil {
+		return err
 	}
 
-	monitor.acceptConfiguration(configuration, configurationBytes)
+	if configuration == nil || len(configurationBytes) == 0 {
+		return nil
+	}
+
+	// acceptConfiguration re-checks ctx under the mutex, which is what makes skipping a superseded retry reliable.
+	if !monitor.acceptConfiguration(ctx, configuration, configurationBytes) {
+		return nil
+	}
+
 	// Always update the annotations if needed to handle cases where the fdb-kubernetes-monitor
 	// has loaded the new configuration but was not able to update the annotations.
-	err := monitor.podClient.updateAnnotations(monitor)
+	err = monitor.podClient.updateAnnotations(ctx, monitor)
 	if err != nil {
 		monitor.logger.Error(err, "Error updating pod annotations")
 	}
+
+	return nil
 }
 
-// checkOwnerExecutable validates that a path is a file that exists and is
+// cancelBinaryRetry stops the running binary retry, if any.
+func (monitor *monitor) cancelBinaryRetry() {
+	monitor.mutex.Lock()
+	defer monitor.mutex.Unlock()
+
+	if monitor.binaryRetryCancel != nil {
+		monitor.binaryRetryCancel()
+		monitor.binaryRetryCancel = nil
+	}
+}
+
+// startBinaryRetry retries loading the configuration in the background until the binary is ready, a new
+// loadConfiguration call cancels it, or ctx is done. Each attempt re-reads the config file, so a newer configuration is
+// picked up as well.
+func (monitor *monitor) startBinaryRetry(ctx context.Context) {
+	retryCtx, cancel := context.WithCancel(ctx)
+
+	monitor.mutex.Lock()
+	if monitor.binaryRetryCancel != nil {
+		monitor.binaryRetryCancel()
+	}
+	monitor.binaryRetryCancel = cancel
+	monitor.mutex.Unlock()
+
+	backoff := monitor.binaryRetryBackoff
+	if backoff == nil {
+		backoff = getBinaryRetryBackoff
+	}
+
+	go func() {
+		defer cancel()
+
+		for attempt := 1; ; attempt++ {
+			timer := time.NewTimer(backoff(attempt))
+			select {
+			case <-retryCtx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+
+			monitor.logger.Info("Retrying to load configuration with unready binary", "attempt", attempt)
+			err := monitor.tryLoadConfiguration(retryCtx)
+			if errors.Is(err, errBinaryNotReady) {
+				continue
+			}
+
+			return
+		}
+	}()
+}
+
+// getBinaryRetryBackoff returns the wait time before the given binary retry attempt, starting at 1. It uses
+// getBackoffDuration but never returns less than a second.
+func getBinaryRetryBackoff(attempt int) time.Duration {
+	return max(getBackoffDuration(attempt), time.Second)
+}
+
+// checkOwnerExecutable validates that a path is a non-empty file that exists and is
 // executable by its owner.
 func checkOwnerExecutable(path string) error {
 	binaryStat, err := os.Stat(path)
 	if err != nil {
 		return err
+	}
+	if binaryStat.Size() == 0 {
+		return fmt.Errorf("binary is empty")
 	}
 	if binaryStat.Mode()&0o100 == 0 {
 		return fmt.Errorf("binary is not executable")
@@ -307,14 +456,20 @@ func checkOwnerExecutable(path string) error {
 }
 
 // acceptConfiguration is called when the monitor process parses and accepts
-// a configuration from the local config file.
-func (monitor *monitor) acceptConfiguration(configuration *api.ProcessConfiguration, configurationBytes []byte) {
+// a configuration from the local config file. It returns false without applying the configuration if ctx is done.
+// cancelBinaryRetry cancels under the same mutex, so a superseded retry can't apply its configuration after the
+// load that superseded it started.
+func (monitor *monitor) acceptConfiguration(ctx context.Context, configuration *api.ProcessConfiguration, configurationBytes []byte) bool {
 	monitor.mutex.Lock()
 	defer monitor.mutex.Unlock()
 
+	if ctx.Err() != nil {
+		return false
+	}
+
 	// If the configuration hasn't changed ignore those events to prevent noisy logging.
 	if equality.Semantic.DeepEqual(monitor.activeConfiguration, configuration) {
-		return
+		return true
 	}
 
 	monitor.logger.Info("Received new configuration file", "configuration", configuration)
@@ -338,18 +493,15 @@ func (monitor *monitor) acceptConfiguration(configuration *api.ProcessConfigurat
 
 	// If the monitor has running processes but the processes shouldn't be running, kill them with SIGTERM.
 	if hasRunningProcesses && !monitor.activeConfiguration.ShouldRunServers() {
-		monitor.sendSignalToProcesses(syscall.SIGTERM)
+		monitor.signalProcesses(syscall.SIGTERM, monitor.processIDs)
 	}
+
+	return true
 }
 
-// getBackoffDuration returns the backoff duration. The backoff time will increase exponential with a maximum of 60 seconds.
+// getBackoffDuration returns the backoff duration. The backoff time will increase quadratically with a maximum of 60 seconds.
 func getBackoffDuration(errorCounter int) time.Duration {
-	timeToBackoff := time.Duration(errorCounter*errorCounter) * time.Second
-	if timeToBackoff > maxErrorBackoffSeconds {
-		return maxErrorBackoffSeconds
-	}
-
-	return timeToBackoff
+	return min(time.Duration(errorCounter*errorCounter)*time.Second, maxErrorBackoffDuration)
 }
 
 // runProcess runs a loop to continually start and watch a process.
@@ -373,10 +525,15 @@ func (monitor *monitor) runProcess(processNumber int) {
 			errorCounter = 0
 		}
 
-		arguments, err := monitor.activeConfiguration.GenerateArguments(processNumber, monitor.customEnvironment)
+		monitor.mutex.Lock()
+		config := monitor.activeConfiguration
+		monitor.mutex.Unlock()
+		customEnv := monitor.copyCustomEnvironment()
+
+		arguments, err := config.GenerateArguments(processNumber, customEnv)
 		if err != nil {
 			backoffDuration := getBackoffDuration(errorCounter)
-			logger.Error(err, "Error generating arguments for subprocess", "configuration", monitor.activeConfiguration, "errorCounter", errorCounter, "backoffDuration", backoffDuration.String())
+			logger.Error(err, "Error generating arguments for subprocess", "configuration", config, "errorCounter", errorCounter, "backoffDuration", backoffDuration.String())
 			time.Sleep(backoffDuration)
 			errorCounter++
 			continue
@@ -408,7 +565,7 @@ func (monitor *monitor) runProcess(processNumber int) {
 		}
 
 		// Update the prometheus metrics for the process.
-		monitor.metrics.registerProcessStartup(processNumber, monitor.activeConfiguration.Version.String())
+		monitor.metrics.registerProcessStartup(processNumber, config.Version.String())
 
 		if cmd.Process != nil {
 			pid = cmd.Process.Pid
@@ -420,6 +577,11 @@ func (monitor *monitor) runProcess(processNumber int) {
 		logger.Info("Subprocess started", "PID", pid)
 
 		monitor.updateProcessID(processNumber, pid)
+		monitor.setProcessVersion(processNumber, config.Version, config.BinaryPath, startTime)
+		monitor.metrics.registerRunningBinary(processNumber, config.Version.String(), config.BinaryPath)
+		// Once the last process has switched to the desired version no bounce is pending and the binaries of all
+		// other versions are unused.
+		monitor.pruneSharedBinaries()
 
 		if stdout != nil {
 			stdoutScanner := bufio.NewScanner(stdout)
@@ -451,6 +613,8 @@ func (monitor *monitor) runProcess(processNumber int) {
 		processDuration := time.Since(startTime)
 		logger.Info("Subprocess terminated", "exitCode", exitCode, "PID", pid, "lastExecutionDurationSeconds", processDuration.String())
 		monitor.updateProcessID(processNumber, -1)
+		monitor.setProcessVersion(processNumber, nil, "", time.Time{})
+		monitor.metrics.unregisterRunningBinary(processNumber)
 
 		// Only backoff if the exit code is non-zero.
 		if exitCode != 0 {
@@ -484,16 +648,21 @@ func (monitor *monitor) processRequired(processNumber int) bool {
 }
 
 // processIsIsolated returns true if the IsolateProcessGroupAnnotation is set to "true".
-func (monitor *monitor) processIsIsolated() bool {
-	if monitor.podClient.podMetadata == nil {
+func (monitor *monitor) processIsIsolated(ctx context.Context) bool {
+	podMeta, err := monitor.podClient.getPodMetadata(ctx)
+	if err != nil {
 		return false
 	}
 
-	if monitor.podClient.podMetadata.Annotations == nil {
+	if podMeta == nil {
 		return false
 	}
 
-	val, ok := monitor.podClient.podMetadata.Annotations[api.IsolateProcessGroupAnnotation]
+	if podMeta.Annotations == nil {
+		return false
+	}
+
+	val, ok := podMeta.Annotations[api.IsolateProcessGroupAnnotation]
 	if !ok {
 		return false
 	}
@@ -514,8 +683,37 @@ func (monitor *monitor) updateProcessID(processNumber int, pid int) {
 	monitor.processIDs[processNumber] = pid
 }
 
+// addWatcher adds a watch for the provided file. If an error is returned it will be retried for a maximum of 10 retries.
+// The delay between the retries increases with each retry and the maximum delay is 1 second.
+func addWatcher(fileName string, watcher *fsnotify.Watcher) error {
+	var retryCnt int
+	maxRetryCnt := 10
+
+	baseDelay := 100 * time.Millisecond
+	maxDelay := 1 * time.Second
+
+	var err error
+	for retryCnt < maxRetryCnt {
+		err = watcher.Add(fileName)
+		if err == nil {
+			return nil
+		}
+
+		retryCnt++
+
+		// Double the delay each attempt (100ms → 200ms → 400ms → …)
+		delay := min(baseDelay*(1<<retryCnt), maxDelay)
+		// Add jitter to avoid thundering herd
+		delay += time.Duration(rand.Int64N(int64(delay) / 2))
+
+		time.Sleep(delay)
+	}
+
+	return err
+}
+
 // watchConfiguration detects changes to the monitor configuration file.
-func (monitor *monitor) watchConfiguration(watcher *fsnotify.Watcher) {
+func (monitor *monitor) watchConfiguration(ctx context.Context, watcher *fsnotify.Watcher) {
 	for {
 		select {
 		case event, ok := <-watcher.Events:
@@ -525,38 +723,44 @@ func (monitor *monitor) watchConfiguration(watcher *fsnotify.Watcher) {
 
 			monitor.logger.Info("Detected event on monitor conf file or cluster file", "event", event)
 			if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
-				monitor.handleFileChange(event.Name)
+				monitor.handleFileChange(ctx, event.Name)
 			} else if event.Op&fsnotify.Remove == fsnotify.Remove {
-				err := watcher.Add(event.Name)
+				err := addWatcher(event.Name, watcher)
 				if err != nil {
 					panic(err)
 				}
-				monitor.handleFileChange(event.Name)
+				monitor.handleFileChange(ctx, event.Name)
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return
 			}
 			monitor.logger.Error(err, "Error watching for file system events")
+		// Stop watching if the context is shutdown.
+		case <-ctx.Done():
+			return
 		}
 	}
 }
 
 // handleFileChange will perform the required action based on the changed/modified file.
-func (monitor *monitor) handleFileChange(changedFile string) {
+func (monitor *monitor) handleFileChange(ctx context.Context, changedFile string) {
 	if changedFile == fdbClusterFilePath {
-		err := monitor.podClient.updateFdbClusterTimestampAnnotation()
+		err := monitor.podClient.updateFdbClusterTimestampAnnotation(ctx)
 		if err != nil {
 			monitor.logger.Error(err, fmt.Sprintf("could not update %s annotation", api.ClusterFileChangeDetectedAnnotation))
 		}
 		return
 	}
 
-	monitor.loadConfiguration()
+	monitor.loadConfiguration(ctx)
 }
 
-func (monitor *monitor) sendSignalToProcesses(signal os.Signal) {
-	for processNumber, processID := range monitor.processIDs {
+// signalProcesses sends the given signal to all processes in the provided slice.
+// Callers that already hold monitor.mutex should pass monitor.processIDs directly.
+// Callers that do not hold the mutex should snapshot processIDs under the mutex first.
+func (monitor *monitor) signalProcesses(signal os.Signal, processIDs []int) {
+	for processNumber, processID := range processIDs {
 		if processID <= 0 {
 			continue
 		}
@@ -577,34 +781,43 @@ func (monitor *monitor) sendSignalToProcesses(signal os.Signal) {
 }
 
 // run runs the monitor loop.
-func (monitor *monitor) run() {
+func (monitor *monitor) run(ctx context.Context) {
 	done := make(chan bool, 1)
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		latestSignal := <-signals
-		monitor.logger.Info("Received system signal", "signal", latestSignal)
+		<-ctx.Done()
+		monitor.logger.Info("Received system signal")
 
-		// Reset the processCount to 0 to make sure the monitor doesn't try to restart the processes.
-		monitor.processCount = 0
-		monitor.sendSignalToProcesses(latestSignal)
+		var delayShutdown time.Duration
+		// We cannot use ctx here as the context as cancelled.
+		podMeta, err := monitor.podClient.getPodMetadata(context.Background())
+		if err != nil {
+			monitor.logger.Error(err, "Could not read pod metadata for delayed shutdown")
+		}
 
-		annotations := monitor.podClient.podMetadata.Annotations
-		if len(annotations) > 0 {
-			delayValue, ok := annotations[api.DelayShutdownAnnotation]
-			if ok {
-				delay, err := time.ParseDuration(delayValue)
-				if err == nil {
-					time.Sleep(delay)
+		if podMeta != nil {
+			if delayValue, ok := podMeta.Annotations[api.DelayShutdownAnnotation]; ok {
+				if delay, err := time.ParseDuration(delayValue); err == nil {
+					delayShutdown = delay
 				}
 			}
 		}
 
+		// Reset processCount and snapshot processIDs under the mutex, then signal
+		// outside the lock to avoid holding it during OS calls.
+		monitor.mutex.Lock()
+		monitor.processCount = 0
+		ids := make([]int, len(monitor.processIDs))
+		copy(ids, monitor.processIDs)
+		monitor.mutex.Unlock()
+		monitor.signalProcesses(syscall.SIGTERM, ids)
+
+		time.Sleep(delayShutdown)
+
 		done <- true
 	}()
 
-	monitor.loadConfiguration()
+	monitor.loadConfiguration(ctx)
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		panic(err)
@@ -616,12 +829,12 @@ func (monitor *monitor) run() {
 	}
 
 	defer func(watcher *fsnotify.Watcher) {
-		err := watcher.Close()
+		err = watcher.Close()
 		if err != nil {
 			monitor.logger.Error(err, "could not close watcher")
 		}
 	}(watcher)
-	go func() { monitor.watchConfiguration(watcher) }()
+	go func() { monitor.watchConfiguration(ctx, watcher) }()
 
 	// The cluster file will be created and managed by the fdbserver processes, so we have to wait until the fdbserver
 	// processes have been started. Except for the initial cluster creation this file should be present as soon as the
@@ -646,10 +859,18 @@ func (monitor *monitor) run() {
 }
 
 // watchPodTimestamps watches the timestamp feed to reload the configuration.
-func (monitor *monitor) watchPodTimestamps() {
-	for timestamp := range monitor.podClient.TimestampFeed {
-		if timestamp > monitor.lastConfigurationTime.Unix() {
-			monitor.loadConfiguration()
+func (monitor *monitor) watchPodTimestamps(ctx context.Context) {
+	for {
+		select {
+		case timestamp, ok := <-monitor.podClient.TimestampFeed:
+			if !ok {
+				return
+			}
+			if timestamp > monitor.lastConfigurationTime.Unix() {
+				monitor.loadConfiguration(ctx)
+			}
+		case <-ctx.Done():
+			return
 		}
 	}
 }
