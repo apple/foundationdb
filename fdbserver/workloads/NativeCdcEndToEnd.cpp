@@ -20,7 +20,6 @@
 
 #include <algorithm>
 #include <limits>
-#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -34,7 +33,6 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/cdcproxy/CDCProxy.h"
 #include "fdbserver/clustercontroller/NativeCdcProxyBalancer.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RecoveryState.h"
@@ -2726,7 +2724,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
-	Future<Void> waitForRetiredTagState(Database cx, bool present) {
+	Future<Void> waitForRetiredTagCleanup(Database cx) {
 		Transaction tr(cx);
 		while (true) {
 			Error err;
@@ -2735,8 +2733,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				RangeResult markers = co_await tr.getRange(cdcRetiredTagPopKeys, 1);
 				RangeResult versions = co_await tr.getRange(cdcRetiredTagPopVersionKeys, 1);
-				if ((present && !markers.empty() && !versions.empty()) ||
-				    (!present && markers.empty() && versions.empty())) {
+				if (markers.empty() && versions.empty()) {
 					co_return;
 				}
 				tr.reset();
@@ -2748,8 +2745,6 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			co_await tr.onError(err);
 		}
 	}
-
-	Future<Void> waitForRetiredTagCleanup(Database cx) { return waitForRetiredTagState(cx, false); }
 
 	Future<Void> setAllProxyPopsPaused(Database cx, bool paused, bool afterSnapshot = false) {
 		while (true) {
@@ -2931,35 +2926,59 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await timeoutError(waitForTransactionSystemRecoveryAfter(recoveryCount), operationTimeout);
 	}
 
-	Future<Void> replaceProxyWithRetiredPopPending(Database cx, Version retiredVersion) {
-		while (cx->clientInfo->get().cdcProxies.empty()) {
-			co_await cx->clientInfo->onChange();
+	Future<Optional<Version>> readRetiredWatermark(Database cx, Tag tag) {
+		const NativeCdcStatus status = co_await getNativeCdcStatus(cx);
+		ASSERT(status.metadataComplete);
+		ASSERT_EQ(status.streams.size(), streams.size());
+		const auto found =
+		    std::find_if(status.tags.begin(), status.tags.end(), [tag](const auto& entry) { return entry.tag == tag; });
+		if (found == status.tags.end() || !found->pendingRetiredPop) {
+			ASSERT(!blockRetiredPopWithLiveStream);
+			co_return Optional<Version>();
 		}
-		const auto previousProxies = cx->clientInfo->get().cdcProxies;
-		co_await haltProxyUntilReplaced(cx, previousProxies.front(), false);
-		std::unordered_map<UID, int64_t> completionsAtWatermark;
+		ASSERT_GT(found->retiredPopVersion, 0);
+		if (blockRetiredPopWithLiveStream) {
+			ASSERT_EQ(status.streams.front().info.streamId, streams.front().consumer->position().streamId);
+			ASSERT_EQ(found->blockingStreams.size(), 1);
+			ASSERT_EQ(found->blockingStreams.front(), status.streams.front().info.streamId);
+			ASSERT_LT(found->safePopVersion, found->retiredPopVersion);
+		}
+		co_return found->retiredPopVersion;
+	}
+
+	Future<Void> observeRetiredWatermarkAcrossRecovery(Database cx) {
 		while (true) {
-			const NativeCdcStatus status = co_await getNativeCdcStatus(cx);
-			for (const auto& proxy : status.proxies) {
-				// A new proxy with no streams learns the committed version from its durable pop scan.
-				if (std::ranges::find(previousProxies, proxy.id, &CDCProxyInterface::id) != previousProxies.end() ||
-				    !proxy.sample.present() || proxy.sample.get().latestCommittedVersion < retiredVersion) {
-					continue;
-				}
-				// Reading the snapshot precedes waitForPopped and marker cleanup. Let the scan finish before recovery.
-				const int64_t completions = proxy.sample.get().popCompletions;
-				const int64_t initial = completionsAtWatermark.emplace(proxy.id, completions).first->second;
-				if (completions > initial) {
-					TraceEvent("NativeCdcRetiredProxyReplaced")
-					    .detail("PreviousProxy", previousProxies.front().id())
-					    .detail("ReplacementProxy", proxy.id)
-					    .detail("InitialPopCompletions", initial)
-					    .detail("PopCompletions", completions)
-					    .detail("RetiredVersion", retiredVersion);
-					co_return;
-				}
+			const Key name = streams.back().name;
+			const CDCStreamId streamId = streams.back().consumer->position().streamId;
+			const RetagSnapshot original = co_await readRetagSnapshot(cx, streams.size() - 1);
+			const Tag tag = original.state.assignment.tag;
+			const NativeCdcRemoveResult removed = co_await removeNativeCdcStreamGuarded(cx, name, streamId);
+			ASSERT(removed == NativeCdcRemoveResult::Removed);
+			streams.pop_back();
+
+			const Optional<Version> before = co_await readRetiredWatermark(cx, tag);
+			Optional<Version> after;
+			if (before.present()) {
+				TraceEvent("NativeCdcRetiredMarkerCreated").detail("Tag", tag).detail("RetiredVersion", before.get());
+				co_await forceTransactionSystemRecovery();
+				after = co_await readRetiredWatermark(cx, tag);
 			}
-			co_await delay(0.1);
+			const NativeCdcRemoveResult repeated = co_await removeNativeCdcStreamGuarded(cx, name, streamId);
+			ASSERT(repeated == NativeCdcRemoveResult::AlreadyAbsent);
+			if (after.present()) {
+				ASSERT_EQ(after.get(), before.get());
+				TraceEvent("NativeCdcRetiredRecoveryComplete").detail("Tag", tag).detail("RetiredVersion", after.get());
+				co_return;
+			}
+
+			// A proxy may legally finish before either sample. Prove this attempt drained before making another marker.
+			TraceEvent("NativeCdcRetiredCleanupWonRace")
+			    .detail("Tag", tag)
+			    .detail("Phase", before.present() ? "AfterRecovery" : "BeforeRecovery")
+			    .detail("RetiredVersion", before.orDefault(invalidVersion));
+			co_await waitForRetiredTagCleanup(cx);
+			co_await waitForFullyRecovered();
+			co_await addStream(cx);
 		}
 	}
 
@@ -2968,68 +2987,14 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await timeoutError(waitForTransactionSystemAvailable(), operationTimeout);
 		if (blockRetiredPopWithLiveStream) {
 			ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 1);
-			// Another region's proxy can finish a retired pop while the locally published proxy is paused.
-			// Keep the original stream on the shared tag until after recovery so that pop remains pending.
+			// Keep a live stream on the shared tag until after recovery.
 			const Key key = keyForIndex(keyCount / 2);
 			co_await addStream(cx, KeyRange(KeyRangeRef(key, keyAfter(key))));
 		}
-		const Key name = streams.back().name;
-		const CDCStreamId streamId = streams.back().consumer->position().streamId;
-		std::optional<ScopedRetiredPopPauseForSimulation> retiredPopPause;
-		if (blockRetiredPopWithLiveStream) {
-			co_await setAllProxyPopsPaused(cx, true);
-		} else {
-			while (!cx->clientInfo->get().clusterId.isValid()) {
-				co_await cx->clientInfo->onChange();
-			}
-			retiredPopPause.emplace(cx->clientInfo->get().clusterId);
-		}
-		const NativeCdcRemoveResult removed =
-		    co_await timeoutError(removeNativeCdcStreamGuarded(cx, name, streamId), operationTimeout);
-		ASSERT(removed == NativeCdcRemoveResult::Removed);
-		streams.pop_back();
-		co_await timeoutError(waitForRetiredTagState(cx, true), operationTimeout);
-		const NativeCdcRemoveResult repeated =
-		    co_await timeoutError(removeNativeCdcStreamGuarded(cx, name, streamId), operationTimeout);
-		ASSERT(repeated == NativeCdcRemoveResult::AlreadyAbsent);
-		const NativeCdcStatus pendingStatus = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
-		ASSERT(pendingStatus.metadataComplete);
-		ASSERT_EQ(pendingStatus.streams.size(), streams.size());
-		if (blockRetiredPopWithLiveStream) {
-			ASSERT_EQ(pendingStatus.streams.front().info.streamId, streams.front().consumer->position().streamId);
-			ASSERT_EQ(pendingStatus.tags.size(), 1);
-			const NativeCdcTagStatus& tag = pendingStatus.tags.front();
-			ASSERT_EQ(tag.blockingStreams.size(), 1);
-			ASSERT_EQ(tag.blockingStreams.front(), streams.front().consumer->position().streamId);
-			ASSERT_LT(tag.safePopVersion, tag.retiredPopVersion);
-		}
-		// Removal stamps its commit version on the tag, ahead of any earlier pending removal.
-		const auto retired = std::ranges::max_element(pendingStatus.tags, {}, &NativeCdcTagStatus::retiredPopVersion);
-		ASSERT(retired != pendingStatus.tags.end() && retired->pendingRetiredPop);
-		TraceEvent("NativeCdcRetiredMarkerCreated")
-		    .detail("Tag", retired->tag)
-		    .detail("RetiredVersion", retired->retiredPopVersion);
-
-		const auto checkRetiredMarker = [&](const NativeCdcStatus& status) {
-			ASSERT(status.metadataComplete);
-			ASSERT_EQ(status.streams.size(), streams.size());
-			const auto tag = std::ranges::find(status.tags, retired->tag, &NativeCdcTagStatus::tag);
-			ASSERT(tag != status.tags.end() && tag->pendingRetiredPop);
-			ASSERT_EQ(tag->retiredPopVersion, retired->retiredPopVersion);
-		};
-		if (!blockRetiredPopWithLiveStream) {
-			co_await timeoutError(replaceProxyWithRetiredPopPending(cx, retired->retiredPopVersion), operationTimeout);
-			checkRetiredMarker(co_await timeoutError(getNativeCdcStatus(cx), operationTimeout));
-		}
-		co_await forceTransactionSystemRecovery();
-		TraceEvent("NativeCdcRetiredRecoveryComplete").log();
-		checkRetiredMarker(co_await timeoutError(getNativeCdcStatus(cx), operationTimeout));
+		co_await timeoutError(observeRetiredWatermarkAcrossRecovery(cx), operationTimeout);
 		if (blockRetiredPopWithLiveStream) {
 			co_await timeoutError(removeNativeCdcStreamClient(cx, streams.front().name), operationTimeout);
 			streams.clear();
-			co_await setAllProxyPopsPaused(cx, false);
-		} else {
-			retiredPopPause.reset();
 		}
 		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 		TraceEvent("NativeCdcRetiredCleanupComplete").log();

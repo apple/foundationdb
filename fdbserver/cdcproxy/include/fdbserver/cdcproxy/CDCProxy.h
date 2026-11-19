@@ -28,14 +28,3 @@ struct ServerDBInfo;
 Future<Void> cdcProxyServer(CDCProxyInterface proxy,
                             uint64_t recoveryCount,
                             Reference<AsyncVar<ServerDBInfo> const> dbInfo);
-
-// Holds retired tag pops across simulated proxy replacement and transaction system recovery.
-class ScopedRetiredPopPauseForSimulation {
-	UID clusterId;
-
-public:
-	explicit ScopedRetiredPopPauseForSimulation(UID clusterId);
-	~ScopedRetiredPopPauseForSimulation();
-	ScopedRetiredPopPauseForSimulation(const ScopedRetiredPopPauseForSimulation&) = delete;
-	ScopedRetiredPopPauseForSimulation& operator=(const ScopedRetiredPopPauseForSimulation&) = delete;
-};
