@@ -1050,8 +1050,8 @@ static void printRestoreUsage(bool devhelp) {
 	    "  --mode MODE    Restore mechanism to use: rangefile (default), bulkload.\n"
 	    "                 rangefile: Traditional range file restore from kvranges/\n"
 	    "                 bulkload: Use BulkLoad for faster range data restoration if BulkDump dataset is available\n"
-	    "                 If incomplete dataset: restore returns error with clear message directing user to retry with "
-	    "--mode rangefile.\n");
+	    "                 If the BulkDump dataset is incomplete, use rangefile mode only with a separate\n"
+	    "                 rangefile-only backup that covers the target version.\n");
 	printf("  --encryption-key-file"
 	       "                 The AES-256-GCM key in the provided file is used for decrypting backup files.\n");
 	printf(TLS_HELP);

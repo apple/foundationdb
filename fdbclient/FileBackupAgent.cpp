@@ -4381,7 +4381,8 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 					co_await restore.logError(
 					    cx,
 					    restore_missing_data(),
-					    "BulkLoad restore failed: bulkdump dataset incomplete; retry with --mode rangefile",
+					    "BulkLoad restore failed: bulkdump dataset incomplete. To restore with --mode rangefile, "
+					    "use a separate rangefile-only backup that covers the target version.",
 					    nullptr);
 					// Abort the restore by setting state to ABORTED
 					auto abortTr = makeReference<ReadYourWritesTransaction>(cx);
