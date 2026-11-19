@@ -240,6 +240,29 @@ TEST_CASE("transaction_destruction_cancels_with_timeout") {
 	fdb_future_destroy(grvFuture);
 }
 
+TEST_CASE("open_tenant_on_database_with_missing_cluster_file") {
+	FDBDatabase* missingClusterFileDb = fdb_open_database("/nonexistent/fdb.cluster");
+
+	FDBTenant* tenant;
+	fdb_check(fdb_database_open_tenant(missingClusterFileDb, reinterpret_cast<const uint8_t*>("tenant"), 6, &tenant));
+
+	FDBFuture* idFuture = fdb_tenant_get_id(tenant);
+	fdb_check(fdb_future_block_until_ready(idFuture));
+	CHECK(fdb_future_get_error(idFuture) != 0);
+	fdb_future_destroy(idFuture);
+
+	FDBTransaction* tr;
+	fdb_check(fdb_tenant_create_transaction(tenant, &tr));
+	FDBFuture* grvFuture = fdb_transaction_get_read_version(tr);
+	fdb_check(fdb_future_block_until_ready(grvFuture));
+	CHECK(fdb_future_get_error(grvFuture) == 1515);
+	fdb_future_destroy(grvFuture);
+
+	fdb_transaction_destroy(tr);
+	fdb_tenant_destroy(tenant);
+	fdb_database_destroy(missingClusterFileDb);
+}
+
 TEST_CASE("transaction_set_timeout_and_destroy_repeatedly") {
 	for (int i = 0; i < 1000; ++i) {
 		fdb::Transaction tr(db);
