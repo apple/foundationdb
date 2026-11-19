@@ -3727,6 +3727,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	state Optional<Version> blockedVersion;
 	state Reference<ChangeFeedInfo> feedInfo;
 	state Future<Void> streamEndReached;
+	state Future<Void> readyCheck;
 	state bool doFilterMutations;
 	state int commonFeedPrefixLength;
 
@@ -3813,7 +3814,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		}
 
 		loop {
-			Future<Void> onReady = req.reply.onReady();
+			state Future<Void> onReady = req.reply.onReady();
 			if (atLatest && !onReady.isReady() && !removeUID) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.id] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
@@ -3830,6 +3831,28 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 				}
 				removeUID = true;
+			}
+			if (atLatest && !onReady.isReady()) {
+				// A stalled stream caps the version reported for every feed from this client. End the stream
+				// before releasing its cap so a live reader retries from its last consumed version.
+				state double deadline = now() + SERVER_KNOBS->CHANGE_FEED_STREAM_READY_TIMEOUT;
+				while (!onReady.isReady()) {
+					if (now() >= deadline) {
+						TraceEvent("ChangeFeedStreamReadyTimeout", data->thisServerID)
+						    .suppressFor(1.0)
+						    .detail("FeedID", req.rangeID)
+						    .detail("StreamUID", req.id)
+						    .detail("Begin", req.begin)
+						    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
+						req.reply.sendError(connection_failed());
+						throw operation_obsolete();
+					}
+					// Reuse the timer across brief stalls. Flow keeps a scheduled delay until it fires.
+					if (!readyCheck.isValid() || readyCheck.isReady()) {
+						readyCheck = delayUntil(deadline);
+					}
+					wait(onReady || readyCheck);
+				}
 			}
 			wait(onReady);
 
