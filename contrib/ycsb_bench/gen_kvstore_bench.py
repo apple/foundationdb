@@ -158,6 +158,7 @@ def load_toml(size, engine, layout, method, node_count, data_dir):
 [[test]]
 testTitle = 'Load_{size}_{engine}_{layout}_{method}'
 useDB = false
+runFailureWorkloads = false
 startDelay = 0
 timeout = {LOAD_TIMEOUT}
 
@@ -205,6 +206,7 @@ def read_toml(
 [[test]]
 testTitle = '{kind}_{size}_{engine}_{layout}_{method}_{dist}_{pct}pct_{title_suffix}'
 useDB = false
+runFailureWorkloads = false
 startDelay = 0
 
     [[test.workload]]
