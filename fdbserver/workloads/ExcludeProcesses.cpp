@@ -30,15 +30,16 @@
 #include "fdbserver/tester/workloads.h"
 #include "flow/CodeProbe.h"
 
-// Excludes processes partway through a test and leaves them excluded, so a concurrent workload sees the cluster move
-// their data elsewhere. Processes are chosen by port (e.g. the storage processes a cluster was configured to have
-// started on a given port), or else randomly among the processes hosting storage servers.
+// Excludes processes partway through a test and leaves them excluded until the test ends, so a concurrent workload sees
+// the cluster move their data elsewhere. Processes are chosen by port (e.g. the storage processes a cluster was
+// configured to have started on a given port), or else randomly among the processes hosting storage servers.
 struct ExcludeProcessesWorkload : TestWorkload {
 	static constexpr auto NAME = "ExcludeProcesses";
 
 	double excludeDelay{ 0.0 };
 	std::vector<int> ports;
 	int count{ 0 }; // 0 = every matching process
+	std::vector<AddressExclusion> excluded;
 
 	explicit ExcludeProcessesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		excludeDelay = getOption(options, "excludeDelay"_sr, 0.0);
@@ -71,6 +72,7 @@ struct ExcludeProcessesWorkload : TestWorkload {
 		    .detail("Exclusions", describe(exclusions));
 		// Returns once the exclusion is durable; the processes' data then moves away in the background
 		co_await excludeServers(cx, exclusions);
+		excluded = exclusions;
 		TraceEvent("ExcludeProcessesWorkloadMain").detail("Status", "Exclusion finished");
 	}
 
@@ -119,7 +121,15 @@ struct ExcludeProcessesWorkload : TestWorkload {
 		return g_simulator->canKillProcesses(left, dead, ISimulator::KillType::KillInstantly, nullptr);
 	}
 
-	Future<bool> check(Database const& cx) override { return true; }
+	// Include the processes back once every workload is done, since with them excluded data distribution may not be
+	// able to build healthy teams, and the consistency checks that follow the test would never pass
+	Future<bool> check(Database const& cx) override {
+		if (!excluded.empty()) {
+			co_await includeServers(cx, excluded);
+			TraceEvent("ExcludeProcessesWorkloadMain").detail("Status", "Inclusion finished");
+		}
+		co_return true;
+	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
