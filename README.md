@@ -25,7 +25,7 @@ Contributions to FoundationDB can include contributions to the codebase, sharing
 The latest stable releases are versions that are recommended for production use, which have been extensively validated via simulation and real cluster tests and used in our production environment.
 
 | Branch   |     Latest Production Release      |  Notes |
-|:--------:|:----------------------------------:|-------:|
+|:--------:|:-----------------------------------|:-------|
 | 8.0      | [8.0.1](https://github.com/apple/foundationdb/releases/tag/8.0.1)   | Supported    |
 | 7.4      | [7.4.8](https://github.com/apple/foundationdb/releases/tag/7.4.8)   | Supported    |
 | 7.3      | [7.3.77](https://github.com/apple/foundationdb/releases/tag/7.3.77) | Bug Fixes    |
