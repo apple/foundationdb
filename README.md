@@ -28,7 +28,7 @@ The latest stable releases are versions that are recommended for production use,
 |:--------:|:----------------------------------:|-------:|
 | 8.0      | [8.0.1](https://github.com/apple/foundationdb/releases/tag/8.0.1)   | Supported    |
 | 7.4      | [7.4.8](https://github.com/apple/foundationdb/releases/tag/7.4.8)   | Supported    |
-| 7.3      | [7.3.77](https://github.com/apple/foundationdb/releases/tag/7.3.77) | Supported    |
+| 7.3      | [7.3.77](https://github.com/apple/foundationdb/releases/tag/7.3.77) | Bug Fixes    |
 | 7.2      |                                                                     | Experimental |
 | 7.1      | [7.1.57](https://github.com/apple/foundationdb/releases/tag/7.1.57) | Unsupported  |
 | 7.0      |                                                                     | Experimental |
