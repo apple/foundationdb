@@ -393,6 +393,9 @@ public:
 	// removed. Returns the number of references to the watch.
 	int32_t decreaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
 
+	// Gets the number of entries in the watch reference count map
+	size_t getWatchRefCountEntryCount() const { return watchCounterMap.size(); }
+
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 
 	Error deferredError;
