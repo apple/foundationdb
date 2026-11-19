@@ -1189,7 +1189,7 @@ public:
 		// for each range in tags, check all tags from 1 are continouous
 		for (const auto& [beginEnd, count] : tags) {
 			for (int i = 1; i < count; i++) {
-				if (!isContinuous(files, tagIndices[i], beginEnd.first, std::min(beginEnd.second - 1, end), nullptr)) {
+				if (!isContinuous(files, tagIndices[i], beginEnd.first, beginEnd.second, nullptr)) {
 					TraceEvent(SevWarn, "BackupFileNotContinuous")
 					    .detail("Partition", i)
 					    .detail("RangeBegin", beginEnd.first)
@@ -1226,16 +1226,34 @@ public:
 	}
 
 	static Optional<RestorableFileSet> getRestoreSetFromLogs(const std::vector<LogFile>& logs,
-	                                                         Version targetVersion,
 	                                                         RestorableFileSet restorable) {
 		Version end = logs.begin()->beginVersion;
-		computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
-		if (end >= targetVersion) {
+		computeRestoreEndVersion(logs, &restorable.logs, &end, restorable.targetVersion);
+		if (end > restorable.targetVersion) {
 			restorable.continuousBeginVersion = logs.begin()->beginVersion;
 			restorable.continuousEndVersion = end;
 			return Optional<RestorableFileSet>(restorable);
 		}
 		return Optional<RestorableFileSet>();
+	}
+
+	static Optional<RestorableFileSet> getRestoreSetFromPartitionedLogs(std::vector<LogFile> logs,
+	                                                                    Version firstRequiredVersion,
+	                                                                    RestorableFileSet restorable) {
+		// Duplicate files from earlier epochs must be filtered within each tag before checking version continuity.
+		std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
+			return std::tie(a.tagId, a.beginVersion, a.endVersion) < std::tie(b.tagId, b.beginVersion, b.endVersion);
+		});
+		restorable.logs = filterDuplicates(logs);
+		std::sort(restorable.logs.begin(), restorable.logs.end());
+		Version begin =
+		    firstRequiredVersion == invalidVersion ? restorable.logs.front().beginVersion : firstRequiredVersion;
+		if (!isPartitionedLogsContinuous(restorable.logs, begin, restorable.targetVersion))
+			return {};
+
+		restorable.continuousBeginVersion = begin;
+		restorable.continuousEndVersion = restorable.targetVersion + 1;
+		return restorable;
 	}
 
 	// Get a set of files that can restore the given "keyRangesFilter" to the "targetVersion".
@@ -1256,16 +1274,30 @@ public:
 		}
 
 		if (logsOnly) {
-			RestorableFileSet restorableSet;
+			RestorableFileSet restorableSet{};
 			restorableSet.targetVersion = targetVersion;
-			std::vector<LogFile> logFiles;
-			Version begin = beginVersion == invalidVersion ? 0 : beginVersion;
-			logFiles = co_await bc->listLogFiles(begin, targetVersion, MutationLogType::DEFAULT);
-			// List logs in version order so log continuity can be analyzed
-			std::sort(logFiles.begin(), logFiles.end());
-			if (!logFiles.empty()) {
-				co_return getRestoreSetFromLogs(logFiles, targetVersion, restorableSet);
+			if (beginVersion < invalidVersion || targetVersion < 0 || beginVersion > targetVersion)
+				co_return Optional<RestorableFileSet>();
+			if (beginVersion == targetVersion) {
+				restorableSet.continuousBeginVersion = restorableSet.continuousEndVersion = invalidVersion;
+				co_return restorableSet;
 			}
+			// The destination already includes mutations at an explicit begin version.
+			Version firstRequired = beginVersion == invalidVersion ? invalidVersion : beginVersion + 1;
+			Version listBegin = firstRequired == invalidVersion ? 0 : firstRequired;
+			std::vector<LogFile> logFiles;
+			std::vector<LogFile> partitionedLogs;
+			co_await (
+			    store(logFiles, bc->listLogFiles(listBegin, targetVersion, MutationLogType::DEFAULT)) &&
+			    store(partitionedLogs, bc->listLogFiles(listBegin, targetVersion, MutationLogType::PARTITIONED_LOG)));
+			if (!partitionedLogs.empty()) {
+				co_return getRestoreSetFromPartitionedLogs(
+				    std::move(partitionedLogs), firstRequired, std::move(restorableSet));
+			}
+			std::sort(logFiles.begin(), logFiles.end());
+			if (logFiles.empty() || (firstRequired != invalidVersion && logFiles.front().beginVersion > firstRequired))
+				co_return Optional<RestorableFileSet>();
+			co_return getRestoreSetFromLogs(logFiles, std::move(restorableSet));
 		}
 
 		// Find the most recent keyrange snapshot through which we can restore filtered key ranges into targetVersion.
@@ -1276,13 +1308,13 @@ public:
 				continue;
 			}
 
-			RestorableFileSet restorable;
+			RestorableFileSet restorable{};
 			Version minKeyRangeVersion = MAX_VERSION;
 			Version maxKeyRangeVersion = -1;
 
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
 			    co_await bc->readKeyspaceSnapshot(snapshots[i]);
-			if (!logsOnly && requireRangeFiles && results.first.empty()) {
+			if (requireRangeFiles && results.first.empty()) {
 				continue;
 			}
 
@@ -1327,7 +1359,6 @@ public:
 				co_return Optional<RestorableFileSet>(restorable);
 			}
 
-			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
 			std::vector<LogFile> logs;
 			std::vector<LogFile> plogs;
 			co_await (
@@ -1337,24 +1368,7 @@ public:
 			        bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, MutationLogType::PARTITIONED_LOG)));
 
 			if (!plogs.empty()) {
-				logs.swap(plogs);
-				// sort by tag ID so that filterDuplicates works.
-				std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
-					return std::tie(a.tagId, a.beginVersion, a.endVersion) <
-					       std::tie(b.tagId, b.beginVersion, b.endVersion);
-				});
-
-				// Remove duplicated log files that can happen for old epochs.
-				std::vector<LogFile> filtered = filterDuplicates(logs);
-				restorable.logs.swap(filtered);
-				// sort by version order again for continuous analysis
-				std::sort(restorable.logs.begin(), restorable.logs.end());
-				if (isPartitionedLogsContinuous(restorable.logs, minKeyRangeVersion, restorable.targetVersion)) {
-					restorable.continuousBeginVersion = minKeyRangeVersion;
-					restorable.continuousEndVersion = restorable.targetVersion + 1; // not inclusive
-					co_return Optional<RestorableFileSet>(restorable);
-				}
-				co_return Optional<RestorableFileSet>();
+				co_return getRestoreSetFromPartitionedLogs(std::move(plogs), minKeyRangeVersion, std::move(restorable));
 			}
 
 			// List logs in version order so log continuity can be analyzed
@@ -1362,7 +1376,7 @@ public:
 			// If there are logs and the first one starts at or before the keyrange's snapshot begin version, then
 			// it is valid restore set and proceed
 			if (!logs.empty() && logs.front().beginVersion <= minKeyRangeVersion) {
-				co_return getRestoreSetFromLogs(logs, targetVersion, restorable);
+				co_return getRestoreSetFromLogs(logs, std::move(restorable));
 			}
 		}
 		co_return Optional<RestorableFileSet>();
@@ -3115,20 +3129,76 @@ TEST_CASE("/backup/containers/localdir/getRestoreSet/rangeFileWithBulkDumpSnapsh
 	ASSERT(!bulkDumpOnly.present());
 	auto bulkLoad = co_await c->getRestoreSet(targetVersion, {}, false, invalidVersion, RequireRangeFiles::False);
 	ASSERT(bulkLoad.present());
+	auto incrementalWithoutLogs = co_await c->getRestoreSet(targetVersion, {}, true, rangeVersion);
+	ASSERT(!incrementalWithoutLogs.present());
 
 	Reference<IBackupFile> range = co_await c->writeRangeFile(rangeVersion, 0, rangeVersion, blockSize);
 	co_await testWriteSnapshotFile(range, normalKeys.begin, normalKeys.end, blockSize);
 	std::vector<std::string> rangeFiles{ range->getFileName() };
 	co_await c->writeKeyspaceSnapshotFile(rangeFiles, keyRanges, range->size(), IncludeKeyRangeMap::False);
-	Reference<IBackupFile> log = co_await c->writeLogFile(rangeVersion, targetVersion + 1, blockSize);
+	Reference<IBackupFile> log = co_await c->writeLogFile(rangeVersion, targetVersion, blockSize);
 	co_await log->finish();
 
+	auto missingTargetVersion = co_await c->getRestoreSet(targetVersion);
+	ASSERT(!missingTargetVersion.present());
+
+	Reference<IBackupFile> lastLog = co_await c->writeLogFile(targetVersion, targetVersion + 1, blockSize);
+	co_await lastLog->finish();
 	auto restore = co_await c->getRestoreSet(targetVersion);
 	ASSERT(restore.present());
 	ASSERT_EQ(restore.get().ranges.size(), 1);
 	ASSERT_EQ(restore.get().ranges.front().fileName, range->getFileName());
-	ASSERT_EQ(restore.get().logs.size(), 1);
+	ASSERT_EQ(restore.get().logs.size(), 2);
 	ASSERT_EQ(restore.get().logs.front().fileName, log->getFileName());
+	ASSERT_EQ(restore.get().logs.back().fileName, lastLog->getFileName());
+	co_await c->deleteContainer();
+}
+
+TEST_CASE("/backup/containers/localdir/getRestoreSet/incrementalLogCoverage") {
+	std::string url = fmt::format("file://{}/fdb_backups/{:x}", params.getDataDir(), timer_int());
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await c->create();
+
+	const Version beginVersion = 100;
+	const Version firstAvailableVersion = 150;
+	const Version targetVersion = 200;
+	const int blockSize = 64;
+	auto alreadyRestored = co_await c->getRestoreSet(targetVersion, {}, true, targetVersion);
+	ASSERT(alreadyRestored.present());
+	ASSERT(alreadyRestored.get().logs.empty());
+
+	Reference<IBackupFile> log = co_await c->writeLogFile(firstAvailableVersion, targetVersion + 1, blockSize);
+	co_await log->finish();
+
+	auto missingPrefix = co_await c->getRestoreSet(targetVersion, {}, true, beginVersion);
+	ASSERT(!missingPrefix.present());
+	auto fromPreviousVersion = co_await c->getRestoreSet(targetVersion, {}, true, firstAvailableVersion - 1);
+	ASSERT(fromPreviousVersion.present());
+	ASSERT_EQ(fromPreviousVersion.get().logs.size(), 1);
+	auto unspecifiedBegin = co_await c->getRestoreSet(targetVersion, {}, true);
+	ASSERT(unspecifiedBegin.present());
+	ASSERT_EQ(unspecifiedBegin.get().continuousBeginVersion, firstAvailableVersion);
+
+	Reference<IBackupFile> prefix = co_await c->writeLogFile(beginVersion, firstAvailableVersion, blockSize);
+	co_await prefix->finish();
+	auto restore = co_await c->getRestoreSet(targetVersion, {}, true, beginVersion);
+	ASSERT(restore.present());
+	ASSERT_EQ(restore.get().logs.size(), 2);
+	ASSERT_EQ(restore.get().logs.front().fileName, prefix->getFileName());
+	ASSERT_EQ(restore.get().logs.back().fileName, log->getFileName());
+
+	// When tagged logs are present, every tag must cover the target even if the default logs are complete.
+	auto tag0 = co_await c->writeTaggedLogFile(beginVersion, targetVersion + 1, blockSize, 0, 2);
+	co_await tag0->finish();
+	auto tag1 = co_await c->writeTaggedLogFile(beginVersion, targetVersion, blockSize, 1, 2);
+	co_await tag1->finish();
+	auto missingTagTail = co_await c->getRestoreSet(targetVersion, {}, true, beginVersion);
+	ASSERT(!missingTagTail.present());
+	auto tag1Tail = co_await c->writeTaggedLogFile(targetVersion, targetVersion + 1, blockSize, 1, 2);
+	co_await tag1Tail->finish();
+	auto partitioned = co_await c->getRestoreSet(targetVersion, {}, true, beginVersion);
+	ASSERT(partitioned.present());
+	ASSERT_EQ(partitioned.get().logs.size(), 3);
 	co_await c->deleteContainer();
 }
 
