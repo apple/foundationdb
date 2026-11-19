@@ -3023,6 +3023,11 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 		}
 		co_await tr->onError(err);
 	}
+
+	if (options.activeSnapshotIntervalSeconds.present()) {
+		co_await FileBackupAgent().applyActiveBulkDumpInterval(
+		    db, tagName, options.activeSnapshotIntervalSeconds.get());
+	}
 }
 
 // NOLINTBEGIN(bugprone-use-after-move): ignore clang-tidy false positives in parseLine's token buffer handling.

@@ -3940,6 +3940,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 		static TaskParam<Version> snapshotVersion() { return __FUNCTION__sr; }
 		static TaskParam<std::string> bulkDumpJobId() { return __FUNCTION__sr; }
 		static TaskParam<bool> timeoutOccurred() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> snapshotIntervalSeconds() { return __FUNCTION__sr; }
 	} Params;
 
 	StringRef getName() const override { return name; };
@@ -4044,25 +4045,9 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				// Store job ID for monitoring
 				Params.bulkDumpJobId().set(task, bulkDumpJob.getJobId().toString());
 
-				// Carry --snapshot-interval through to the job. Data distribution paces admission against
-				// this, so a bulkdump snapshot spreads over the requested window the way a rangefile
-				// snapshot already does: before this, -s reached only BackupSnapshotDispatchTask, which a
-				// bulkdump-mode backup never schedules, so the interval was accepted and ignored.
-				int64_t snapshotIntervalSeconds = 0;
-				Transaction intervalTr(cx);
-				while (true) {
-					Error err;
-					try {
-						intervalTr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-						intervalTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						snapshotIntervalSeconds =
-						    co_await config.snapshotIntervalSeconds().getD(&intervalTr, Snapshot::False, 0);
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					co_await intervalTr.onError(err);
-				}
+				// The interval for this snapshot rides on the task, not on the config: --initial-snapshot-interval
+				// governs the first snapshot and -s every later one, as on the rangefile path.
+				int64_t snapshotIntervalSeconds = Params.snapshotIntervalSeconds().getOrDefault(task, 0);
 				if (snapshotIntervalSeconds > 0) {
 					// Resolved against the clock now rather than stored as a duration: see
 					// BulkJobControlState::targetEndTime for why there is no dependable job start time.
@@ -4074,11 +4059,19 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					    .detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
 				}
 
-				// Monitor BulkDump progress - timeout is configurable for large datasets
-				bool completed = co_await monitorBulkDumpJobCompletion(cx,
-				                                                       bulkDumpJob.getJobId(),
-				                                                       CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT,
-				                                                       5.0); // Poll every 5 seconds
+				// The no-progress window must outlast the deliberate gaps pacing leaves between admissions.
+				bool completed =
+				    co_await monitorBulkDumpJobCompletion(cx,
+				                                          bulkDumpJob.getJobId(),
+				                                          CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT + snapshotIntervalSeconds,
+				                                          5.0); // Poll every 5 seconds
+
+				// A job cancelled along with its backup disappears the same way a finished one does. Whether
+				// this task is still wanted is what separates the two, so ask before judging the dataset.
+				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+					taskBucket->setOptions(tr);
+					return taskBucket->keepRunning(tr, task);
+				});
 
 				// A bulkdump that did not finish leaves no keyspace snapshot, and therefore no bulkDumpJobId
 				// for a bulkload restore to locate its data. Reporting the backup as successful in that
@@ -4239,7 +4232,16 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 		    .detail("Mode", mode.present() ? mode.get() : 0);
 
 		Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
-		co_await taskFuture->set(tr, taskBucket);
+		bool stopWhenDone = co_await config.stopWhenDone().getOrThrow(tr);
+		if (stopWhenDone) {
+			co_await taskFuture->set(tr, taskBucket);
+		} else {
+			// Like the rangefile loop, snapshots follow one another until the backup is discontinued, each
+			// spread over -s.
+			int64_t intervalSeconds = co_await config.snapshotIntervalSeconds().getOrThrow(tr);
+			co_await addTask(
+			    tr, taskBucket, task, snapshotVersion, TaskCompletionKey::signal(taskFuture), intervalSeconds);
+		}
 		co_await taskBucket->finish(tr, task);
 
 		TraceEvent("BulkDumpTaskFinish")
@@ -4254,6 +4256,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 	                           Reference<Task> parentTask,
 	                           Version snapshotVersion,
 	                           TaskCompletionKey completionKey,
+	                           int64_t snapshotIntervalSeconds,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 		Key key = co_await addBackupTask(BulkDumpTaskFunc::name,
 		                                 BulkDumpTaskFunc::version,
@@ -4265,6 +4268,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 		                                 [=](Reference<Task> task) {
 			                                 Params.snapshotVersion().set(task, snapshotVersion);
 			                                 Params.timeoutOccurred().set(task, false);
+			                                 Params.snapshotIntervalSeconds().set(task, snapshotIntervalSeconds);
 		                                 });
 		co_return key;
 	}
@@ -4498,8 +4502,12 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				int currentBulkDumpMode = co_await getBulkDumpMode(tr->getDatabase());
 				config.originalBulkDumpMode().set(tr, currentBulkDumpMode);
 
-				co_await BulkDumpTaskFunc::addTask(
-				    tr, taskBucket, task, beginVersion, TaskCompletionKey::joinWith(backupFinished));
+				co_await BulkDumpTaskFunc::addTask(tr,
+				                                   taskBucket,
+				                                   task,
+				                                   beginVersion,
+				                                   TaskCompletionKey::joinWith(backupFinished),
+				                                   initialSnapshotIntervalSeconds.orDefault(0));
 			}
 
 			// Add traditional range file snapshot if mode is RANGEFILE(0) or BOTH(2)
@@ -9506,6 +9514,52 @@ Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransact
 
 Future<Void> FileBackupAgent::abortBackup(Reference<ReadYourWritesTransaction> tr, std::string tagName) {
 	return FileBackupAgentImpl::abortBackup(this, tr, tagName);
+}
+
+static Future<Optional<std::pair<UID, BulkDumpOwnerInfo>>> getBulkDumpJobOwnedByBackup(Database cx,
+                                                                                       std::string tagName) {
+	Optional<BulkDumpState> job = co_await getSubmittedBulkDumpJob(cx);
+	if (!job.present()) {
+		co_return Optional<std::pair<UID, BulkDumpOwnerInfo>>();
+	}
+	Optional<BulkDumpOwnerInfo> owner = co_await getBulkDumpOwner(cx, job.get().getJobId());
+	if (!owner.present() || owner.get().ownerType != "backup" || owner.get().ownerName != tagName) {
+		co_return Optional<std::pair<UID, BulkDumpOwnerInfo>>();
+	}
+	co_return std::make_pair(job.get().getJobId(), owner.get());
+}
+
+Future<Void> FileBackupAgent::cancelBulkDumpOfBackup(Database cx, std::string tagName, Future<Void> backupStopped) {
+	co_await backupStopped;
+	Optional<std::pair<UID, BulkDumpOwnerInfo>> job = co_await getBulkDumpJobOwnedByBackup(cx, tagName);
+	if (!job.present()) {
+		co_return;
+	}
+	UID backupUID = job.get().second.ownerUID;
+	// A discontinue that waits for the current snapshot leaves the backup running, and its job must finish.
+	EBackupState state = co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		return BackupConfig(backupUID).stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN);
+	});
+	if (isRunnable(state)) {
+		co_return;
+	}
+	TraceEvent("BulkDumpJobCancelledWithBackup")
+	    .detail("BackupUID", backupUID)
+	    .detail("BulkDumpJobId", job.get().first)
+	    .detail("State", getStateText(state));
+	co_await cancelBulkDumpJob(cx, job.get().first);
+}
+
+Future<Optional<UID>> FileBackupAgent::applyActiveBulkDumpInterval(Database cx, std::string tagName, int64_t seconds) {
+	Optional<std::pair<UID, BulkDumpOwnerInfo>> job = co_await getBulkDumpJobOwnedByBackup(cx, tagName);
+	if (!job.present()) {
+		co_return Optional<UID>();
+	}
+	// Relative to the start of the snapshot, as on the rangefile path.
+	co_await setBulkJobTargetEndTime(cx, job.get().first, job.get().second.submitTime + seconds, /*isBulkDump=*/true);
+	co_return job.get().first;
 }
 
 Future<Void> FileBackupAgent::checkAndDisableBackupWorkers(Database cx) {
