@@ -22,6 +22,8 @@
 #ifndef FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
 #define FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
 
+#include <memory>
+
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/DataDistributorInterface.h"
@@ -583,7 +585,35 @@ struct DDBulkLoadEngineTask {
 	DDBulkLoadEngineTask() = default;
 
 	DDBulkLoadEngineTask(BulkLoadTaskState coreState, Version commitVersion, Promise<BulkLoadAck> completeAck)
-	  : coreState(coreState), commitVersion(commitVersion), completeAck(completeAck) {}
+	  : coreState(coreState), commitVersion(commitVersion), completeAck(completeAck) {
+		// Replacement relocators share the placement budget only when an early split can preserve all data.
+		// For an indivisible task, exhausting the budget marks the task failed.
+		const auto range = coreState.getRange();
+		for (const auto& manifest : coreState.getManifests()) {
+			const auto boundary = manifest.getBeginKey();
+			if (range.begin < boundary && boundary < range.end) {
+				placementMisses = std::make_shared<int>(0);
+				break;
+			}
+		}
+	}
+
+	bool recordPlacementMiss(int relocatorMisses) {
+		constexpr int limit = 50;
+		if (!placementMisses) {
+			return relocatorMisses == limit;
+		}
+		if (*placementMisses == limit) {
+			return false;
+		}
+		return ++*placementMisses == limit;
+	}
+
+	void recordPlacementSuccess() {
+		if (placementMisses) {
+			*placementMisses = 0;
+		}
+	}
 
 	bool operator==(const DDBulkLoadEngineTask& rhs) const {
 		return coreState == rhs.coreState && commitVersion == rhs.commitVersion;
@@ -592,6 +622,9 @@ struct DDBulkLoadEngineTask {
 	std::string toString() const {
 		return coreState.toString() + ", [CommitVersion]: " + std::to_string(commitVersion);
 	}
+
+private:
+	std::shared_ptr<int> placementMisses;
 };
 
 inline bool bulkLoadIsEnabled(int bulkLoadModeValue, bool shardEncodeLocationMetadata) {

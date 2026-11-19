@@ -6168,6 +6168,43 @@ BulkLoadTaskState splitTestTask(const std::vector<KeyRange>& manifestRanges, con
 
 } // namespace
 
+TEST_CASE("/DataDistribution/BulkLoad/PlacementRetriesAcrossRelocations") {
+	auto range = KeyRangeRef("a"_sr, "e"_sr);
+	std::vector<KeyRange> manifests{ KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("c"_sr, "e"_sr) };
+	auto task = splitTestTask(manifests, range);
+	BulkLoadTaskCollection collection{ UID() };
+	collection.publishTask(task, 1, {});
+	auto first = collection.getTaskByRange(range).get();
+	for (int miss = 1; miss <= 30; ++miss) {
+		ASSERT(!first.recordPlacementMiss(miss));
+	}
+	auto replacement = collection.getTaskByRange(range).get();
+	for (int miss = 1; miss < 20; ++miss) {
+		ASSERT(!replacement.recordPlacementMiss(miss));
+	}
+	ASSERT(replacement.recordPlacementMiss(20));
+	first.recordPlacementSuccess();
+	ASSERT(!replacement.recordPlacementMiss(1));
+	collection.eraseTask(task);
+	collection.publishTask(task, 2, {});
+	auto republished = collection.getTaskByRange(range).get();
+	for (int miss = 1; miss < 50; ++miss) {
+		ASSERT(!republished.recordPlacementMiss(miss));
+	}
+	ASSERT(republished.recordPlacementMiss(50));
+
+	// Neither manifest starts inside the clipped range. Replacing the relocator retains a full grace period.
+	auto clipped = splitTestTask(manifests, KeyRangeRef("c"_sr, "e"_sr));
+	DDBulkLoadEngineTask indivisible(clipped, 3, {});
+	for (int attempt = 0; attempt < 2; ++attempt) {
+		for (int miss = 1; miss < 50; ++miss) {
+			ASSERT(!indivisible.recordPlacementMiss(miss));
+		}
+	}
+	ASSERT(indivisible.recordPlacementMiss(50));
+	return Void();
+}
+
 TEST_CASE("/DataDistribution/BulkLoad/DeriveSplitTasks") {
 	// The children tile the parent and partition its manifests, and inherit its job.
 	{
