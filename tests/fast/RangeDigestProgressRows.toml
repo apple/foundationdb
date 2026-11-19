@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'RangeDigestProgressRows'
+useDB = true
+
+    [[test.workload]]
+    testName = 'RangeDigestProgressRows'
