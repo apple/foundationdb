@@ -25,12 +25,14 @@ Contributions to FoundationDB can include contributions to the codebase, sharing
 The latest stable releases are versions that are recommended for production use, which have been extensively validated via simulation and real cluster tests and used in our production environment.
 
 | Branch   |     Latest Production Release      |  Notes |
-|:--------:|:-------------:|------:|
-| 7.3      |  [7.3.77](https://github.com/apple/foundationdb/releases/tag/7.3.77) | Supported |
-| 7.2      |   | Experimental |
-| 7.1      |  [7.1.57](https://github.com/apple/foundationdb/releases/tag/7.1.57)   |   Bug fixes |
-| 7.0      |           |   Experimental |
-| 6.3      |  [6.3.25](https://github.com/apple/foundationdb/releases/tag/6.3.25) |   Unsupported |
+|:--------:|:----------------------------------:|-------:|
+| 8.0      | [8.0.1](https://github.com/apple/foundationdb/releases/tag/8.0.1)   | Supported    |
+| 7.4      | [7.4.8](https://github.com/apple/foundationdb/releases/tag/7.4.8)   | Supported    |
+| 7.3      | [7.3.77](https://github.com/apple/foundationdb/releases/tag/7.3.77) | Supported    |
+| 7.2      |                                                                     | Experimental |
+| 7.1      | [7.1.57](https://github.com/apple/foundationdb/releases/tag/7.1.57) | Unsupported  |
+| 7.0      |                                                                     | Experimental |
+| 6.3      | [6.3.25](https://github.com/apple/foundationdb/releases/tag/6.3.25) | Unsupported  |
 
 - `Supported` branches are those we actively maintain and will publish new patch releases.
 - `Bug fixes` are branches where we still accept bug fixes, but may not publish newer patch releases. The community can build the latest release binaries if needed and is encouraged to upgrade to the `Supported` branches.
