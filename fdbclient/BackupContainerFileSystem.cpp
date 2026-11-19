@@ -1248,8 +1248,9 @@ public:
 	static Future<Optional<RestorableFileSet>> getRestoreSet(Reference<BackupContainerFileSystem> bc,
 	                                                         Version targetVersion,
 	                                                         VectorRef<KeyRangeRef> keyRangesFilter,
-	                                                         bool logsOnly = false,
-	                                                         Version beginVersion = invalidVersion) {
+	                                                         bool logsOnly,
+	                                                         Version beginVersion,
+	                                                         RequireRangeFiles requireRangeFiles) {
 		for (const auto& range : keyRangesFilter) {
 			TraceEvent("BackupContainerGetRestoreSet").detail("RangeFilter", printable(range));
 		}
@@ -1281,6 +1282,9 @@ public:
 
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
 			    co_await bc->readKeyspaceSnapshot(snapshots[i]);
+			if (!logsOnly && requireRangeFiles && results.first.empty()) {
+				continue;
+			}
 
 			// If there is no key ranges filter for the restore OR if the snapshot contains no per-file key range info
 			// then return all of the range files
@@ -1914,9 +1918,14 @@ Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeF
 Future<Optional<RestorableFileSet>> BackupContainerFileSystem::getRestoreSet(Version targetVersion,
                                                                              VectorRef<KeyRangeRef> keyRangesFilter,
                                                                              bool logsOnly,
-                                                                             Version beginVersion) {
-	return BackupContainerFileSystemImpl::getRestoreSet(
-	    Reference<BackupContainerFileSystem>::addRef(this), targetVersion, keyRangesFilter, logsOnly, beginVersion);
+                                                                             Version beginVersion,
+                                                                             RequireRangeFiles requireRangeFiles) {
+	return BackupContainerFileSystemImpl::getRestoreSet(Reference<BackupContainerFileSystem>::addRef(this),
+	                                                    targetVersion,
+	                                                    keyRangesFilter,
+	                                                    logsOnly,
+	                                                    beginVersion,
+	                                                    requireRangeFiles);
 }
 
 Future<Optional<Version>> BackupContainerFileSystem::VersionProperty::get() {
@@ -3087,6 +3096,39 @@ TEST_CASE("/backup/containers/localdir/listKeyspaceSnapshots/versionFilter") {
 	std::vector<KeyspaceSnapshotFile> beyond = co_await bcfs->listKeyspaceSnapshots(4000, 5000);
 	ASSERT_EQ(beyond.size(), 0);
 
+	co_await c->deleteContainer();
+}
+
+TEST_CASE("/backup/containers/localdir/getRestoreSet/rangeFileWithBulkDumpSnapshot") {
+	std::string url = fmt::format("file://{}/fdb_backups/{:x}", params.getDataDir(), timer_int());
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await c->create();
+
+	const Version targetVersion = 200;
+	const Version rangeVersion = 100;
+	const int blockSize = 64;
+	std::vector<std::pair<Key, Key>> keyRanges{ { normalKeys.begin, normalKeys.end } };
+	auto metadata = SnapshotMetadata::bulkDump(deterministicRandom()->randomUniqueID().toString(), targetVersion, 0, 0);
+	co_await c->writeKeyspaceSnapshotFile({}, keyRanges, 0, IncludeKeyRangeMap::False, metadata);
+
+	auto bulkDumpOnly = co_await c->getRestoreSet(targetVersion);
+	ASSERT(!bulkDumpOnly.present());
+	auto bulkLoad = co_await c->getRestoreSet(targetVersion, {}, false, invalidVersion, RequireRangeFiles::False);
+	ASSERT(bulkLoad.present());
+
+	Reference<IBackupFile> range = co_await c->writeRangeFile(rangeVersion, 0, rangeVersion, blockSize);
+	co_await testWriteSnapshotFile(range, normalKeys.begin, normalKeys.end, blockSize);
+	std::vector<std::string> rangeFiles{ range->getFileName() };
+	co_await c->writeKeyspaceSnapshotFile(rangeFiles, keyRanges, range->size(), IncludeKeyRangeMap::False);
+	Reference<IBackupFile> log = co_await c->writeLogFile(rangeVersion, targetVersion + 1, blockSize);
+	co_await log->finish();
+
+	auto restore = co_await c->getRestoreSet(targetVersion);
+	ASSERT(restore.present());
+	ASSERT_EQ(restore.get().ranges.size(), 1);
+	ASSERT_EQ(restore.get().ranges.front().fileName, range->getFileName());
+	ASSERT_EQ(restore.get().logs.size(), 1);
+	ASSERT_EQ(restore.get().logs.front().fileName, log->getFileName());
 	co_await c->deleteContainer();
 }
 

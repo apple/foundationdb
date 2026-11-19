@@ -165,7 +165,8 @@ public:
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
 	                                                  VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                  bool logsOnly,
-	                                                  Version beginVersion) final;
+	                                                  Version beginVersion,
+	                                                  RequireRangeFiles requireRangeFiles) final;
 	static Future<Void> createTestEncryptionKeyFile(std::string const& filename);
 
 	Future<Void> writeEncryptionMetadata(int encryptionBlockSize) override;

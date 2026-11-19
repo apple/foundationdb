@@ -4382,7 +4382,7 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 					    cx,
 					    restore_missing_data(),
 					    "BulkLoad restore failed: bulkdump dataset incomplete. To restore with --mode rangefile, "
-					    "use a separate rangefile-only backup that covers the target version.",
+					    "use a backup with a rangefile snapshot and any logs needed to reach the target version.",
 					    nullptr);
 					// Abort the restore by setting state to ABORTED
 					auto abortTr = makeReference<ReadYourWritesTransaction>(cx);
@@ -6539,6 +6539,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		std::vector<KeyRange> ranges;
 		bool logsOnly{ false };
 		bool inconsistentSnapshotOnly{ false };
+		bool useRangeFileRestore{ true };
 
 		while (true) {
 			Error err;
@@ -6553,6 +6554,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				ranges = co_await restore.getRestoreRangesOrDefault(tr);
 				logsOnly = co_await restore.onlyApplyMutationLogs().getD(tr, Snapshot::False, false);
 				inconsistentSnapshotOnly = co_await restore.inconsistentSnapshotOnly().getD(tr, Snapshot::False, false);
+				useRangeFileRestore = co_await restore.useRangeFileRestore().getD(tr, Snapshot::False, true);
 				co_await taskBucket->keepRunning(tr, task);
 
 				ERestoreState oldState = co_await restore.stateEnum().getD(tr);
@@ -6611,8 +6613,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		for (auto const& r : ranges) {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
-		Optional<RestorableFileSet> restorable =
-		    co_await bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion);
+		Optional<RestorableFileSet> restorable = co_await bc->getRestoreSet(
+		    restoreVersion, keyRangesFilter, logsOnly, beginVersion, RequireRangeFiles{ useRangeFileRestore });
 		if (!restorable.present())
 			throw restore_missing_data();
 
@@ -8125,8 +8127,8 @@ public:
 		if (!beginVersions.empty()) {
 			beginVersion = *std::min_element(beginVersions.begin(), beginVersions.end());
 		}
-		Optional<RestorableFileSet> restoreSet =
-		    co_await bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion);
+		Optional<RestorableFileSet> restoreSet = co_await bc->getRestoreSet(
+		    targetVersion, ranges, onlyApplyMutationLogs, beginVersion, RequireRangeFiles{ useRangeFileRestore });
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")

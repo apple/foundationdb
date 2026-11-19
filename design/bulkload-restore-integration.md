@@ -669,13 +669,13 @@ BulkDump/BulkLoad integration uses the same error handling as current backup/res
 2. **Incomplete BulkDump Dataset at Restore**
    - Restore pre-flight check verifies manifest completeness
    - If incomplete: throw `restore_bulkload_dataset_incomplete` error
-   - On release 8.0, snapshot selection does not distinguish rangefile and BulkDump manifests. A rangefile restore can select a BulkDump manifest with no range files, even if the backup also contains a rangefile snapshot.
+   - A rangefile restore skips manifests without range files and looks for a rangefile snapshot that can reach the target version.
 
 3. **BulkLoad Fails During Restore**
    - When user specifies `--mode bulkload`, BulkLoad task fails and logs error
    - Restore fails with error: `restore_bulkload_failed`
    - Recovery options (in order of preference):
-     - **Format fallback**: For a rangefile restore on release 8.0, use a separate rangefile-only backup that covers the target version.
+     - **Format fallback**: Use a backup with a rangefile snapshot and any logs needed to reach the target version. A backup created with `--mode both` can contain a suitable rangefile snapshot.
      - **Older snapshot fallback**: Use an older snapshot from the backup dataset (if available) and replay more mutation logs to reach target version
      - **No recovery**: If only current BulkDump snapshot exists and BulkLoad consistently fails, restore cannot proceed
 
@@ -694,7 +694,7 @@ error_code_actor bulkload_invalid_configuration()  // NEW: Configuration validat
 #### Emergency Rollback
 If critical issues are discovered post-deployment:
 1. **Disable BulkDump** in new backups (revert to default `--mode rangefile`)
-2. **Use traditional restore** with a verified rangefile-only backup that covers the target version.
+2. **Use traditional restore** with a verified rangefile snapshot and any logs needed to reach the target version.
 
 ---
 
