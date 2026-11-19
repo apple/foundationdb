@@ -34,14 +34,16 @@ func TestErrorWrapping(t *testing.T) {
 	MustAPIVersion(API_VERSION)
 	db := MustOpenDefault()
 
+	// Static type error keeps vet's printf check from rejecting %w of *Error;
+	// wrapping *Error is deliberately covered since Error.Is handles it.
+	var ptrErr error = &Error{Code: 2007}
+
 	testCases := []error{
 		nil,
 		&Error{
 			Code: 2007,
 		},
-		fmt.Errorf("wrapped error: %w", &Error{
-			Code: 2007,
-		}),
+		fmt.Errorf("wrapped error: %w", ptrErr),
 		Error{
 			Code: 2007,
 		},
@@ -74,8 +76,9 @@ func TestErrorIs(t *testing.T) {
 	if !errors.Is(fmt.Errorf("wrap: %w", Error{Code: 1007}), ErrTransactionTooOld) {
 		t.Error("expected match through wrapping")
 	}
-	// wrapped pointer
-	if !errors.Is(fmt.Errorf("wrap: %w", &Error{Code: 1007}), ErrTransactionTooOld) {
+	// wrapped pointer (static type error, see TestErrorWrapping)
+	var ptrErr error = &Error{Code: 1007}
+	if !errors.Is(fmt.Errorf("wrap: %w", ptrErr), ErrTransactionTooOld) {
 		t.Error("expected match through wrapped *Error")
 	}
 	// no false positive: wrong code

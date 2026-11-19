@@ -30,6 +30,7 @@
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/SpecialKeySpace.h"
 #include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
 
@@ -398,7 +399,13 @@ ThreadFuture<Optional<Value>> ThreadSafeTransaction::get(const KeyRef& key, bool
 
 	ReadYourWritesTransaction* tr = this->tr;
 	return onMainThread([tr, k, snapshot]() -> Future<Optional<Value>> {
-		tr->checkDeferredError();
+		// Keep the failed mutation pending while allowing its diagnostic to be read.
+		if (tr->deferredError.code() == error_code_special_keys_api_failure &&
+		    k == SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin) {
+			tr->getTransaction().checkDeferredError();
+		} else {
+			tr->checkDeferredError();
+		}
 		return tr->get(k, Snapshot{ snapshot });
 	});
 }

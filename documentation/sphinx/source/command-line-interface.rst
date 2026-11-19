@@ -645,6 +645,33 @@ heap
 
 Enables heap profiling for the specified process.
 
+rangeconfig
+-----------
+
+The ``rangeconfig`` command shows or changes the configuration options of key ranges. These options are hints to data distribution. They do not change the shard map directly.
+
+Use it to give a key range more replicas than the rest of the database, for example a small range that is read heavily or needs extra durability, or to keep two ranges on different storage teams. A range with a replication factor above the cluster's replication level is placed on a larger storage team, and data distribution does not merge shards across the boundaries of a configured range. The ``DD_MAX_SHARDS_ON_LARGE_TEAMS`` knob limits how many shards can be placed on larger teams.
+
+``rangeconfig show [includeDefault]``
+
+Prints the range configuration as JSON. Ranges with no configured options are not shown, unless ``includeDefault`` is given.
+
+``rangeconfig update <BEGINKEY> <ENDKEY> [OPTION...]``
+
+Applies the given options to the key range from ``BEGINKEY`` to ``ENDKEY``. Options that are not given keep their current setting for the range.
+
+``rangeconfig set <BEGINKEY> <ENDKEY> [OPTION...]``
+
+Makes the key range have exactly the given configuration. Options that are not given are unset for the range.
+
+The options are:
+
+* ``default`` resets the range to have no options set. Used with ``set``, it clears all options for the range. Used with ``update``, it changes nothing, because ``update`` keeps the existing values.
+* ``replication <N>`` sets the replication factor for the range. A factor lower than the cluster's replication level is treated as the cluster's replication level.
+* ``teamID <N>`` indicates that shards in ranges with different team IDs should be assigned to different storage teams. Shards with the same team ID can share a storage team, but nothing enforces this.
+
+``rangeconfig`` requires the end key to be greater than the begin key.
+
 reset
 -----
 

@@ -908,9 +908,24 @@ Future<Void> connectionKeeper(Reference<Peer> self,
 					// Override waiting, if we are in failed state to update failure monitoring status.
 					Future<Void> retryConnectF = Never();
 					if (retryConnect) {
-						retryConnectF = IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()
-						                    ? delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY)
-						                    : delay(FLOW_KNOBS->SERVER_REQUEST_INTERVAL);
+						if (IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()) {
+							if (FlowTransport::isClient() && FLOW_KNOBS->CLIENT_SKIP_AVAILABLE_PEER_PROBE) {
+								// Reconnect only when there is something to send, so that a cluster restart does not
+								// make every client reconnect to every server it has cached at the same moment.
+								retryConnectF = Never();
+							} else {
+								retryConnectF = delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY);
+							}
+						} else {
+							if (FlowTransport::isClient() && FLOW_KNOBS->CLIENT_FAILED_PEER_PROBE_JITTER > 0) {
+								// Spread out probes, so that clients do not probe restarted servers in lockstep.
+								double jitter =
+								    deterministicRandom()->random01() * FLOW_KNOBS->CLIENT_FAILED_PEER_PROBE_JITTER;
+								retryConnectF = delay(FLOW_KNOBS->SERVER_REQUEST_INTERVAL + jitter);
+							} else {
+								retryConnectF = delay(FLOW_KNOBS->SERVER_REQUEST_INTERVAL);
+							}
+						}
 					}
 
 					auto res = co_await race(self->dataToSend.onTrigger(), retryConnectF);
@@ -1361,10 +1376,17 @@ static void deliverNow(TransportData* self,
 				g_currentDeliveryPeerDisconnect = nullptr;
 			});
 			StringRef data = reader.arenaReadAll();
-			ASSERT_GT(data.size(), 8);
 			ArenaObjectReader objReader(std::move(reader.arena()), data, AssumeVersion(reader.protocolVersion()));
 			receiver->receive(objReader);
 		} catch (Error& e) {
+			if (e.code() == error_code_serialization_failed) {
+				// Malformed peer input is not a local invariant violation.
+				TraceEvent(SevWarnAlways, "ReceiverDeserializationFailed")
+				    .suppressFor(1.0)
+				    .detail("Token", destination.token.toString())
+				    .detail("PeerAddress", peerAddress);
+				return;
+			}
 			TraceEvent(SevError, "ReceiverError")
 			    .error(e)
 			    .detail("Token", destination.token.toString())

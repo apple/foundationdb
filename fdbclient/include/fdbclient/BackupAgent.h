@@ -179,6 +179,12 @@ public:
 	                                                    Optional<std::string> encryptionKeyFileName,
 	                                                    bool useRangeFileRestore);
 
+	// True if a BulkLoad job runs over what a backup of these ranges records: partitioned-log workers record the whole
+	// keyspace, whatever the backup ranges. The transaction must be able to read system keys.
+	static Future<bool> isBackupUnderBulkLoadJob(Reference<ReadYourWritesTransaction> tr,
+	                                             MutationLogType mutationLogType,
+	                                             Standalone<VectorRef<KeyRangeRef>> ranges);
+
 	// restore() will
 	//   - make sure that url is readable and appears to be a complete backup
 	//   - make sure the requested TargetVersion is valid

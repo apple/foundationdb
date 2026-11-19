@@ -65,6 +65,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BUSY_WAIT_THRESHOLD,                                   0 ); // 1e100 == never sleep
 	init( CLIENT_REQUEST_INTERVAL,                             1.0 ); if( randomize && buggify() ) CLIENT_REQUEST_INTERVAL = 2.0;
 	init( SERVER_REQUEST_INTERVAL,                             1.0 ); if( randomize && buggify() ) SERVER_REQUEST_INTERVAL = 2.0;
+	init( CLIENT_SKIP_AVAILABLE_PEER_PROBE,                  false ); if( randomize && buggify() ) CLIENT_SKIP_AVAILABLE_PEER_PROBE = deterministicRandom()->coinflip();
+	init( CLIENT_FAILED_PEER_PROBE_JITTER,                     0.0 ); if( randomize && buggify() ) CLIENT_FAILED_PEER_PROBE_JITTER = 2.0;
 
 	init( REACTOR_FLAGS,                                         0 );
 
@@ -361,6 +363,10 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( RESTCLIENT_REQUEST_TRIES,                             10 );
 	init( RESTCLIENT_REQUEST_TIMEOUT_SEC,                        6 );
 	init( REST_LOG_LEVEL,                                        3 );
+
+	// Serialization
+	// When false, readers stop bounds-checking untrusted buffers. The std::array length check stays on.
+	init( FLATBUFFERS_BOUNDS_CHECKS_ENABLED,                  true );
 }
 // clang-format on
 
