@@ -1,0 +1,23 @@
+# KillRegionCycle with MONITOR_LEADER_DURING_CANDIDACY_DELAY always on. The remote region's processes wait
+# WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY before running for leader, so every run exercises learning the leader
+# during that delay, through recoveries and the loss of a region.
+[configuration]
+minimumRegions = 2
+
+[[knobs]]
+max_read_transaction_life_versions = 5000000
+monitor_leader_during_candidacy_delay = true
+
+[[test]]
+testTitle = 'KillRegionCycleLeaderMonitor'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 30000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'KillRegion'
+    testDuration = 30.0

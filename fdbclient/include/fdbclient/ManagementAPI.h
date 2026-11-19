@@ -248,11 +248,16 @@ Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange j
 // Submit a BulkLoad job: loading data from a remote folder using bulkloading mechanism.
 // There is at most one BulkLoad or one BulkDump job at a time.
 // If there is any existing BulkLoad or BulkDump job, reject the new job.
+// Bulkload commits no mutations, so a backup or DR would never record the loaded data: if one is running, submitted, or
+// covers the range, reject with bulkload_range_under_backup.
 // Set lockAware=true when submitting during database restore (when database is locked).
 Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware = false);
 
 // Return the existing BulkLoad job metadata (if any)
 Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr);
+
+// True if a BulkLoad job is submitted over any part of the range. The transaction must be able to read system keys.
+Future<bool> isRangeUnderBulkLoadJob(Reference<ReadYourWritesTransaction> tr, KeyRange range);
 
 // Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
 // the metadata.

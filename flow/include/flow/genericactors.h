@@ -775,7 +775,7 @@ Future<Void> asyncDeserialize(Reference<AsyncVar<Standalone<StringRef>>> input,
                               Reference<AsyncVar<Optional<T>>> output) {
 	while (true) {
 		if (!input->get().empty()) {
-			ObjectReader reader(input->get().begin(), IncludeVersion());
+			ObjectReader reader(input->get(), IncludeVersion());
 			T res;
 			reader.deserialize(res);
 			output->set(res);
