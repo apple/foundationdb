@@ -4,6 +4,15 @@
 Release Notes
 #############
 
+7.3.83
+======
+* Same as 7.3.82 release with AVX enabled.
+
+7.3.82
+======
+* Reverted the S3 multipart upload completion change from 7.3.80. A 200 response with an embedded error, and an uncertain completion (NoSuchUpload or a failed request), are handled as they were before 7.3.80. `(PR #14172) <https://github.com/apple/foundationdb/pull/14172>`_
+* Fixed memory leak by erasing the watch reference count map entry for a key once all watches on it have finished. `(PR #14481) <https://github.com/apple/foundationdb/pull/14481>`_
+
 7.3.81
 ======
 * Same as 7.3.80 release with AVX enabled.
