@@ -939,6 +939,85 @@ public:
 			}
 		}
 
+		// Verify the job and use its actual bounds before computing restorability. Older
+		// descriptors recorded the job start as a point snapshot. Even a correctly bounded
+		// descriptor cannot protect an earlier snapshot from expiration if its job is missing.
+		for (auto& s : desc.snapshots) {
+			if (s.totalSize != 0 || s.endVersion < desc.unreliableEndVersion.orDefault(0)) {
+				continue;
+			}
+			try {
+				auto job = co_await readBulkDumpJobId(bc, s, true);
+				if (job.empty()) {
+					continue;
+				}
+				auto batches = co_await BackupContainerFileSystem::readBulkDumpRanges(bc, job);
+				auto bounds = std::minmax_element(
+				    batches.begin(), batches.end(), [](const auto& a, const auto& b) { return a.version < b.version; });
+				s.beginVersion = bounds.first->version;
+				s.endVersion = bounds.second->version;
+			} catch (Error& e) {
+				if (!unusableSnapshot(e)) {
+					throw;
+				}
+				TraceEvent(SevWarn, "BackupDescribeUnreadableBulkDump").error(e).detail("Snapshot", s.fileName);
+				s.restorable = false;
+			}
+		}
+		// The stored begin can be too high: log files finish out of order, and a describe that ran before the first one
+		// existed stored the begin of the first file it saw. A snapshot that begins before the stored begin shows it,
+		// so look for files that extend the logs backwards.
+		if (metaLogBegin.present() && desc.minLogBegin.present() && !desc.snapshots.empty()) {
+			// A snapshot of a single version needs no logs.
+			Version firstSnapshotBegin = std::numeric_limits<Version>::max();
+			for (auto const& s : desc.snapshots) {
+				if (!s.isSingleVersion()) {
+					firstSnapshotBegin = std::min(firstSnapshotBegin, s.beginVersion);
+				}
+			}
+			if (firstSnapshotBegin < desc.minLogBegin.get()) {
+				Version unreliableEnd = desc.unreliableEndVersion.orDefault(0);
+				std::vector<LogFile> earlier =
+				    co_await bc->listLogFiles(unreliableEnd, desc.minLogBegin.get(), desc.mutationLogType);
+				Version begin = desc.minLogBegin.get();
+				if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
+					// The earliest begin from which every tag is covered up to the stored begin.
+					std::sort(earlier.begin(), earlier.end());
+					Version tried = invalidVersion;
+					for (auto const& f : earlier) {
+						if (f.beginVersion >= begin) {
+							break;
+						}
+						if (f.beginVersion != tried && getPartitionedLogsContinuousEndVersion(
+						                                   earlier, f.beginVersion) >= desc.minLogBegin.get() - 1) {
+							begin = f.beginVersion;
+							break;
+						}
+						tried = f.beginVersion;
+					}
+				} else {
+					for (bool extended = true; extended;) {
+						extended = false;
+						for (auto const& f : earlier) {
+							if (f.beginVersion < begin && f.endVersion >= begin) {
+								begin = f.beginVersion;
+								extended = true;
+							}
+						}
+					}
+				}
+				begin = std::max(begin, unreliableEnd);
+				if (begin < desc.minLogBegin.get()) {
+					TraceEvent(SevWarn, "BackupContainerLogBeginExtended")
+					    .detail("URL", bc->getURL())
+					    .detail("RecordedLogBegin", desc.minLogBegin.get())
+					    .detail("LogBegin", begin)
+					    .detail("FirstSnapshotBegin", firstSnapshotBegin);
+					desc.minLogBegin = begin;
+				}
+			}
+		}
+
 		// Only update stored contiguous log begin and end versions if we did NOT use a log start override.
 		// Otherwise, a series of describe operations can result in a version range which is actually missing data.
 		if (logStartVersionOverride == invalidVersion) {
@@ -969,31 +1048,6 @@ public:
 			}
 		}
 
-		// Verify the job and use its actual bounds before computing restorability. Older
-		// descriptors recorded the job start as a point snapshot. Even a correctly bounded
-		// descriptor cannot protect an earlier snapshot from expiration if its job is missing.
-		for (auto& s : desc.snapshots) {
-			if (s.totalSize != 0 || s.endVersion < desc.unreliableEndVersion.orDefault(0)) {
-				continue;
-			}
-			try {
-				auto job = co_await readBulkDumpJobId(bc, s, true);
-				if (job.empty()) {
-					continue;
-				}
-				auto batches = co_await BackupContainerFileSystem::readBulkDumpRanges(bc, job);
-				auto bounds = std::minmax_element(
-				    batches.begin(), batches.end(), [](const auto& a, const auto& b) { return a.version < b.version; });
-				s.beginVersion = bounds.first->version;
-				s.endVersion = bounds.second->version;
-			} catch (Error& e) {
-				if (!unusableSnapshot(e)) {
-					throw;
-				}
-				TraceEvent(SevWarn, "BackupDescribeUnreadableBulkDump").error(e).detail("Snapshot", s.fileName);
-				s.restorable = false;
-			}
-		}
 		std::sort(desc.snapshots.begin(), desc.snapshots.end());
 
 		for (auto& s : desc.snapshots) {
@@ -3176,6 +3230,109 @@ TEST_CASE("/backup/containers/localdir/incrementalBeginVersion") {
 	ASSERT_EQ(ordinarySet.get().logs.size(), 1);
 	ASSERT_EQ(ordinarySet.get().logs.front().fileName, log->getFileName());
 	co_await container->deleteContainer();
+}
+
+// Log files can be written out of order. A describe that runs before the first one exists records the begin of the
+// first file it sees; once the earlier file is written, a later describe must find it, or the snapshot stays
+// unrestorable for good.
+TEST_CASE("/backup/containers/localdir/logBeginAfterLateFirstLogFile") {
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await c->create();
+
+	Key begin = ""_sr;
+	Key end = "\xff"_sr;
+	uint32_t blockSize = 3 * sizeof(uint32_t) + begin.size() + end.size() + 8;
+	// A snapshot taken over versions 55..60 needs the logs from 55 on.
+	Reference<IBackupFile> range1 = co_await c->writeRangeFile(50, 0, 55, blockSize);
+	co_await testWriteSnapshotFile(range1, begin, end, blockSize);
+	Reference<IBackupFile> range2 = co_await c->writeRangeFile(50, 1, 60, blockSize);
+	co_await testWriteSnapshotFile(range2, begin, end, blockSize);
+	co_await c->writeKeyspaceSnapshotFile({ range1->getFileName(), range2->getFileName() },
+	                                      { std::make_pair(begin, end), std::make_pair(begin, end) },
+	                                      200,
+	                                      IncludeKeyRangeMap::False);
+
+	auto writeLog = [&](Version b, Version e) -> Future<Void> {
+		Reference<IBackupFile> log = co_await c->writeLogFile(b, e, 10);
+		co_await log->finish();
+	};
+	co_await writeLog(70, 90);
+	co_await writeLog(90, 110);
+
+	// The first file is missing: the snapshot at 50..60 is not covered, and the begin 70 is recorded.
+	BackupDescription before = co_await c->describeBackup();
+	ASSERT(before.minLogBegin.present());
+	ASSERT_EQ(before.minLogBegin.get(), 70);
+	ASSERT(!before.maxRestorableVersion.present());
+
+	// A file that does not connect to the recorded begin does not extend it.
+	co_await writeLog(20, 30);
+	BackupDescription apart = co_await c->describeBackup();
+	ASSERT_EQ(apart.minLogBegin.get(), 70);
+	ASSERT(!apart.maxRestorableVersion.present());
+
+	// The files that cover the snapshot are written late, both after the recorded begin: the begin follows the chain.
+	co_await writeLog(60, 70);
+	co_await writeLog(50, 60);
+	BackupDescription after = co_await c->describeBackup();
+	ASSERT_EQ(after.minLogBegin.get(), 50);
+	ASSERT(after.maxRestorableVersion.present());
+	ASSERT_GE(after.maxRestorableVersion.get(), 60);
+
+	// The corrected begin is recorded: a describe that trusts the recorded values agrees.
+	BackupDescription again = co_await c->describeBackup();
+	ASSERT_EQ(again.minLogBegin.get(), 50);
+	ASSERT_EQ(again.maxRestorableVersion.get(), after.maxRestorableVersion.get());
+
+	co_await c->deleteContainer();
+}
+
+// The same for partitioned logs: the begin must not move until every tag covers the earlier range.
+TEST_CASE("/backup/containers/localdir/logBeginAfterLatePartitionedLogFile") {
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await c->create();
+
+	Key begin = ""_sr;
+	Key end = "\xff"_sr;
+	uint32_t blockSize = 3 * sizeof(uint32_t) + begin.size() + end.size() + 8;
+	Reference<IBackupFile> range1 = co_await c->writeRangeFile(50, 0, 55, blockSize);
+	co_await testWriteSnapshotFile(range1, begin, end, blockSize);
+	Reference<IBackupFile> range2 = co_await c->writeRangeFile(50, 1, 60, blockSize);
+	co_await testWriteSnapshotFile(range2, begin, end, blockSize);
+	co_await c->writeKeyspaceSnapshotFile({ range1->getFileName(), range2->getFileName() },
+	                                      { std::make_pair(begin, end), std::make_pair(begin, end) },
+	                                      200,
+	                                      IncludeKeyRangeMap::False);
+
+	auto writeLog = [&](Version b, Version e, int tag) -> Future<Void> {
+		Reference<IBackupFile> log = co_await c->writeTaggedLogFile(b, e, 10, tag, 2);
+		co_await log->finish();
+	};
+	for (int tag = 0; tag < 2; ++tag) {
+		co_await writeLog(70, 90, tag);
+		co_await writeLog(90, 110, tag);
+	}
+
+	BackupDescription before = co_await c->describeBackup();
+	ASSERT_EQ(before.minLogBegin.get(), 70);
+	ASSERT(!before.maxRestorableVersion.present());
+
+	// One tag has the earlier range: it is not covered, so the begin stays.
+	co_await writeLog(40, 70, 0);
+	BackupDescription partial = co_await c->describeBackup();
+	ASSERT_EQ(partial.minLogBegin.get(), 70);
+	ASSERT(!partial.maxRestorableVersion.present());
+
+	// Both tags have it.
+	co_await writeLog(40, 70, 1);
+	BackupDescription after = co_await c->describeBackup();
+	ASSERT_EQ(after.minLogBegin.get(), 40);
+	ASSERT(after.maxRestorableVersion.present());
+	ASSERT_GE(after.maxRestorableVersion.get(), 60);
+
+	co_await c->deleteContainer();
 }
 
 TEST_CASE("/backup/containers/localdir/missingLogRangesRestorability") {
