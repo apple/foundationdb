@@ -58,6 +58,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 using namespace std::string_view_literals;
@@ -2652,8 +2653,8 @@ public:
 		// Indicate that extension to this new count has been started
 		self->filePageCountPending = newPageCount;
 
-		// Wait for any previous extensions to complete
-		co_await previousExtension;
+		// The pager retains this future until the next extension. Drop its predecessor after the wait.
+		co_await std::exchange(previousExtension, {});
 
 		// Grow the file
 		co_await self->pageFile->truncate(newPageCount * self->physicalPageSize);
@@ -2714,7 +2715,7 @@ public:
 	                                           unsigned int level,
 	                                           Standalone<VectorRef<LogicalPageID>> pageIDs,
 	                                           Reference<ArenaPage> data) {
-		co_await after;
+		co_await std::exchange(after, {});
 		co_await self->writePhysicalPage(reason, level, pageIDs, data);
 	}
 
@@ -10087,6 +10088,41 @@ TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
 	ASSERT_EQ(survivingRead.get()->dataAsStringRef().substr(0, expectedPageContents.size()), expectedPageContents);
 
 	return Void();
+}
+
+TEST_CASE("/redwood/correctness/unit/pagerReleasesPredecessors") {
+	g_redwoodMetricsActor = Void();
+	g_redwoodMetrics.clear();
+
+	std::string file = "unittest_pager-predecessors.redwood-v1";
+	deleteFile(file);
+	auto* pager = new DWALPager(4096,
+	                            SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE,
+	                            file,
+	                            FLOW_KNOBS->PAGE_CACHE_4K,
+	                            0,
+	                            SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
+	                            false);
+	co_await pager->init();
+	LogicalPageID id = co_await pager->newPageID();
+	auto page = pager->newPageBuffer();
+	page->init(EncodingType::XXHash64, PageType::BTreeNode, 1);
+	page->setLogicalPageInfo(id, invalidLogicalPageID);
+
+	Promise<Void> previous;
+	Future<Void> extension = DWALPager::extendToCover(pager, id, previous.getFuture());
+	Future<Void> write = DWALPager::writePhysicalPageAfter(
+	    pager, extension, PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<LogicalPageID>(&id, 1), page);
+	ASSERT(!write.isReady());
+	previous.send(Void());
+	co_await write;
+	co_await delay(0);
+	ASSERT_EQ(previous.getFutureReferenceCount(), 0);
+	ASSERT_EQ(extension.getFutureReferenceCount(), 1);
+
+	Future<Void> closed = pager->onClosed();
+	pager->dispose();
+	co_await closed;
 }
 
 TEST_CASE("/redwood/correctness/btreeCloseWithQueuedCommits") {

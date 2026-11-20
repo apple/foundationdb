@@ -47,6 +47,7 @@
 #include "FileBackupAgentFileFormat.h"
 #include "flow/network.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/Util.h"
 
 #include <cinttypes>
@@ -1138,7 +1139,9 @@ size_t TwoBuffers::getBufferSize() {
 }
 
 // only one readNextBlock can be run at a single time, otherwie the same block might be loaded twice
-Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int index) {
+Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> selfInput, int index) {
+	// A restore can stop at its target version with this read still cached.
+	Reference<TwoBuffers> self(std::move(selfInput));
 	if (self->currentFileIndex >= self->files.size()) {
 		TraceEvent(SevError, "ReadNextBlockOutOfBound")
 		    .detail("FileIndex", self->currentFileIndex)
@@ -1174,6 +1177,25 @@ void TwoBuffers::fillBufferIfAbsent(int index) {
 	auto self = Reference<TwoBuffers>::addRef(this);
 	self->buffers[index]->fetchingData = readNextBlock(self, index);
 	return;
+}
+
+TEST_CASE("/backup/partitionedLog/releasesUnreadBuffer") {
+	auto url = fmt::format("file://{}/fdb_backups/{:x}", params.getDataDir(), timer_int());
+	auto container = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await container->create();
+	auto log = co_await container->writeLogFile(1, 2, 4096);
+	uint8_t value = 42;
+	co_await log->append(&value, 1);
+	co_await log->finish();
+
+	std::vector<RestoreFile> files{ { .version = 1, .fileName = log->getFileName(), .fileSize = 1 } };
+	auto buffers = makeReference<TwoBuffers>(1, container, files, 0);
+	co_await buffers->ready();
+	ASSERT_EQ(buffers->getBufferSize(), 1);
+	std::weak_ptr<char[]> bytes = buffers->peek();
+	buffers.clear();
+	co_await container->deleteContainer();
+	ASSERT(bytes.expired());
 }
 
 bool endOfBlock(char* start, int offset) {

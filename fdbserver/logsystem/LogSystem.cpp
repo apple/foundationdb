@@ -803,7 +803,9 @@ Future<Void> LogSystem::onError() const {
 	}
 }
 
-Future<Void> LogSystem::pushResetChecker(Reference<ConnectionResetInfo> self, NetworkAddress addr) {
+Future<Void> LogSystem::pushResetChecker(Reference<ConnectionResetInfo> tracker, NetworkAddress addr) {
+	// The tracker holds the returned future. Release our reference before final suspend.
+	auto self = std::move(tracker);
 	self->slowReplies = 0;
 	self->fastReplies = 0;
 	co_await delay(SERVER_KNOBS->PUSH_STATS_INTERVAL);
