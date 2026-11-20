@@ -56,8 +56,7 @@ public:
 		}
 		const int ciphertextLen = bytes - GCM_TAG_LEN;
 		const uint8_t* tag = encrypted + ciphertextLen;
-		StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
-		DecryptionStreamCipher decryptor(cipherKey, self->getIV(block));
+		DecryptionStreamCipher decryptor(self->cipherKey.get(), self->getIV(block));
 		auto decrypted = decryptor.decrypt(encrypted, ciphertextLen, arena);
 		// Throws restore_corrupted_data if the tag does not verify.
 		decryptor.finish(tag, arena);
@@ -153,8 +152,11 @@ public:
 	}
 };
 
-AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, Mode mode, int encryptionBlockSize)
-  : file(file), mode(mode), currentBlock(0), encryptionBlockSize(encryptionBlockSize) {
+AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file,
+                                       Mode mode,
+                                       int encryptionBlockSize,
+                                       std::shared_ptr<const StreamCipherKey> cipherKey)
+  : file(file), cipherKey(std::move(cipherKey)), mode(mode), currentBlock(0), encryptionBlockSize(encryptionBlockSize) {
 	ASSERT_GT(encryptionBlockSize, 0);
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (mode == Mode::APPEND_ONLY) {
@@ -254,7 +256,7 @@ StreamCipher::IV AsyncFileEncrypted::getIV(uint32_t block) const {
 
 Future<Void> AsyncFileEncrypted::writeLastBlockToFile() {
 	Arena arena;
-	EncryptionStreamCipher encryptor(StreamCipherKey::getGlobalCipherKey(), getIV(currentBlock));
+	EncryptionStreamCipher encryptor(cipherKey.get(), getIV(currentBlock));
 	auto ciphertext = encryptor.encrypt(&writeBuffer[0], offsetInBlock, arena);
 	auto tag = encryptor.finish(arena);
 	const int rawBlockSize = encryptionBlockSize + GCM_TAG_LEN;
@@ -277,13 +279,14 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 		deterministicRandom()->randomBytes(writeBuffer.data(), bytes);
 	}
 	std::vector<unsigned char> readBuffer(bytes, 0);
-	StreamCipherKey::initializeGlobalRandomTestKey();
+	auto key = std::make_shared<StreamCipherKey>(AES_256_KEY_LENGTH);
+	key->initializeRandomTestKey();
 	int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
 	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
 	Reference<IAsyncFile> rawFile = co_await IAsyncFileSystem::filesystem()->open(
 	    joinPath(params.getDataDir(), "test-encrypted-file"), flags, 0600);
 	Reference<IAsyncFile> file =
-	    makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize);
+	    makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize, key);
 	int bytesWritten = 0;
 	int chunkSize;
 	while (bytesWritten < bytes) {
@@ -292,7 +295,7 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 		bytesWritten += chunkSize;
 	}
 	co_await file->sync();
-	file = makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
+	file = makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize, key);
 	int bytesRead = 0;
 	while (bytesRead < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesRead);
@@ -306,7 +309,8 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 TEST_CASE("fdbrpc/AsyncFileEncrypted/ZeroLengthRead") {
 	const int encryptionBlockSize = 4096;
 	const int bytes = 2 * encryptionBlockSize + 1;
-	StreamCipherKey::initializeGlobalRandomTestKey();
+	auto key = std::make_shared<StreamCipherKey>(AES_256_KEY_LENGTH);
+	key->initializeRandomTestKey();
 	int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
 	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
 	Reference<IAsyncFile> rawFile = co_await IAsyncFileSystem::filesystem()->open(
@@ -314,16 +318,16 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted/ZeroLengthRead") {
 	std::vector<unsigned char> readBuffer(encryptionBlockSize, 0xa5);
 	const auto untouchedBuffer = readBuffer;
 	Reference<IAsyncFile> file =
-	    makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
+	    makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize, key);
 	int bytesRead = co_await file->read(readBuffer.data(), 0, 0);
 	ASSERT_EQ(bytesRead, 0);
 	ASSERT(readBuffer == untouchedBuffer);
 
-	file = makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize);
+	file = makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize, key);
 	std::vector<unsigned char> writeBuffer(bytes, 0x5a);
 	co_await file->write(writeBuffer.data(), bytes, 0);
 	co_await file->sync();
-	file = makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
+	file = makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize, key);
 	for (int offset : { 0, 1, encryptionBlockSize, encryptionBlockSize + 1, bytes, bytes + 1 }) {
 		bytesRead = co_await file->read(readBuffer.data(), 0, offset);
 		ASSERT_EQ(bytesRead, 0);

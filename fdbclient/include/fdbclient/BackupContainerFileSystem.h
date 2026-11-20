@@ -24,6 +24,7 @@
 
 #include "fmt/format.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/Trace.h"
 
@@ -181,6 +182,8 @@ protected:
 	bool usesEncryption() const;
 
 	void setEncryptionKey(Optional<std::string> const& encryptionKeyFileName);
+	Future<Reference<IAsyncFile>> encryptedFile(Future<Reference<IAsyncFile>> file,
+	                                            AsyncFileEncrypted::Mode mode) const;
 
 	Future<Void> writeEntireFileFallback(const std::string& fileName, const std::string& fileContents);
 
@@ -222,7 +225,7 @@ private:
 
 	friend class BackupContainerFileSystemImpl;
 
-	Future<Void> encryptionSetupFuture;
+	Future<std::shared_ptr<const StreamCipherKey>> encryptionKey;
 };
 
 #endif
