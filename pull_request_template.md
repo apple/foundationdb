@@ -1,18 +1,35 @@
-Replace this text with your description here...
+<!--
+Keep the headings below. Replace the guidance comments with your description.
+Keep the level of detail proportional to the change.
+-->
 
-# Code-Reviewer Section
+## Problem
 
-The general pull request guidelines can be found [here](https://github.com/apple/foundationdb/wiki/FoundationDB-Commit-Process).
+<!--
+Start with a short explanation that a ten-year-old could understand. Describe
+who or what is affected and why it matters. Give a concrete example of the
+current behavior; for a bug, include the trigger and how it was found.
+-->
 
-Please check each of the following things and check *all* boxes before accepting a PR.
+## Solution
 
-- [ ] The PR has a description, explaining both the problem and the solution.
-- [ ] The description mentions which forms of testing were done and the testing seems reasonable.
-- [ ] Every function/class/actor that was touched is reasonably well documented.
+<!--
+Start with the main idea in plain language. Use the same example to show the
+new behavior. Explain key design choices and tradeoffs. If a walkthrough helps,
+link to the key source blocks in execution order and explain their roles.
+-->
 
-## For Release-Branches
+## Testing
 
-If this PR is made against a release-branch, please also check the following:
+<!--
+List the checks you ran and their results. If you did not run tests, say why.
+For Joshua runs, include each ensemble ID as plain text, its latest verified
+status, and passed, failed, and remaining counts when available. Update these
+results when following up on the PR; a running ensemble need not delay opening it.
+-->
 
-- [ ] This change/bugfix is a cherry-pick from the next younger branch (younger `release-branch` or `main` if this is the youngest branch)
-- [ ] There is a good reason why this PR needs to go into a release branch and this reason is documented (either in the description above or in a linked GitHub issue)
+<!--
+We encourage AI-assisted review of the PR diff against its target branch:
+What is it trying to do? Is it correct? Are there bugs? Are there omissions?
+Are there better ways of doing things? Should this CL be LGTMd?
+-->
