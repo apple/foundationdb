@@ -361,18 +361,22 @@ struct BulkDumping : TestWorkload {
 
 		// Wait until dispatch is under way, measured on admissions rather than progress: progress counts
 		// dump batches, not tasks, so it cannot say whether the job has started handing work out.
+		// Pacing spreads admissions across the whole target, so a gate as long as the target would race the
+		// last of them: allow a fraction of it, which the admissions of a healthy job reach many times over.
+		double gateSeconds = std::min(self->pauseProbeTimeout, self->pacingTargetSeconds / 2);
 		double waitStart = now();
 		while (true) {
-			if (now() - waitStart > self->pauseProbeTimeout) {
-				TraceEvent(SevError, "BulkDumpingPacingNeverDispatched")
-				    .detail("JobId", jobId)
-				    .detail("Required", self->minAdmissionsToProbe)
-				    .detail("Elapsed", now() - waitStart);
-				co_return;
-			}
 			int64_t admitted = co_await getBulkDumpAdmittedCount(cx, jobId);
 			if (admitted >= self->minAdmissionsToProbe) {
 				TraceEvent("BulkDumpingPacingProbeReady").detail("JobId", jobId).detail("Admitted", admitted);
+				co_return;
+			}
+			if (now() - waitStart > gateSeconds) {
+				TraceEvent(SevError, "BulkDumpingPacingNeverDispatched")
+				    .detail("JobId", jobId)
+				    .detail("Required", self->minAdmissionsToProbe)
+				    .detail("Admitted", admitted)
+				    .detail("Elapsed", now() - waitStart);
 				co_return;
 			}
 			co_await delay(1.0);

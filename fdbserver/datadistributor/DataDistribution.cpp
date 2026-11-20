@@ -414,6 +414,8 @@ struct DDBulkDumpJobManager {
 	// a pass restarts whenever scheduling is interrupted, and with this reset each time, every admission
 	// looked like the first and none was ever paced -- one job restarted 63 passes for 32 admissions.
 	double previousRemainingWidth = -1;
+	// Width of tasks that have failed since pacing last looked, and so left their range undumped.
+	double failedWidth = 0;
 
 	DDBulkDumpJobManager() = default;
 	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -2734,6 +2736,45 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 	co_await waitForAll(bulkLoadActors);
 }
 
+// Approximate position of a key as a fraction, by reading its leading bytes as a base-256 value.
+//
+// Pacing needs a measure of progress through the job, and the key range is the only thing a bulkdump
+// knows at submit time. Task counts cannot serve: the metadata counts dump batches, and the number of
+// tasks is not bounded by shards either -- a single-shard job still dispatches one task per batch-bounded
+// portion, so the total is only known once the job is over.
+//
+// The value is used solely for ratios between keys in the same job, and only the bytes after the prefix
+// every key in the job shares carry any information about position: skip them, or a job confined to one
+// subspace would read as zero width throughout and never be paced. Eight bytes past the prefix is ample,
+// since the job's own endpoints already differ at the first of them.
+double keyPositionFraction(StringRef key, int skip) {
+	double value = 0;
+	double scale = 1.0 / 256.0;
+	for (int i = 0; i < 8; i++) {
+		int at = skip + i;
+		uint8_t byte = at < key.size() ? key[at] : 0;
+		value += byte * scale;
+		scale /= 256.0;
+	}
+	return value;
+}
+
+// Width of a range as a fraction of the job's keyspace, floored at zero for inverted or empty input.
+double keyRangeWidthFraction(KeyRangeRef range, int skip) {
+	return std::max(0.0, keyPositionFraction(range.end, skip) - keyPositionFraction(range.begin, skip));
+}
+
+// What the previous admission accomplished, as the shrinkage of the unscheduled remainder since it.
+// The remainder shrinks by the range the pass walked past, whether or not the task there did anything, so the
+// width of tasks that have failed since is taken back out: that range is dumped by a later pass, and pacing
+// that credited it would sleep for work that has not happened.
+double bulkDumpConsumedWidth(double previousRemainingWidth, double remainingWidth, double failedWidth) {
+	if (previousRemainingWidth < 0) {
+		return 0;
+	}
+	return std::max(0.0, previousRemainingWidth - remainingWidth - failedWidth);
+}
+
 // The actor spawned by DD dedicated to listen on a SS bulkdump task and holding a budget of parallelismLimitor.
 // The parallelismLimitor is used to limit the maximum concurrent bulkloading tasks spawned by DD.
 // Each DD spawned task corresponds to an actual alive SS bulk dumping task.
@@ -2776,6 +2817,11 @@ Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 		if (e.code() == error_code_movekeys_conflict) {
 			throw e; // trigger DD restarts, which resets bulkDumpParallelismLimitor
 		}
+		if (bulkDumpState.getJobId() == self->bulkDumpJobManager.jobState.getJobId()) {
+			KeyRangeRef jobRange = self->bulkDumpJobManager.jobState.getJobRange();
+			self->bulkDumpJobManager.failedWidth +=
+			    keyRangeWidthFraction(bulkDumpState.getRange(), commonPrefixLength(jobRange.begin, jobRange.end));
+		}
 		// Sliently exit for other errors
 	}
 	self->bulkDumpParallelismLimitor.decrementTaskCounter();
@@ -2813,32 +2859,6 @@ Future<Void> markBulkDumpRangesFailed(Reference<DataDistributor> self, std::map<
 		}
 		co_await tr.onError(err);
 	}
-}
-
-// Approximate position of a key as a fraction, by reading its leading bytes as a base-256 value.
-//
-// Pacing needs a measure of progress through the job, and the key range is the only thing a bulkdump
-// knows at submit time. Task counts cannot serve: the metadata counts dump batches, and the number of
-// tasks is not bounded by shards either -- a single-shard job still dispatches one task per batch-bounded
-// portion, so the total is only known once the job is over.
-//
-// Eight bytes is ample. The value is used solely for ratios between keys in the same job, so a shared
-// prefix beyond that resolution only makes successive tasks look equally sized, which costs smoothness
-// and not correctness.
-double keyPositionFraction(StringRef key) {
-	double value = 0;
-	double scale = 1.0 / 256.0;
-	for (int i = 0; i < 8; i++) {
-		uint8_t byte = i < key.size() ? key[i] : 0;
-		value += byte * scale;
-		scale /= 256.0;
-	}
-	return value;
-}
-
-// Width of a range as a fraction of the keyspace, floored at zero for inverted or empty input.
-double keyRangeWidthFraction(KeyRangeRef range) {
-	return std::max(0.0, keyPositionFraction(range.end) - keyPositionFraction(range.begin));
 }
 
 Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
@@ -2988,10 +3008,13 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 							// width on every admission, which is why pacing declined to wait at all on
 							// those seeds. The shrinkage of the remainder between admissions is the work
 							// that actually happened.
-							double remainingWidth = keyRangeWidthFraction(KeyRangeRef(taskRange.begin, jobRange.end));
+							double remainingWidth =
+							    keyRangeWidthFraction(KeyRangeRef(taskRange.begin, jobRange.end),
+							                          commonPrefixLength(jobRange.begin, jobRange.end));
 							double& previousRemainingWidth = self->bulkDumpJobManager.previousRemainingWidth;
-							double consumedWidth =
-							    previousRemainingWidth < 0 ? 0 : previousRemainingWidth - remainingWidth;
+							double consumedWidth = bulkDumpConsumedWidth(
+							    previousRemainingWidth, remainingWidth, self->bulkDumpJobManager.failedWidth);
+							self->bulkDumpJobManager.failedWidth = 0;
 							previousRemainingWidth = remainingWidth;
 							double waitSeconds = 0;
 							if (remainingWidth > 0 && consumedWidth > 0) {
@@ -6462,6 +6485,42 @@ TEST_CASE("/DataDistribution/BulkDump/SkipTracker") {
 		ASSERT(!tracker.shouldFail(5, 0.0, 0.0));
 		ASSERT(!tracker.shouldFail(5, 1e9, 0.0));
 	}
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/BulkDump/PacingWidthMeasuresWithinTheJobRange") {
+	// A job confined to one subspace: every key shares a long prefix, which used to read as zero width.
+	KeyRange job = KeyRangeRef("mytable/users/"_sr, "mytable/users0"_sr);
+	int skip = commonPrefixLength(job.begin, job.end);
+	ASSERT_EQ(skip, 13);
+	ASSERT_EQ(keyRangeWidthFraction(job, 0), 0.0);
+	ASSERT(keyRangeWidthFraction(job, skip) > 0);
+
+	// Half way through the job is half the width, whatever the prefix.
+	double half =
+	    keyRangeWidthFraction(KeyRangeRef(job.begin, "mytable/users/\x80"_sr), skip) / keyRangeWidthFraction(job, skip);
+	ASSERT(std::abs(half - 0.5) < 1e-9);
+
+	// A whole-keyspace job has no shared prefix and keeps its old scale.
+	ASSERT_EQ(commonPrefixLength(normalKeys.begin, normalKeys.end), 0);
+	ASSERT(std::abs(keyRangeWidthFraction(KeyRangeRef("\x80"_sr, "\xc0"_sr), 0) - 0.25) < 1e-9);
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/BulkDump/PacingDoesNotCreditFailedTasks") {
+	// The first admission has nothing to measure against.
+	ASSERT_EQ(bulkDumpConsumedWidth(-1, 0.9, 0), 0.0);
+	// The remainder shrank by what the pass walked past.
+	ASSERT(std::abs(bulkDumpConsumedWidth(0.9, 0.6, 0) - 0.3) < 1e-12);
+	// A task that failed instantly left its range undumped: nothing was consumed, so nothing is waited for.
+	ASSERT(bulkDumpConsumedWidth(0.9, 0.6, 0.3) < 1e-12);
+	ASSERT(std::abs(bulkDumpConsumedWidth(0.9, 0.6, 0.1) - 0.2) < 1e-12);
+	// A failure reported for an earlier interval cannot make consumption negative.
+	ASSERT_EQ(bulkDumpConsumedWidth(0.9, 0.6, 0.5), 0.0);
+	// A pass restarting from the front grows the remainder; that is not consumption either.
+	ASSERT_EQ(bulkDumpConsumedWidth(0.1, 0.9, 0), 0.0);
 
 	return Void();
 }
