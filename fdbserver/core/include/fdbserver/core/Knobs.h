@@ -841,6 +841,10 @@ public:
 	double CC_CLASS_DELAY;
 	double WAIT_FOR_GOOD_RECRUITMENT_DELAY;
 	double WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY;
+	// If true, a process waiting WAIT_FOR_GOOD_RECRUITMENT_DELAY or WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY before
+	// running for leader learns the current leader from the coordinators meanwhile, so it can register with it
+	// without waiting for the delay to expire.
+	bool MONITOR_LEADER_DURING_CANDIDACY_DELAY;
 	double ATTEMPT_RECRUITMENT_DELAY;
 	double WAIT_FOR_DISTRIBUTOR_JOIN_DELAY;
 	double WAIT_FOR_RATEKEEPER_JOIN_DELAY;
