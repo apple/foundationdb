@@ -1180,7 +1180,8 @@ void TwoBuffers::fillBufferIfAbsent(int index) {
 }
 
 TEST_CASE("/backup/partitionedLog/releasesUnreadBuffer") {
-	auto url = fmt::format("file://{}/fdb_backups/{:x}", params.getDataDir(), timer_int());
+	auto path = joinPath(params.getDataDir(), "unread-partitioned-log");
+	auto url = "file://" + (g_network->isSimulated() ? path : abspath(path));
 	auto container = IBackupContainer::openContainer(url, {}, {}, 0);
 	co_await container->create();
 	auto log = co_await container->writeLogFile(1, 2, 4096);

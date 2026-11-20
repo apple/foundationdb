@@ -10094,7 +10094,7 @@ TEST_CASE("/redwood/correctness/unit/pagerReleasesPredecessors") {
 	g_redwoodMetricsActor = Void();
 	g_redwoodMetrics.clear();
 
-	std::string file = "unittest_pager-predecessors.redwood-v1";
+	std::string file = joinPath(params.getDataDir(), "pager-predecessors.redwood-v1");
 	deleteFile(file);
 	auto* pager = new DWALPager(4096,
 	                            SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE,
