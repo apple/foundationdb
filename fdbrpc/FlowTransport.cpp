@@ -883,9 +883,11 @@ Future<Void> delayedHealthUpdate(HealthMonitor* healthMonitor, NetworkAddress ad
 	}
 }
 
-Future<Void> connectionKeeper(Reference<Peer> self,
+Future<Void> connectionKeeper(Reference<Peer> peer,
                               Reference<IConnection> conn = Reference<IConnection>(),
                               Future<Void> reader = Void()) {
+	// The peer owns the returned future. Release the peer before final suspend.
+	Reference<Peer> self = std::move(peer);
 	TraceEvent(SevDebug, "ConnectionKeeper", conn ? conn->getDebugID() : UID())
 	    .detail("PeerAddr", self->destination)
 	    .detail("PeerAddress", self->destination)
@@ -2616,6 +2618,27 @@ static ReliablePacket* sendPacket(TransportData* self,
 		peer->lastDataPacketSentTime = now();
 	}
 	return rp;
+}
+
+TEST_CASE("noSim/fdbrpc/FlowTransport/DisconnectedPeerOwnership") {
+	auto* network = INetworkConnections::net();
+	auto listener = network->listen(NetworkAddress::parse("127.0.0.1:0"));
+	auto client = co_await network->connect(listener->getListenAddress());
+	auto connection = co_await listener->accept();
+
+	TransportData transport(1, WLTOKEN_FIRST_AVAILABLE, nullptr);
+	auto address = connection->getPeerAddress();
+	auto peer = transport.getOrOpenPeer(address, false);
+	Promise<Void> reader;
+	peer->onIncomingConnection(peer, connection, reader.getFuture());
+	// The completed future must release its reference even while it is still held.
+	auto keeper = peer->connect;
+
+	client->close();
+	reader.sendError(connection_failed());
+	co_await keeper;
+	ASSERT(!transport.getPeer(address));
+	ASSERT_EQ(peer->debugGetReferenceCount(), 1);
 }
 
 TEST_CASE("noSim/fdbrpc/FlowTransport/PacketLimitOnSend") {
