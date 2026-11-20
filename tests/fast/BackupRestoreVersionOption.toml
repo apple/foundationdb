@@ -1,0 +1,47 @@
+# A backup and restore of a Cycle ring with the version option of the backup workloads set to 'v2': partitioned mutation
+# logs written by backup workers, with range file snapshots and restore. The backup runs while Cycle writes; RestoreBackup
+# then stops it, restores in place to its latest restorable version, and Cycle checks the ring.
+
+testClass = "Backup"
+
+[[test]]
+testTitle = 'SubmitBackupV2'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'SubmitBackup'
+    version = 'v2'
+    tag = 'v2'
+    backupDir = 'file://simfdb/backups/v2/'
+    delayFor = 0
+    stopWhenDone = false
+    encrypted = false
+
+[[test]]
+testTitle = 'RestoreV2'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'RestoreBackup'
+    version = 'v2'
+    tag = 'v2'
+    delayFor = 0
+
+[[test]]
+testTitle = 'VerifyCycle'
+checkOnly = true
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
