@@ -386,6 +386,10 @@ void DatabaseContext::expireThrottles() {
 // trace file names. The IP is then provided by a repeated call to initializeClientTracing
 // when opening a database. All tracing events from this point are annotated with the local IP
 //
+// If the local IP cannot be determined when opening a database (e.g. no coordinator hostname
+// resolves), tracing is initialized without the IP, as above. The IP is only determined again
+// when another database is opened, not while the current one keeps running.
+//
 // If tracing initialization is completed, further calls to initializeClientTracing are ignored
 void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Optional<int> apiVersion) {
 	if (!networkOptions.traceDirectory.present()) {
