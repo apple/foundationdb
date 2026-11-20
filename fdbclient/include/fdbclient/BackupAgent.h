@@ -39,7 +39,6 @@ FDB_BOOLEAN_PARAM(ForceAction);
 FDB_BOOLEAN_PARAM(Terminator);
 FDB_BOOLEAN_PARAM(IncrementalBackupOnly);
 FDB_BOOLEAN_PARAM(OnlyApplyMutationLogs);
-FDB_BOOLEAN_PARAM(InconsistentSnapshotOnly);
 FDB_BOOLEAN_PARAM(ShowErrors);
 FDB_BOOLEAN_PARAM(AbortOldBackup);
 FDB_BOOLEAN_PARAM(DstOnly); // TODO: More descriptive name?
@@ -168,6 +167,10 @@ public:
 
 	enum ERestoreState { UNINITIALIZED = 0, QUEUED = 1, STARTING = 2, RUNNING = 3, COMPLETED = 4, ABORTED = 5 };
 	static StringRef restoreStateText(ERestoreState id);
+	static const char* getRestoreModeError(bool logsOnly,
+	                                       bool inconsistentSnapshotOnly,
+	                                       bool useRangeFileRestore,
+	                                       MutationLogType logType = MutationLogType::DEFAULT);
 	static Key getPauseKey();
 
 	// restore() will

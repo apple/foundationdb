@@ -1246,12 +1246,10 @@ public:
 		});
 		restorable.logs = filterDuplicates(logs);
 		std::sort(restorable.logs.begin(), restorable.logs.end());
-		Version begin =
-		    firstRequiredVersion == invalidVersion ? restorable.logs.front().beginVersion : firstRequiredVersion;
-		if (!isPartitionedLogsContinuous(restorable.logs, begin, restorable.targetVersion))
+		if (!isPartitionedLogsContinuous(restorable.logs, firstRequiredVersion, restorable.targetVersion))
 			return {};
 
-		restorable.continuousBeginVersion = begin;
+		restorable.continuousBeginVersion = firstRequiredVersion;
 		restorable.continuousEndVersion = restorable.targetVersion + 1;
 		return restorable;
 	}
@@ -1268,7 +1266,8 @@ public:
 	                                                         VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                         bool logsOnly,
 	                                                         Version beginVersion,
-	                                                         RequireRangeFiles requireRangeFiles) {
+	                                                         RequireRangeFiles requireRangeFiles,
+	                                                         InconsistentSnapshotOnly inconsistentSnapshotOnly) {
 		for (const auto& range : keyRangesFilter) {
 			TraceEvent("BackupContainerGetRestoreSet").detail("RangeFilter", printable(range));
 		}
@@ -1291,8 +1290,8 @@ public:
 			    store(logFiles, bc->listLogFiles(listBegin, targetVersion, MutationLogType::DEFAULT)) &&
 			    store(partitionedLogs, bc->listLogFiles(listBegin, targetVersion, MutationLogType::PARTITIONED_LOG)));
 			if (!partitionedLogs.empty()) {
-				co_return getRestoreSetFromPartitionedLogs(
-				    std::move(partitionedLogs), firstRequired, std::move(restorableSet));
+				// Incremental replay supports default logs only. Mixing formats can omit mutations from a tag.
+				co_return Optional<RestorableFileSet>();
 			}
 			std::sort(logFiles.begin(), logFiles.end());
 			if (logFiles.empty() || (firstRequired != invalidVersion && logFiles.front().beginVersion > firstRequired))
@@ -1337,6 +1336,8 @@ public:
 				}
 				// No range file matches 'keyRangesFilter'.
 				if (restorable.ranges.empty()) {
+					if (inconsistentSnapshotOnly)
+						continue;
 					throw backup_not_overlapped_with_keys_filter();
 				}
 			}
@@ -1349,8 +1350,8 @@ public:
 			// restorable.snapshot.beginVersion is set to the smallest(oldest) snapshot's beginVersion
 			restorable.snapshot = snapshots[i];
 
-			// No logs needed if there is a complete filtered key space snapshot at the target version.
-			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion) {
+			if (inconsistentSnapshotOnly ||
+			    (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion)) {
 				restorable.continuousBeginVersion = restorable.continuousEndVersion = invalidVersion;
 				TraceEvent("BackupContainerGetRestorableFilesWithoutLogs")
 				    .detail("KeyRangeVersion", restorable.targetVersion)
@@ -1929,17 +1930,20 @@ Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeF
 	return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file, cx);
 }
 
-Future<Optional<RestorableFileSet>> BackupContainerFileSystem::getRestoreSet(Version targetVersion,
-                                                                             VectorRef<KeyRangeRef> keyRangesFilter,
-                                                                             bool logsOnly,
-                                                                             Version beginVersion,
-                                                                             RequireRangeFiles requireRangeFiles) {
+Future<Optional<RestorableFileSet>> BackupContainerFileSystem::getRestoreSet(
+    Version targetVersion,
+    VectorRef<KeyRangeRef> keyRangesFilter,
+    bool logsOnly,
+    Version beginVersion,
+    RequireRangeFiles requireRangeFiles,
+    InconsistentSnapshotOnly inconsistentSnapshotOnly) {
 	return BackupContainerFileSystemImpl::getRestoreSet(Reference<BackupContainerFileSystem>::addRef(this),
 	                                                    targetVersion,
 	                                                    keyRangesFilter,
 	                                                    logsOnly,
 	                                                    beginVersion,
-	                                                    requireRangeFiles);
+	                                                    requireRangeFiles,
+	                                                    inconsistentSnapshotOnly);
 }
 
 Future<Optional<Version>> BackupContainerFileSystem::VersionProperty::get() {
@@ -3142,6 +3146,17 @@ TEST_CASE("/backup/containers/localdir/getRestoreSet/rangeFileWithBulkDumpSnapsh
 	auto missingTargetVersion = co_await c->getRestoreSet(targetVersion);
 	ASSERT(!missingTargetVersion.present());
 
+	auto snapshotOnly = co_await c->getRestoreSet(
+	    targetVersion, {}, false, invalidVersion, RequireRangeFiles::True, InconsistentSnapshotOnly::True);
+	ASSERT(snapshotOnly.present());
+	ASSERT_EQ(snapshotOnly.get().ranges.size(), 1);
+	ASSERT_EQ(snapshotOnly.get().ranges.front().fileName, range->getFileName());
+	ASSERT(snapshotOnly.get().logs.empty());
+	auto latestSnapshot = co_await c->getRestoreSet(
+	    latestVersion, {}, false, invalidVersion, RequireRangeFiles::True, InconsistentSnapshotOnly::True);
+	ASSERT(latestSnapshot.present());
+	ASSERT_EQ(latestSnapshot.get().targetVersion, rangeVersion);
+
 	Reference<IBackupFile> lastLog = co_await c->writeLogFile(targetVersion, targetVersion + 1, blockSize);
 	co_await lastLog->finish();
 	auto restore = co_await c->getRestoreSet(targetVersion);
@@ -3151,6 +3166,19 @@ TEST_CASE("/backup/containers/localdir/getRestoreSet/rangeFileWithBulkDumpSnapsh
 	ASSERT_EQ(restore.get().logs.size(), 2);
 	ASSERT_EQ(restore.get().logs.front().fileName, log->getFileName());
 	ASSERT_EQ(restore.get().logs.back().fileName, lastLog->getFileName());
+
+	// A full restore using partitioned logs needs the target version on every tag.
+	auto tag0 = co_await c->writeTaggedLogFile(rangeVersion, targetVersion + 1, blockSize, 0, 2);
+	co_await tag0->finish();
+	auto tag1 = co_await c->writeTaggedLogFile(rangeVersion, targetVersion, blockSize, 1, 2);
+	co_await tag1->finish();
+	auto missingTagTail = co_await c->getRestoreSet(targetVersion);
+	ASSERT(!missingTagTail.present());
+	auto tag1Tail = co_await c->writeTaggedLogFile(targetVersion, targetVersion + 1, blockSize, 1, 2);
+	co_await tag1Tail->finish();
+	auto partitioned = co_await c->getRestoreSet(targetVersion);
+	ASSERT(partitioned.present());
+	ASSERT_EQ(partitioned.get().logs.size(), 3);
 	co_await c->deleteContainer();
 }
 
@@ -3187,18 +3215,16 @@ TEST_CASE("/backup/containers/localdir/getRestoreSet/incrementalLogCoverage") {
 	ASSERT_EQ(restore.get().logs.front().fileName, prefix->getFileName());
 	ASSERT_EQ(restore.get().logs.back().fileName, log->getFileName());
 
-	// When tagged logs are present, every tag must cover the target even if the default logs are complete.
-	auto tag0 = co_await c->writeTaggedLogFile(beginVersion, targetVersion + 1, blockSize, 0, 2);
-	co_await tag0->finish();
-	auto tag1 = co_await c->writeTaggedLogFile(beginVersion, targetVersion, blockSize, 1, 2);
-	co_await tag1->finish();
-	auto missingTagTail = co_await c->getRestoreSet(targetVersion, {}, true, beginVersion);
-	ASSERT(!missingTagTail.present());
-	auto tag1Tail = co_await c->writeTaggedLogFile(targetVersion, targetVersion + 1, blockSize, 1, 2);
-	co_await tag1Tail->finish();
-	auto partitioned = co_await c->getRestoreSet(targetVersion, {}, true, beginVersion);
-	ASSERT(partitioned.present());
-	ASSERT_EQ(partitioned.get().logs.size(), 3);
+	// Even complete default logs must not mask tagged files in the requested interval.
+	auto tagged = co_await c->writeTaggedLogFile(beginVersion, targetVersion + 2, blockSize, 0, 1);
+	co_await tagged->finish();
+	auto mixed = co_await c->getRestoreSet(targetVersion, {}, true, beginVersion);
+	ASSERT(!mixed.present());
+
+	// Only the tagged log reaches this target.
+	KeyRangeRef keyRange("a"_sr, "b"_sr);
+	auto partitioned = co_await c->getRestoreSet(targetVersion + 1, VectorRef<KeyRangeRef>(&keyRange, 1), true);
+	ASSERT(!partitioned.present());
 	co_await c->deleteContainer();
 }
 

@@ -563,7 +563,10 @@ The ``start`` command will start a new restore on the specified (or default) tag
   The cluster file for the original database from which the backup was created.  The original database is only needed to convert a --timestamp argument to a database version.
 
 ``--inconsistent-snapshot-only``
-  Ignore mutation log files during the restore to speedup the process. Because only range files are restored, this option gives an inconsistent snapshot in most cases and is not recommended to use.
+  Restore only the range files from a snapshot at or before the target version. If the target is omitted, use the latest matching rangefile snapshot. The range files can come from different versions, so the result may be inconsistent. This option requires rangefile mode.
+
+``--incremental``
+  Replay non-partitioned mutation logs onto an existing destination. With ``--begin-version VERSION``, the destination must already contain the requested keys through VERSION. Replay starts at VERSION + 1 and includes the target version. With no begin version, replay starts at the first available log. This option requires rangefile mode and is incompatible with ``--inconsistent-snapshot-only``.
 
 ``--user-data``
   Restore only the user keyspace. This option should NOT be used alongside --system-metadata (below) and CANNOT be used alongside other specified key ranges.

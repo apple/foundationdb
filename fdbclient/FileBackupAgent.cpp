@@ -1629,6 +1629,20 @@ Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffer
 	return getNext(Reference<PartitionedLogIteratorTwoBuffers>::addRef(this));
 }
 
+const char* FileBackupAgent::getRestoreModeError(bool logsOnly,
+                                                 bool inconsistentSnapshotOnly,
+                                                 bool useRangeFileRestore,
+                                                 MutationLogType logType) {
+	if (logsOnly && inconsistentSnapshotOnly)
+		return "--incremental and --inconsistent-snapshot-only cannot be combined";
+	if (!useRangeFileRestore && (logsOnly || inconsistentSnapshotOnly))
+		return "--mode bulkload requires a full restore and cannot be combined with --incremental or "
+		       "--inconsistent-snapshot-only";
+	if (logsOnly && logType != MutationLogType::DEFAULT)
+		return "--incremental requires non-partitioned mutation logs";
+	return nullptr;
+}
+
 FileBackupAgent::FileBackupAgent()
   : subspace(Subspace(fileBackupPrefixRange.begin))
     // The other subspaces have logUID -> value
@@ -6448,7 +6462,9 @@ Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key t
 	co_return result;
 }
 
-Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName) {
+Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr,
+                                   Key tagName,
+                                   UnlockDB unlockDB = UnlockDB::True) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
@@ -6474,7 +6490,8 @@ Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key 
 	// Cancel the backup tasks on this tag
 	co_await tag.cancel(tr);
 
-	co_await unlockDatabase(tr, current.get().first);
+	if (unlockDB)
+		co_await unlockDatabase(tr, current.get().first);
 	co_return ERestoreState::ABORTED;
 }
 
@@ -6565,6 +6582,19 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 					                          nullptr);
 					co_return;
 				}
+				// Older clients may have queued restore options that this worker cannot safely execute.
+				MutationLogType logType = MutationLogType::DEFAULT;
+				if (logsOnly)
+					logType = co_await restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
+				if (const char* error = FileBackupAgent::getRestoreModeError(
+				        logsOnly, inconsistentSnapshotOnly, useRangeFileRestore, logType)) {
+					co_await restore.logError(cx, invalid_option(), error);
+					std::string tag = co_await restore.tag().getD(tr);
+					bool unlockDB = co_await restore.unlockDBAfterRestore().getD(tr, Snapshot::False, true);
+					co_await abortRestore(tr, StringRef(tag), UnlockDB{ unlockDB });
+					co_await tr->commit();
+					co_return;
+				}
 				restore.stateEnum().set(tr, ERestoreState::STARTING);
 				restore.fileSet().clear(tr);
 				restore.fileBlockCount().clear(tr);
@@ -6610,8 +6640,13 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		for (auto const& r : ranges) {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
-		Optional<RestorableFileSet> restorable = co_await bc->getRestoreSet(
-		    restoreVersion, keyRangesFilter, logsOnly, beginVersion, RequireRangeFiles{ useRangeFileRestore });
+		Optional<RestorableFileSet> restorable =
+		    co_await bc->getRestoreSet(restoreVersion,
+		                               keyRangesFilter,
+		                               logsOnly,
+		                               beginVersion,
+		                               RequireRangeFiles{ useRangeFileRestore },
+		                               InconsistentSnapshotOnly{ inconsistentSnapshotOnly });
 		if (!restorable.present())
 			throw restore_missing_data();
 
@@ -6650,6 +6685,30 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			if (beginVersion == invalidVersion)
 				beginVersion = 0;
 			firstConsistentVersion = beginVersion;
+			// Log blocks can contain mutations outside the restore ranges. The apply map starts at invalidVersion;
+			// mark only the selected user ranges eligible before dispatching any log blocks.
+			const Key mapPrefix = restore.applyMutationsMapPrefix();
+			const Value replayAfter = BinaryWriter::toValue(beginVersion, Unversioned());
+			const Value skip = BinaryWriter::toValue<Version>(invalidVersion, Unversioned());
+			size_t firstRange = 0;
+			while (firstRange < ranges.size()) {
+				firstRange =
+				    co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<size_t> {
+					    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					    co_await taskBucket->keepRunning(tr, task);
+					    size_t next = firstRange;
+					    do {
+						    KeyRangeRef range = ranges[next++] & normalKeys;
+						    if (!range.empty()) {
+							    tr->set(range.begin.withPrefix(mapPrefix), replayAfter);
+							    tr->set(range.end.withPrefix(mapPrefix), skip);
+						    }
+					    } while (next < ranges.size() &&
+					             tr->getApproximateSize() < CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE);
+					    co_return next;
+				    });
+			}
 		}
 		if (!inconsistentSnapshotOnly) {
 			for (const LogFile& f : restorable.get().logs) {
@@ -6876,6 +6935,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			// After BulkLoad completes, run RestoreDispatch to apply mutation logs
 			// Set onlyApplyMutationLogs so it only processes logs, not range files
 			restore.onlyApplyMutationLogs().set(tr, true);
+			Value versionEncoded = BinaryWriter::toValue(firstVersion, Unversioned());
+			co_await krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded);
 
 			// Add RestoreDispatch task that waits for BulkLoad to complete
 			co_await RestoreDispatchTaskFunc::addTask(tr,
@@ -6888,7 +6949,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			                                          0,
 			                                          TaskCompletionKey::noSignal(),
 			                                          bulkLoadDone);
-		} else if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
+		} else if (mutationLogType == MutationLogType::PARTITIONED_LOG &&
+		           !(co_await restore.inconsistentSnapshotOnly().getD(tr, Snapshot::False, false))) {
 			// Traditional restore with partitioned logs
 			Version endVersion =
 			    std::min(firstVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE, restoreVersion);
@@ -6898,16 +6960,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			// Traditional restore with non-partitioned logs
 			co_await RestoreDispatchTaskFunc::addTask(
 			    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE);
-		}
-
-		// Initialize apply mutations map.
-		Future<Optional<bool>> logsOnly = restore.onlyApplyMutationLogs().get(tr);
-		co_await logsOnly;
-		if (logsOnly.get().present() && logsOnly.get().get()) {
-			//  If this is an incremental restore, we need to set the applyMutationsMapPrefix
-			//  to the earliest log version so no mutations are missed
-			Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
-			co_await krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded);
 		}
 
 		co_await taskBucket->finish(tr, task);
@@ -8094,6 +8146,11 @@ public:
 		// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
 		// This is needed for S3 where metadata may not be immediately consistent
 		BackupDescription desc = co_await bc->describeBackup(true, isBlobstoreUrl(urlStr) ? invalidVersion : 0);
+		if (const char* error = FileBackupAgent::getRestoreModeError(
+		        onlyApplyMutationLogs, inconsistentSnapshotOnly, useRangeFileRestore, desc.mutationLogType)) {
+			fmt::print(stderr, "ERROR: {}\n", error);
+			throw invalid_option();
+		}
 
 		if (desc.fileLevelEncryption && !encryptionKeyFileName.present()) {
 			fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
@@ -8115,6 +8172,8 @@ public:
 		}
 
 		printf("Backup Description\n%s", desc.toString().c_str());
+		if (targetVersion == invalidVersion && inconsistentSnapshotOnly)
+			targetVersion = latestVersion;
 		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present())
 			targetVersion = desc.maxRestorableVersion.get();
 
@@ -8126,8 +8185,12 @@ public:
 		if (!beginVersions.empty()) {
 			beginVersion = *std::min_element(beginVersions.begin(), beginVersions.end());
 		}
-		Optional<RestorableFileSet> restoreSet = co_await bc->getRestoreSet(
-		    targetVersion, ranges, onlyApplyMutationLogs, beginVersion, RequireRangeFiles{ useRangeFileRestore });
+		Optional<RestorableFileSet> restoreSet = co_await bc->getRestoreSet(targetVersion,
+		                                                                    ranges,
+		                                                                    onlyApplyMutationLogs,
+		                                                                    beginVersion,
+		                                                                    RequireRangeFiles{ useRangeFileRestore },
+		                                                                    inconsistentSnapshotOnly);
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -8137,6 +8200,7 @@ public:
 			throw restore_invalid_version();
 		}
 
+		targetVersion = restoreSet.get().targetVersion;
 		if (verbose) {
 			printf("Restoring backup to version: %lld\n", (long long)targetVersion);
 		}

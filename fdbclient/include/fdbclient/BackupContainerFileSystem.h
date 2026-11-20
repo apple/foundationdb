@@ -166,7 +166,8 @@ public:
 	                                                  VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                  bool logsOnly,
 	                                                  Version beginVersion,
-	                                                  RequireRangeFiles requireRangeFiles) final;
+	                                                  RequireRangeFiles requireRangeFiles,
+	                                                  InconsistentSnapshotOnly inconsistentSnapshotOnly) final;
 	static Future<Void> createTestEncryptionKeyFile(std::string const& filename);
 
 	Future<Void> writeEncryptionMetadata(int encryptionBlockSize) override;

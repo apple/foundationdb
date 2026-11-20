@@ -31,6 +31,7 @@
 
 FDB_BOOLEAN_PARAM(IncludeKeyRangeMap);
 FDB_BOOLEAN_PARAM(RequireRangeFiles);
+FDB_BOOLEAN_PARAM(InconsistentSnapshotOnly);
 
 class ReadYourWritesTransaction;
 
@@ -366,13 +367,15 @@ public:
 	// If logsOnly is set, replay mutations after beginVersion through targetVersion, inclusive.
 	// An omitted beginVersion starts replay at the first available log.
 	// A full rangefile restore needs a snapshot with range files. Bulkload reads the snapshot data from the dump job.
+	// A snapshot-only restore selects the range files at or before targetVersion and skips mutation logs.
 	// Returns non-present if restoring to the given version is not possible.
 	virtual Future<Optional<RestorableFileSet>> getRestoreSet(
 	    Version targetVersion,
 	    VectorRef<KeyRangeRef> keyRangesFilter = {},
 	    bool logsOnly = false,
 	    Version beginVersion = -1,
-	    RequireRangeFiles requireRangeFiles = RequireRangeFiles::True) = 0;
+	    RequireRangeFiles requireRangeFiles = RequireRangeFiles::True,
+	    InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False) = 0;
 
 	// Get an IBackupContainer based on a container spec string
 	static Reference<IBackupContainer> openContainer(const std::string& url,
