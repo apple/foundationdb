@@ -29,6 +29,7 @@
 #include "fdbclient/FDBTypes.h"
 
 #include <rocksdb/db.h>
+#include <rocksdb/sst_file_writer.h>
 #include <rocksdb/sst_partitioner.h>
 
 #include <memory>
@@ -88,6 +89,37 @@ private:
 	mutable std::mutex mutex;
 	// A multiset, so two ingests with the same begin key each keep it until they remove it.
 	std::multiset<std::string> ingestBeginKeys;
+};
+
+// Builds one SST file from key-values given in increasing key order, using RocksDB's SstFileWriter. The file uses the
+// column family's options, so it has the same format and bottom-level compression as the files RocksDB writes itself.
+// The file is not part of the database until it is ingested. Writing it takes disk time, so use it on the RocksDB
+// writer thread, not the main thread.
+class IngestSSTFileBuilder {
+public:
+	IngestSSTFileBuilder(const rocksdb::Options& options, rocksdb::ColumnFamilyHandle* cf, std::string path)
+	  : writer(rocksdb::EnvOptions(), options, cf), path(std::move(path)) {}
+
+	// Adds a block of key-values. Keys must be strictly increasing, within the block and across calls.
+	rocksdb::Status add(VectorRef<KeyValueRef> kvs);
+
+	// Completes the file. If nothing was added, no file is created.
+	rocksdb::Status finish();
+
+	const std::string& getPath() const { return path; }
+	const std::string& getFirstKey() const { return firstKey; }
+	const std::string& getLastKey() const { return lastKey; }
+	int64_t getKeyCount() const { return keyCount; }
+	uint64_t getFileBytes() const { return fileBytes; } // Set by finish().
+
+private:
+	rocksdb::SstFileWriter writer;
+	const std::string path;
+	bool opened = false;
+	std::string firstKey;
+	std::string lastKey;
+	int64_t keyCount = 0;
+	uint64_t fileBytes = 0;
 };
 
 } // namespace RocksDBRangeTransfer

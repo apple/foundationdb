@@ -84,6 +84,42 @@ void IngestSSTPartitionerFactory::removeIngestBeginKey(const std::string& key) {
 	}
 }
 
+rocksdb::Status IngestSSTFileBuilder::add(VectorRef<KeyValueRef> kvs) {
+	if (kvs.empty()) {
+		return rocksdb::Status::OK();
+	}
+	// Open the file only when the first key arrives: RocksDB can't finish a file with no keys.
+	if (!opened) {
+		rocksdb::Status s = writer.Open(path);
+		if (!s.ok()) {
+			return s;
+		}
+		opened = true;
+		firstKey = kvs.front().key.toString();
+	}
+	for (const KeyValueRef& kv : kvs) {
+		rocksdb::Status s = writer.Put(RocksDBCommon::toSlice(kv.key), RocksDBCommon::toSlice(kv.value));
+		if (!s.ok()) {
+			return s;
+		}
+	}
+	lastKey = kvs.back().key.toString();
+	keyCount += kvs.size();
+	return rocksdb::Status::OK();
+}
+
+rocksdb::Status IngestSSTFileBuilder::finish() {
+	if (!opened) {
+		return rocksdb::Status::OK();
+	}
+	rocksdb::ExternalSstFileInfo info;
+	rocksdb::Status s = writer.Finish(&info);
+	if (s.ok()) {
+		fileBytes = info.file_size;
+	}
+	return s;
+}
+
 } // namespace RocksDBRangeTransfer
 
 #endif // WITH_ROCKSDB
