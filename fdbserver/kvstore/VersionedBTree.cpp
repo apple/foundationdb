@@ -6103,8 +6103,15 @@ private:
 			ASSERT(height < 0xf0);
 			self->m_header.height = ++height;
 			ASSERT(height < std::numeric_limits<int8_t>::max());
-			Standalone<VectorRef<RedwoodRecordRef>> newRecords = co_await writePages(
-			    self, commitYielder, &dbBegin, &dbEnd, records, height, version, BTreeNodeLinkRef(), invalidLogicalPageID);
+			Standalone<VectorRef<RedwoodRecordRef>> newRecords = co_await writePages(self,
+			                                                                         commitYielder,
+			                                                                         &dbBegin,
+			                                                                         &dbEnd,
+			                                                                         records,
+			                                                                         height,
+			                                                                         version,
+			                                                                         BTreeNodeLinkRef(),
+			                                                                         invalidLogicalPageID);
 			debug_printf("Wrote a new root level at version %" PRId64 " height %d size %d pages\n",
 			             version,
 			             height,
@@ -7486,11 +7493,12 @@ private:
 				Standalone<VectorRef<RedwoodRecordRef>> newRootRecords(commitState->all.newLinks,
 				                                                       commitState->all.newLinks.arena());
 				// Build new root levels if there are multiple new root records or if the root pointer is too large
-				Standalone<VectorRef<RedwoodRecordRef>> newRootPage = co_await buildNewRootsIfNeeded(self,
-				                                                                       &commitState->batch.commitYielder,
-				                                                                       commitState->batch.writeVersion,
-				                                                                       newRootRecords,
-				                                                                       self->m_header.height);
+				Standalone<VectorRef<RedwoodRecordRef>> newRootPage =
+				    co_await buildNewRootsIfNeeded(self,
+				                                   &commitState->batch.commitYielder,
+				                                   commitState->batch.writeVersion,
+				                                   newRootRecords,
+				                                   self->m_header.height);
 				commitState->rootNodeLink = newRootPage.front().getChildPage();
 			}
 		}
