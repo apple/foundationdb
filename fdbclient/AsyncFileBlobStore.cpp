@@ -33,14 +33,14 @@ Future<int> AsyncFileBlobStoreRead::read(void* data, int length, int64_t offset)
 
 Future<Void> sendStuff(int id, Reference<IRateControl> t, int bytes) {
 	printf("Starting fake sender %d which will send send %d bytes.\n", id, bytes);
-	double ts = timer();
+	double ts = now();
 	int total = 0;
 	while (total < bytes) {
 		int r = std::min<int>(deterministicRandom()->randomInt(0, 1000), bytes - total);
 		co_await t->getAllowance(r);
 		total += r;
 	}
-	double dur = timer() - ts;
+	double dur = now() - ts;
 	printf("Sender %d: Sent %d in %fs, %f/s\n", id, total, dur, total / dur);
 }
 
@@ -54,7 +54,8 @@ TEST_CASE("/backup/throttling") {
 
 	int id = 1;
 	std::vector<Future<Void>> f;
-	double ts = timer();
+	// use the same monotonic timer the Net2 reactor uses
+	double ts = now();
 	int total = 0;
 	int s = 500000;
 	f.push_back(sendStuff(id++, t, s));
@@ -71,7 +72,7 @@ TEST_CASE("/backup/throttling") {
 	total += s;
 
 	co_await waitForAll(f);
-	double dur = timer() - ts;
+	double dur = now() - ts;
 	int speed = int(total / dur);
 	printf("Speed limit was %d, measured speed was %d\n", limit, speed);
 	// Host scheduling can delay completions; only exceeding the rate limit is an error.

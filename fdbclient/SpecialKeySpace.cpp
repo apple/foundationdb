@@ -21,7 +21,10 @@
 #include "boost/lexical_cast.hpp"
 #include "boost/algorithm/string.hpp"
 
+#include <charconv>
+#include <limits>
 #include <string>
+#include <string_view>
 #include <time.h>
 #include <msgpack.hpp>
 
@@ -784,9 +787,9 @@ RangeResult rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr, c
 		return res;
 	// If ryw enabled, we update it with writes from the transaction
 	RangeResult result;
-	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
-	    ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
-	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
+	// Sets cover single keys, but a clear can extend past either end of the read.
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().intersectingRanges(kr);
+	auto iter = ranges.begin();
 	auto iter2 = res.begin();
 	result.arena().dependsOn(res.arena());
 	while (iter != ranges.end() || iter2 != res.end()) {
@@ -1329,10 +1332,12 @@ Future<RangeResult> ExclusionInProgressRangeImpl::getRange(ReadYourWritesTransac
 	return ExclusionInProgressActor(ryw, getKeyRange().begin, kr);
 }
 
-Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
-	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
-	std::vector<ProcessData> workers = co_await getWorkers(&ryw->getTransaction());
-	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
+namespace {
+RangeResult buildProcessClassRows(std::vector<ProcessData> workers,
+                                  KeyRef prefix,
+                                  KeyRangeRef kr,
+                                  std::string (ProcessClass::*valueString)() const) {
+	// Special-key rows use lexical endpoint order, e.g. 1.1.1.1:11 < 1.1.1.1:5.
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
 	});
@@ -1340,17 +1345,24 @@ Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef 
 	auto last = std::unique(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) == formatIpPort(rhs.address.ip, rhs.address.port);
 	});
-	// remove duplicates
 	workers.erase(last, workers.end());
 	RangeResult result;
 	for (auto& w : workers) {
 		// exclude :tls in keys even the network address is TLS
 		KeyRef k(prefix.withSuffix(formatIpPort(w.address.ip, w.address.port), result.arena()));
 		if (kr.contains(k)) {
-			ValueRef v(result.arena(), w.processClass.toString());
+			ValueRef v(result.arena(), (w.processClass.*valueString)());
 			result.push_back(result.arena(), KeyValueRef(k, v));
 		}
 	}
+	return result;
+}
+} // namespace
+
+Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
+	std::vector<ProcessData> workers = co_await getWorkers(&ryw->getTransaction());
+	RangeResult result = buildProcessClassRows(std::move(workers), prefix, kr, &ProcessClass::toString);
 	co_return rywGetRange(ryw, kr, result);
 }
 
@@ -1455,28 +1467,7 @@ void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& 
 Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
 	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
 	std::vector<ProcessData> workers = co_await getWorkers(&ryw->getTransaction());
-	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
-	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
-		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
-	});
-	// Note: ProcessData can contain duplicate workers in corner cases
-	auto last = std::unique(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
-		return formatIpPort(lhs.address.ip, lhs.address.port) == formatIpPort(rhs.address.ip, rhs.address.port);
-	});
-	// remove duplicates
-	workers.erase(last, workers.end());
-	RangeResult result;
-	for (auto& w : workers) {
-		// exclude :tls in keys even the network address is TLS
-		Key k(prefix.withSuffix(formatIpPort(w.address.ip, w.address.port)));
-		if (kr.contains(k)) {
-			Value v(w.processClass.sourceString());
-			result.push_back(result.arena(), KeyValueRef(k, v));
-			result.arena().dependsOn(k.arena());
-			result.arena().dependsOn(v.arena());
-		}
-	}
-	co_return result;
+	co_return buildProcessClassRows(std::move(workers), prefix, kr, &ProcessClass::sourceString);
 }
 
 ProcessClassSourceRangeImpl::ProcessClassSourceRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
@@ -1743,8 +1734,29 @@ Future<RangeResult> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
 	return result;
 }
 
+static Optional<UID> parseTracingTransactionId(std::string_view text) {
+	if (text.empty()) {
+		return {};
+	}
+	auto parse = [](std::string_view digits, int base, uint64_t& value) {
+		const char* begin = digits.data();
+		const char* end = begin + digits.size();
+		auto result = std::from_chars(begin, end, value, base);
+		return result.ec == std::errc{} && result.ptr == end;
+	};
+	uint64_t high = 0, low = 0;
+	if (text.size() == 32) {
+		if (parse(text.substr(0, 16), 16, high) && parse(text.substr(16), 16, low)) {
+			return UID(high, low);
+		}
+	} else if (parse(text, 10, low)) {
+		return UID(0, low);
+	}
+	return {};
+}
+
 void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
-	if (ryw->getApproximateSize() > 0) {
+	if (ryw->getApproximateSize() > 0 || ryw->getTransaction().getSize() > 0) {
 		ryw->setSpecialKeySpaceErrorMsg(
 		    ManagementAPIError::toJsonString(false, "configure trace", "tracing options must be set first"));
 		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
@@ -1752,7 +1764,16 @@ void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, 
 	}
 
 	if (key.endsWith(kTracingTransactionIdKey)) {
-		ryw->setTransactionID(UID::fromString(value.toString()));
+		auto id = parseTracingTransactionId(value.toStringView());
+		if (!id.present() || !id.get().isValid()) {
+			ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
+			    false,
+			    "configure trace",
+			    "transaction_id must be nonzero and specified as an unsigned 64-bit decimal integer or 32 hex digits"));
+			ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
+			return;
+		}
+		ryw->setTransactionID(id.get());
 	} else if (key.endsWith(kTracingTokenKey)) {
 		if (value.toString() == "true") {
 			ryw->setToken(deterministicRandom()->randomUInt64());
@@ -2545,6 +2566,28 @@ Future<RangeResult> MaintenanceImpl::getRange(ReadYourWritesTransaction* ryw,
 	return MaintenanceGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
+static Optional<Version> maintenanceEndVersion(Version readVersion, double seconds) {
+	constexpr Version maxVersion = std::numeric_limits<Version>::max();
+	const double duration = seconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+	if (!(duration >= 0 && duration < static_cast<double>(maxVersion))) {
+		return {};
+	}
+	const Version delta = static_cast<Version>(duration);
+	if (readVersion > maxVersion - delta) {
+		return {};
+	}
+	return readVersion + delta;
+}
+
+TEST_CASE("/fdbclient/SpecialKeySpace/MaintenanceEndVersion") {
+	constexpr Version maxVersion = std::numeric_limits<Version>::max();
+	const Version lastStart = maxVersion - CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+	auto end = maintenanceEndVersion(lastStart, 1.0);
+	ASSERT(end.present() && end.get() == maxVersion);
+	ASSERT(!maintenanceEndVersion(lastStart + 1, 1.0).present());
+	return Void();
+}
+
 // Commit the change to healthZoneKey
 // We do not allow more than one zone to be set in maintenance in one transaction
 // In addition, if the zoneId now is 'ignoreSSFailuresZoneString',
@@ -2576,7 +2619,10 @@ static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWritesTransa
 				    false, "maintenance", "Multiple zones given for maintenance, only one allowed at the same time"));
 			isSet = true;
 			zoneId = iter->begin().removePrefix(kr.begin);
-			seconds = boost::lexical_cast<double>(iter->value().second.get().toString());
+			if (!boost::conversion::try_lexical_convert(iter->value().second.get().toString(), seconds)) {
+				co_return Optional<std::string>(ManagementAPIError::toJsonString(
+				    false, "maintenance", "Expected a non-negative duration in seconds"));
+			}
 		} else {
 			// if we already have set operation, then all clear operations will be meaningless, thus skip
 			if (!isSet && healthyZone.present() && iter.range().contains(healthyZone.get().first.withPrefix(kr.begin)))
@@ -2594,11 +2640,13 @@ static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWritesTransa
 			    "The specified maintenance time " + boost::lexical_cast<std::string>(seconds) + " is a negative value";
 			co_return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
 		} else {
+			auto endVersion = maintenanceEndVersion(ryw->getTransaction().getReadVersion().get(), seconds);
+			if (!endVersion.present()) {
+				co_return Optional<std::string>(ManagementAPIError::toJsonString(
+				    false, "maintenance", "Maintenance duration must give a representable end version"));
+			}
 			TraceEvent(SevDebug, "SKSMaintenanceSet").detail("ZoneId", zoneId.toString());
-			ryw->getTransaction().set(healthyZoneKey,
-			                          healthyZoneValue(zoneId,
-			                                           ryw->getTransaction().getReadVersion().get() +
-			                                               (seconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND)));
+			ryw->getTransaction().set(healthyZoneKey, healthyZoneValue(zoneId, endVersion.get()));
 		}
 	}
 	co_return Optional<std::string>();

@@ -89,7 +89,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		int paddingLen = keyBytes - 8 - keyPrefix.size();
 		// left padding by zero, each client has different prefix
 		Key prefixWithClientId = StringRef(format("Cid_%04d", clientId)).withPrefix(keyPrefix);
-		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p)).withPrefix(prefixWithClientId);
+		return StringRef(format("%0*llx", paddingLen, std::bit_cast<uint64_t>(p))).withPrefix(prefixWithClientId);
 	}
 
 	void addRandomReadConflictRange(ReadYourWritesTransaction* tr, std::vector<KeyRange>* readConflictRanges) {

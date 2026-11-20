@@ -407,7 +407,7 @@ coordinators
 
 The ``coordinators`` command is used to change cluster coordinators or description. Its syntax is ``coordinators auto|<ADDRESS...> [description=<DESC>]``.
 
-Addresses may be specified as a list of IP:port pairs (such as ``coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000``). If addresses are specified, the coordinators will be set to them. An ``fdbserver`` process must be running on each of the specified addresses.
+Addresses may be specified as a list of IP:port or hostname:port pairs (such as ``coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000`` or ``coordinators fdb1.example.com:4000 fdb2.example.com:4000 fdb3.example.com:4000``). Hostnames are saved in the cluster file as hostnames (but ``coordinators auto`` picks coordinators by IP address), and each one must resolve when you run the command. Running ``coordinators`` with no arguments shows the resolved IP addresses. If addresses are specified, the coordinators will be set to them. An ``fdbserver`` process must be running on each of the specified addresses.
 
 If ``auto`` is specified, coordinator addresses will be chosen automatically to support the configured redundancy level. Processes with class coordinator will be prioritized. (If the current set of coordinators are healthy and already support the configured redundancy level, nothing will be changed.)
 
@@ -644,6 +644,33 @@ heap
 ``profile heap <PROCESS>``
 
 Enables heap profiling for the specified process.
+
+rangeconfig
+-----------
+
+The ``rangeconfig`` command shows or changes the configuration options of key ranges. These options are hints to data distribution. They do not change the shard map directly.
+
+Use it to give a key range more replicas than the rest of the database, for example a small range that is read heavily or needs extra durability, or to keep two ranges on different storage teams. A range with a replication factor above the cluster's replication level is placed on a larger storage team, and data distribution does not merge shards across the boundaries of a configured range. The ``DD_MAX_SHARDS_ON_LARGE_TEAMS`` knob limits how many shards can be placed on larger teams.
+
+``rangeconfig show [includeDefault]``
+
+Prints the range configuration as JSON. Ranges with no configured options are not shown, unless ``includeDefault`` is given.
+
+``rangeconfig update <BEGINKEY> <ENDKEY> [OPTION...]``
+
+Applies the given options to the key range from ``BEGINKEY`` to ``ENDKEY``. Options that are not given keep their current setting for the range.
+
+``rangeconfig set <BEGINKEY> <ENDKEY> [OPTION...]``
+
+Makes the key range have exactly the given configuration. Options that are not given are unset for the range.
+
+The options are:
+
+* ``default`` resets the range to have no options set. Used with ``set``, it clears all options for the range. Used with ``update``, it changes nothing, because ``update`` keeps the existing values.
+* ``replication <N>`` sets the replication factor for the range. A factor lower than the cluster's replication level is treated as the cluster's replication level.
+* ``teamID <N>`` indicates that shards in ranges with different team IDs should be assigned to different storage teams. Shards with the same team ID can share a storage team, but nothing enforces this.
+
+``rangeconfig`` requires the end key to be greater than the begin key.
 
 reset
 -----

@@ -40,8 +40,7 @@ void fillRandom(int64_t& i) {
 
 void fillRandom(double& d) {
 	auto i64 = deterministicRandom()->randomInt64(0, 1e15);
-	static_assert(sizeof(i64) == sizeof(double));
-	d = *reinterpret_cast<double*>(&i64);
+	d = static_cast<double>(i64);
 }
 
 void fillRandom(VectorRef<int>& vi, Arena& arena, int minLen = 1, int maxLen = 100) {

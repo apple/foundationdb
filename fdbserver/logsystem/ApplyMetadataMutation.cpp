@@ -994,15 +994,6 @@ private:
 						break;
 					}
 				}
-				auto& systemBackupRanges = getSystemBackupRanges();
-				for (auto r = systemBackupRanges.begin(); !foundKey && r != systemBackupRanges.end(); ++r) {
-					for (auto& it : vecBackupKeys->intersectingRanges(*r)) {
-						if (it.value().contains(logDestination)) {
-							foundKey = true;
-							break;
-						}
-					}
-				}
 				if (!foundKey) {
 					auto logRanges = vecBackupKeys->modify(singleKeyRange(metadataVersionKey));
 					for (auto logRange : logRanges) {
@@ -1029,7 +1020,7 @@ private:
 		// CDC tags may be shared and acknowledgement minima are stored outside transaction state.
 		// A durable retired-tag watermark lets any CDC proxy finish pops after stream removal.
 		if (!initialCommit) {
-			for (const KeyRangeRef cdcRange :
+			for (const KeyRangeRef& cdcRange :
 			     { cdcStreamNameKeys, cdcStreamKeys, cdcTagHistoryKeys, cdcRetiredTagPopKeys, cdcProxyKeys }) {
 				if (cdcRange.intersects(range)) {
 					txnStateStore->clear(cdcRange & range);

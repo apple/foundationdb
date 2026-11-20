@@ -203,8 +203,9 @@ CommandFactory coordinatorsFactory(
         "change cluster coordinators or description",
         "If 'auto' is specified, coordinator addresses will be chosen automatically to support the configured "
         "redundancy level. (If the current set of coordinators are healthy and already support the redundancy level, "
-        "nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port pairs specified by "
-        "<ADDRESS>+. An fdbserver process must be running on each of the specified addresses.\n\ne.g. coordinators "
-        "10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in "
-        "the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+."));
+        "nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port or hostname:port pairs "
+        "specified by <ADDRESS>+. A hostname must resolve when the command runs. An fdbserver process must be running "
+        "on each of the specified addresses.\n\ne.g. coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf "
+        "'description=desc' is specified then the description field in the cluster\nfile is changed to desc, which "
+        "must match [A-Za-z0-9_]+."));
 } // namespace fdb_cli

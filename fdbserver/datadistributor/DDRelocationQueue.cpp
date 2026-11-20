@@ -1168,7 +1168,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		RelocateData rd(*it);
 		// A restored move can be held behind the pipeline gate while shard-encoded metadata is disabled.
 		// Restart DD before mutating the queue so the move is cancelled by the rollback path.
-		if (rd.isRestore() && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		if (rd.isRestore() && !ddEnabledState->shardEncodeLocationMetadata()) {
 			throw dd_config_changed();
 		}
 
@@ -2001,6 +2001,9 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 				}
 
 				if (foundTeams && anyHealthy && !anyDestOverloaded) {
+					if (doBulkLoading) {
+						rd.bulkLoadTask.get().recordPlacementSuccess();
+					}
 					ASSERT(rd.completeDests.empty());
 					break;
 				}
@@ -2049,7 +2052,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("AnyDestOverloaded", anyDestOverloaded)
 					    .detail("NumOfTeamCollections", self->teamCollections.size())
 					    .detail("ConductingBulkLoad", doBulkLoading);
-					if (doBulkLoading && stuckCount == 50) {
+					if (doBulkLoading && rd.bulkLoadTask.get().recordPlacementMiss(stuckCount)) {
 						ASSERT(rd.bulkLoadTask.present());
 						TraceEvent(SevWarnAlways, "DDBulkLoadTaskStuck", self->distributorId)
 						    .detail("TraceID", rd.randomId)

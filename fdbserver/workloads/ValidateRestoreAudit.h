@@ -31,60 +31,24 @@
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/tester/workloads.h"
+#include "BackupSteps.h"
 #include "flow/flow.h"
 
-// Waits until no ValidateRestore audit is running, then `settleSeconds` more, and checks again. A data distributor
-// that takes over can run an audit again after it was reported complete; such an audit compares the live data with
-// the restored copy, so it must not overlap anything that changes either. Best effort: gives up after
-// `maxWaitSeconds`.
-inline Future<Void> waitForAuditsToSettle(Database cx, double settleSeconds = 30.0, double maxWaitSeconds = 300.0) {
-	double deadline = now() + maxWaitSeconds;
-	bool settled = false;
-	while (!settled && now() < deadline) {
-		bool running = false;
-		Error readError;
-		try {
-			std::vector<AuditStorageState> states =
-			    co_await getAuditStates(cx, AuditType::ValidateRestore, true, 1, AuditPhase::Running);
-			running = !states.empty();
-		} catch (Error& e) {
-			readError = e;
-		}
-		if (readError.isValid() && !isTransientAuditStateReadError(readError)) {
-			throw readError;
-		}
-		if (running || readError.isValid()) {
-			co_await delay(2.0);
-			continue;
-		}
-		co_await delay(settleSeconds);
-		bool stillIdle = false;
-		Error recheckError;
-		try {
-			std::vector<AuditStorageState> states =
-			    co_await getAuditStates(cx, AuditType::ValidateRestore, true, 1, AuditPhase::Running);
-			stillIdle = states.empty();
-		} catch (Error& e) {
-			recheckError = e;
-		}
-		if (recheckError.isValid() && !isTransientAuditStateReadError(recheckError)) {
-			throw recheckError;
-		}
-		settled = stillIdle;
-	}
-}
+inline constexpr double validateRestoreAuditRetrySeconds = 600.0;
 
 // Runs an audit_storage ValidateRestore audit over `range` and waits for it to complete. The audit compares `range`
 // of the live database with its copy under validateRestoreLogKeys.begin, as written by a restore with that add-prefix,
 // at a single version, so both sides must be quiescent. Throws audit_storage_failed if the audit finds a difference
 // (phase Error), and timed_out if it does not finish in time. An audit that fails without a verdict (phase Failed:
 // the data distributor gave up reaching storage servers during recoveries or failures) is run again until
-// `retryBudgetSeconds` have passed.
+// `retryBudgetSeconds` have passed. `completedState`, when set, receives the state of the audit that completed.
 inline Future<Void> runValidateRestoreAudit(Database cx,
                                             KeyRange range,
                                             AuditWaitOptions options = AuditWaitOptions(),
-                                            double retryBudgetSeconds = 600.0) {
+                                            double retryBudgetSeconds = validateRestoreAuditRetrySeconds,
+                                            AuditStorageState* completedState = nullptr) {
 	double firstAttemptTime = now();
 	if (options.traceContext.empty()) {
 		options.traceContext = "ValidateRestoreAudit";
@@ -93,6 +57,9 @@ inline Future<Void> runValidateRestoreAudit(Database cx,
 		AuditStorageState state =
 		    co_await auditStorageAndWait(cx, range, AuditType::ValidateRestore, KeyValueStoreType::END, options);
 		if (state.getPhase() == AuditPhase::Complete) {
+			if (completedState) {
+				*completedState = state;
+			}
 			co_return;
 		}
 		if (state.getPhase() == AuditPhase::Failed && now() - firstAttemptTime < retryBudgetSeconds) {
@@ -127,13 +94,6 @@ struct RestoreValidationGate {
 	}
 };
 
-// Waits until nothing reads the live data or the validation prefix, so the in-place restore can overwrite the live
-// data: no validation restore is pending, and no ValidateRestore audit is running.
-inline Future<Void> waitForValidationsToFinish(Database cx) {
-	co_await RestoreValidationGate::waitUntilNonePending();
-	co_await waitForAuditsToSettle(cx);
-}
-
 // One workload instance's claim on the pending-validation count. Releases it on every exit path, so a failed instance
 // cannot leave the in-place restore waiting forever.
 struct PendingValidationClaim : NonCopyable {
@@ -150,6 +110,12 @@ struct PendingValidationClaim : NonCopyable {
 	~PendingValidationClaim() { release(); }
 };
 
+// Where validateAgainstPrefixedRestore spent its time.
+struct ValidationTimings {
+	double restoreSeconds = 0.0;
+	double auditSeconds = 0.0;
+};
+
 // How validateAgainstPrefixedRestore labels its trace events.
 struct ValidationTraceOptions {
 	// Prepended to the event names (ValidateRestoreStart, ValidateRestoreVersions, ValidateRestoreDone), so each
@@ -159,20 +125,52 @@ struct ValidationTraceOptions {
 	// Also read the backup's description before the restore and trace its maximum restorable version next to the
 	// version that was restored.
 	bool traceRestorableVersions = false;
+	// Receives the restore and audit durations when set; must outlive the call.
+	ValidationTimings* timings = nullptr;
+	// Receives the completed state of each range's audit when set; must outlive the call.
+	std::vector<AuditStorageState>* audits = nullptr;
+	// Reads the validation restore's status after it completes, which traces its FileRestoreProgress (exact bytes
+	// written and file block counts; the restore configuration is not readable from a workload).
+	bool traceRestoreProgress = false;
+	// After the audits pass, clears the validation prefix and checks that nothing is left, still holding the
+	// RestoreValidationGate so that no other validation can start writing the prefix in between. The copy is kept
+	// when an audit fails.
+	bool clearWhenDone = false;
+	// The backup system the validated backup was made with.
+	BackupSteps::BackupVersion version = BackupSteps::BackupVersion::V1;
 };
 
-// Restores the latest version of the backup in `container` under the validation prefix and audits it against the live
-// data, one `backupRanges` entry at a time. The data must be quiescent and covered by the backup. Runs one at a time
-// per RestoreValidationGate. The prefix is left in place: a data distributor can re-dispatch an audit after it was
-// reported complete, and that audit would read a cleared prefix as an empty baseline. Rows left by earlier validations
-// equal the live data, so they cause no false failures, but they can hide a key that a later restore of an
-// overlapping range failed to write.
+// Clears the validation prefix, the destination of validation restores.
+inline Future<Void> clearValidationRestoreData(Database cx) {
+	return runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->clear(validateRestoreLogKeys);
+		return Void();
+	});
+}
+
+// Throws operation_failed if anything is left under the validation prefix.
+inline Future<Void> verifyValidationRestoreDataCleared(Database cx) {
+	Optional<Key> left = co_await BackupSteps::firstKeyIn(cx, validateRestoreLogKeys);
+	if (left.present()) {
+		TraceEvent(SevWarnAlways, "ValidationRestoreDataNotCleared").detail("FirstKey", left.get());
+		throw operation_failed();
+	}
+}
+
+// Restores the latest version of the backup in `container` under the validation prefix, which it clears first, and
+// audits it against the live data, one `backupRanges` entry at a time. The data must be quiescent and covered by the
+// backup. Runs one at a time per RestoreValidationGate.
 inline Future<Void> validateAgainstPrefixedRestore(Database cx,
                                                    FileBackupAgent* backupAgent,
                                                    Reference<IBackupContainer> container,
                                                    Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                                    Key backupTag,
                                                    ValidationTraceOptions trace = ValidationTraceOptions()) {
+	if (trace.timings) {
+		*trace.timings = ValidationTimings();
+	}
 	const std::string startEvent = trace.eventPrefix + "ValidateRestoreStart";
 	const std::string versionsEvent = trace.eventPrefix + "ValidateRestoreVersions";
 	const std::string doneEvent = trace.eventPrefix + "ValidateRestoreDone";
@@ -180,7 +178,9 @@ inline Future<Void> validateAgainstPrefixedRestore(Database cx,
 	FlowLock::Releaser releaser(RestoreValidationGate::lock);
 	Key prefix = validateRestoreLogKeys.begin;
 	Standalone<StringRef> validationTag(backupTag.toString() + "_validate");
-	co_await waitForAuditsToSettle(cx);
+	// Start from an empty prefix, so that a key the restore failed to write cannot be masked by a row left by an
+	// earlier validation.
+	co_await clearValidationRestoreData(cx);
 	TraceEvent(startEvent.c_str(), trace.id).detail("Tag", printable(backupTag));
 	Version maxRestorable = -1;
 	if (trace.traceRestorableVersions) {
@@ -191,35 +191,53 @@ inline Future<Void> validateAgainstPrefixedRestore(Database cx,
 		                             ->describeBackup();
 		maxRestorable = desc.maxRestorableVersion.present() ? desc.maxRestorableVersion.get() : -1;
 	}
-	Version restoredVersion = co_await backupAgent->restore(cx,
-	                                                        cx,
-	                                                        validationTag,
-	                                                        KeyRef(container->getURL()),
-	                                                        container->getProxy(),
-	                                                        backupRanges,
-	                                                        WaitForComplete::True,
-	                                                        ::invalidVersion,
-	                                                        Verbose::True,
-	                                                        prefix,
-	                                                        Key(),
-	                                                        LockDB::False,
-	                                                        UnlockDB::False,
-	                                                        OnlyApplyMutationLogs::False,
-	                                                        InconsistentSnapshotOnly::False,
-	                                                        ::invalidVersion,
-	                                                        container->getEncryptionKeyFileName());
+	double restoreStart = now();
+	BackupSteps::RestoreSpec spec;
+	spec.tag = validationTag;
+	spec.container = container;
+	spec.ranges = backupRanges;
+	spec.addPrefix = prefix;
+	spec.encryptionKeyFileName = container->getEncryptionKeyFileName();
+	Version restoredVersion = co_await BackupSteps::restoreBackup(cx, backupAgent, trace.version, spec);
 	if (trace.traceRestorableVersions) {
 		TraceEvent(versionsEvent.c_str(), trace.id)
 		    .detail("Tag", printable(backupTag))
 		    .detail("RestoredVersion", restoredVersion)
 		    .detail("MaxRestorable", maxRestorable);
 	}
+	double auditStart = now();
+	if (trace.timings) {
+		trace.timings->restoreSeconds = auditStart - restoreStart;
+	}
+	if (trace.traceRestoreProgress) {
+		try {
+			co_await backupAgent->restoreStatus(cx, validationTag);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			// Diagnostic only.
+			TraceEvent(SevWarn, (trace.eventPrefix + "ValidateRestoreStatusFailed").c_str(), trace.id).error(e);
+		}
+	}
 	for (const auto& range : backupRanges) {
 		// The audit only covers user keys.
 		KeyRangeRef userRange = range & normalKeys;
 		if (!userRange.empty()) {
-			co_await runValidateRestoreAudit(cx, userRange);
+			AuditStorageState completed;
+			co_await runValidateRestoreAudit(
+			    cx, userRange, AuditWaitOptions(), validateRestoreAuditRetrySeconds, &completed);
+			if (trace.audits) {
+				trace.audits->push_back(completed);
+			}
 		}
+	}
+	if (trace.timings) {
+		trace.timings->auditSeconds = now() - auditStart;
+	}
+	if (trace.clearWhenDone) {
+		co_await clearValidationRestoreData(cx);
+		co_await verifyValidationRestoreDataCleared(cx);
 	}
 	TraceEvent(doneEvent.c_str(), trace.id).detail("Tag", printable(backupTag));
 }
@@ -324,10 +342,13 @@ struct QuiescentValidation {
 
 	// Lets the differential backup `tag` catch up with the quiescent version, so that discontinuing it keeps all the
 	// data. Does nothing when validation is off.
-	Future<Void> waitForBackupToCover(Database cx, FileBackupAgent* agent, std::string tag) {
+	Future<Void> waitForBackupToCover(Database cx,
+	                                  FileBackupAgent* agent,
+	                                  std::string tag,
+	                                  double maxWaitSeconds = 600.0) {
 		if (enabled) {
 			Version target = co_await quiescentVersion;
-			co_await waitForRestorableVersion(cx, agent, tag, target);
+			co_await waitForRestorableVersion(cx, agent, tag, target, maxWaitSeconds);
 		}
 	}
 };

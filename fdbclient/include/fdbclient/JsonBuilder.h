@@ -154,7 +154,7 @@ protected:
 
 	inline void writeValue(const std::string& val) { writeValue(val.data(), val.size()); }
 
-	inline void writeValue(const char* val) { writeValue(val, strlen(val)); }
+	inline void writeValue(const char* val) { writeValue(val, val ? strlen(val) : 0); }
 
 	inline void writeValue(const StringRef& s) { writeValue((const char*)s.begin(), s.size()); }
 

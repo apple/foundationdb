@@ -151,6 +151,8 @@ When reviewing, state explicitly: what the change is for, whether it is correct,
 
 PRs target `main`. Release branches receive cherry-picks rather than direct PRs — don't open backport PRs without confirming first.
 
+Branches created on apple/foundationdb must start with `apple/` (convention: `apple/<github-username>/<topic>`); a repository ruleset blocks creating any other branch. Branches on personal forks can still be named anything. Stacked PRs (`gh stack`) require their branches to be on apple/foundationdb rather than a fork.
+
 ## Design Docs
 
 Before a design doc is considered finished (not at the start), reconcile it against `design/design-doc-template.md`.

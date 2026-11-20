@@ -495,35 +495,15 @@ else()
       $<${is_cxx_compile}:-Wno-delete-non-abstract-non-virtual-dtor>
       $<${is_cxx_compile}:-Wno-range-loop-construct>
       $<${is_cxx_compile}:-Wno-reorder-ctor>
-      # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
-      # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
-      $<${is_cxx_compile}:-Wno-unused-command-line-argument>
+      $<${is_cxx_compile}:-Wno-unused-function>
+      # Needed for clang 13 ?
+      $<${is_cxx_compile}:-Wno-unused-private-field>
+      $<${is_cxx_compile}:-Wno-nullability-completeness>
       # Disable C++ 20 warning for ambiguous operator.
       $<${is_cxx_compile}:-Wno-ambiguous-reversed-operator>
       # Disable for clang 19
       $<${is_cxx_compile}:-Wno-vla-cxx-extension>
       )
-    # These need to be disabled for FDB's RocksDB storage server implementation
-    add_compile_options(
-      $<${is_cxx_compile}:-Wno-deprecated-copy>
-      $<${is_cxx_compile}:-Wno-delete-non-abstract-non-virtual-dtor>
-      $<${is_cxx_compile}:-Wno-range-loop-construct>
-      $<${is_cxx_compile}:-Wno-reorder-ctor>
-      $<${is_cxx_compile}:-Wno-unused-function>
-    )
-    # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
-    # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
-    add_compile_options(
-      $<${is_cxx_compile}:-Wno-unused-command-line-argument>
-      $<${is_cxx_compile}:-Wno-unused-private-field>
-      $<${is_cxx_compile}:-Wno-nullability-completeness>
-      $<${is_cxx_compile}:-Wno-macro-redefined>
-    )
-    if (USE_CCACHE)
-      add_compile_options(
-        $<${is_cxx_compile}:-Wno-register>
-      )
-    endif()
     if (PROFILE_INSTR_GENERATE)
       add_compile_options($<${is_cxx_compile}:-fprofile-instr-generate>)
       add_link_options($<${is_cxx_link}:-fprofile-instr-generate>)
@@ -544,14 +524,24 @@ else()
     add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-Werror>)
   endif()
   if (GCC)
-    add_compile_options(-Wno-pragmas)
-    # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
-    # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
-    add_compile_options(-Wno-attributes)
-    # Needed for gcc 13
-    #add_compile_options($<${is_cxx_compile}:-Wno-missing-template-keyword>)
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-missing-template-keyword>)
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-free-nonheap-object>)
+    # TODO consolidate common GCC and Clang warning options, for now GCC is minimal
+    add_compile_options(
+      $<${is_cxx_compile}:-Wall>
+      $<${is_cxx_compile}:-Wno-sign-compare>
+      $<${is_cxx_compile}:-Wno-unused-function>
+      $<${is_cxx_compile}:-Wno-pragmas>           # rapidjson "unknown option after '#pragma GCC diagnostic' kind"
+      $<${is_cxx_compile}:-Wno-unknown-pragmas>   # "ignoring '#pragma clang diagnostic'"
+      $<${is_cxx_compile}:-Wno-attributes>        # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
+      $<${is_cxx_compile}:-Wno-comment>           # multi-line c++ style comment (trailing '\', usually benign)
+      # Needed for gcc 13
+      $<${is_cxx_compile}:-Wno-array-compare>     # comparison between two arrays is deprecated in C++20
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-reorder>     # "X will be initialized after Y"
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-catch-value> # "catching polymorphic type XX by value"
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-maybe-uninitialized> # false positives that vary with inlining and gcc version
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-delete-non-virtual-dtor>
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-missing-template-keyword>
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-free-nonheap-object>
+    )
   endif()
   add_compile_options(
     $<${is_cxx_compile}:-Wno-error=format>

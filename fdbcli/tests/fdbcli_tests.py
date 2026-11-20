@@ -7,6 +7,7 @@ import logging
 import functools
 import json
 import tempfile
+import threading
 import time
 import random
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
@@ -193,34 +194,73 @@ def setclass(logger):
         assert "command_line" in line or "set_class" in line
 
 
-@enable_logging()
-def lockAndUnlock(logger):
-    # lock an unlocked database, should be successful
-    output1 = run_fdbcli_command("lock")
-    # UID is 32 bytes
-    lines = output1.split("\n")
-    lock_uid = lines[0][-32:]
+def lock_database():
+    lines = run_fdbcli_command("lock").split("\n")
     assert lines[1] == "Database locked."
-    logger.debug("UID: {}".format(lock_uid))
-    assert get_value_from_status_json(True, "cluster", "database_lock_state", "locked")
-    # lock a locked database, should get the error code 1038
-    output2 = run_fdbcli_command_and_get_error("lock")
-    assert output2 == "ERROR: Database is locked (1038)"
-    # unlock the database
+    return lines[0][-32:]
+
+
+def unlock_database(lock_uid, timeout=30):
     process = subprocess.Popen(
         command_template + ["unlock " + lock_uid],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         env=fdbcli_env,
     )
-    process.stdout.readline()
-    # The random passphrase we need to confirm to proceed the unlocking
-    line2 = process.stdout.readline()
-    logger.debug("Random passphrase: {}".format(line2))
-    output3, err = process.communicate(input=line2)
-    # No error and unlock was successful
-    assert err is None
-    assert output3.decode("utf-8").strip() == "Database unlocked."
+    timer = threading.Timer(timeout, process.kill)
+    timer.start()
+    try:
+        process.stdout.readline()
+        # The random passphrase we need to confirm to proceed the unlocking
+        passphrase = process.stdout.readline()
+        output, _ = process.communicate(input=passphrase)
+    finally:
+        timer.cancel()
+        process.kill()
+        process.wait()
+    output = output.decode("utf-8").strip()
+    assert output == "Database unlocked.", "exit={} stdout={}".format(
+        process.returncode, output
+    )
+
+
+@enable_logging()
+def lockAndUnlock(logger):
+    # lock an unlocked database, should be successful
+    lock_uid = lock_database()
+    logger.debug("UID: {}".format(lock_uid))
+    assert get_value_from_status_json(True, "cluster", "database_lock_state", "locked")
+    # lock a locked database, should get the error code 1038
+    output2 = run_fdbcli_command_and_get_error("lock")
+    assert output2 == "ERROR: Database is locked (1038)"
+    # unlock the database
+    unlock_database(lock_uid)
+    assert not get_value_from_status_json(
+        True, "cluster", "database_lock_state", "locked"
+    )
+
+
+@enable_logging()
+def exclude_on_locked_database(logger):
+    lock_uid = lock_database()
+    try:
+        process = subprocess.run(
+            command_template + ["exclude"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=fdbcli_env,
+            timeout=30,
+        )
+        output = process.stdout.decode("utf-8")
+        assert (
+            process.returncode == 0
+            and "There are currently no servers or localities excluded from the database."
+            in output
+        ), "exit={} stdout={} stderr={}".format(
+            process.returncode, output, process.stderr.decode("utf-8")
+        )
+    finally:
+        unlock_database(lock_uid)
     assert not get_value_from_status_json(
         True, "cluster", "database_lock_state", "locked"
     )
@@ -1247,6 +1287,7 @@ if __name__ == "__main__":
         expensive_data_check_empty_all()
         kill()
         lockAndUnlock()
+        exclude_on_locked_database()
         maintenance()
         profile()
         # TODO: re-enable once stable

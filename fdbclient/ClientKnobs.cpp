@@ -218,6 +218,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
 	init( STORAGE_METRICS_SHARD_LIMIT,             100 ); if( randomize && buggify() ) STORAGE_METRICS_SHARD_LIMIT = 10;
+	init( STORAGE_METRICS_LARGE_RANGE_SHARD_LIMIT, 1000 ); if( randomize && buggify() ) STORAGE_METRICS_LARGE_RANGE_SHARD_LIMIT = deterministicRandom()->randomInt(1, 11);
 	init( SHARD_COUNT_LIMIT,                        80 ); if( randomize && buggify() ) SHARD_COUNT_LIMIT = 3;
 	init( STORAGE_METRICS_UNFAIR_SPLIT_LIMIT,  2.0/3.0 );
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
@@ -256,7 +257,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	// TaskBucket
 	init( TASKBUCKET_LOGGING_DELAY,                5.0 );
-	init( TASKBUCKET_MAX_PRIORITY,                   1 );
+	init( TASKBUCKET_MAX_PRIORITY,                   2 );
 	init( TASKBUCKET_CHECK_TIMEOUT_CHANCE,        0.02 ); if( randomize && buggify() ) TASKBUCKET_CHECK_TIMEOUT_CHANCE = 1.0;
 	init( TASKBUCKET_TIMEOUT_JITTER_OFFSET,        0.9 );
 	init( TASKBUCKET_TIMEOUT_JITTER_RANGE,         0.2 );
@@ -303,9 +304,12 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
 	init( BACKUP_DISPATCH_ADDTASK_SIZE,             50 );
 	init( RESTORE_DISPATCH_ADDTASK_SIZE,           150 );
+	init( RESTORE_DISPATCH_TX_SIZE,      4 * 1024 * 1024 ); if( randomize && buggify() ) RESTORE_DISPATCH_TX_SIZE = 1 * 1024;
 	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && buggify() ) RESTORE_DISPATCH_BATCH_SIZE = 20;
 	init (RESTORE_PARTITIONED_BATCH_VERSION_SIZE, 10000000); // each step restores 10s worth of data
 	init( RESTORE_WRITE_TX_SIZE,            256 * 1024 );
+	init( RESTORE_RANGE_READ_BEFORE_CLEAR,                        true ); if( randomize && buggify() ) RESTORE_RANGE_READ_BEFORE_CLEAR = false;
+	init( RESTORE_RANGE_DISABLE_RYW,              true ); if( randomize && buggify() ) RESTORE_RANGE_DISABLE_RYW = false;
 	init( APPLY_MAX_LOCK_BYTES,                    1e9 );
 	init( APPLY_MIN_LOCK_BYTES,                   11e6 ); //Must be bigger than TRANSACTION_SIZE_LIMIT
 	init( APPLY_BLOCK_SIZE,     LOG_RANGE_BLOCK_SIZE/5 );

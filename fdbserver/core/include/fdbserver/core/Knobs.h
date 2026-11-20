@@ -485,7 +485,10 @@ public:
 	                                                       // simulation.
 	int DD_BULKDUMP_PARALLELISM; // the max number of concurrent bulk dump tasks in DD
 	bool DD_BULKDUMP_USE_REMOTE_REGION; // dump from the remote region instead of the primary. The dumping server
-	                                    // uploads the files, so its region must reach the destination.
+	                                    // uploads the files, so its region must reach the destination. Ignored
+	                                    // with usable_regions == 1, where the remote holds no storage servers.
+	double DD_BULKDUMP_NO_TARGET_REPLICA_FAIL_SEC; // fail a job whose ranges skipped for lacking a replica in the
+	                                               // dumping DC have not dropped in number for this long. 0 disables.
 	int SS_SERVE_BULKDUMP_PARALLELISM; // the number of bulk dump tasks that can concurrently happen at a SS
 	int64_t SS_BULKDUMP_BATCH_BYTES; // the max bytes when SS creates a batch to dump
 	int SS_BULKLOAD_GETRANGE_BATCH_SIZE; // the max number of keys to scan before do context switch
@@ -838,6 +841,10 @@ public:
 	double CC_CLASS_DELAY;
 	double WAIT_FOR_GOOD_RECRUITMENT_DELAY;
 	double WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY;
+	// If true, a process waiting WAIT_FOR_GOOD_RECRUITMENT_DELAY or WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY before
+	// running for leader learns the current leader from the coordinators meanwhile, so it can register with it
+	// without waiting for the delay to expire.
+	bool MONITOR_LEADER_DURING_CANDIDACY_DELAY;
 	double ATTEMPT_RECRUITMENT_DELAY;
 	double WAIT_FOR_DISTRIBUTOR_JOIN_DELAY;
 	double WAIT_FOR_RATEKEEPER_JOIN_DELAY;
@@ -1213,6 +1220,7 @@ public:
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 	std::string STORAGESERVER_READ_PRIORITIES;
 	int STORAGE_SERVER_READ_CONCURRENCY;
+	int64_t SS_SKIP_DELIVERED_TO_NOT_ASSIGNED_VERSION;
 	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
 	int SPLIT_METRICS_MAX_ROWS;
 	double STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL;

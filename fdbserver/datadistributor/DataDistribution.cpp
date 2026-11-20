@@ -310,12 +310,13 @@ Future<Void> monitorBackupPartitionRequired(Database cx, KeyRangeMap<ShardTracke
 						tr.set(backupPartitionListKey, encodeBackupPartitionListValue(partitions));
 						tr.clear(backupPartitionRequiredKey);
 						co_await tr.commit();
-						TraceEvent("DDBackupPartitionsComputed", ddId).detail("NumPartitions", partitions.size());
+						TraceEvent("RangePartitionedBWPartitionsComputedByDD", ddId)
+						    .detail("NumPartitions", partitions.size());
 					} else {
 						tr.clear(backupPartitionListKey);
 						tr.clear(backupPartitionRequiredKey);
 						co_await tr.commit();
-						TraceEvent("DDBackupPartitionsCleared", ddId);
+						TraceEvent("RangePartitionedBWPartitionsClearedByDD", ddId);
 					}
 					break;
 				} catch (Error& e) {
@@ -385,12 +386,30 @@ struct DDBulkLoadJobManager {
 	bool isValid() const { return jobState.isValid(); }
 };
 
+// The window restarts whenever the skipped count falls below its lowest value so far, so a DC that is catching up
+// (e.g. after usable_regions goes from 1 to 2) is not failed while it is making progress.
+struct BulkDumpSkipTracker {
+	Optional<double> stalledSince;
+	size_t lowestSkipped = 0;
+
+	bool shouldFail(size_t skipped, double currentTime, double failAfterSec) {
+		if (skipped == 0) {
+			stalledSince.reset();
+			return false;
+		}
+		if (!stalledSince.present() || skipped < lowestSkipped) {
+			stalledSince = currentTime;
+			lowestSkipped = skipped;
+		}
+		return failAfterSec > 0 && currentTime - stalledSince.get() >= failAfterSec;
+	}
+};
+
 struct DDBulkDumpJobManager {
 	BulkDumpState jobState;
 	std::map<Key, BulkLoadManifest> taskManifestMap;
-	// Limits the "no replica in the target DC" warning to once per job rather than once per
-	// affected range per scheduling cycle. This manager is reconstructed for each job.
-	bool warnedNoServerInTargetDc = false;
+	BulkDumpSkipTracker skipTracker;
+	bool failed = false; // set once an Error range is seen or written; stops scheduling
 
 	DDBulkDumpJobManager() = default;
 	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -518,10 +537,11 @@ public:
 	}
 
 	// The DC whose storage servers perform bulkdump uploads, or empty when the cluster has no
-	// region configuration. Resolved per dispatch rather than cached so it follows a failover.
+	// region configuration. Resolved per scheduling pass rather than cached so it follows a failover.
 	std::string bulkDumpTargetDcId() const {
-		const std::vector<Optional<Key>>& dcIds =
-		    SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION ? remoteDcIds : primaryDcId;
+		// With usable_regions == 1 the remote DC is configured but holds no storage servers.
+		const bool useRemote = SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION && configuration.usableRegions > 1;
+		const std::vector<Optional<Key>>& dcIds = useRemote ? remoteDcIds : primaryDcId;
 		if (!dcIds.empty() && dcIds[0].present()) {
 			return dcIds[0].get().toString();
 		}
@@ -2739,6 +2759,40 @@ Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 	self->bulkDumpParallelismLimitor.decrementTaskCounter();
 }
 
+// Marks ranges Error in the metadata so the failure is visible to pollers and survives a DD restart.
+Future<Void> markBulkDumpRangesFailed(Reference<DataDistributor> self, std::map<Key, KeyRange> rangeMap) {
+	const BulkDumpState errorState = self->bulkDumpJobManager.jobState.generateErrorMetadata();
+	const UID jobId = errorState.getJobId();
+	constexpr int rangesPerTransaction = 100;
+	Transaction tr(self->txnProcessor->context());
+	auto batchBegin = rangeMap.begin();
+	while (batchBegin != rangeMap.end()) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			auto it = batchBegin;
+			for (int n = 0; n < rangesPerTransaction && it != rangeMap.end(); ++n, ++it) {
+				const KeyRange& range = it->second;
+				RangeResult current = co_await krmGetRanges(&tr, bulkDumpPrefix, range);
+				for (int j = 0; j < static_cast<int>(current.size()) - 1; ++j) {
+					if (current[j].value.empty() || decodeBulkDumpState(current[j].value).getJobId() != jobId) {
+						throw bulkdump_task_outdated();
+					}
+				}
+				co_await krmSetRange(&tr, bulkDumpPrefix, range, bulkDumpStateValue(errorState));
+			}
+			co_await tr.commit();
+			batchBegin = it;
+			tr.reset();
+			continue;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	UID jobId = self->bulkDumpJobManager.jobState.getJobId();
 	KeyRange jobRange = self->bulkDumpJobManager.jobState.getJobRange();
@@ -2754,6 +2808,7 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	int rangeLocationIndex = 0;
 	std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations;
 	KeyRange taskRange;
+	std::map<Key, KeyRange> skippedRanges;
 	std::vector<Future<Void>> actors;
 	Transaction tr(cx);
 	while (beginKey < endKey) {
@@ -2782,7 +2837,11 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					    .detail("CurrentJob", bulkDumpState.getJobId());
 					throw bulkdump_task_outdated();
 				}
-				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
+				if (bulkDumpState.getPhase() == BulkDumpPhase::Error) {
+					self->bulkDumpJobManager.failed = true;
+				}
+				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete ||
+				    bulkDumpState.getPhase() == BulkDumpPhase::Error) {
 					TraceEvent(SevDebug, "DDBulkDumpJobScheduleJobSeeCompleteTask", self->ddId)
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
@@ -2805,25 +2864,25 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 				    .detail("BulkDumpRange", bulkDumpRange)
 				    .detail("BeginKey", bulkDumpResult[bulkDumpResultIndex].key)
 				    .detail("EndKey", rangeLocations.back().range.end);
+				const std::string targetDcId = self->bulkDumpTargetDcId();
 				rangeLocationIndex = 0;
 				for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
 					// Spawn task per shard
 					taskRange = rangeLocations[rangeLocationIndex].range;
 					ASSERT(!taskRange.empty());
 					// Skip rather than fall back to another region: the dumping server uploads the
-					// files, so a DC that cannot reach the destination would fail every task.
-					const std::string targetDcId = self->bulkDumpTargetDcId();
+					// files, so a DC that cannot reach the destination would fail every task. The
+					// one exception is usable_regions == 1, handled in bulkDumpTargetDcId().
 					if (!targetDcId.empty()) {
 						const auto& servers = rangeLocations[rangeLocationIndex].servers;
 						auto targetDc = servers.find(targetDcId);
 						if (targetDc == servers.end() || targetDc->second.empty()) {
-							if (!self->bulkDumpJobManager.warnedNoServerInTargetDc) {
-								self->bulkDumpJobManager.warnedNoServerInTargetDc = true;
-								TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDc", self->ddId)
-								    .detail("JobID", jobId)
-								    .detail("TargetDcId", targetDcId)
-								    .detail("FirstSkippedRange", taskRange);
-							}
+							TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDc", self->ddId)
+							    .suppressFor(60.0)
+							    .detail("JobID", jobId)
+							    .detail("TargetDcId", targetDcId)
+							    .detail("SkippedRange", taskRange);
+							skippedRanges[taskRange.begin] = taskRange;
 							continue;
 						}
 					}
@@ -2859,6 +2918,16 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 		co_await tr.onError(err);
 	}
 	co_await waitForAll(actors);
+	if (self->bulkDumpJobManager.skipTracker.shouldFail(
+	        skippedRanges.size(), now(), SERVER_KNOBS->DD_BULKDUMP_NO_TARGET_REPLICA_FAIL_SEC)) {
+		TraceEvent(SevWarnAlways, "DDBulkDumpNoServerInTargetDcTimeout", self->ddId)
+		    .detail("JobID", jobId)
+		    .detail("TargetDcId", self->bulkDumpTargetDcId())
+		    .detail("SkippedRanges", skippedRanges.size())
+		    .detail("FailAfterSec", SERVER_KNOBS->DD_BULKDUMP_NO_TARGET_REPLICA_FAIL_SEC);
+		co_await markBulkDumpRangesFailed(self, skippedRanges);
+		self->bulkDumpJobManager.failed = true;
+	}
 	TraceEvent(SevInfo, "DDBulkDumpJobScheduleEnd", self->ddId).detail("JobId", jobId).detail("JobRange", jobRange);
 }
 
@@ -2888,7 +2957,8 @@ Future<bool> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
 					throw bulkdump_task_outdated();
 				}
 				if (bulkDumpState.getPhase() != BulkDumpPhase::Complete) {
-					ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
+					ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted ||
+					       bulkDumpState.getPhase() == BulkDumpPhase::Error);
 					co_return false;
 				}
 			}
@@ -3067,6 +3137,10 @@ Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 			co_await cancelBulkDumpJob(cx, jobId);
 			TraceEvent(SevInfo, "DDBulkDumpManagerMetadataCleared", self->ddId).detail("JobId", jobId);
 			break; // end
+		} else if (self->bulkDumpJobManager.failed) {
+			// Keep the metadata so the failure stays visible. Cancelling the job clears it, which ends this loop
+			// through bulkdump_task_outdated.
+			TraceEvent(SevWarnAlways, "DDBulkDumpJobFailed", self->ddId).suppressFor(60.0).detail("JobId", jobId);
 		} else {
 			// Schedule the job
 			co_await scheduleBulkDumpJob(self);
@@ -3144,7 +3218,7 @@ void addDataDistributionActors(Reference<DataDistributor> self, std::vector<Futu
 Future<Void> dataDistribution(Reference<DataDistributor> self,
                               PromiseStream<GetMetricsListRequest> getShardMetricsList) {
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
-	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
+	cx->locationCache.setCapacity(SERVER_KNOBS->DD_LOCATION_CACHE_SIZE);
 	self->txnProcessor = makeReference<DDTxnProcessor>(cx);
 
 	TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Start");
@@ -3995,6 +4069,11 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 	try {
 		ASSERT(audit != nullptr);
 		ASSERT(audit->coreState.ddId == self->ddId);
+		// Stop here if this data distributor lost the lock, or the audit was completed or taken over by another one:
+		// tasks dispatched for an audit that is over run against data that nothing keeps consistent. This covers the
+		// start of a generation only; tasks scheduled later within it are not re-checked.
+		co_await checkAuditRunningUnderLock(
+		    self->txnProcessor->context(), auditType, auditID, self->ddId, lockInfo, self->context->isDDEnabled());
 		loadAndDispatchAudit(self, audit);
 		TraceEvent(SevInfo, "DDAuditStorageCoreScheduled", self->ddId)
 		    .detail("Context", audit->getDDAuditContext())
@@ -5895,6 +5974,19 @@ private:
 	int64_t saved;
 };
 
+class BulkDumpUseRemoteRegionGuard {
+public:
+	BulkDumpUseRemoteRegionGuard() : saved(SERVER_KNOBS->DD_BULKDUMP_USE_REMOTE_REGION) {}
+	~BulkDumpUseRemoteRegionGuard() { set(saved); }
+	BulkDumpUseRemoteRegionGuard(BulkDumpUseRemoteRegionGuard const&) = delete;
+	BulkDumpUseRemoteRegionGuard& operator=(BulkDumpUseRemoteRegionGuard const&) = delete;
+
+	void set(bool value) { const_cast<ServerKnobs*>(SERVER_KNOBS)->DD_BULKDUMP_USE_REMOTE_REGION = value; }
+
+private:
+	bool saved;
+};
+
 } // namespace
 
 TEST_CASE("/DataDistribution/Audit/BoundAuditTaskRange") {
@@ -5983,6 +6075,28 @@ TEST_CASE("/DataDistribution/Initialization/DcIds") {
 	return Void();
 }
 
+TEST_CASE("/DataDistribution/BulkDump/TargetDcId") {
+	Reference<DDSharedContext> context(new DDSharedContext(UID()));
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+	Reference<DataDistributor> self(new DataDistributor(dbInfo, UID(), context, ""));
+	self->primaryDcId = { Optional<Key>("primary"_sr) };
+	self->remoteDcIds = { Optional<Key>("remote"_sr) };
+	BulkDumpUseRemoteRegionGuard useRemoteRegion;
+
+	useRemoteRegion.set(true);
+	self->configuration.usableRegions = 2;
+	ASSERT_EQ(self->bulkDumpTargetDcId(), "remote");
+	// The remote DC is configured but holds no storage servers.
+	self->configuration.usableRegions = 1;
+	ASSERT_EQ(self->bulkDumpTargetDcId(), "primary");
+
+	useRemoteRegion.set(false);
+	self->configuration.usableRegions = 2;
+	ASSERT_EQ(self->bulkDumpTargetDcId(), "primary");
+
+	return Void();
+}
+
 TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
 	Reference<DDSharedContext> context(new DDSharedContext(UID()));
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
@@ -6053,6 +6167,43 @@ BulkLoadTaskState splitTestTask(const std::vector<KeyRange>& manifestRanges, con
 }
 
 } // namespace
+
+TEST_CASE("/DataDistribution/BulkLoad/PlacementRetriesAcrossRelocations") {
+	auto range = KeyRangeRef("a"_sr, "e"_sr);
+	std::vector<KeyRange> manifests{ KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("c"_sr, "e"_sr) };
+	auto task = splitTestTask(manifests, range);
+	BulkLoadTaskCollection collection{ UID() };
+	collection.publishTask(task, 1, {});
+	auto first = collection.getTaskByRange(range).get();
+	for (int miss = 1; miss <= 30; ++miss) {
+		ASSERT(!first.recordPlacementMiss(miss));
+	}
+	auto replacement = collection.getTaskByRange(range).get();
+	for (int miss = 1; miss < 20; ++miss) {
+		ASSERT(!replacement.recordPlacementMiss(miss));
+	}
+	ASSERT(replacement.recordPlacementMiss(20));
+	first.recordPlacementSuccess();
+	ASSERT(!replacement.recordPlacementMiss(1));
+	collection.eraseTask(task);
+	collection.publishTask(task, 2, {});
+	auto republished = collection.getTaskByRange(range).get();
+	for (int miss = 1; miss < 50; ++miss) {
+		ASSERT(!republished.recordPlacementMiss(miss));
+	}
+	ASSERT(republished.recordPlacementMiss(50));
+
+	// Neither manifest starts inside the clipped range. Replacing the relocator retains a full grace period.
+	auto clipped = splitTestTask(manifests, KeyRangeRef("c"_sr, "e"_sr));
+	DDBulkLoadEngineTask indivisible(clipped, 3, {});
+	for (int attempt = 0; attempt < 2; ++attempt) {
+		for (int miss = 1; miss < 50; ++miss) {
+			ASSERT(!indivisible.recordPlacementMiss(miss));
+		}
+	}
+	ASSERT(indivisible.recordPlacementMiss(50));
+	return Void();
+}
 
 TEST_CASE("/DataDistribution/BulkLoad/DeriveSplitTasks") {
 	// The children tile the parent and partition its manifests, and inherit its job.
@@ -6127,6 +6278,54 @@ TEST_CASE("/DataDistribution/BulkLoad/DeriveSplitTasks") {
 			task = children.get()[0];
 		}
 		ASSERT_EQ(task.getManifests().size(), 1);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/BulkDump/SkipTracker") {
+	constexpr double failAfter = 100.0;
+
+	// Skipped ranges that never drop fail the job once the window elapses.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, failAfter));
+		ASSERT(!tracker.shouldFail(5, 99.0, failAfter));
+		ASSERT(tracker.shouldFail(5, 100.0, failAfter));
+	}
+
+	// A growing count is not progress.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, failAfter));
+		ASSERT(!tracker.shouldFail(8, 50.0, failAfter));
+		ASSERT(tracker.shouldFail(8, 100.0, failAfter));
+	}
+
+	// A DC that is catching up keeps the job alive: each drop restarts the window.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, failAfter));
+		ASSERT(!tracker.shouldFail(4, 90.0, failAfter));
+		ASSERT(!tracker.shouldFail(4, 180.0, failAfter));
+		ASSERT(tracker.shouldFail(4, 190.0, failAfter));
+	}
+
+	// A pass with no skipped range clears the window.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, failAfter));
+		ASSERT(!tracker.shouldFail(0, 90.0, failAfter));
+		ASSERT(!tracker.shouldFail(5, 150.0, failAfter));
+		ASSERT(!tracker.shouldFail(5, 249.0, failAfter));
+		ASSERT(tracker.shouldFail(5, 250.0, failAfter));
+	}
+
+	// A zero knob never fails the job.
+	{
+		BulkDumpSkipTracker tracker;
+		ASSERT(!tracker.shouldFail(5, 0.0, 0.0));
+		ASSERT(!tracker.shouldFail(5, 1e9, 0.0));
 	}
 
 	return Void();

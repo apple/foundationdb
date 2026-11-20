@@ -705,30 +705,6 @@ Future<Void> commitTransaction(Reference<ITransaction> tr) {
 		fmt::print("Nothing to commit\n");
 }
 
-Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
-	Standalone<StringRef> snapCmd;
-	UID snapUID = deterministicRandom()->randomUniqueID();
-	for (int i = 1; i < tokens.size(); i++) {
-		snapCmd = snapCmd.withSuffix(tokens[i]);
-		if (i != tokens.size() - 1) {
-			snapCmd = snapCmd.withSuffix(" "_sr);
-		}
-	}
-	try {
-		co_await makeInterruptable(mgmtSnapCreate(db, snapCmd, snapUID));
-		printf("Snapshot command succeeded with UID %s\n", snapUID.toString().c_str());
-	} catch (Error& e) {
-		fprintf(stderr,
-		        "Snapshot command failed %d (%s)."
-		        " Please cleanup any instance level snapshots created with UID %s.\n",
-		        e.code(),
-		        e.what(),
-		        snapUID.toString().c_str());
-		co_return true;
-	}
-	co_return false;
-}
-
 // TODO: Update the function to get rid of the Database after refactoring
 Reference<ITransaction> getTransaction(Reference<IDatabase> db,
                                        Reference<ITransaction>& tr,

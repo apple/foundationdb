@@ -839,8 +839,12 @@ Future<Void> doOnMainThread(Future<Void> signal,
 	}
 
 	function.destroy(result);
-	ThreadFuture<R> destroyResultAfterReturning(
-	    result); // Call result->delref(), but only after our return promise is no longer referenced on this thread
+	// Coroutine locals are destroyed before final_suspend(), unlike the local guard in the generated Flow actor.
+	// Detach our cancellation future while we still own a result reference, so a client thread cannot release it
+	// concurrently with final_suspend() accessing the non-thread-safe SAV. Dropping the last future reference may
+	// mark this running coroutine cancelled, but there are no more waits and its promise keeps the frame alive.
+	result->setCancel(Future<Void>());
+	ThreadFuture<R> destroyResult(result);
 	co_return Void();
 }
 

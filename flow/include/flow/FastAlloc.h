@@ -45,11 +45,13 @@ bool valgrindPrecise();
 #include "flow/Hash3.h"
 
 #include <assert.h>
+#include <array>
 #include <atomic>
 #include <vector>
 #include <cstdlib>
 #include <cstdio>
 #include <unordered_map>
+#include <utility>
 
 #if defined(ALLOC_INSTRUMENTATION) && defined(__linux__)
 #include <execinfo.h>
@@ -105,6 +107,15 @@ void recordDeallocation(void* ptr);
 #endif
 
 inline constexpr auto kFastAllocMagazineBytes = 128 << 10;
+
+inline constexpr std::array FAST_ALLOCATOR_SIZES{ 16, 32, 64, 96, 128, 256, 512, 1024, 2048, 4096, 8192, 16384 };
+
+template <class Visitor>
+void forEachFastAllocatorSize(Visitor&& visitor) {
+	[&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
+		(static_cast<void>(visitor.template operator()<FAST_ALLOCATOR_SIZES[Indices]>()), ...);
+	}(std::make_index_sequence<FAST_ALLOCATOR_SIZES.size()>{});
+}
 
 template <int Size>
 class FastAllocator {
