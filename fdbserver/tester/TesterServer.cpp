@@ -437,6 +437,7 @@ Future<Void> runWorkloadAsync(Database cx,
 
 		if (action == 5) {
 			stopReq.send(Void());
+			TraceEvent("WorkloadStop", workIface.id()).detail("Workload", workload->description());
 			break;
 		}
 

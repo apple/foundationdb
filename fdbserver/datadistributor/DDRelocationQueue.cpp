@@ -2001,6 +2001,9 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 				}
 
 				if (foundTeams && anyHealthy && !anyDestOverloaded) {
+					if (doBulkLoading) {
+						rd.bulkLoadTask.get().recordPlacementSuccess();
+					}
 					ASSERT(rd.completeDests.empty());
 					break;
 				}
@@ -2049,7 +2052,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("AnyDestOverloaded", anyDestOverloaded)
 					    .detail("NumOfTeamCollections", self->teamCollections.size())
 					    .detail("ConductingBulkLoad", doBulkLoading);
-					if (doBulkLoading && stuckCount == 50) {
+					if (doBulkLoading && rd.bulkLoadTask.get().recordPlacementMiss(stuckCount)) {
 						ASSERT(rd.bulkLoadTask.present());
 						TraceEvent(SevWarnAlways, "DDBulkLoadTaskStuck", self->distributorId)
 						    .detail("TraceID", rd.randomId)

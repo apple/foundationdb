@@ -20,6 +20,7 @@
 
 #pragma once
 #include "flow/Error.h"
+#include "flow/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/flat_buffers.h"
 #include "flow/ProtocolVersion.h"
@@ -52,36 +53,82 @@ struct LoadContext {
 
 	void addArena(Arena& arena) { arena = ar->arena(); }
 
+	// Throws serialization_failed unless [ptr, ptr + len) lies inside the buffer being loaded.
+	void checkRange(const uint8_t* ptr, size_t len) const { ar->checkRange(ptr, len); }
+
+	[[noreturn]] void loadFailed(const char* reason) const { Ar::loadFailed(reason); }
+
 	LoadContext& context() { return *this; }
 };
 
 template <class ReaderImpl>
 class _ObjectReader {
+	friend struct _IncludeVersion;
+	_ObjectReader& operator>>(ProtocolVersion& version) {
+		uint64_t result;
+		if (static_cast<size_t>(_end - _data) < sizeof(result)) {
+			ReaderImpl::loadFailed("buffer too short for protocol version");
+		}
+		memcpy(&result, _data, sizeof(result));
+		_data += sizeof(result);
+		version = ProtocolVersion(result);
+		return *this;
+	}
+
 protected:
 	Optional<ProtocolVersion> mProtocolVersion;
+	const uint8_t* _data;
+	const uint8_t* _begin; // start of the flatbuffer, after any protocol version prefix
+	const uint8_t* _end;
+	bool _checksEnabled; // Cached so each field read avoids the knob lookup.
+
+	template <class VersionOptions>
+	_ObjectReader(const StringRef& input, VersionOptions vo)
+	  : _data(input.begin()), _end(input.end()), _checksEnabled(FLOW_KNOBS->FLATBUFFERS_BOUNDS_CHECKS_ENABLED) {
+		vo.read(*this);
+		_begin = _data;
+	}
 
 public:
 	ProtocolVersion protocolVersion() const { return mProtocolVersion.get(); }
 	void setProtocolVersion(ProtocolVersion v) { mProtocolVersion = v; }
 
+	const uint8_t* data() { return _data; }
+
+	void checkRange(const uint8_t* ptr, size_t len) const {
+		if (!_checksEnabled || len == 0) {
+			return;
+		}
+		auto p = reinterpret_cast<uintptr_t>(ptr);
+		auto b = reinterpret_cast<uintptr_t>(_begin);
+		auto e = reinterpret_cast<uintptr_t>(_end);
+		if (p < b || p > e || len > e - p) {
+			ReaderImpl::loadFailed("read outside of buffer");
+		}
+	}
+
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
 		LoadContext<ReaderImpl> context(static_cast<ReaderImpl*>(this));
 		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
+		if (static_cast<size_t>(_end - data) < 2 * sizeof(uint32_t)) { // root offset and file identifier
+			ReaderImpl::loadFailed("buffer too short for header");
+		}
 		if (read_file_identifier(data) != file_identifier) {
 			// Some file identifiers are changed in 7.0, so file identifier mismatches
 			// are expected during a downgrade from 7.0 to 6.3
 			bool expectMismatch = mProtocolVersion.get() >= ProtocolVersion(0x0FDB00B070000000LL) &&
 			                      currentProtocolVersion() < ProtocolVersion(0x0FDB00B070000000LL);
 			{
-				TraceEvent te(expectMismatch ? SevInfo : SevError, "MismatchedFileIdentifier");
-				if (expectMismatch) {
-					te.suppressFor(1.0);
-				}
-				te.detail("Expected", file_identifier).detail("Read", read_file_identifier(data));
+				TraceEvent te(expectMismatch ? SevInfo : SevWarnAlways, "MismatchedFileIdentifier");
+				te.suppressFor(1.0).detail("Expected", file_identifier).detail("Read", read_file_identifier(data));
 			}
 			if (!expectMismatch) {
-				ASSERT(false);
+				if constexpr (ReaderImpl::failsFatally) {
+					ASSERT(false);
+				} else {
+					detail::flat_buffer_load_failed("file identifier mismatch");
+				}
 			}
 		}
 		load_members(data, context, items...);
@@ -94,71 +141,46 @@ public:
 };
 
 class ObjectReader : public _ObjectReader<ObjectReader> {
-	friend struct _IncludeVersion;
-	ObjectReader& operator>>(ProtocolVersion& version) {
-		uint64_t result;
-		memcpy(&result, _data, sizeof(result));
-		_data += sizeof(result);
-		version = ProtocolVersion(result);
-		return *this;
-	}
-
 public:
 	static constexpr bool ownsUnderlyingMemory = false;
+	// ObjectReader has no error path for a malformed buffer, so it aborts rather than throw.
+	static constexpr bool failsFatally = true;
+	[[noreturn]] static void loadFailed(const char* reason) { detail::flat_buffer_load_fatal(reason); }
 
 	template <class VersionOptions>
-	ObjectReader(const uint8_t* data, VersionOptions vo) : _data(data) {
-		vo.read(*this);
-	}
+	ObjectReader(const StringRef& input, VersionOptions vo) : _ObjectReader(input, vo) {}
 
 	template <class T, class VersionOptions>
 	static T fromStringRef(StringRef sr, VersionOptions vo) {
 		T t;
-		ObjectReader reader(sr.begin(), vo);
+		ObjectReader reader(sr, vo);
 		reader.deserialize(t);
 		return t;
 	}
 
-	const uint8_t* data() { return _data; }
-
 	Arena& arena() { return _arena; }
 
 private:
-	const uint8_t* _data;
 	Arena _arena;
 };
 
 class ArenaObjectReader : public _ObjectReader<ArenaObjectReader> {
-	friend struct _IncludeVersion;
-	ArenaObjectReader& operator>>(ProtocolVersion& version) {
-		uint64_t result;
-		memcpy(&result, _data, sizeof(result));
-		_data += sizeof(result);
-		version = ProtocolVersion(result);
-		return *this;
-	}
-
 public:
 	static constexpr bool ownsUnderlyingMemory = true;
+	static constexpr bool failsFatally = false;
+	[[noreturn]] static void loadFailed(const char* reason) { detail::flat_buffer_load_failed(reason); }
 
 	template <class VersionOptions>
 	ArenaObjectReader(Arena const& arena, const StringRef& input, VersionOptions vo)
-	  : _data(input.begin()), _arena(arena) {
-		vo.read(*this);
-	}
+	  : _ObjectReader(input, vo), _arena(arena) {}
 
 	template <class VersionOptions>
 	ArenaObjectReader(Arena&& arena, const StringRef& input, VersionOptions vo)
-	  : _data(input.begin()), _arena(std::move(arena)) {
-		vo.read(*this);
-	}
-
-	const uint8_t* data() { return _data; }
+	  : _ObjectReader(input, vo), _arena(std::move(arena)) {}
 
 	Arena& arena() { return _arena; }
 
 private:
-	const uint8_t* _data;
 	Arena _arena;
 };
 
