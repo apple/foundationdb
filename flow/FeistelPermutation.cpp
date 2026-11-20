@@ -29,6 +29,8 @@
 #include "flow/FeistelPermutation.h"
 #include "flow/UnitTest.h"
 
+void forceLinkFeistelPermutationTests() {}
+
 TEST_CASE("/flow/FeistelPermutation/bijection") {
 	for (uint64_t const n : { 1, 2, 3, 4, 5, 17, 20, 21, 1000, 1024, 4097 }) {
 		FeistelPermutation const perm(n, 0x9c5b);
