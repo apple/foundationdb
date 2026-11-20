@@ -93,7 +93,7 @@ struct VersionStampWorkload : TestWorkload {
 		memset(data, '.', keyBytes);
 
 		double d = double(index) / nodeCount;
-		emplaceIndex(data, 0, *(int64_t*)&d);
+		emplaceIndex(data, 0, std::bit_cast<int64_t>(d));
 
 		return result.withPrefix(vsValuePrefix);
 	}
@@ -105,7 +105,7 @@ struct VersionStampWorkload : TestWorkload {
 		memset(&data[0], 'V', keySize);
 
 		double d = double(index) / nodeCount;
-		emplaceIndex(data, 4, *(int64_t*)&d);
+		emplaceIndex(data, 4, std::bit_cast<int64_t>(d));
 
 		if (oldVSFormat) {
 			data[keySize - 2] = 24 + vsKeyPrefix.size();

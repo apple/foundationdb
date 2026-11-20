@@ -354,8 +354,7 @@ struct ClogRemoteTLog : TestWorkload {
 		// ensure no crashes or correctness issues are observed.
 		cloggedRemoteTLog = isolatedRemoteTLog.present()
 		                        ? isolatedRemoteTLog.get()
-		                        : cloggedRemoteTLog =
-		                              remoteTLogs[deterministicRandom()->randomInt(0, remoteTLogs.size())];
+		                        : remoteTLogs[deterministicRandom()->randomInt(0, remoteTLogs.size())];
 		ASSERT(cloggedRemoteTLog.present());
 
 		// Then, find all processes that the remote tlog will have degraded connection with

@@ -34,7 +34,9 @@ public:
 	                     Optional<StringRef> const& creds,
 	                     std::string const& projectId,
 	                     BlobKnobs const& knobs = BlobKnobs(),
-	                     HTTP::Headers extraHeaders = HTTP::Headers());
+	                     HTTP::Headers extraHeaders = HTTP::Headers(),
+	                     Optional<std::string> const& serverSideEncryption = Optional<std::string>(),
+	                     Optional<std::string> const& proxyParameter = Optional<std::string>());
 
 	// OAuth2 Bearer token instead of SigV4
 	void setRequestHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers) override;

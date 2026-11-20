@@ -29,15 +29,15 @@ const uint8_t USER_TYPE_END = 0x4f;
 
 // TODO: Many functions copied from bindings/flow/Tuple.cpp. Merge at some point.
 static float bigEndianFloat(float orig) {
-	int32_t big = *(int32_t*)&orig;
+	auto big = std::bit_cast<int32_t>(orig);
 	big = bigEndian32(big);
-	return *(float*)&big;
+	return std::bit_cast<float>(big);
 }
 
 static double bigEndianDouble(double orig) {
-	int64_t big = *(int64_t*)&orig;
+	auto big = std::bit_cast<int64_t>(orig);
 	big = bigEndian64(big);
-	return *(double*)&big;
+	return std::bit_cast<double>(big);
 }
 
 static size_t findStringTerminator(const StringRef data, size_t offset) {

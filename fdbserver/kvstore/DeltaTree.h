@@ -1491,7 +1491,7 @@ public:
 
 			int nIndex = rootIndex();
 			int parentIndex = nIndex;
-			DecodedNode* parentDecoded;
+			DecodedNode* parentDecoded = nullptr;
 			// Result of comparing node at parentIndex
 			int cmp = 0;
 			// Height of the inserted node

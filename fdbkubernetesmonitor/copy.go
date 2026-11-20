@@ -20,11 +20,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
 	"regexp"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
 )
 
@@ -99,6 +103,86 @@ func copyFiles(logger logr.Logger, outputDir string, copyDetails map[string]stri
 	}
 
 	return nil
+}
+
+// restoreDelay is the time to wait after a file was removed before restoring it. It batches the events of a recursive
+// removal into a single restore. This is a variable to allow overwriting it in unit-tests.
+var restoreDelay = time.Second
+
+// restoreDeletedFiles blocks until the context is cancelled and copies every file of copyDetails again that
+// disappears from the output directory, e.g. because the monitor pruned a staged binary directory before it was needed.
+// The initial copy must have happened before this is called.
+func restoreDeletedFiles(ctx context.Context, logger logr.Logger, outputDir string, copyDetails map[string]string, requiredCopies map[string]bool) error {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	defer watcher.Close()
+
+	outputPaths := make(map[string]string, len(copyDetails))
+	for inputPath, outputSubpath := range copyDetails {
+		if outputSubpath == "" {
+			outputSubpath = path.Base(inputPath)
+		}
+		outputPaths[inputPath] = path.Join(outputDir, outputSubpath)
+	}
+
+	// The watches of removed directories are dropped by the kernel, so they have to be added again after a restore.
+	addWatches := func() {
+		for _, outputPath := range outputPaths {
+			err := watcher.Add(path.Dir(outputPath))
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				logger.Error(err, "Could not watch directory", "path", path.Dir(outputPath))
+			}
+		}
+	}
+	addWatches()
+
+	// Files removed before the watches were added generate no event, so check once right away.
+	restoreTimer := time.After(0)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return nil
+			}
+
+			if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
+				restoreTimer = time.After(restoreDelay)
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return nil
+			}
+
+			logger.Error(err, "Error watching the output directory")
+		case <-restoreTimer:
+			restoreTimer = nil
+			missing := make(map[string]string)
+			for inputPath, outputPath := range outputPaths {
+				_, err := os.Stat(outputPath)
+				if errors.Is(err, os.ErrNotExist) {
+					missing[inputPath] = copyDetails[inputPath]
+				}
+			}
+
+			if len(missing) == 0 {
+				continue
+			}
+
+			logger.Info("Restoring deleted files", "count", len(missing))
+			err := copyFiles(logger, outputDir, missing, requiredCopies)
+			if err != nil {
+				logger.Error(err, "Error restoring deleted files")
+				restoreTimer = time.After(restoreDelay)
+				continue
+			}
+
+			addWatches()
+		}
+	}
 }
 
 // getCompactVersion will return the compact version representation for the input version. The compact version consists

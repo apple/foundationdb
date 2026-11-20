@@ -29,7 +29,9 @@ GCSBlobStoreEndpoint::GCSBlobStoreEndpoint(std::string const& host,
                                            Optional<StringRef> const& creds,
                                            std::string const& projectId,
                                            BlobKnobs const& knobs,
-                                           HTTP::Headers extraHeaders)
+                                           HTTP::Headers extraHeaders,
+                                           Optional<std::string> const& serverSideEncryption,
+                                           Optional<std::string> const& proxyParameter)
   : S3BlobStoreEndpoint(host,
                         service,
                         "auto",
@@ -37,7 +39,9 @@ GCSBlobStoreEndpoint::GCSBlobStoreEndpoint(std::string const& host,
                         proxyPort,
                         Optional<StringRef>(), // Don't pass creds to S3 — we handle auth ourselves
                         knobs,
-                        extraHeaders),
+                        extraHeaders,
+                        serverSideEncryption,
+                        proxyParameter),
     projectId(projectId) {
 	if (creds.present()) {
 		token = creds.get().toString();

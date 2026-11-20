@@ -7,32 +7,37 @@ Release Notes
 8.0.1
 =====
 
-Unreleased.
+AVX enabled release.
 
-* Fixed network setup failures when older multiversion clients load the 8.0
-  client, even when the application does not use blob granules. Restored the
-  required blob granule C symbols as stubs that abort the process when called.
-  `(PR #14238) <https://github.com/apple/foundationdb/pull/14238>`_
-* Fixed Redwood page-cache memory accounting when a reused page ID changes
-  size, so cache eviction uses the current page size.
-  `(PR #14291) <https://github.com/apple/foundationdb/pull/14291>`_
-* Added bounded retries for disk errors when opening or reading backup
-  encryption-key files, allowing transient failures to recover before the
-  backup container retains a failed initialization result.
-  `(PR #14294) <https://github.com/apple/foundationdb/pull/14294>`_
-* Avoided linking newer glibc symbols into RHEL 9 builds that prevented
-  binaries built on RHEL 9.7 from starting on RHEL 9.6 systems and containers.
-  `(PR #14278) <https://github.com/apple/foundationdb/pull/14278>`_
-* Cached the network interface name used for network-traffic metrics to reduce
-  periodic network-thread stalls on hosts with many interfaces.
-  `(PR #14283) <https://github.com/apple/foundationdb/pull/14283>`_
-* Fixed a Linux ``fdbmonitor`` memory leak when changes to a configuration-file
-  symlink caused its target path to be resolved again.
-  `(PR #14253) <https://github.com/apple/foundationdb/pull/14253>`_
-* Changed the Kubernetes monitor image to declare its existing non-root user
-  numerically, allowing it to start with ``runAsNonRoot: true`` when
-  ``runAsUser`` is not specified.
-  `(PR #14248) <https://github.com/apple/foundationdb/pull/14248>`_
+* Raised the protocol versions that 8.0 binaries treat as the next release from 8.1 to 9.0 (future protocol version 9.0, minimum invalid protocol version 9.1). 8.0.0 rejects data stamped with protocol 8.2 or later, so a future 9.0 cluster can be downgraded only to 8.0.1 or later 8.0.x releases, not to 8.0.0. The current protocol version, minimum compatible version and API version are unchanged. `(PR #14423) <https://github.com/apple/foundationdb/pull/14423>`_
+* Rejected file and object names that are absolute or contain a ``..`` component in places where a name is joined onto a base directory: local directory backup containers, backup file listing, S3 copy-down, bulk load job and task manifests, the profiler output file, and SST file names in fetched checkpoints. `(PR #14421) <https://github.com/apple/foundationdb/pull/14421>`_
+* Avoided linking newer glibc symbols into RHEL 9 builds that prevented binaries built on RHEL 9.7 from starting on RHEL 9.6 systems and containers. `(PR #14278) <https://github.com/apple/foundationdb/pull/14278>`_
+* Fixed network setup failures when older multiversion clients load the 8.0 client, even when the application does not use blob granules. Restored the required blob granule C symbols as stubs that abort the process when called. `(PR #14239) <https://github.com/apple/foundationdb/pull/14239>`_
+* Removed the unused blob granule types ``FDBBGMutationType`` and the ``FDBBG*`` file description structs from ``fdb_c.h``. They were only used by the blob granule read API removed in 8.0.0. ``FDBGranuleSummary`` and ``FDBReadBlobGranuleContext`` are kept for the compatibility stubs. `(PR #14247) <https://github.com/apple/foundationdb/pull/14247>`_
+* Outbound TLS connections that fdbserver opens by hostname (S3 and other HTTPS blob stores, REST and KMS servers, including connections through an HTTP proxy) are now verified by CA chain and hostname instead of the cluster's ``--tls-verify-peers`` rules. Previously, on clusters that set peer rules, every S3 server certificate was rejected, which broke bulk dump and bulk load uploads. Cluster traffic keeps using the peer rules. `(PR #14469) <https://github.com/apple/foundationdb/pull/14469>`_
+* Fixed an interrupted remote-region recovery possibly starting the next generation one version too late and leaving a storage server behind, because a new log router reported its synthetic startup pop floor as committed progress. `(PR #14295) <https://github.com/apple/foundationdb/pull/14295>`_
+* Added the ``SS_SKIP_DELIVERED_TO_NOT_ASSIGNED_VERSION`` server knob (default ``0``, disabled) to recover a storage server that crash-loops on a mutation delivered to a shard it is not assigned. Setting it to that one version makes the storage server drop such mutations at that version instead of asserting. `(PR #14480) <https://github.com/apple/foundationdb/pull/14480>`_
+* Fixed DR (``fdbdr``) mutation log copying possibly skipping mutations when a copy step timed out. Copying now finishes the current version and resumes at the first version it did not copy. `(PR #14296) <https://github.com/apple/foundationdb/pull/14296>`_
+* Fixed a race in the client library where an application thread could destroy a result while the network thread was still completing it, which could crash the client. `(PR #14373) <https://github.com/apple/foundationdb/pull/14373>`_
+* Fixed a client memory leak when setting watches on many distinct keys. Watch reference-count entries are now removed once no watch uses them. `(PR #14490) <https://github.com/apple/foundationdb/pull/14490>`_
+* Retried ``fallocate()`` and ``ftruncate()`` when they fail with ``EINTR`` in the Linux KAIO file truncate path, instead of failing the operation. `(PR #14326) <https://github.com/apple/foundationdb/pull/14326>`_
+* Fixed Redwood page-cache memory accounting when a reused page ID changes size, so cache eviction uses the current page size. `(PR #14291) <https://github.com/apple/foundationdb/pull/14291>`_
+* Fixed a Linux ``fdbmonitor`` memory leak when changes to a configuration-file symlink caused its target path to be resolved again. `(PR #14253) <https://github.com/apple/foundationdb/pull/14253>`_
+* Remote-region TLogs reuse recent disk-space samples in the low-disk admission check instead of calling ``statvfs()`` for every version they pull. On a two-region cluster under write load, the per-version disk checks made spilling fall behind, and remote TLogs ran out of memory during a machine exclude. `(PR #14345) <https://github.com/apple/foundationdb/pull/14345>`_
+* Reduced CPU spent on every completed RPC reply. Cancelling the per-request failure monitor wait no longer throws C++ exceptions. `(PR #14352) <https://github.com/apple/foundationdb/pull/14352>`_
+* Cached the network interface name used for network-traffic metrics to reduce periodic network-thread stalls on hosts with many interfaces. `(PR #14283) <https://github.com/apple/foundationdb/pull/14283>`_
+* Fixed one backup with a missing or invalid container URL dropping every backup from the backup layer status in ``status json`` (``layers.backup``). The other backups are still reported, and the failing one gets an ``error`` field. `(PR #14484) <https://github.com/apple/foundationdb/pull/14484>`_
+* Mutation log tasks of a backup whose snapshot has finished now run ahead of other backups' initial snapshot tasks, so a new backup's first snapshot no longer starves other backups' logs and increases their backup lag. This raises the ``TASKBUCKET_MAX_PRIORITY`` client knob default from 1 to 2. Backup agents older than 8.0.1 (and older than 7.4.9 on 7.4) only run tasks up to priority 1, so keep at least one 8.0.1 or newer backup agent running for backups that ran under 8.0.1, and do not downgrade all backup agents while a backup is running. `(PR #14499) <https://github.com/apple/foundationdb/pull/14499>`_
+* Added bounded retries for disk errors when opening or reading backup encryption-key files, allowing transient failures to recover before the backup container retains a failed initialization result. `(PR #14294) <https://github.com/apple/foundationdb/pull/14294>`_
+* Added per-URL blobstore parameters for backups: ``server_side_encryption`` (or ``sse``) overrides the ``BLOBSTORE_ENCRYPTION_TYPE`` knob (``sse=none`` sends no server-side encryption header), ``proxy`` overrides the ``--proxy`` option and proxy environment variables (``proxy=none`` connects directly), and ``aws_v4_header`` (or ``v4``) overrides the ``HTTP_REQUEST_AWS_V4_HEADER`` knob. The URL is saved with the backup, so each backup on a cluster can use its own values. `(PR #14519) <https://github.com/apple/foundationdb/pull/14519>`_, `(PR #14521) <https://github.com/apple/foundationdb/pull/14521>`_
+* Range file restores now send one clear per restore transaction instead of one clear per gap between restored keys, and skip that clear when the range has no existing keys. In tests on 20-storage-server clusters this made restores about 2x faster and roughly halved storage server CPU. Setting the client knobs ``RESTORE_RANGE_DISABLE_RYW`` or ``RESTORE_RANGE_READ_BEFORE_CLEAR`` (both default ``true``) to ``false`` on the backup agents restores the previous behavior. `(PR #14513) <https://github.com/apple/foundationdb/pull/14513>`_, `(PR #14525) <https://github.com/apple/foundationdb/pull/14525>`_
+* Bulk dump now picks its target DC from the region configuration: the primary region by default, or the remote region when the new ``DD_BULKDUMP_USE_REMOTE_REGION`` knob is set and the cluster has more than one usable region. Previously the target was decided by the lexicographic order of DC ids. `(PR #14275) <https://github.com/apple/foundationdb/pull/14275>`_, `(PR #14384) <https://github.com/apple/foundationdb/pull/14384>`_
+* Added opt-in audit logging to fdbcli. With ``--audit-log`` (or ``FDB_CLI_AUDIT_LOG_ENABLE``), every key returned by ``get``, ``getrange``, ``getrangekeys`` and ``getall`` is logged as an ``FdbCliAudit`` trace event. ``--audit-log-values`` (``none``, ``system`` or ``all``, default ``system``) picks which values are logged. Audit events go to their own ``trace_audit.*`` files, in the ``FDB_CLI_AUDIT_LOG_ENABLE`` value or ``--audit-log-dir`` if set, else next to the trace files, else the current directory. `(PR #14486) <https://github.com/apple/foundationdb/pull/14486>`_
+* Added opt-in JSON audit logging to ``transaction_profiling_analyzer.py``. With ``--audit-log`` (or ``FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE``), every key, range and mutation it prints is appended to ``transaction_profiling_analyzer_audit.json``, in the ``FDB_TRANSACTION_PROFILER_AUDIT_LOG_ENABLE`` value or ``--audit-log-dir`` if set, else the ``FDB_NETWORK_OPTION_TRACE_ENABLE`` directory, else the current directory. `(PR #14486) <https://github.com/apple/foundationdb/pull/14486>`_
+* Fixed truth testing of an absent value in the Python bindings on Python 3. ``if not tr[key]:`` raised ``TypeError`` for a missing key and now evaluates as false. `(PR #14517) <https://github.com/apple/foundationdb/pull/14517>`_
+* Fixed ``FDB::Tuple.compare`` and ``FDB::Tuple::SingleFloat`` comparisons raising ``ArgumentError`` on Ruby 3.3 and later when comparing floating point values. `(PR #14518) <https://github.com/apple/foundationdb/pull/14518>`_
+* Changed the Kubernetes monitor image to declare its existing non-root user numerically, allowing it to start with ``runAsNonRoot: true`` when ``runAsUser`` is not specified. `(PR #14248) <https://github.com/apple/foundationdb/pull/14248>`_
+* Updated ``fdb-kubernetes-monitor``: it retries loading its configuration while the ``fdbserver`` binary is missing, empty or not executable, can be configured to always use the shared binaries (useful for compatible version upgrades without recreating pods), and exposes the staged and running ``fdbserver`` versions in a pod annotation for the operator. Its Go toolchain and dependencies now match ``main``. `(PR #14556) <https://github.com/apple/foundationdb/pull/14556>`_
 
 8.0.0
 =====

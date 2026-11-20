@@ -274,11 +274,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(fullPath, flags, 0644);
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		int encBlockSize = encryptionBlockSize;
-		f = map(success(f) && encryptionSetupComplete(), [file = f, encBlockSize](Void) {
-			return Reference<IAsyncFile>(
-			    makeReference<AsyncFileEncrypted>(file.get(), AsyncFileEncrypted::Mode::READ_ONLY, encBlockSize));
-		});
+		f = encryptedFile(f, AsyncFileEncrypted::Mode::READ_ONLY);
 	}
 
 	if (g_network->isSimulated()) {
@@ -318,11 +314,7 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		int encBlockSize = encryptionBlockSize;
-		f = map(success(f) && encryptionSetupComplete(), [file = f, encBlockSize](Void) {
-			return Reference<IAsyncFile>(
-			    makeReference<AsyncFileEncrypted>(file.get(), AsyncFileEncrypted::Mode::APPEND_ONLY, encBlockSize));
-		});
+		f = encryptedFile(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
 	}
 	return map(f, [=](Reference<IAsyncFile> file) -> Reference<IBackupFile> {
 		return makeReference<BackupFile>(path, file, fullPath);
@@ -378,7 +370,7 @@ TEST_CASE("/backup/containers/localdir/rejectsEscapingPaths") {
 		ASSERT(false);
 	};
 
-	for (const std::string& path : { "../x", "a/../../x", "/etc/passwd" }) {
+	for (const char* path : { "../x", "a/../../x", "/etc/passwd" }) {
 		expectRejected([&] { (void)bc->readFile(path); });
 		expectRejected([&] { (void)bc->writeFile(path); });
 		expectRejected([&] { (void)bc->deleteFile(path); });
@@ -386,7 +378,7 @@ TEST_CASE("/backup/containers/localdir/rejectsEscapingPaths") {
 	}
 
 	// Names that resolve to the container directory itself are only allowed for listing.
-	for (const std::string& path : { "", ".", "a/.." }) {
+	for (const char* path : { "", ".", "a/.." }) {
 		expectRejected([&] { (void)bc->readFile(path); });
 		expectRejected([&] { (void)bc->writeFile(path); });
 		expectRejected([&] { (void)bc->deleteFile(path); });
