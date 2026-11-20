@@ -3232,6 +3232,18 @@ TEST_CASE("/backup/containers/localdir/incrementalBeginVersion") {
 	co_await container->deleteContainer();
 }
 
+// An empty log file covering [begin, end), written by a test.
+static Future<Void> writeTestLogFile(Reference<IBackupContainer> c, Version begin, Version end) {
+	Reference<IBackupFile> log = co_await c->writeLogFile(begin, end, 10);
+	co_await log->finish();
+}
+
+// The same for the partitioned log file of `tag` out of two.
+static Future<Void> writeTestTaggedLogFile(Reference<IBackupContainer> c, Version begin, Version end, int tag) {
+	Reference<IBackupFile> log = co_await c->writeTaggedLogFile(begin, end, 10, tag, 2);
+	co_await log->finish();
+}
+
 // Log files can be written out of order. A describe that runs before the first one exists records the begin of the
 // first file it sees; once the earlier file is written, a later describe must find it, or the snapshot stays
 // unrestorable for good.
@@ -3253,12 +3265,8 @@ TEST_CASE("/backup/containers/localdir/logBeginAfterLateFirstLogFile") {
 	                                      200,
 	                                      IncludeKeyRangeMap::False);
 
-	auto writeLog = [&](Version b, Version e) -> Future<Void> {
-		Reference<IBackupFile> log = co_await c->writeLogFile(b, e, 10);
-		co_await log->finish();
-	};
-	co_await writeLog(70, 90);
-	co_await writeLog(90, 110);
+	co_await writeTestLogFile(c, 70, 90);
+	co_await writeTestLogFile(c, 90, 110);
 
 	// The first file is missing: the snapshot at 50..60 is not covered, and the begin 70 is recorded.
 	BackupDescription before = co_await c->describeBackup();
@@ -3267,14 +3275,14 @@ TEST_CASE("/backup/containers/localdir/logBeginAfterLateFirstLogFile") {
 	ASSERT(!before.maxRestorableVersion.present());
 
 	// A file that does not connect to the recorded begin does not extend it.
-	co_await writeLog(20, 30);
+	co_await writeTestLogFile(c, 20, 30);
 	BackupDescription apart = co_await c->describeBackup();
 	ASSERT_EQ(apart.minLogBegin.get(), 70);
 	ASSERT(!apart.maxRestorableVersion.present());
 
 	// The files that cover the snapshot are written late, both after the recorded begin: the begin follows the chain.
-	co_await writeLog(60, 70);
-	co_await writeLog(50, 60);
+	co_await writeTestLogFile(c, 60, 70);
+	co_await writeTestLogFile(c, 50, 60);
 	BackupDescription after = co_await c->describeBackup();
 	ASSERT_EQ(after.minLogBegin.get(), 50);
 	ASSERT(after.maxRestorableVersion.present());
@@ -3306,13 +3314,9 @@ TEST_CASE("/backup/containers/localdir/logBeginAfterLatePartitionedLogFile") {
 	                                      200,
 	                                      IncludeKeyRangeMap::False);
 
-	auto writeLog = [&](Version b, Version e, int tag) -> Future<Void> {
-		Reference<IBackupFile> log = co_await c->writeTaggedLogFile(b, e, 10, tag, 2);
-		co_await log->finish();
-	};
 	for (int tag = 0; tag < 2; ++tag) {
-		co_await writeLog(70, 90, tag);
-		co_await writeLog(90, 110, tag);
+		co_await writeTestTaggedLogFile(c, 70, 90, tag);
+		co_await writeTestTaggedLogFile(c, 90, 110, tag);
 	}
 
 	BackupDescription before = co_await c->describeBackup();
@@ -3320,13 +3324,13 @@ TEST_CASE("/backup/containers/localdir/logBeginAfterLatePartitionedLogFile") {
 	ASSERT(!before.maxRestorableVersion.present());
 
 	// One tag has the earlier range: it is not covered, so the begin stays.
-	co_await writeLog(40, 70, 0);
+	co_await writeTestTaggedLogFile(c, 40, 70, 0);
 	BackupDescription partial = co_await c->describeBackup();
 	ASSERT_EQ(partial.minLogBegin.get(), 70);
 	ASSERT(!partial.maxRestorableVersion.present());
 
 	// Both tags have it.
-	co_await writeLog(40, 70, 1);
+	co_await writeTestTaggedLogFile(c, 40, 70, 1);
 	BackupDescription after = co_await c->describeBackup();
 	ASSERT_EQ(after.minLogBegin.get(), 40);
 	ASSERT(after.maxRestorableVersion.present());
