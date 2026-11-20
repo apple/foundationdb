@@ -3260,10 +3260,9 @@ TEST_CASE("/backup/containers/localdir/logBeginAfterLateFirstLogFile") {
 	co_await testWriteSnapshotFile(range1, begin, end, blockSize);
 	Reference<IBackupFile> range2 = co_await c->writeRangeFile(50, 1, 60, blockSize);
 	co_await testWriteSnapshotFile(range2, begin, end, blockSize);
-	co_await c->writeKeyspaceSnapshotFile({ range1->getFileName(), range2->getFileName() },
-	                                      { std::make_pair(begin, end), std::make_pair(begin, end) },
-	                                      200,
-	                                      IncludeKeyRangeMap::False);
+	std::vector<std::string> snapshotFiles = { range1->getFileName(), range2->getFileName() };
+	std::vector<std::pair<Key, Key>> snapshotRanges = { { begin, end }, { begin, end } };
+	co_await c->writeKeyspaceSnapshotFile(snapshotFiles, snapshotRanges, 200, IncludeKeyRangeMap::False);
 
 	co_await writeTestLogFile(c, 70, 90);
 	co_await writeTestLogFile(c, 90, 110);
@@ -3309,10 +3308,9 @@ TEST_CASE("/backup/containers/localdir/logBeginAfterLatePartitionedLogFile") {
 	co_await testWriteSnapshotFile(range1, begin, end, blockSize);
 	Reference<IBackupFile> range2 = co_await c->writeRangeFile(50, 1, 60, blockSize);
 	co_await testWriteSnapshotFile(range2, begin, end, blockSize);
-	co_await c->writeKeyspaceSnapshotFile({ range1->getFileName(), range2->getFileName() },
-	                                      { std::make_pair(begin, end), std::make_pair(begin, end) },
-	                                      200,
-	                                      IncludeKeyRangeMap::False);
+	std::vector<std::string> snapshotFiles = { range1->getFileName(), range2->getFileName() };
+	std::vector<std::pair<Key, Key>> snapshotRanges = { { begin, end }, { begin, end } };
+	co_await c->writeKeyspaceSnapshotFile(snapshotFiles, snapshotRanges, 200, IncludeKeyRangeMap::False);
 
 	for (int tag = 0; tag < 2; ++tag) {
 		co_await writeTestTaggedLogFile(c, 70, 90, tag);
