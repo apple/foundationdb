@@ -1195,7 +1195,6 @@ TEST_CASE("/backup/partitionedLog/releasesUnreadBuffer") {
 	ASSERT_EQ(buffers->getBufferSize(), 1);
 	std::weak_ptr<char[]> bytes = buffers->peek();
 	buffers.clear();
-	co_await container->deleteContainer();
 	ASSERT(bytes.expired());
 }
 

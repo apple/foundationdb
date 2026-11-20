@@ -10107,6 +10107,7 @@ TEST_CASE("/redwood/correctness/unit/pagerReleasesPredecessors") {
 	LogicalPageID id = co_await pager->newPageID();
 	auto page = pager->newPageBuffer();
 	page->init(EncodingType::XXHash64, PageType::BTreeNode, 1);
+	memset(page->mutateData(), 0, page->dataSize());
 	page->setLogicalPageInfo(id, invalidLogicalPageID);
 
 	Promise<Void> previous;
