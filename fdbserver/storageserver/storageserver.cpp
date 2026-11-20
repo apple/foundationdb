@@ -7995,6 +7995,8 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				}
 			} else {
 				// Akanksha: Actually Read the range for the transferred shard using tryGetRange.
+				// one request contains 2MB of requested data.
+				// While loop is inside tryGetRange to fetch for all the data in loop.
 				hold = tryGetRange(results, &tr, keys);
 				rangeEnd = keys.end;
 			}

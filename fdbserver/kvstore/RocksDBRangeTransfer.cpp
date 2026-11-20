@@ -28,6 +28,8 @@
 
 #include <rocksdb/convenience.h>
 
+#include <algorithm>
+
 namespace RocksDBRangeTransfer {
 
 rocksdb::Status deleteFilesInRange(rocksdb::DB* db, rocksdb::ColumnFamilyHandle* cf, KeyRangeRef range, UID id) {
@@ -48,6 +50,38 @@ rocksdb::Status deleteFilesInRange(rocksdb::DB* db, rocksdb::ColumnFamilyHandle*
 		    .detail("SstBytesAfter", sstBytesAfter);
 	}
 	return s;
+}
+
+// Returns true to start a new file between two adjacent keys if any ingest begin key lies in (request.prev_user_key,
+// request.current_user_key).
+rocksdb::PartitionerResult IngestSSTPartitioner::ShouldPartition(const rocksdb::PartitionerRequest& request) {
+	auto it = std::upper_bound(
+	    ingestBeginKeys.begin(),
+	    ingestBeginKeys.end(),
+	    *request.prev_user_key,
+	    [](const rocksdb::Slice& key, const std::string& ingestBeginKey) { return key.compare(ingestBeginKey) < 0; });
+	return it != ingestBeginKeys.end() && request.current_user_key->compare(*it) >= 0 ? rocksdb::kRequired
+	                                                                                  : rocksdb::kNotRequired;
+}
+
+std::unique_ptr<rocksdb::SstPartitioner> IngestSSTPartitionerFactory::CreatePartitioner(
+    const rocksdb::SstPartitioner::Context&) const {
+	std::lock_guard<std::mutex> lock(mutex);
+	return std::make_unique<IngestSSTPartitioner>(
+	    std::vector<std::string>(ingestBeginKeys.begin(), ingestBeginKeys.end()));
+}
+
+void IngestSSTPartitionerFactory::addIngestBeginKey(const std::string& key) {
+	std::lock_guard<std::mutex> lock(mutex);
+	ingestBeginKeys.insert(key);
+}
+
+void IngestSSTPartitionerFactory::removeIngestBeginKey(const std::string& key) {
+	std::lock_guard<std::mutex> lock(mutex);
+	auto it = ingestBeginKeys.find(key);
+	if (it != ingestBeginKeys.end()) {
+		ingestBeginKeys.erase(it);
+	}
 }
 
 } // namespace RocksDBRangeTransfer

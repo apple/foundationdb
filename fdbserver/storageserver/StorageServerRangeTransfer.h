@@ -36,7 +36,6 @@
 // - level-0 files,
 // - files that also have keys outside the range, and
 // - files that are being compacted.
-// Those keys will be deleted later by compaction.
 Future<Void> deleteFilesInRemovedRange(IKeyValueStore* kvStore,
                                        KeyRange range,
                                        Future<Void> clearDurable,
