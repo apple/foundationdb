@@ -966,6 +966,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_CLASS_DELAY,                                       0.01 );
 	init( WAIT_FOR_GOOD_RECRUITMENT_DELAY,                       1.0 );
 	init( WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY,                5.0 );
+	init( MONITOR_LEADER_DURING_CANDIDACY_DELAY,               false ); if( randomize && buggify() ) MONITOR_LEADER_DURING_CANDIDACY_DELAY = deterministicRandom()->coinflip();
 	init( ATTEMPT_RECRUITMENT_DELAY,                           0.035 );
 	init( WAIT_FOR_DISTRIBUTOR_JOIN_DELAY,                       1.0 );
 	init( WAIT_FOR_RATEKEEPER_JOIN_DELAY,                        1.0 );

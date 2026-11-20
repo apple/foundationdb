@@ -889,7 +889,7 @@ Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
 			}
 
 			if (!leader.get().first.serializedInfo.empty()) {
-				ObjectReader reader(leader.get().first.serializedInfo.begin(), IncludeVersion());
+				ObjectReader reader(leader.get().first.serializedInfo, IncludeVersion());
 				ClusterControllerClientInterface res;
 				reader.deserialize(res);
 				knownLeader->set(res);
