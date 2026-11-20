@@ -883,9 +883,11 @@ Future<Void> delayedHealthUpdate(HealthMonitor* healthMonitor, NetworkAddress ad
 	}
 }
 
-Future<Void> connectionKeeper(Reference<Peer> self,
+Future<Void> connectionKeeper(Reference<Peer> peer,
                               Reference<IConnection> conn = Reference<IConnection>(),
                               Future<Void> reader = Void()) {
+	// The peer owns the returned future. Release the peer before final suspend.
+	Reference<Peer> self = std::move(peer);
 	TraceEvent(SevDebug, "ConnectionKeeper", conn ? conn->getDebugID() : UID())
 	    .detail("PeerAddr", self->destination)
 	    .detail("PeerAddress", self->destination)
@@ -908,9 +910,24 @@ Future<Void> connectionKeeper(Reference<Peer> self,
 					// Override waiting, if we are in failed state to update failure monitoring status.
 					Future<Void> retryConnectF = Never();
 					if (retryConnect) {
-						retryConnectF = IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()
-						                    ? delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY)
-						                    : delay(FLOW_KNOBS->SERVER_REQUEST_INTERVAL);
+						if (IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()) {
+							if (FlowTransport::isClient() && FLOW_KNOBS->CLIENT_SKIP_AVAILABLE_PEER_PROBE) {
+								// Reconnect only when there is something to send, so that a cluster restart does not
+								// make every client reconnect to every server it has cached at the same moment.
+								retryConnectF = Never();
+							} else {
+								retryConnectF = delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY);
+							}
+						} else {
+							if (FlowTransport::isClient() && FLOW_KNOBS->CLIENT_FAILED_PEER_PROBE_JITTER > 0) {
+								// Spread out probes, so that clients do not probe restarted servers in lockstep.
+								double jitter =
+								    deterministicRandom()->random01() * FLOW_KNOBS->CLIENT_FAILED_PEER_PROBE_JITTER;
+								retryConnectF = delay(FLOW_KNOBS->SERVER_REQUEST_INTERVAL + jitter);
+							} else {
+								retryConnectF = delay(FLOW_KNOBS->SERVER_REQUEST_INTERVAL);
+							}
+						}
 					}
 
 					auto res = co_await race(self->dataToSend.onTrigger(), retryConnectF);
@@ -978,39 +995,55 @@ Future<Void> connectionKeeper(Reference<Peer> self,
 						throw connection_failed();
 					}
 				} catch (Error& e) {
-					++self->connectFailedCount;
-					// Track per-address cumulative connect failures + last-failure time. The map
-					// potentially has unbounded list of peers as they're having connection issues.
-					// To make the map bounded, evict based on TTL.
-					//
-					// Note: this prune only runs here, inside the connect-failure path, so it is
-					// failure-driven rather than on a timer. If connect failures stop across all
-					// addresses, the scan does not run again and stale entries can linger past their
-					// TTL until the next failure on any address. The map is still bounded -- by the
-					// set of addresses ever contacted, and the next failure prunes the stale ones --
-					// so this is not unbounded growth, just not strictly time-based eviction.
-					{
-						double ttl = FLOW_KNOBS->PERSISTENT_CONNECT_FAILED_COUNT_TTL;
-						double tNow = now();
-						auto& failCounts = self->transport->persistentConnectFailedCount;
-						auto& info = failCounts[self->destination];
-						info.count++;
-						info.lastFailed = tNow;
-						TraceEvent("PersistentConnectFailed")
-						    .suppressFor(5.0)
-						    .detail("PeerAddr", self->destination)
-						    .detail("ConnectFailedTotal", info.count);
-						if (ttl > 0 && tNow - self->transport->persistentConnectFailedLastPrune >= ttl) {
-							self->transport->persistentConnectFailedLastPrune = tNow;
-							for (auto it = failCounts.begin(); it != failCounts.end();) {
-								if (tNow - it->second.lastFailed >= ttl) {
-									TraceEvent("PersistentConnectFailedPrune")
-									    .suppressFor(5.0)
-									    .detail("PeerAddr", it->first)
-									    .detail("ConnectFailedTotal", it->second.count);
-									it = failCounts.erase(it);
-								} else {
-									++it;
+					const bool cancelled = e.code() == error_code_actor_cancelled;
+					bool handshakeOverload = false;
+					bool countFailure = true; // Every failure counts unless a knob below says otherwise.
+					if (FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_IS_NOT_CONNECT_FAILURE && !cancelled) {
+						// TCP connected, then the handshake timed out or was dropped: overload on either end, not a
+						// down peer. Not checked after a cancellation, since the handshake may still be running and
+						// recording its error.
+						handshakeOverload = conn && conn->handshakeTimedOutOrDisconnected();
+						countFailure = !handshakeOverload;
+					}
+					if (FLOW_KNOBS->CANCELLED_CONNECT_IS_NOT_CONNECT_FAILURE && cancelled) {
+						// This process stopped trying, which says nothing about the peer.
+						countFailure = false;
+					}
+					if (countFailure) {
+						++self->connectFailedCount;
+						// Track per-address cumulative connect failures + last-failure time. The map
+						// potentially has unbounded list of peers as they're having connection issues.
+						// To make the map bounded, evict based on TTL.
+						//
+						// Note: this prune only runs here, inside the connect-failure path, so it is
+						// failure-driven rather than on a timer. If connect failures stop across all
+						// addresses, the scan does not run again and stale entries can linger past their
+						// TTL until the next failure on any address. The map is still bounded -- by the
+						// set of addresses ever contacted, and the next failure prunes the stale ones --
+						// so this is not unbounded growth, just not strictly time-based eviction.
+						{
+							double ttl = FLOW_KNOBS->PERSISTENT_CONNECT_FAILED_COUNT_TTL;
+							double tNow = now();
+							auto& failCounts = self->transport->persistentConnectFailedCount;
+							auto& info = failCounts[self->destination];
+							info.count++;
+							info.lastFailed = tNow;
+							TraceEvent("PersistentConnectFailed")
+							    .suppressFor(5.0)
+							    .detail("PeerAddr", self->destination)
+							    .detail("ConnectFailedTotal", info.count);
+							if (ttl > 0 && tNow - self->transport->persistentConnectFailedLastPrune >= ttl) {
+								self->transport->persistentConnectFailedLastPrune = tNow;
+								for (auto it = failCounts.begin(); it != failCounts.end();) {
+									if (tNow - it->second.lastFailed >= ttl) {
+										TraceEvent("PersistentConnectFailedPrune")
+										    .suppressFor(5.0)
+										    .detail("PeerAddr", it->first)
+										    .detail("ConnectFailedTotal", it->second.count);
+										it = failCounts.erase(it);
+									} else {
+										++it;
+									}
 								}
 							}
 						}
@@ -1028,6 +1061,7 @@ Future<Void> connectionKeeper(Reference<Peer> self,
 					    .detail("UnsentEmpty", self->unsent.empty())
 					    .detail("OutstandingReplies", self->outstandingReplies)
 					    .detail("ConnectFailedCount", self->connectFailedCount)
+					    .detail("HandshakeOverload", handshakeOverload)
 					    .detail("Connected", self->connected);
 
 					throw;
@@ -1344,10 +1378,17 @@ static void deliverNow(TransportData* self,
 				g_currentDeliveryPeerDisconnect = nullptr;
 			});
 			StringRef data = reader.arenaReadAll();
-			ASSERT_GT(data.size(), 8);
 			ArenaObjectReader objReader(std::move(reader.arena()), data, AssumeVersion(reader.protocolVersion()));
 			receiver->receive(objReader);
 		} catch (Error& e) {
+			if (e.code() == error_code_serialization_failed) {
+				// Malformed peer input is not a local invariant violation.
+				TraceEvent(SevWarnAlways, "ReceiverDeserializationFailed")
+				    .suppressFor(1.0)
+				    .detail("Token", destination.token.toString())
+				    .detail("PeerAddress", peerAddress);
+				return;
+			}
 			TraceEvent(SevError, "ReceiverError")
 			    .error(e)
 			    .detail("Token", destination.token.toString())
@@ -2577,6 +2618,27 @@ static ReliablePacket* sendPacket(TransportData* self,
 		peer->lastDataPacketSentTime = now();
 	}
 	return rp;
+}
+
+TEST_CASE("noSim/fdbrpc/FlowTransport/DisconnectedPeerOwnership") {
+	auto* network = INetworkConnections::net();
+	auto listener = network->listen(NetworkAddress::parse("127.0.0.1:0"));
+	auto client = co_await network->connect(listener->getListenAddress());
+	auto connection = co_await listener->accept();
+
+	TransportData transport(1, WLTOKEN_FIRST_AVAILABLE, nullptr);
+	auto address = connection->getPeerAddress();
+	auto peer = transport.getOrOpenPeer(address, false);
+	Promise<Void> reader;
+	peer->onIncomingConnection(peer, connection, reader.getFuture());
+	// The completed future must release its reference even while it is still held.
+	auto keeper = peer->connect;
+
+	client->close();
+	reader.sendError(connection_failed());
+	co_await keeper;
+	ASSERT(!transport.getPeer(address));
+	ASSERT_EQ(peer->debugGetReferenceCount(), 1);
 }
 
 TEST_CASE("noSim/fdbrpc/FlowTransport/PacketLimitOnSend") {

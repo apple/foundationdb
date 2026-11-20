@@ -24,6 +24,7 @@
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "BackupRangeSpec.h"
+#include "BackupSteps.h"
 
 struct SubmitBackupWorkload : TestWorkload {
 	static constexpr auto NAME = "SubmitBackup";
@@ -33,6 +34,7 @@ struct SubmitBackupWorkload : TestWorkload {
 	Standalone<StringRef> backupDir;
 	Standalone<StringRef> tag;
 	double delayFor;
+	BackupSteps::BackupVersion version;
 	int initSnapshotInterval;
 	int snapshotInterval;
 	StopWhenDone stopWhenDone{ false };
@@ -45,6 +47,7 @@ struct SubmitBackupWorkload : TestWorkload {
 		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
 		tag = getOption(options, "tag"_sr, "default"_sr);
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
+		version = BackupSteps::parseBackupVersion(getOption(options, "version"_sr, "v1"_sr));
 		initSnapshotInterval = getOption(options, "initSnapshotInterval"_sr, 0);
 		snapshotInterval = getOption(options, "snapshotInterval"_sr, 1e8);
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, true));
@@ -70,19 +73,16 @@ struct SubmitBackupWorkload : TestWorkload {
 		}
 
 		try {
-			co_await backupAgent.submitBackup(cx,
-			                                  backupDir,
-			                                  {},
-			                                  initSnapshotInterval,
-			                                  snapshotInterval,
-			                                  tag.toString(),
-			                                  backupRanges,
-			                                  stopWhenDone,
-			                                  MutationLogType::DEFAULT,
-			                                  incremental,
-			                                  encryptionKeyFileName,
-			                                  encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
-			                                  0);
+			BackupSteps::SubmitSpec spec;
+			spec.backupDir = backupDir;
+			spec.tag = tag;
+			spec.ranges = backupRanges;
+			spec.initSnapshotInterval = initSnapshotInterval;
+			spec.snapshotInterval = snapshotInterval;
+			spec.stopWhenDone = stopWhenDone;
+			spec.incremental = incremental;
+			spec.encryptionKeyFileName = encryptionKeyFileName;
+			co_await BackupSteps::submitBackup(cx, &backupAgent, version, spec);
 		} catch (Error& e) {
 			TraceEvent("BackupSubmitError").error(e);
 			if (e.code() != error_code_backup_duplicate) {

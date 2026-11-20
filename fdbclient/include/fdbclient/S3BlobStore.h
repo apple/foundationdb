@@ -37,14 +37,7 @@ public:
 		std::string securityToken;
 	};
 
-	S3BlobStoreEndpoint(std::string const& host,
-	                    std::string const& service,
-	                    std::string region,
-	                    Optional<std::string> const& proxyHost,
-	                    Optional<std::string> const& proxyPort,
-	                    Optional<StringRef> const& creds,
-	                    BlobKnobs const& knobs = BlobKnobs(),
-	                    HTTP::Headers extraHeaders = HTTP::Headers());
+	S3BlobStoreEndpoint(BlobStoreEndpointParams const& params, std::string region, Optional<StringRef> const& creds);
 
 	// Infer the cloud region from a hostname by matching known service prefixes
 	// (e.g. "s3.us-west-2.amazonaws.com" -> "us-west-2", "cos.ap-beijing.myqcloud.com" -> "ap-beijing").
@@ -87,6 +80,11 @@ public:
 
 	// Sets headers needed for Authorization (including Date which will be overwritten if present)
 	void setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers);
+
+	// Sets x-amz-server-side-encryption to the URL's server_side_encryption (or sse) value, or to the
+	// BLOBSTORE_ENCRYPTION_TYPE knob if the URL has none. Sets nothing if that value is empty (the knob's default)
+	// or "none". Used on single-part PUT and multipart-upload start.
+	void setServerSideEncryptionHeader(HTTP::Headers& headers) const;
 
 	// Set headers in the AWS V4 authorization format. $date and $datestamp are used for unit testing
 	void setV4AuthHeaders(const std::string& verb,

@@ -18,10 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
@@ -177,7 +175,6 @@ struct IncrementalBackupWorkload : TestWorkload {
 
 	Future<Void> _start(Database cx) {
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		addDefaultBackupRanges(backupRanges);
 
 		if (submitOnly) {

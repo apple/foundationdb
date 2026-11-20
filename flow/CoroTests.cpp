@@ -1190,6 +1190,58 @@ TEST_CASE("/flow/coro/YieldedAsyncMap/cancel2") {
 	y2.cancel();
 }
 
+// An error must reach every yielded waiter, including the ones doYield() defers along with the first.
+TEST_CASE("/flow/coro/yieldedFuture/errorReachesAllWaiters") {
+	// check_yield() is always true, so every waiter is deferred and one completes per tick.
+	auto yn = makeReference<YieldMockNetwork>();
+	yn->nextYield = 0;
+
+	Promise<Void> source;
+	std::vector<Future<Void>> waiters;
+	waiters.reserve(4);
+	for (int i = 0; i < 4; i++) {
+		waiters.push_back(yieldedFuture(source.getFuture()));
+	}
+	source.sendError(io_error());
+	for (auto& w : waiters) {
+		ASSERT(!w.isReady());
+	}
+	for (int i = 0; i < 4; i++) {
+		yn->tick();
+		for (int j = 0; j < 4; j++) {
+			ASSERT_EQ(waiters[j].isReady(), j <= i);
+		}
+		ASSERT(waiters[i].isError());
+		ASSERT_EQ(waiters[i].getError().code(), error_code_io_error);
+	}
+	co_return;
+}
+
+TEST_CASE("/flow/coro/YieldedAsyncMap/destroyedMapBreaksAllWaiters") {
+	auto yn = makeReference<YieldMockNetwork>();
+	yn->nextYield = 0;
+
+	auto yam = std::make_unique<YieldedAsyncMap<int, int>>();
+	std::vector<Future<Void>> waiters;
+	waiters.reserve(4);
+	for (int i = 0; i < 4; i++) {
+		waiters.push_back(yam->onChange(1));
+	}
+	yam.reset();
+	for (auto& w : waiters) {
+		ASSERT(!w.isReady());
+	}
+	for (int i = 0; i < 4; i++) {
+		yn->tick();
+		for (int j = 0; j < 4; j++) {
+			ASSERT_EQ(waiters[j].isReady(), j <= i);
+		}
+		ASSERT(waiters[i].isError());
+		ASSERT_EQ(waiters[i].getError().code(), error_code_broken_promise);
+	}
+	co_return;
+}
+
 // Cancelling one waiter must not disturb the others on the same key.
 TEST_CASE("/flow/coro/YieldedAsyncMap/cancelKeepsOtherWaiters") {
 	YieldedAsyncMap<int, int> yam;

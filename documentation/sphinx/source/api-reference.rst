@@ -14,6 +14,7 @@ The following documents give detailed descriptions of the API for each language:
    api-ruby
    Java API <https://www.javadoc.io/doc/org.foundationdb/fdb-java/latest/index.html>
    Go API <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>
+   rust API <https://docs.rs/foundationdb/latest/foundationdb/#hello-world-using-the-crate>
    api-c
    api-error-codes
    special-keys
