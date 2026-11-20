@@ -1341,11 +1341,11 @@ public:
 					throw backup_not_overlapped_with_keys_filter();
 				}
 			}
-			// 'latestVersion' represents using the minimum restorable version in a snapshot.
-			restorable.targetVersion = targetVersion == latestVersion ? maxKeyRangeVersion : targetVersion;
-			// Any version < maxKeyRangeVersion is not restorable.
-			if (restorable.targetVersion < maxKeyRangeVersion)
+			if (targetVersion != latestVersion && targetVersion < maxKeyRangeVersion)
 				continue;
+			// Snapshot-only replay stops at the range files, even when the requested upper bound is later.
+			restorable.targetVersion =
+			    (inconsistentSnapshotOnly || targetVersion == latestVersion) ? maxKeyRangeVersion : targetVersion;
 
 			// restorable.snapshot.beginVersion is set to the smallest(oldest) snapshot's beginVersion
 			restorable.snapshot = snapshots[i];
@@ -3149,6 +3149,7 @@ TEST_CASE("/backup/containers/localdir/getRestoreSet/rangeFileWithBulkDumpSnapsh
 	auto snapshotOnly = co_await c->getRestoreSet(
 	    targetVersion, {}, false, invalidVersion, RequireRangeFiles::True, InconsistentSnapshotOnly::True);
 	ASSERT(snapshotOnly.present());
+	ASSERT_EQ(snapshotOnly.get().targetVersion, rangeVersion);
 	ASSERT_EQ(snapshotOnly.get().ranges.size(), 1);
 	ASSERT_EQ(snapshotOnly.get().ranges.front().fileName, range->getFileName());
 	ASSERT(snapshotOnly.get().logs.empty());

@@ -6536,7 +6536,8 @@ Future<ERestoreState> abortRestore(Database cx, Key tagName) {
 
 struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 	static StringRef name;
-	static constexpr uint32_t version = 1;
+	// Older workers choose different restore files and initialize incremental replay for all user keys.
+	static constexpr uint32_t version = 2;
 
 	static struct {
 		static TaskParam<Version> firstVersion() { return __FUNCTION__sr; }
@@ -6681,9 +6682,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				}
 			}
 		} else {
-			// With no explicit begin version, replay from the first available log.
+			// The apply map excludes its floor, so keep the first version in the selected logs eligible.
 			if (beginVersion == invalidVersion)
-				beginVersion = 0;
+				beginVersion = std::max<Version>(0, restorable.get().continuousBeginVersion - 1);
 			firstConsistentVersion = beginVersion;
 			// Log blocks can contain mutations outside the restore ranges. The apply map starts at invalidVersion;
 			// mark only the selected user ranges eligible before dispatching any log blocks.

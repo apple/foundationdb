@@ -111,7 +111,9 @@ Features (Experimental)
   accepts ``--mode bulkload`` to load an available BulkDump dataset. Traditional
   ``rangefile`` mode remains the default. A full rangefile restore skips BulkDump
   snapshots and requires a rangefile snapshot and any logs needed to reach
-  the target version.
+  the target version. Upgrade backup agents before submitting restores with the
+  updated client. New restore-start tasks require a worker that enforces these
+  file-selection and replay rules.
   `(PR #12608) <https://github.com/apple/foundationdb/pull/12608>`_,
   `(PR #13873) <https://github.com/apple/foundationdb/pull/13873>`_
 * Added **range-partitioned mutation logging (Backup V3)**, including partition
