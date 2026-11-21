@@ -47,7 +47,9 @@ Future<Void> AsyncFileDetachable::doShutdown(AsyncFileDetachable* self) {
 	self->file = Reference<IAsyncFile>();
 }
 
-Future<Reference<IAsyncFile>> AsyncFileDetachable::open(Future<Reference<IAsyncFile>> wrappedFile) {
+Future<Reference<IAsyncFile>> AsyncFileDetachable::open(Future<Reference<IAsyncFile>> wrappedFileInput) {
+	// Shutdown must release the raw file even if a caller keeps the completed open future.
+	auto wrappedFile = std::move(wrappedFileInput);
 	auto* process = g_simulator->getCurrentProcess();
 	TaskPriority task = g_network->getCurrentTask();
 	auto shutdown = process->shutdownSignal.getFuture();
@@ -232,10 +234,10 @@ public:
 	void addref() override { ReferenceCounted<DetachableTestFile>::addref(); }
 	void delref() override { ReferenceCounted<DetachableTestFile>::delref(); }
 	Future<int> read(void*, int, int64_t) override { return unsupported_operation(); }
-	Future<Void> write(void const*, int, int64_t) override { return unsupported_operation(); }
-	Future<Void> truncate(int64_t) override { return unsupported_operation(); }
-	Future<Void> sync() override { return unsupported_operation(); }
-	Future<int64_t> size() const override { return unsupported_operation(); }
+	Future<Void> write(void const*, int, int64_t) override { return Void(); }
+	Future<Void> truncate(int64_t) override { return Void(); }
+	Future<Void> sync() override { return Void(); }
+	Future<int64_t> size() const override { return 0; }
 	int64_t debugFD() const override { return -1; }
 	std::string getFilename() const override { return "detachable-test-file"; }
 
@@ -288,6 +290,34 @@ Future<Reference<IAsyncFile>> checkOpenContext(Future<Reference<IAsyncFile>> ope
 
 } // namespace
 
+TEST_CASE("/fdbrpc/AsyncFileNonDurable/modificationsReleaseTheirOwnFuture") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+	auto* caller = g_simulator->getCurrentProcess();
+	auto priority = g_network->getCurrentTask();
+	Promise<Void> destroyed;
+	Reference<IAsyncFile> raw = makeReference<DetachableTestFile>(destroyed);
+	auto name = raw->getFilename();
+	auto disk = makeReference<DiskParameters>(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH);
+	auto file = co_await AsyncFileNonDurable::open(name, name, raw, disk, false);
+	raw.clear();
+
+	uint8_t byte = 0;
+	Future<Void> writeStarted = file->write(&byte, 1, 0);
+	co_await writeStarted;
+	Future<Void> truncateStarted = file->truncate(0);
+	co_await truncateStarted;
+	co_await file->sync();
+	file.clear();
+	co_await destroyed.getFuture();
+	co_await g_simulator->onProcess(caller, priority);
+
+	// Each modification frame held its start promise. Closing the file drops the last external owner of both frames.
+	ASSERT_EQ(writeStarted.getPromiseReferenceCount(), 0);
+	ASSERT_EQ(truncateStarted.getPromiseReferenceCount(), 0);
+}
+
 TEST_CASE("/fdbrpc/AsyncFileDetachable/openContextAndShutdown") {
 	if (!g_network->isSimulated()) {
 		co_return;
@@ -315,7 +345,6 @@ TEST_CASE("/fdbrpc/AsyncFileDetachable/openContextAndShutdown") {
 		auto file = co_await checked;
 		ASSERT(bool(file) == !error.isValid());
 		checked = Future<Reference<IAsyncFile>>();
-		opened = Future<Reference<IAsyncFile>>();
 		input = Promise<Reference<IAsyncFile>>();
 		raw.clear();
 		if (file) {
