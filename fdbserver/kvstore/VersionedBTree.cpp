@@ -10159,7 +10159,7 @@ Future<Void> testCloseWithPendingFileExtensions(std::string file, bool failTrunc
 		void delref() override { ReferenceCounted<PendingTruncateFile>::delref(); }
 		Future<Void> truncate(int64_t) override {
 			ASSERT(truncateCompletion.isValid());
-			return std::move(truncateCompletion);
+			co_await std::exchange(truncateCompletion, {});
 		}
 		Future<int> read(void*, int, int64_t) override { return unsupported_operation(); }
 		Future<Void> write(void const*, int, int64_t) override { return unsupported_operation(); }
@@ -10210,6 +10210,7 @@ Future<Void> testCloseWithPendingFileExtensions(std::string file, bool failTrunc
 	ASSERT(firstExtension.isError() && firstExtension.getError().code() == error_code_actor_cancelled);
 	ASSERT(firstWrite.isError() && firstWrite.getError().code() == error_code_actor_cancelled);
 	ASSERT(secondWrite.isError() && secondWrite.getError().code() == error_code_actor_cancelled);
+	// Cancelling the truncate would release its only wait on truncateDone.
 	ASSERT_GT(truncateDone.getFutureReferenceCount(), 0);
 	ASSERT(!closed.isReady() && !fileDestroyed.isSet());
 	if (failTruncate) {
