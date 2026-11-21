@@ -30,6 +30,8 @@
 #include <vector>
 
 FDB_BOOLEAN_PARAM(IncludeKeyRangeMap);
+FDB_BOOLEAN_PARAM(RequireRangeFiles);
+FDB_BOOLEAN_PARAM(InconsistentSnapshotOnly);
 
 class ReadYourWritesTransaction;
 
@@ -250,8 +252,7 @@ struct RestorableFileSet {
 	// Range file's key ranges. Can be empty for backups generated before 6.3.
 	std::map<std::string, KeyRange> keyRanges;
 
-	// Mutation logs continuous range [begin, end). Both can be invalidVersion
-	// when the entire key space snapshot is at the target version.
+	// Continuous mutation log range [begin, end). Both are invalidVersion when no logs are needed.
 	Version continuousBeginVersion, continuousEndVersion;
 
 	KeyspaceSnapshotFile snapshot; // Info. for debug purposes
@@ -363,12 +364,18 @@ public:
 
 	// Get exactly the files necessary to restore the key space filtered by the specified key ranges to targetVersion.
 	// If targetVersion is 'latestVersion', use the minimum restorable version in a snapshot.
-	// If logsOnly is set, only use log files in [beginVersion, targetVervions) in restore set.
+	// If logsOnly is set, replay mutations after beginVersion through targetVersion, inclusive.
+	// An omitted beginVersion starts replay at the first available log.
+	// A full rangefile restore needs a snapshot with range files. Bulkload reads the snapshot data from the dump job.
+	// A snapshot-only restore selects the range files at or before targetVersion and skips mutation logs.
 	// Returns non-present if restoring to the given version is not possible.
-	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
-	                                                          VectorRef<KeyRangeRef> keyRangesFilter = {},
-	                                                          bool logsOnly = false,
-	                                                          Version beginVersion = -1) = 0;
+	virtual Future<Optional<RestorableFileSet>> getRestoreSet(
+	    Version targetVersion,
+	    VectorRef<KeyRangeRef> keyRangesFilter = {},
+	    bool logsOnly = false,
+	    Version beginVersion = -1,
+	    RequireRangeFiles requireRangeFiles = RequireRangeFiles::True,
+	    InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False) = 0;
 
 	// Get an IBackupContainer based on a container spec string
 	static Reference<IBackupContainer> openContainer(const std::string& url,

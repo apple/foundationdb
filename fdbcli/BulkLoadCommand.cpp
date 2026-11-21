@@ -87,6 +87,12 @@ Future<Void> printPastBulkLoadJob(Database cx) {
 }
 
 Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
+	// A bare `bulkload` reaches here with only the command itself, and every branch below reads tokens[1].
+	if (tokens.size() < 2) {
+		printUsage(tokens[0]);
+		printLongDesc(tokens[0]);
+		co_return UID();
+	}
 	if (tokencmp(tokens[1], "mode")) {
 		if (tokens.size() == 2) {
 			int mode = co_await getBulkLoadMode(cx);
