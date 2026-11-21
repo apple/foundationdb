@@ -69,6 +69,11 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 
 	explicit PerpetualWiggleStatsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		// RandomMoveKeys can restore disabled DD mode after this workload re-enables it
+		out.insert("RandomMoveKeys");
+	}
+
 	Future<Void> _setup(Database cx) {
 		co_await setDDMode(cx, 0);
 		co_await takeMoveKeysLock(cx, UID()); // force current DD to quit
