@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 #ifdef FLOW_GRPC_ENABLED
-#include "fdbctl/ControlCommands.h"
+#include "fdbgrpc/ControlCommands.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/StatusSchema.h"
 #include "fmt/format.h"
 #include <boost/algorithm/string.hpp>
 
-namespace fdbctl {
+namespace fdbgrpc {
 
 //-- Coordinators ----
 
@@ -549,5 +549,5 @@ Future<bool> getWorkersProcessData(Reference<IDatabase> db, std::vector<ProcessD
 }
 
 } // namespace utils
-} // namespace fdbctl
+} // namespace fdbgrpc
 #endif // FLOW_GRPC_ENABLED
