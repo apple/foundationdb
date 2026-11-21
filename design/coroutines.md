@@ -316,6 +316,9 @@ Here the frame owns a `Key`. Passing a `KeyRef`, `ValueRef`, or `StringRef` by v
 extend its arena's lifetime. Use an owning type such as `Key`, `Value`, or `Standalone<T>` when bytes must outlive
 the caller.
 
+Copy a shared future into a local before awaiting it if another actor can replace or clear it.
+Flow reads the awaited handle again when the coroutine resumes.
+
 An ordinary `Future<T>` can keep the coroutine frame and its by-value parameters alive after the body returns.
 If an object stores that future and a parameter owns the object, each can keep the other alive. Move the owning
 parameter into a local at entry so it releases the object when the body exits. The same rule applies when an
