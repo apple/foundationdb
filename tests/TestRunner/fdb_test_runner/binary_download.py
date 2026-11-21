@@ -101,11 +101,7 @@ class FdbBinaryDownloader:
         remote_sha256 = "{}.sha256".format(remote_file)
         local_sha256 = Path("{}.sha256".format(local_file_tmp))
 
-        for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS + 1):
-            if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS:
-                assert False, "Failed to download {} after {} attempts".format(
-                    local_file_tmp, MAX_DOWNLOAD_ATTEMPTS
-                )
+        for _ in range(MAX_DOWNLOAD_ATTEMPTS):
             try:
                 print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
                 request.urlretrieve(remote_file, local_file_tmp)
@@ -128,12 +124,26 @@ class FdbBinaryDownloader:
                     expected_checksum, actual_checkum
                 )
             )
+        else:
+            local_file_tmp.unlink(missing_ok=True)
+            local_sha256.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"Failed to download {remote_file} after {MAX_DOWNLOAD_ATTEMPTS} attempts"
+            )
 
+        if make_executable:
+            make_executable_path(local_file_tmp)
         os.rename(local_file_tmp, local_file)
         os.remove(local_sha256)
 
-        if make_executable:
-            make_executable_path(local_file)
+    def get_server(self, version):
+        server = self.binary_path(version, "fdbserver")
+        if is_local_build_version(version) or server.is_file():
+            return server
+        self.download_old_binary(
+            version, "fdbserver", f"fdbserver.{self.platform}", True
+        )
+        return self.download_dir / version / "fdbserver"
 
     # Copy a client library file from the local old binaries repository
     # The file needs to be renamed to libfdb_c.so, because it is loaded with this name by fdbcli
@@ -166,9 +176,7 @@ class FdbBinaryDownloader:
             self.copy_clientlib_from_local_repo(version)
             return
 
-        self.download_old_binary(
-            version, "fdbserver", "fdbserver.{}".format(self.platform), True
-        )
+        self.get_server(version)
         self.download_old_binary(
             version, "fdbmonitor", "fdbmonitor.{}".format(self.platform), True
         )
