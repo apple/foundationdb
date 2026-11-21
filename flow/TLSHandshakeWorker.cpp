@@ -25,7 +25,11 @@
 #include <algorithm>
 #include <limits>
 
-#include <sys/socket.h>
+#include <boost/asio/write.hpp>
+
+#ifdef __linux__
+#include <pthread.h>
+#endif
 
 #include "flow/Error.h"
 #include "flow/Knobs.h"
@@ -33,32 +37,8 @@
 
 namespace {
 
-// Boost's synchronous handshake loses the unsent part of a write that would block, and reports it only as
-// would_block, so the handshake then stalls until its deadline. This is not specific to the workers: Net2's
-// SSLConnection::write() has the same limitation, with synchronous ssl_sock.write_some() on its non-blocking socket.
-// It is rare here, because a handshake flight (3-6 KB) goes into a new connection's empty send buffer, which is far
-// larger. Flag flights large enough to come close to the send buffer, so that a stall from this cause is visible.
-void warnIfLargeFlight(const TLSHandshakeJob& job) {
-	constexpr int largeFlightBytes = 8 * 1024;
-	int queued = platform::socketSendQueueBytes(job.fd);
-	if (queued < largeFlightBytes) {
-		return;
-	}
-	// TraceEvent::suppressFor() only works on the network thread, so limit this to once a second per worker thread.
-	thread_local std::chrono::steady_clock::time_point lastWarning;
-	auto now = std::chrono::steady_clock::now();
-	if (now - lastWarning < std::chrono::seconds(1)) {
-		return;
-	}
-	lastWarning = now;
-	int sendBuffer = 0;
-	socklen_t len = sizeof(sendBuffer);
-	::getsockopt(job.fd, SOL_SOCKET, SO_SNDBUF, &sendBuffer, &len);
-	TraceEvent(SevWarnAlways, "TLSHandshakeLargeFlight")
-	    .detail("PeerAddr", job.peerAddr)
-	    .detail("Type", job.type == TLSHandshakeSocket::client ? "Client" : "Server")
-	    .detail("SendQueueBytes", queued)
-	    .detail("SendBuffer", sendBuffer);
+bool wouldBlock(const boost::system::error_code& ec) {
+	return ec == boost::asio::error::would_block || ec == boost::asio::error::try_again;
 }
 
 } // namespace
@@ -71,7 +51,7 @@ TLSHandshakeJob::TLSHandshakeJob(TLSHandshakeSocket& socket,
 TLSHandshakeWorker::TLSHandshakeWorker(double handshakeTimeoutSeconds)
   : timeout(std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(handshakeTimeoutSeconds))),
-    thread(startThread(threadMain, this, FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE, "fdb-tls-hshake")) {}
+    thread(startThread(threadMain, this, FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE)) {}
 
 TLSHandshakeWorker::~TLSHandshakeWorker() {
 	// Set the flag before waking, so the thread sees it when its wait returns. run() completes every remaining job
@@ -83,8 +63,6 @@ TLSHandshakeWorker::~TLSHandshakeWorker() {
 
 void TLSHandshakeWorker::submitJob(std::shared_ptr<TLSHandshakeJob> job) {
 	job->worker = this;
-	// Counted before the worker sees the job, so that back-to-back submissions spread across workers.
-	activeJobs.fetch_add(1, std::memory_order_relaxed);
 	// The mutex hands the job, and everything written to it, over to the worker thread; setting the deadline under it
 	// keeps deadlines in list order. Only a submission to an empty list needs to wake the worker: it takes the whole
 	// list at once, and checks it after every wait.
@@ -94,6 +72,8 @@ void TLSHandshakeWorker::submitJob(std::shared_ptr<TLSHandshakeJob> job) {
 		job->deadline = std::chrono::steady_clock::now() + timeout;
 		wasEmpty = submitted.empty();
 		submitted.push_back(std::move(job));
+		// Count only jobs handed to the worker, before releasing the queue lock.
+		activeJobs.fetch_add(1, std::memory_order_relaxed);
 	}
 	if (wasEmpty) {
 		poller.wake();
@@ -107,6 +87,13 @@ void TLSHandshakeWorker::cancelJob(TLSHandshakeJob& job) {
 }
 
 THREAD_FUNC_RETURN TLSHandshakeWorker::threadMain(void* worker) {
+#ifdef __linux__
+	// Naming a different thread can fail after startThread has already launched it. Name this thread here so
+	// that a naming failure cannot unwind the worker constructor while the thread still uses the worker.
+	if (int error = pthread_setname_np(pthread_self(), "fdb-tls-hshake"); error != 0) {
+		TraceEvent(SevWarn, "TLSHandshakeWorkerSetThreadNameFailed").detail("ErrorCode", error);
+	}
+#endif
 	static_cast<TLSHandshakeWorker*>(worker)->run();
 	THREAD_RETURN;
 }
@@ -120,8 +107,8 @@ void TLSHandshakeWorker::run() {
 	std::list<std::shared_ptr<TLSHandshakeJob>> jobs;
 	// Stops watching the socket before completing: once `done` is fulfilled the owner may close it, and its descriptor
 	// number could then be reused by another connection. Erasing may destroy the job, so it comes last.
-	auto finish = [&](TLSHandshakeJob& job, const boost::system::error_code& ec) {
-		poller.unwatch(job.fd);
+	auto finish = [&](TLSHandshakeJob& job, bool writing, const boost::system::error_code& ec) {
+		poller.unwatch(job.fd, writing);
 		completeJob(job, ec);
 		jobs.erase(job.position);
 	};
@@ -141,7 +128,7 @@ void TLSHandshakeWorker::run() {
 			if (advanceHandshake(*job, ec)) {
 				completeJob(*job, ec);
 			} else {
-				int err = poller.watch(job->fd, job.get());
+				int err = poller.watch(job->fd, job.get(), !job->pendingOutput.empty());
 				if (err == 0) {
 					jobs.push_back(std::move(job));
 					jobs.back()->position = std::prev(jobs.end());
@@ -168,9 +155,18 @@ void TLSHandshakeWorker::run() {
 		// job leaves the list.
 		for (void* tag : ready) {
 			auto& job = *static_cast<TLSHandshakeJob*>(tag);
+			bool writing = !job.pendingOutput.empty();
 			boost::system::error_code ec;
 			if (advanceHandshake(job, ec)) {
-				finish(job, ec);
+				finish(job, writing, ec);
+			} else if (writing != !job.pendingOutput.empty()) {
+				// Register the new direction after removing the old one. The new watch reports existing readiness.
+				poller.unwatch(job.fd, writing);
+				int err = poller.watch(job.fd, &job, !writing);
+				if (err != 0) {
+					completeJob(job, boost::system::error_code(err, boost::system::system_category()));
+					jobs.erase(job.position);
+				}
 			}
 		}
 
@@ -178,20 +174,22 @@ void TLSHandshakeWorker::run() {
 			for (auto it = jobs.begin(); it != jobs.end();) {
 				auto& job = **it++;
 				if (job.cancelled.load()) {
-					finish(job, boost::asio::error::operation_aborted);
+				finish(job, !job.pendingOutput.empty(), boost::asio::error::operation_aborted);
 				}
 			}
 		}
 
 		auto now = std::chrono::steady_clock::now();
 		while (!jobs.empty() && jobs.front()->deadline <= now) {
-			finish(*jobs.front(), boost::asio::error::timed_out);
+			auto& job = *jobs.front();
+			finish(job, !job.pendingOutput.empty(), boost::asio::error::timed_out);
 		}
 	}
 
 	// Stopping: fail every unfinished job, so that nothing waits on its `done` forever.
 	while (!jobs.empty()) {
-		finish(*jobs.front(), boost::asio::error::operation_aborted);
+		auto& job = *jobs.front();
+		finish(job, !job.pendingOutput.empty(), boost::asio::error::operation_aborted);
 	}
 	std::lock_guard<std::mutex> lock(mutex);
 	for (auto& job : submitted) {
@@ -204,20 +202,36 @@ bool TLSHandshakeWorker::advanceHandshake(TLSHandshakeJob& job, boost::system::e
 		result = boost::asio::error::operation_aborted;
 		return true;
 	}
-	// Runs OpenSSL as far as the data received so far allows. On the non-blocking socket it reads until the socket is
-	// empty, as the poller's edge-triggered readiness requires, then returns would_block; OpenSSL keeps its progress in
-	// the connection's SSL object for the next call. An exception (e.g. from the certificate verification callback)
-	// must not escape the worker thread.
+	auto& transport = job.socket.next_layer();
+	if (!job.pendingOutput.empty()) {
+		auto& socket = static_cast<boost::asio::ip::tcp::socket&>(transport);
+		job.outputWritten +=
+		    boost::asio::write(socket, boost::asio::buffer(job.pendingOutput) + job.outputWritten, result);
+		if (result) {
+			return !wouldBlock(result);
+		}
+		job.pendingOutput.clear();
+		job.outputWritten = 0;
+		if (job.handshakeComplete) {
+			return true;
+		}
+	}
+
+	// Keep any output Boost consumes before the real socket can take it. A completed handshake must flush its
+	// final flight before the connection can go back to its owner.
+	transport.bufferHandshakeWrites(&job.pendingOutput);
 	try {
 		// NOLINTNEXTLINE(bugprone-unused-return-value): the result is also stored in `result`.
 		job.socket.handshake(job.type, result);
 	} catch (...) {
 		result = boost::asio::error::fault;
 	}
-	warnIfLargeFlight(job);
-	// A would-block on write would drop the unsent part of a handshake message inside Boost; handshake flights are
-	// far smaller than a new socket's send buffer, and a stalled handshake still ends at its deadline.
-	return result != boost::asio::error::would_block && result != boost::asio::error::try_again;
+	transport.bufferHandshakeWrites(nullptr);
+	if (result && !wouldBlock(result)) {
+		return true;
+	}
+	job.handshakeComplete = !result;
+	return job.handshakeComplete && job.pendingOutput.empty();
 }
 
 void TLSHandshakeWorker::completeJob(TLSHandshakeJob& job, const boost::system::error_code& ec) {
