@@ -121,7 +121,7 @@ func TestRenderedViewChangesWithTheme(t *testing.T) {
 		m.width, m.height = 200, 50
 		out := m.View()
 		found := map[string]bool{}
-		for _, f := range strings.Split(out, "\x1b[") {
+		for f := range strings.SplitSeq(out, "\x1b[") {
 			if strings.HasPrefix(f, "38;5;") {
 				found[strings.SplitN(f, "m", 2)[0]] = true
 			}

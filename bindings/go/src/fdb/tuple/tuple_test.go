@@ -61,17 +61,17 @@ func getRandomGenerator() *rand.Rand {
 	return randomGenerator
 }
 
-func genBytes() interface{}     { return []byte("namespace") }
-func genBytesNil() interface{}  { return []byte{0xFF, 0x00, 0xFF} }
-func genString() interface{}    { return "namespace" }
-func genStringNil() interface{} { return "nam\x00es\xFFpace" }
-func genInt() interface{}       { return getRandomGenerator().Int63() }
-func genFloat() interface{}     { return float32(getRandomGenerator().NormFloat64()) }
-func genDouble() interface{}    { return getRandomGenerator().NormFloat64() }
+func genBytes() any     { return []byte("namespace") }
+func genBytesNil() any  { return []byte{0xFF, 0x00, 0xFF} }
+func genString() any    { return "namespace" }
+func genStringNil() any { return "nam\x00es\xFFpace" }
+func genInt() any       { return getRandomGenerator().Int63() }
+func genFloat() any     { return float32(getRandomGenerator().NormFloat64()) }
+func genDouble() any    { return getRandomGenerator().NormFloat64() }
 
-func mktuple(gen func() interface{}, count int) Tuple {
+func mktuple(gen func() any, count int) Tuple {
 	tt := make(Tuple, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		tt[i] = gen()
 	}
 	return tt

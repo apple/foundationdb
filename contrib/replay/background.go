@@ -133,7 +133,7 @@ func parseOSCColor(s string) (r, g, b float64, ok bool) {
 		return 0, 0, 0, false
 	}
 	var out [3]float64
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		p := strings.TrimSpace(parts[i])
 		if p == "" || len(p) > 4 {
 			return 0, 0, 0, false

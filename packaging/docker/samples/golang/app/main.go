@@ -1,6 +1,6 @@
 // main.go
 //
-// This source file is part of the FoundationDB open source project
+// # This source file is part of the FoundationDB open source project
 //
 // Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
 //
@@ -49,7 +49,7 @@ func main() {
 }
 
 func incrementCounter(w http.ResponseWriter, r *http.Request) {
-	ret, err := db.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	ret, err := db.Transact(func(tr fdb.Transaction) (any, error) {
 		value := tr.Get(fdb.Key("my-counter")).MustGet()
 		if len(value) == 0 {
 			value = intToBytes(0)
