@@ -6692,23 +6692,29 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			const Value replayAfter = BinaryWriter::toValue(beginVersion, Unversioned());
 			const Value skip = BinaryWriter::toValue<Version>(invalidVersion, Unversioned());
 			size_t firstRange = 0;
+			tr->reset();
 			while (firstRange < ranges.size()) {
-				firstRange =
-				    co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<size_t> {
-					    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					    co_await taskBucket->keepRunning(tr, task);
-					    size_t next = firstRange;
-					    do {
-						    KeyRangeRef range = ranges[next++] & normalKeys;
-						    if (!range.empty()) {
-							    tr->set(range.begin.withPrefix(mapPrefix), replayAfter);
-							    tr->set(range.end.withPrefix(mapPrefix), skip);
-						    }
-					    } while (next < ranges.size() &&
-					             tr->getApproximateSize() < CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE);
-					    co_return next;
-				    });
+				Error err;
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					co_await taskBucket->keepRunning(tr, task);
+					size_t next = firstRange;
+					do {
+						KeyRangeRef range = ranges[next++] & normalKeys;
+						if (!range.empty()) {
+							tr->set(range.begin.withPrefix(mapPrefix), replayAfter);
+							tr->set(range.end.withPrefix(mapPrefix), skip);
+						}
+					} while (next < ranges.size() && tr->getApproximateSize() < CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE);
+					co_await tr->commit();
+					firstRange = next;
+					tr->reset();
+					continue;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr->onError(err);
 			}
 		}
 		if (!inconsistentSnapshotOnly) {
