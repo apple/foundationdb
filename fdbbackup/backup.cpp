@@ -151,6 +151,7 @@ enum {
 	// Backup Modify
 	OPT_MOD_ACTIVE_INTERVAL,
 	OPT_MOD_VERIFY_UID,
+	OPT_MOD_RESTART_SNAPSHOT,
 
 	// Restore constants
 	OPT_RESTORECONTAINER,
@@ -318,6 +319,7 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot-interval", SO_REQ_SEP },
 	{ OPT_MOD_ACTIVE_INTERVAL, "--active-snapshot-interval", SO_REQ_SEP },
+	{ OPT_MOD_RESTART_SNAPSHOT, "--restart-snapshot", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -933,6 +935,12 @@ static void printBackupUsage(bool devhelp) {
 	printf("  --active-snapshot-interval DURATION\n"
 	       "                 For modify operations, sets the desired interval for the backup's currently active "
 	       "snapshot, relative to the start of the snapshot.\n");
+	printf(
+	    "  --restart-snapshot\n"
+	    "                 For modify operations, drops the backup's in-progress snapshot and starts a new one now,\n"
+	    "                 e.g. after a gap in the mutation logs makes the in-progress snapshot unrestorable. The new\n"
+	    "                 snapshot runs over --active-snapshot-interval if given, else over the backup's initial\n"
+	    "                 snapshot interval (0 by default, meaning as fast as possible).\n");
 	printf("  --verify-uid UID\n"
 	       "                 Specifies a UID to verify against the BackupUID of the running backup.  If provided, the "
 	       "UID is verified in the same transaction\n"
@@ -2876,8 +2884,10 @@ struct BackupModifyOptions {
 	Optional<int> snapshotIntervalSeconds;
 	Optional<int> activeSnapshotIntervalSeconds;
 	Optional<std::string> encryptionKeyFile;
+	bool restartSnapshot = false;
 	bool hasChanges() const {
-		return destURL.present() || snapshotIntervalSeconds.present() || activeSnapshotIntervalSeconds.present();
+		return destURL.present() || snapshotIntervalSeconds.present() || activeSnapshotIntervalSeconds.present() ||
+		       restartSnapshot;
 	}
 };
 
@@ -2886,8 +2896,14 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 		fprintf(stderr, "No changes were specified, nothing to do!\n");
 		throw backup_error();
 	}
+	if (options.restartSnapshot && options.activeSnapshotIntervalSeconds.orDefault(0) < 0) {
+		fprintf(stderr, "ERROR: --active-snapshot-interval cannot be negative with --restart-snapshot\n");
+		throw backup_error();
+	}
 
 	KeyBackedTag tag = makeBackupTag(tagName);
+	FileBackupAgent backupAgent;
+	Optional<Version> restartedSnapshotBegin;
 
 	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	while (true) {
@@ -2984,7 +3000,30 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 				config.snapshotIntervalSeconds().set(tr, options.snapshotIntervalSeconds.get());
 			}
 
-			if (options.activeSnapshotIntervalSeconds.present()) {
+			if (options.restartSnapshot) {
+				bool stopWhenDone{ false };
+				int snapshotMode{ 0 };
+				bool incrementalBackupOnly{ false };
+				co_await (
+				    store(stopWhenDone, config.stopWhenDone().getD(tr, Snapshot::False, false)) &&
+				    store(snapshotMode, config.snapshotMode().getD(tr, Snapshot::False, 0)) &&
+				    store(incrementalBackupOnly, config.incrementalBackupOnly().getD(tr, Snapshot::False, false)));
+				Optional<std::string> refusal =
+				    FileBackupAgent::restartSnapshotRefusal(s, stopWhenDone, snapshotMode, incrementalBackupOnly);
+				if (refusal.present()) {
+					fprintf(stderr,
+					        "ERROR: Cannot restart the snapshot of the backup on tag '%s': %s.\n",
+					        tagName.c_str(),
+					        refusal.get().c_str());
+					throw backup_error();
+				}
+				Optional<int64_t> interval;
+				if (options.activeSnapshotIntervalSeconds.present()) {
+					interval = options.activeSnapshotIntervalSeconds.get();
+				}
+				Version begin = co_await backupAgent.restartSnapshot(tr, StringRef(tagName), interval);
+				restartedSnapshotBegin = begin;
+			} else if (options.activeSnapshotIntervalSeconds.present()) {
 				Version begin = co_await config.snapshotBeginVersion().getOrThrow(tr, Snapshot::False, backup_error());
 				config.snapshotTargetEndVersion().set(tr,
 				                                      begin + ((int64_t)options.activeSnapshotIntervalSeconds.get() *
@@ -2997,6 +3036,12 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 			err = e;
 		}
 		co_await tr->onError(err);
+	}
+
+	if (restartedSnapshotBegin.present()) {
+		fmt::print("Restarted the snapshot of the backup on tag `{}'. The new snapshot begins at version {}.\n",
+		           tagName,
+		           restartedSnapshotBegin.get());
 	}
 }
 
@@ -3824,6 +3869,9 @@ int main(int argc, char* argv[]) {
 			}
 			case OPT_MOD_VERIFY_UID:
 				modifyOptions.verifyUID = args->OptionArg();
+				break;
+			case OPT_MOD_RESTART_SNAPSHOT:
+				modifyOptions.restartSnapshot = true;
 				break;
 			case OPT_WAITFORDONE:
 				waitForDone.set(true);
