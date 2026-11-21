@@ -60,8 +60,7 @@ struct RangeDigestValidationWorkload : TestWorkload {
 	int nodeCount;
 	int valueBytes;
 	double validateAfter;
-	double checkInterval;
-	double maxWaitTime;
+	AuditWaitOptions waitOptions;
 	int expectMinShards;
 	double shardSettleTimeout;
 	bool strictShardCheck;
@@ -79,8 +78,16 @@ struct RangeDigestValidationWorkload : TestWorkload {
 		nodeCount = getOption(options, "nodeCount"_sr, 10000);
 		valueBytes = getOption(options, "valueBytes"_sr, 100);
 		validateAfter = getOption(options, "validateAfter"_sr, 5.0);
-		checkInterval = getOption(options, "checkInterval"_sr, 2.0);
-		maxWaitTime = getOption(options, "maxWaitTime"_sr, 120.0);
+		waitOptions.pollIntervalSeconds = getOption(options, "checkInterval"_sr, waitOptions.pollIntervalSeconds);
+		waitOptions.traceContext = "RangeDigestValidation";
+		waitOptions.maxScheduleAttempts = 10;
+		// Keep individual requests bounded while allowing the full audit completion budget for recovery.
+		waitOptions.roundTripTimeoutSeconds = 120.0;
+		if (hasOption(options, "maxWaitTime"_sr)) {
+			waitOptions.roundTripTimeoutSeconds =
+			    getOption(options, "maxWaitTime"_sr, waitOptions.roundTripTimeoutSeconds);
+			waitOptions.maxWaitSeconds = waitOptions.roundTripTimeoutSeconds;
+		}
 		// Splitting into several shards exercises the cross-shard/cross-server combine. In the
 		// randomized Joshua matrix a seed may keep everything in one shard (shard-size knob is forced
 		// to 400KB/2MB/10MB, not the min_shard_bytes knob), so by default this is best-effort (a warning,
@@ -378,14 +385,6 @@ struct RangeDigestValidationWorkload : TestWorkload {
 	// Retries the whole audit on transient cluster errors (e.g. movekeys_conflict during DD failover),
 	// mirroring RestoreValidation's tolerance for buggify-induced instability.
 	Future<RangeDigestSummary> runOneDigest(Database cx) {
-		AuditWaitOptions waitOptions;
-		waitOptions.pollIntervalSeconds = checkInterval;
-		waitOptions.maxWaitSeconds = maxWaitTime;
-		waitOptions.traceContext = "RangeDigestValidation";
-		// Triggering can take several attempts while the cluster controller or data distributor recovers under
-		// buggify; give each attempt as long as the audit itself gets.
-		waitOptions.maxScheduleAttempts = 10;
-		waitOptions.roundTripTimeoutSeconds = maxWaitTime;
 		int auditRetryCount = 0;
 		int maxAuditRetries = 10;
 		while (true) {
@@ -422,9 +421,8 @@ struct RangeDigestValidationWorkload : TestWorkload {
 				throw retryErr;
 			}
 			// audit_storage_failed and related transient conditions are retryable under buggify. A timed_out
-			// is not retried: it means the audit was scheduled and stopped making progress, which is a finding
-			// (an audit that could not be triggered at all was already retried by auditStorageAndWait), and
-			// re-arming it maxAuditRetries times would spend maxWaitTime on each before failing anyway.
+			// is not retried: each scheduled audit already gets the full completion budget, and triggering
+			// an audit that could not be scheduled was already retried by auditStorageAndWait.
 			if ((retryErr.code() == error_code_audit_storage_failed ||
 			     retryErr.code() == error_code_persist_new_audit_metadata_error ||
 			     retryErr.code() == error_code_audit_storage_cancelled ||
