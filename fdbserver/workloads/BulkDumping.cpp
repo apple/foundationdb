@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
@@ -66,6 +68,14 @@ struct BulkDumping : TestWorkload {
 	double jobCompletionTimeout = 1800.0; // Timeout for waiting on bulk dump/load job completion
 	double jobSubmitTimeout = 60.0; // Timeout for submitBulkDumpJob/submitBulkLoadJob operations
 
+	// Exercise `bulkdump pause`/`resume` against a job that is already dispatching.
+	bool testPauseResume = false;
+	double pauseProbeTimeout = 600.0;
+	// A pause can only be observed on a job with several tasks, and the task count follows the shard
+	// count, which follows how many bytes the dataset occupies.
+	int dataKeyCount = 1000;
+	int minAdmissionsToProbe = 5;
+
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
@@ -106,6 +116,11 @@ struct BulkDumping : TestWorkload {
 		// Initialize timeout options
 		jobCompletionTimeout = getOption(options, "jobCompletionTimeout"_sr, 1800.0);
 		jobSubmitTimeout = getOption(options, "jobSubmitTimeout"_sr, 60.0);
+
+		testPauseResume = getOption(options, "testPauseResume"_sr, false);
+		pauseProbeTimeout = getOption(options, "pauseProbeTimeout"_sr, 600.0);
+		dataKeyCount = getOption(options, "dataKeyCount"_sr, 1000);
+		minAdmissionsToProbe = getOption(options, "minAdmissionsToProbe"_sr, 5);
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
@@ -163,24 +178,38 @@ struct BulkDumping : TestWorkload {
 		return kvs; // ordered
 	}
 
+	// Committed in batches rather than one transaction: a dataset large enough to split into hundreds of
+	// shards does not fit in a single commit, and the whole set in one transaction fails with
+	// transaction_too_large. Every write lands before the dump job is submitted either way, so the
+	// snapshot the dump takes is unaffected by the split.
 	Future<Void> setKeys(Database cx, std::map<Key, Value> kvs) {
-		Transaction tr(cx);
-		while (true) {
-			Error err;
-			try {
-				for (const auto& [key, value] : kvs) {
-					tr.set(key, value);
+		// Well under the commit size limit for the key and value sizes this workload generates.
+		constexpr int keysPerCommit = 5000;
+		auto it = kvs.begin();
+		int written = 0;
+		while (it != kvs.end()) {
+			Transaction tr(cx);
+			auto batchBegin = it;
+			while (true) {
+				Error err;
+				try {
+					it = batchBegin;
+					int inBatch = 0;
+					while (it != kvs.end() && inBatch < keysPerCommit) {
+						tr.set(it->first, it->second);
+						++it;
+						++inBatch;
+					}
+					co_await tr.commit();
+					written += inBatch;
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				co_await tr.commit();
-				TraceEvent("BulkDumpingWorkLoadSetKey")
-				    .detail("KeyCount", kvs.size())
-				    .detail("Version", tr.getCommittedVersion());
-				co_return;
-			} catch (Error& e) {
-				err = e;
+				co_await tr.onError(err);
 			}
-			co_await tr.onError(err);
 		}
+		TraceEvent("BulkDumpingWorkLoadSetKey").detail("KeyCount", written);
 	}
 
 	Future<Void> waitUntilDumpJobComplete(BulkDumping* self, Database cx) {
@@ -212,6 +241,127 @@ struct BulkDumping : TestWorkload {
 				co_await tr.onError(err);
 			}
 			co_await delay(30.0);
+		}
+	}
+
+	// Exercise pause and resume against a job that is already dispatching tasks.
+	//
+	// Pausing a job that has not started yet would be satisfied by an implementation that consults the
+	// control record only once per scheduling pass. That is not good enough: one dispatch pass walks the
+	// whole remaining job and blocks on the parallelism limiter as it goes, so such an implementation
+	// keeps admitting tasks for the lifetime of the job. The pause here is therefore issued mid-flight,
+	// and the assertions below distinguish "stopped admitting" from "kept going".
+	// Pause a job that is dispatching, and require that dispatch stops.
+	//
+	// Everything here is measured with the admitted-task counter and nothing with getBulkDumpProgress.
+	// That is deliberate: progress counts range-map entries, which the storage server writes per dump
+	// batch rather than per task, so its totals are batch counts wearing a task label. Earlier versions
+	// of this probe derived their preconditions from those numbers and were measuring the wrong
+	// population; they could be made to pass or fail by changing the batch size alone.
+	//
+	// Admissions are also the right signal for a second reason. How many tasks *complete* in a window
+	// depends on how long a task takes, so a configuration slow enough to leave work outstanding also
+	// stops producing completions, and a hold then looks quiet whether or not the pause works.
+	// Admissions stop the moment a pause is seen, whatever the tasks are doing.
+	Future<Void> probePauseResume(BulkDumping* self, Database cx, UID jobId) {
+		// Pause early, once dispatch is demonstrably under way but with most of it still ahead. Waiting
+		// for some later "mid-flight" state only narrows the window the pause has to act on.
+		double probeStart = now();
+		int64_t admittedAtPause = 0;
+		while (true) {
+			if (now() - probeStart > self->pauseProbeTimeout) {
+				TraceEvent(SevError, "BulkDumpingPauseProbeNeverDispatched")
+				    .detail("JobId", jobId)
+				    .detail("Admitted", admittedAtPause)
+				    .detail("Required", self->minAdmissionsToProbe)
+				    .detail("Elapsed", now() - probeStart);
+				co_return;
+			}
+			admittedAtPause = co_await getBulkDumpAdmittedCount(cx, jobId);
+			if (admittedAtPause >= self->minAdmissionsToProbe) {
+				break;
+			}
+			co_await delay(1.0);
+		}
+
+		// Admission rate while running: the denominator for the zero required below. A zero over a
+		// window too short to expect anything is not evidence of a pause.
+		double observedAdmitRatePerSec = admittedAtPause / std::max(1.0, now() - probeStart);
+		TraceEvent("BulkDumpingPauseProbePausing")
+		    .detail("JobId", jobId)
+		    .detail("AdmittedAtPause", admittedAtPause)
+		    .detail("ObservedAdmitRatePerSec", observedAdmitRatePerSec);
+
+		co_await setBulkJobPaused(cx, jobId, /*paused=*/true, /*isBulkDump=*/true);
+
+		// Let data distribution notice. Tasks dispatched before this keep running -- that is the drain
+		// semantics -- so the count may still advance briefly; what must stop is further dispatch.
+		co_await delay(2 * SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
+		int64_t admittedAtHoldStart = co_await getBulkDumpAdmittedCount(cx, jobId);
+
+		// Hold long enough that a running job would have been seen admitting: the target is ten
+		// admissions at the rate measured before the pause. Bounded, because the rate can be low
+		// enough that ten of them would outlast the test's own timeout and a wall-clock failure
+		// would displace the one under test.
+		double holdSeconds = std::clamp(10.0 / std::max(observedAdmitRatePerSec, 0.001), 60.0, 600.0);
+		double expectedIfRunning = observedAdmitRatePerSec * holdSeconds;
+		if (expectedIfRunning < 5.0) {
+			// Too slow for the bounded hold to distinguish a pause from an idle queue. Skipping says
+			// so; asserting on a window this thin would pass whether the gate worked or not.
+			TraceEvent(SevWarnAlways, "BulkDumpingPauseProbeSkippedSlowRate")
+			    .detail("JobId", jobId)
+			    .detail("ObservedAdmitRatePerSec", observedAdmitRatePerSec)
+			    .detail("HoldSeconds", holdSeconds)
+			    .detail("ExpectedAdmissionsIfRunning", expectedIfRunning);
+			co_await setBulkJobPaused(cx, jobId, /*paused=*/false, /*isBulkDump=*/true);
+			co_return;
+		}
+		double holdStart = now();
+		while (now() - holdStart < holdSeconds) {
+			co_await delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
+			int64_t admittedNow = co_await getBulkDumpAdmittedCount(cx, jobId);
+			if (admittedNow != admittedAtHoldStart) {
+				TraceEvent(SevError, "BulkDumpingPauseProbeAdmittedWhilePaused")
+				    .detail("JobId", jobId)
+				    .detail("AdmittedAtHoldStart", admittedAtHoldStart)
+				    .detail("AdmittedNow", admittedNow)
+				    .detail("HeldSeconds", now() - holdStart);
+				// Resume anyway: leaving it paused would strand the job and bury this error under a
+				// completion timeout.
+				co_await setBulkJobPaused(cx, jobId, /*paused=*/false, /*isBulkDump=*/true);
+				co_return;
+			}
+		}
+		TraceEvent("BulkDumpingPauseProbeHeld")
+		    .detail("JobId", jobId)
+		    .detail("Admitted", admittedAtHoldStart)
+		    .detail("HeldSeconds", holdSeconds)
+		    .detail("ExpectedAdmissionsIfRunning", expectedIfRunning);
+
+		co_await setBulkJobPaused(cx, jobId, /*paused=*/false, /*isBulkDump=*/true);
+
+		// Dispatch must restart. This doubles as the probe's non-vacuity check: if admissions resume,
+		// then work was pending throughout the hold, so the zero above was a pause and not an empty
+		// queue. A job that had finished would never satisfy this.
+		double resumeStart = now();
+		while (true) {
+			int64_t admittedNow = co_await getBulkDumpAdmittedCount(cx, jobId);
+			if (admittedNow > admittedAtHoldStart) {
+				TraceEvent("BulkDumpingPauseProbeResumed")
+				    .detail("JobId", jobId)
+				    .detail("AdmittedAtHoldStart", admittedAtHoldStart)
+				    .detail("AdmittedNow", admittedNow)
+				    .detail("SecondsToResume", now() - resumeStart);
+				co_return;
+			}
+			if (now() - resumeStart > self->pauseProbeTimeout) {
+				TraceEvent(SevError, "BulkDumpingPauseProbeDidNotResume")
+				    .detail("JobId", jobId)
+				    .detail("Admitted", admittedAtHoldStart)
+				    .detail("WaitedSeconds", now() - resumeStart);
+				co_return;
+			}
+			co_await delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
 		}
 	}
 
@@ -498,7 +648,7 @@ struct BulkDumping : TestWorkload {
 
 		std::map<Key, Value> kvs;
 		if (generateInitialData) {
-			kvs = generateOrderedKVS(this, normalKeys, 1000);
+			kvs = generateOrderedKVS(this, normalKeys, dataKeyCount);
 			co_await setKeys(cx, kvs);
 		}
 
@@ -566,6 +716,9 @@ struct BulkDumping : TestWorkload {
 		    .detail("Job", bulkDumpJob.toString());
 
 		// Wait until the dump job completes
+		if (testPauseResume) {
+			co_await probePauseResume(this, cx, bulkDumpJob.getJobId());
+		}
 		co_await waitUntilDumpJobComplete(this, cx);
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Dump Job Complete").detail("Job", bulkDumpJob.toString());
 

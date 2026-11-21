@@ -1179,4 +1179,40 @@ BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
                                    const KeyRange& range,
                                    const std::string& jobRoot,
                                    const BulkLoadTransportMethod& transportMethod);
+
+// Operator control over a running bulkdump or bulkload job, shared by both paths. An absent control key
+// means no control has been applied, so every default here must mean "behave as if this did not exist".
+struct BulkJobControlState {
+	constexpr static FileIdentifier file_identifier = 1384512;
+
+	// While paused, data distribution admits no new tasks for the job. Tasks already admitted run to
+	// completion, so a pause takes effect over the drain time of the work in flight, not immediately.
+	bool paused = false;
+
+	// Wall-clock time by which the job should aim to finish; zero means unpaced. Absolute rather than a
+	// duration because there is no reliable job start time to measure a duration from: only the backup
+	// path writes an owner record carrying submitTime, a job submitted through fdbcli has none, and
+	// BulkDumpState::getSubmitTime() returns now(). Whoever applies the target resolves it against its
+	// own clock instead.
+	//
+	// NOT YET ENFORCED: defined now so the persisted format does not have to change again when admission
+	// pacing lands, but nothing reads it and no command sets it.
+	double targetEndTime = 0;
+
+	BulkJobControlState() = default;
+
+	bool isPaused() const { return paused; }
+
+	bool hasTargetEndTime() const { return targetEndTime > 0; }
+
+	std::string toString() const {
+		return "BulkJobControlState: [Paused]: " + std::string(paused ? "true" : "false") +
+		       ", [TargetEndTime]: " + std::to_string(targetEndTime);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, paused, targetEndTime);
+	}
+};
 #endif
