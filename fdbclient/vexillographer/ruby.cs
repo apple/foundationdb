@@ -58,7 +58,7 @@ namespace vexillographer
                 TextWriter outFile = new StreamWriter(rbFile);
                 outFile.NewLine = "\n";
 				outFile.WriteLine(@"# FoundationDB Ruby API
-# Copyright (c) 2013-2017 Apple Inc.
+# Copyright (c) 2013-2026 Apple Inc.
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the ""Software""), to deal
