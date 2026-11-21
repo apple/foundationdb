@@ -297,6 +297,19 @@ TEST_CASE("/fdbrpc/AsyncFileKAIO/TruncateEINTR") {
 }
 #endif // __linux__
 
+Future<Void> Net2FileSystem::createParentDirectory(std::string filename) {
+#ifdef __unixish__
+	if (!g_network->isSimulated()) {
+		return uncancellable(AsyncFileEIO::dispatch<Void>([filename] {
+			platform::createDirectory(parentDirectory(filename));
+			return Void();
+		}));
+	}
+#endif
+	platform::createDirectory(parentDirectory(filename));
+	return Void();
+}
+
 // Opens a file for asynchronous I/O
 Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {
 #ifdef __linux__
