@@ -1974,6 +1974,8 @@ class DWALPagerSnapshot;
 // alternate pages it references basically serve as a write ahead log for pages that will eventually be copied
 // back to their original location once the original version is no longer needed.
 class DWALPager final : public IPager2 {
+	friend Future<Void> testCloseWithPendingFileExtensions(std::string file);
+
 public:
 	using LogicalPageQueueT = FIFOQueue<LogicalPageID>;
 	using VersionToPageMapT = std::map<Version, LogicalPageID>;
@@ -2631,8 +2633,9 @@ public:
 				self->fileExtension = extendToCover(self, pageID, self->fileExtension);
 			}
 
-			// Wait for extension that covers pageID to complete;
-			co_await self->fileExtension;
+			// Another write can replace fileExtension, and shutdown clears it. Wait on this generation.
+			auto extension = self->fileExtension;
+			co_await extension;
 		}
 
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
@@ -2653,8 +2656,18 @@ public:
 		// Indicate that extension to this new count has been started
 		self->filePageCountPending = newPageCount;
 
-		// The pager retains this future until the next extension. Drop its predecessor after the wait.
-		co_await std::exchange(previousExtension, {});
+		// Shutdown cancels the newest extension. Earlier extensions can still have uncancellable block writers.
+		{
+			auto predecessor = std::move(previousExtension);
+			try {
+				co_await predecessor;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					predecessor.cancel();
+				}
+				throw;
+			}
+		}
 
 		// Grow the file
 		co_await self->pageFile->truncate(newPageCount * self->physicalPageSize);
@@ -10124,6 +10137,49 @@ TEST_CASE("/redwood/correctness/unit/pagerReleasesPredecessors") {
 	Future<Void> closed = pager->onClosed();
 	pager->dispose();
 	co_await closed;
+}
+
+Future<Void> testCloseWithPendingFileExtensions(std::string file) {
+	g_redwoodMetricsActor = Void();
+	g_redwoodMetrics.clear();
+	deleteFile(file);
+	auto* pager = new DWALPager(4096,
+	                            SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE,
+	                            file,
+	                            FLOW_KNOBS->PAGE_CACHE_4K,
+	                            0,
+	                            SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
+	                            false);
+	co_await pager->init();
+	// Hold the first truncate pending so both generations and their writers are active at shutdown.
+	pager->fileExtension = Never();
+	auto writePage = [pager](LogicalPageID id) {
+		auto page = pager->newPageBuffer();
+		page->init(EncodingType::XXHash64, PageType::BTreeNode, 1);
+		memset(page->mutateData(), 0, page->dataSize());
+		page->setLogicalPageInfo(id, invalidLogicalPageID);
+		return pager->writePhysicalPage(
+		    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<LogicalPageID>(&id, 1), page);
+	};
+	LogicalPageID firstID = pager->filePageCountPending;
+	auto firstWrite = writePage(firstID);
+	auto firstExtension = pager->fileExtension;
+	LogicalPageID secondID = pager->filePageCountPending;
+	ASSERT_GT(secondID, firstID);
+	auto secondWrite = writePage(secondID);
+	ASSERT(pager->fileExtension != firstExtension && !pager->fileExtension.isReady());
+	ASSERT(!firstWrite.isReady() && !secondWrite.isReady());
+
+	auto closed = pager->onClosed();
+	pager->dispose();
+	co_await closed;
+	ASSERT(firstExtension.isError() && firstExtension.getError().code() == error_code_actor_cancelled);
+	ASSERT(firstWrite.isError() && firstWrite.getError().code() == error_code_actor_cancelled);
+	ASSERT(secondWrite.isError() && secondWrite.getError().code() == error_code_actor_cancelled);
+}
+
+TEST_CASE("/redwood/correctness/unit/closeWithPendingFileExtensions") {
+	return testCloseWithPendingFileExtensions(joinPath(params.getDataDir(), "pending-extensions.redwood-v1"));
 }
 
 TEST_CASE("/redwood/correctness/btreeCloseWithQueuedCommits") {
