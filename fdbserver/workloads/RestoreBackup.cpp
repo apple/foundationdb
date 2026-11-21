@@ -19,6 +19,8 @@
  */
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -65,6 +67,16 @@ struct RestoreBackupWorkload : TestWorkload {
 	// digest audit, from it being scheduled to it finishing. An audit that fails is run again, and the ranges are
 	// digested one after the other, so the whole digest can take longer.
 	double digestTimeoutSeconds;
+	// Restore the backup that is in the container at backupDir without waiting for or stopping a running backup
+	// (stopWhenDone is rejected). The ranges to restore must then be given (restoreRanges or restoreRangePrefix): the
+	// backup's own record of its ranges is not read. An in-place restore fails (requireBackupStopped, default true;
+	// false only traces) while any backup or DR logs part of the restored ranges: its log would copy the restore's
+	// writes.
+	bool useExistingBackup;
+	// The version to restore to: the latest restorable one when invalid, else a version inside the restorable window
+	// of the backup, given directly or as the fraction of that window (0 is its start, 1 its end).
+	Version targetVersion;
+	Optional<double> targetVersionFraction;
 	Optional<double> restoreDuration;
 	Optional<double> snapshotMB;
 
@@ -81,6 +93,31 @@ struct RestoreBackupWorkload : TestWorkload {
 		reportBackupMetrics = getOption(options, "reportBackupMetrics"_sr, !g_network->isSimulated());
 		verifyDigest = getOption(options, "verifyDigest"_sr, false);
 		digestTimeoutSeconds = getOption(options, "digestTimeoutSeconds"_sr, 1800.0);
+		useExistingBackup = getOption(options, "useExistingBackup"_sr, false);
+		targetVersion = getOption(options, "targetVersion"_sr, static_cast<int64_t>(::invalidVersion));
+		double fraction = getOption(options, "targetVersionFraction"_sr, std::numeric_limits<double>::quiet_NaN());
+		if (!std::isnan(fraction)) {
+			targetVersionFraction = fraction;
+		}
+		if (useExistingBackup && (!restoreRanges.present() || stopWhenDone)) {
+			TraceEvent(SevWarnAlways, "RestoreBackupExistingBackupInvalidOptions")
+			    .detail("Tag", tag)
+			    .detail("HasRanges", restoreRanges.present())
+			    .detail("StopWhenDone", static_cast<bool>(stopWhenDone));
+			throw test_specification_invalid();
+		}
+		if (targetVersionFraction.present() &&
+		    (fraction < 0.0 || fraction > 1.0 || targetVersion != ::invalidVersion)) {
+			TraceEvent(SevWarnAlways, "RestoreBackupInvalidTargetVersion")
+			    .detail("TargetVersion", targetVersion)
+			    .detail("TargetVersionFraction", fraction);
+			throw test_specification_invalid();
+		}
+		// The digest after a restore to an earlier version differs from the one before it by construction.
+		if (verifyDigest && (targetVersion != ::invalidVersion || targetVersionFraction.present())) {
+			TraceEvent(SevWarnAlways, "RestoreBackupDigestWithTargetVersion").detail("Tag", tag);
+			throw test_specification_invalid();
+		}
 
 		std::string keyFileName = "simfdb/" + getTestEncryptionFileName();
 		// Only set encryptionKeyFileName if the encryption key file exists during backup.
@@ -166,24 +203,6 @@ struct RestoreBackupWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> clearRanges(Database cx, Standalone<VectorRef<KeyRangeRef>> ranges) {
-		Transaction tr(cx);
-		while (true) {
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				for (auto const& r : ranges) {
-					tr.clear(r);
-				}
-				co_await tr.commit();
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr.onError(err);
-		}
-	}
-
 	// A restore must not share the cluster with backup work: a registered mutation log would copy the restore's own
 	// writes into the log keyspace.
 	Future<Void> confirmBackupStopped(Database cx) {
@@ -197,19 +216,6 @@ struct RestoreBackupWorkload : TestWorkload {
 			    .detail("LogDataLeft", report.logDataLeft);
 			if (requireBackupStopped) {
 				throw backup_error();
-			}
-		}
-	}
-
-	// The ranges must be quiescent: a write between the clear and this check fails the restore.
-	static Future<Void> checkRangesEmpty(Database cx, Standalone<VectorRef<KeyRangeRef>> ranges) {
-		for (auto const& r : ranges) {
-			Optional<Key> first = co_await BackupSteps::firstKeyIn(cx, r);
-			if (first.present()) {
-				TraceEvent(SevWarnAlways, "RestoreBackupRangeNotCleared")
-				    .detail("Range", BackupSteps::describeRange(r))
-				    .detail("FirstKey", first.get());
-				throw restore_error();
 			}
 		}
 	}
@@ -249,12 +255,35 @@ struct RestoreBackupWorkload : TestWorkload {
 		co_return results;
 	}
 
+	Future<Void> openExistingBackup() {
+		backupContainer = co_await BackupSteps::openExistingContainer(backupDir.toString(), encryptionKeyFileName);
+		TraceEvent("RestoreBackupExistingContainer").detail("Tag", tag).detail("Url", backupContainer->getURL());
+	}
+
+	// Returns the version to restore to, checked against the restorable window of the backup before anything is
+	// cleared: invalid for the latest restorable version, which must exist.
+	Future<Version> resolveTargetVersion() {
+		BackupDescription desc = co_await backupContainer->describeBackup();
+		Optional<BackupSteps::RestorableWindow> window = BackupSteps::restorableWindow(desc);
+		if (!window.present()) {
+			TraceEvent(SevWarnAlways, "RestoreBackupNothingRestorable").detail("Tag", tag);
+			throw restore_error();
+		}
+		co_return BackupSteps::resolveTargetVersion(
+		    window.get(), targetVersion, targetVersionFraction, "RestoreBackup");
+	}
+
 	// Returns the ranges to restore: restoreRanges if set, else the ranges the backup covers. Every restoreRanges
 	// entry must lie within one backup range: submitBackup coalesces them, so a range spanning two is not covered.
+	// An existing backup is not read for its ranges: they are restoreRanges.
 	Future<Standalone<VectorRef<KeyRangeRef>>> getRangesToRestore(Database cx) {
-		std::vector<KeyRange> backupRanges = co_await BackupSteps::readBackupRanges(cx, backupUID);
-		Standalone<VectorRef<KeyRangeRef>> ranges =
-		    BackupSteps::selectBackupRanges(backupRanges, restoreRanges, "RestoreRangeNotInBackup");
+		Standalone<VectorRef<KeyRangeRef>> ranges;
+		if (useExistingBackup) {
+			ranges = restoreRanges.get();
+		} else {
+			std::vector<KeyRange> backupRanges = co_await BackupSteps::readBackupRanges(cx, backupUID);
+			ranges = BackupSteps::selectBackupRanges(backupRanges, restoreRanges, "RestoreRangeNotInBackup");
+		}
 		for (auto const& r : ranges) {
 			if (!r.begin.startsWith(removePrefix) || !r.end.startsWith(removePrefix)) {
 				TraceEvent(SevWarnAlways, "RestoreRangeOutsideRemovePrefix")
@@ -268,8 +297,12 @@ struct RestoreBackupWorkload : TestWorkload {
 
 	Future<Void> _start(Database cx) {
 		co_await delay(delayFor);
-		co_await waitOnBackup(cx);
-		co_await confirmBackupStopped(cx);
+		if (useExistingBackup) {
+			co_await openExistingBackup();
+		} else {
+			co_await waitOnBackup(cx);
+			co_await confirmBackupStopped(cx);
+		}
 		if (reportBackupMetrics) {
 			try {
 				co_await describeBackupMetrics();
@@ -281,6 +314,11 @@ struct RestoreBackupWorkload : TestWorkload {
 			}
 		}
 		Standalone<VectorRef<KeyRangeRef>> ranges = co_await getRangesToRestore(cx);
+		// A running backup is restored to its latest restorable version unless a version is asked for.
+		Version restoreTarget = ::invalidVersion;
+		if (useExistingBackup || targetVersion != ::invalidVersion || targetVersionFraction.present()) {
+			restoreTarget = co_await resolveTargetVersion();
+		}
 		// An in-place restore overwrites live keys: it clears exactly the ranges it restores and takes the database
 		// lock. With a prefix change the destination must already be empty, so nothing is cleared and the restore
 		// must not block other clients or restores.
@@ -306,8 +344,13 @@ struct RestoreBackupWorkload : TestWorkload {
 			}
 		}
 		if (inPlace) {
-			co_await clearRanges(cx, ranges);
-			co_await checkRangesEmpty(cx, ranges);
+			// An existing backup may be logging the ranges: its log would copy the restore's writes.
+			co_await BackupSteps::prepareEmptyRanges(cx,
+			                                         ranges,
+			                                         "RestoreBackup",
+			                                         !useExistingBackup     ? BackupSteps::OnLoggedRanges::Ignore
+			                                         : requireBackupStopped ? BackupSteps::OnLoggedRanges::Fail
+			                                                                : BackupSteps::OnLoggedRanges::Warn);
 		}
 
 		LockDB lockDB(inPlace);
@@ -317,6 +360,8 @@ struct RestoreBackupWorkload : TestWorkload {
 		    .detail("RangeCount", ranges.size())
 		    .detail("AddPrefix", addPrefix)
 		    .detail("RemovePrefix", removePrefix)
+		    .detail("UseExistingBackup", useExistingBackup)
+		    .detail("TargetVersion", restoreTarget)
 		    .detail("SnapshotMB", snapshotMB.orDefault(-1));
 		double restoreStart = now();
 		BackupSteps::RestoreSpec spec;
@@ -327,9 +372,13 @@ struct RestoreBackupWorkload : TestWorkload {
 		spec.removePrefix = removePrefix;
 		spec.lockDB = lockDB;
 		spec.encryptionKeyFileName = encryptionKeyFileName;
-		co_await BackupSteps::restoreBackup(cx, &backupAgent, version, spec);
+		spec.targetVersion = restoreTarget;
+		Version restoredVersion = co_await BackupSteps::restoreBackup(cx, &backupAgent, version, spec);
 		restoreDuration = now() - restoreStart;
-		TraceEvent("RestoreBackupDone").detail("Tag", tag).detail("DurationSeconds", restoreDuration.get());
+		TraceEvent("RestoreBackupDone")
+		    .detail("Tag", tag)
+		    .detail("DurationSeconds", restoreDuration.get())
+		    .detail("RestoredVersion", restoredVersion);
 		if (verifyDigest) {
 			std::vector<RangeDigestResult> digestsAfter = co_await digestAndRecord(cx, ranges, "after");
 			// The digests are taken over settled data distribution, so a difference is a failure.
