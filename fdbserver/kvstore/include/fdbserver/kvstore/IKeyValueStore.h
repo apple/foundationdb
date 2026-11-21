@@ -87,7 +87,10 @@ public:
 		if (rangeRef.empty()) {
 			co_return;
 		}
+		// Akanksha: Remove the existing key range before replacing it with new data.
+		// Akanksha: Calls RocksDBKeyValueStore::clear.
 		clear(rangeRef);
+		// Akanksha: Go through block pairs (data) and now insert them one by one into the store.
 		for (KeyValueRef const* kvItr = data.begin(); kvItr != data.end(); kvItr++) {
 			set(*kvItr);
 			if (++sinceYield > 1000) {
@@ -139,6 +142,12 @@ public:
 
 	// Compact a range of keys in the store
 	virtual Future<Void> compactRange(KeyRangeRef range) { throw not_implemented(); }
+
+	// Best effort: drops whole SST files lying entirely inside [range.begin, range.end), without rewriting data. May
+	// drop nothing (engines without SST files, level-0 files, files partly outside the range), so callers that need the
+	// range empty must also clear it. The caller must ensure no reader still needs data in the range and no data to
+	// keep is being written into it. Runs after previously committed writes.
+	virtual Future<Void> deleteFilesInRange(KeyRangeRef range) { return Void(); }
 
 	/*
 	Concurrency contract
