@@ -10219,13 +10219,12 @@ Future<Void> testCloseWithPendingFileExtensions(std::string file, bool failTrunc
 	}
 	co_await timeoutError(closed, 5.0);
 	ASSERT(fileDestroyed.isSet());
-	co_await ready(IAsyncFileSystem::filesystem()->deleteFile(file, true));
 }
 
 TEST_CASE("/redwood/correctness/unit/closeWithPendingFileExtensions") {
-	auto file = joinPath(params.getDataDir(), "pending-extensions.redwood-v1");
-	co_await testCloseWithPendingFileExtensions(file, false);
-	co_await testCloseWithPendingFileExtensions(file, true);
+	auto dataDir = params.getDataDir();
+	co_await testCloseWithPendingFileExtensions(joinPath(dataDir, "pending-extensions-ok.redwood-v1"), false);
+	co_await testCloseWithPendingFileExtensions(joinPath(dataDir, "pending-extensions-error.redwood-v1"), true);
 }
 
 TEST_CASE("/redwood/correctness/btreeCloseWithQueuedCommits") {
