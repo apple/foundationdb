@@ -766,6 +766,19 @@ status json
 
 ``status json`` will provide the cluster status in its JSON format. For a detailed description of this format, see :doc:`mr-status`.
 
+suspend
+-------
+
+The ``suspend`` command attempts to suspend one or more processes in the cluster for a given time. A suspended process stops responding until the time is up, and then exits as it does after ``kill``. If ``fdbmonitor`` is managing the process, it :ref:`restarts the process <configuration-restarting>`.
+
+``suspend``
+
+With no arguments, ``suspend`` populates the list of processes that can be suspended. This must be run prior to running any other ``suspend`` commands.
+
+``suspend <SECONDS> <ADDRESS...>``
+
+Attempts to suspend all specified processes for ``SECONDS`` seconds. Each address should include the IP and port of the process being targeted.
+
 .. _cli-throttle:
 
 throttle
@@ -855,6 +868,35 @@ unlock
 ------
 
 The ``unlock`` command unlocks the database with the specified lock UID. Because this is a potentially dangerous operation, users must copy a passphrase before the unlock command is executed.
+
+versionepoch
+------------
+
+The ``versionepoch`` command reads or changes the version epoch. When a version epoch is set, the cluster gives out versions faster or slower than usual, to bring the current version toward the version that the clock and the epoch imply. The version epoch is a number of microseconds since the Unix epoch, and version 0 falls at that time. ``enable`` sets it to 0, which makes versions track the number of microseconds since the Unix epoch.
+
+``versionepoch``
+
+With no arguments, ``versionepoch`` prints the current version, the version expected from the clock and the version epoch, and the difference between them in versions and in seconds. If no version epoch is set, it prints ``Version epoch is unset``.
+
+``versionepoch get``
+
+Prints the current version epoch, or ``Version epoch is unset``.
+
+``versionepoch enable``
+
+Sets the version epoch to 0 if no version epoch is set. Setting it causes a recovery.
+
+``versionepoch set <EPOCH>``
+
+Sets the version epoch to the integer ``EPOCH``. Setting it causes a recovery.
+
+``versionepoch disable``
+
+Clears the version epoch, which also causes a recovery. Versions then stop trying to match the clock. The current version does not change.
+
+``versionepoch commit``
+
+Jumps the version once, directly to the expected version. This is useful when the gap between the current version and the expected one is very large. A version jump cannot be undone. The version epoch must be set first, using ``enable`` or ``set``; otherwise this command only prints a message saying so.
 
 writemode
 ---------
