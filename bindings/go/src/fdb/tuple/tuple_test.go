@@ -5,8 +5,10 @@ import (
 	"encoding/gob"
 	"flag"
 	"fmt"
+	"math/big"
 	"math/rand"
 	"os"
+	"reflect"
 	"testing"
 )
 
@@ -123,6 +125,78 @@ func TestTuplePacking(t *testing.T) {
 
 	if *update {
 		writeGolden(t, golden)
+	}
+}
+
+var truncatedFields = [][]byte{
+	{bytesCode}, {bytesCode, 0, 0xff}, {stringCode, 'x'},
+	{intZeroCode + 1}, {negIntStart + 1}, {negIntStart + 1, 0x80},
+	{posIntEnd}, {posIntEnd, 2, 1}, {negIntStart}, {negIntStart, 0xfd, 1},
+	{nestedCode}, {nestedCode, nilCode, 0xff},
+	{floatCode}, {doubleCode}, {uuidCode}, {versionstampCode},
+}
+
+func TestUnpackTruncatedFields(t *testing.T) {
+	for _, input := range truncatedFields {
+		if _, err := Unpack(input); err == nil {
+			t.Errorf("Unpack(%x) accepted a truncated tuple", input)
+		}
+	}
+}
+
+func TestUnpackNestedSiblings(t *testing.T) {
+	// An escaped nil inside a nested tuple, followed by a zero encoded in one byte.
+	// Preserve the original unsigned result for that noncanonical integer encoding.
+	packed := []byte{nestedCode, nestedCode, nilCode, 0xff, nilCode, intZeroCode + 1, 0, nilCode, nilCode}
+	want := Tuple{Tuple{Tuple{nil}, uint64(0)}, nil}
+	got, err := Unpack(packed)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("Unpack(%x) = %#v, %v; want %#v", packed, got, err, want)
+	}
+}
+
+func TestUnpackDeepNesting(t *testing.T) {
+	const depth = 1 << 16
+	tags := bytes.Repeat([]byte{nestedCode}, depth)
+	if _, err := Unpack(tags); err == nil {
+		t.Fatal("accepted unterminated nested tuples")
+	}
+	packed := append(tags, make([]byte, depth)...)
+	tuple, err := Unpack(packed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < depth; i++ {
+		if len(tuple) != 1 {
+			t.Fatalf("tuple at depth %d has %d elements", i, len(tuple))
+		}
+		var ok bool
+		tuple, ok = tuple[0].(Tuple)
+		if !ok {
+			t.Fatalf("expected a nested tuple at depth %d", i)
+		}
+	}
+	if len(tuple) != 0 {
+		t.Fatal("expected an empty innermost tuple")
+	}
+}
+
+func FuzzUnpack(f *testing.F) {
+	for _, input := range truncatedFields {
+		f.Add(input)
+	}
+	f.Fuzz(func(t *testing.T, input []byte) {
+		_, _ = Unpack(input)
+	})
+}
+
+func TestUnpackIntegerAndStringBoundaries(t *testing.T) {
+	input := Tuple{int64(0), int64(-1 << 63), uint64(1 << 63), new(big.Int).Lsh(big.NewInt(1), 70),
+		new(big.Int).Neg(new(big.Int).Lsh(big.NewInt(1), 70)), []byte{0}, "a\x00", Tuple{nil}}
+	packed := input.Pack()
+	decoded, err := Unpack(packed)
+	if err != nil || !reflect.DeepEqual(decoded, input) {
+		t.Fatalf("Unpack(%x) = %#v, %v; want %#v", packed, decoded, err, input)
 	}
 }
 
