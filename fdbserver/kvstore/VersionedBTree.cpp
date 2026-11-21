@@ -10194,7 +10194,7 @@ Future<Void> testCloseWithPendingFileExtensions(std::string file, bool failTrunc
 	ASSERT(!firstWrite.isReady() && !secondWrite.isReady());
 
 	auto closed = pager->onClosed();
-	pager->dispose();
+	pager->close();
 	co_await timeoutError(ready(secondWrite), 5.0);
 	co_await delay(0);
 	ASSERT(firstExtension.isError() && firstExtension.getError().code() == error_code_actor_cancelled);
@@ -10209,6 +10209,7 @@ Future<Void> testCloseWithPendingFileExtensions(std::string file, bool failTrunc
 	}
 	co_await timeoutError(closed, 5.0);
 	ASSERT(fileDestroyed.isSet());
+	co_await ready(IAsyncFileSystem::filesystem()->deleteFile(file, true));
 }
 
 TEST_CASE("/redwood/correctness/unit/closeWithPendingFileExtensions") {
