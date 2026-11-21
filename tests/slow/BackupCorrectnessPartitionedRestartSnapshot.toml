@@ -1,0 +1,26 @@
+testClass = "Backup"
+
+# Restarts the snapshot of a partitioned-log backup at random times, sometimes several times, with short snapshot
+# intervals.
+[[knobs]]
+backup_rangefile_block_size = 4096
+
+[configuration]
+
+[[test]]
+testTitle = 'BackupAndRestorePartitionedRestartSnapshot'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'BackupAndRestorePartitionedCorrectness'
+    backupAfter = 10.0
+    restoreAfter = 60.0
+    backupRangesCount = -1
+    restartSnapshots = true

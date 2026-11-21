@@ -272,6 +272,144 @@ function test_backup_location_in_use {
   return 0
 }
 
+# Expect modify --restart-snapshot to refuse a backup, retrying while the backup has not started running yet.
+# $1 build directory, $2 scratch directory, $3 message the refusal must contain, $4 tag, $5+ cluster arguments
+function expect_restart_snapshot_refused {
+  local local_build_dir="${1}"
+  local local_scratch_dir="${2}"
+  local expected="${3}"
+  local tag="${4}"
+  local logdir="${local_scratch_dir}/location_in_use_logs"
+  mkdir -p "${logdir}"
+  local output
+  local i
+  for (( i = 0; i < 60; i++ )); do
+    output=$("${local_build_dir}/bin/fdbbackup" modify -t "${tag}" --restart-snapshot "${@:5}" \
+      --log "--logdir=${logdir}" 2>&1) && { err "modify --restart-snapshot succeeded on ${tag}: ${output}"; return 1; }
+    if output_contains "${output}" "${expected}"; then
+      return 0
+    fi
+    if ! output_contains "${output}" "it has been submitted"; then
+      break
+    fi
+    sleep 1
+  done
+  err "modify --restart-snapshot on ${tag} did not fail with '${expected}': ${output}"
+  return 1
+}
+
+# Restart the snapshot of a running backup, wait until a snapshot that begins after the restart is restorable, then
+# restore from the backup, which uses that snapshot. Also check that backups with no snapshot to restart are refused.
+# Expects the loaded data to be in the database, and leaves it there.
+# $1 build directory, $2 scratch directory, $3 credentials file
+function test_restart_snapshot {
+  local local_build_dir="${1}"
+  local local_scratch_dir="${2}"
+  local credentials="${3}"
+
+  local params="${query_str}"
+  if [[ -n "${BACKUP_URL_KEY_PREFIX}" ]]; then
+    params="${params}&prefix=${BACKUP_URL_KEY_PREFIX}"
+  fi
+  # Nested under this run's container so the existing cleanup removes it too.
+  local name="${url_path_prefix}/${test}/restart_snapshot"
+  local restart_url="blobstore://${host}/${name}?${params}"
+  local incremental_url="blobstore://${host}/${name}_incremental?${params}"
+  local stopping_url="blobstore://${host}/${name}_stopping?${params}"
+  local tag="${TAG}_restart_snapshot"
+  local cluster=("-C" "${local_scratch_dir}/loopback_cluster/fdb.cluster" "${KNOBS[@]}")
+  local args=("${cluster[@]}" "--blob-credentials" "${credentials}")
+  local log_args=("--log" "--logdir=${local_scratch_dir}")
+  local run=(fdbbackup_expect "${local_build_dir}" "${local_scratch_dir}")
+  local refused=(expect_restart_snapshot_refused "${local_build_dir}" "${local_scratch_dir}")
+
+  "${run[@]}" "No backup exists on tag" modify -t "${tag}" --restart-snapshot "${cluster[@]}" || return 1
+
+  local start_args=(start -z -t "${tag}" -d "${restart_url}" "${args[@]}")
+  if [[ "${USE_PARTITIONED_LOG:-false}" == "true" ]]; then
+    start_args+=("--mutation-log-type" "partitioned-log-experimental")
+  fi
+  "${run[@]}" ok "${start_args[@]}" || return 1
+
+  local output
+  local i
+  for (( i = 0; i < 120; i++ )); do
+    output=$("${local_build_dir}/bin/fdbbackup" status -t "${tag}" "${cluster[@]}" "${log_args[@]}" 2>&1) || true
+    if output_contains "${output}" "is restorable"; then
+      break
+    fi
+    sleep 2
+  done
+  if ! output_contains "${output}" "is restorable"; then
+    err "Backup on ${tag} did not become restorable: ${output}"
+    return 1
+  fi
+
+  if ! output=$("${local_build_dir}/bin/fdbbackup" modify -t "${tag}" --restart-snapshot "${cluster[@]}" \
+      "${log_args[@]}" 2>&1); then
+    err "fdbbackup modify --restart-snapshot failed: ${output}"
+    return 1
+  fi
+  local restart_version
+  restart_version=$(grep -oE 'begins at version [0-9]+' <<< "${output}" | grep -oE '[0-9]+$' || true)
+  if [[ -z "${restart_version}" ]]; then
+    err "No restart version in modify output: ${output}"
+    return 1
+  fi
+  log "Restarted the snapshot of ${tag} at version ${restart_version}"
+
+  local found=false
+  local described
+  for (( i = 0; i < 120; i++ )); do
+    described=$("${local_build_dir}/bin/fdbbackup" describe -d "${restart_url}" "${args[@]}" "${log_args[@]}" 2>&1) || true
+    if awk -v v="${restart_version}" '
+        /^Snapshot:/ && /restorable=true/ {
+          if (match($0, /startVersion=[0-9]+/) && substr($0, RSTART + 13, RLENGTH - 13) + 0 >= v + 0) { ok = 1 }
+        }
+        END { exit ok ? 0 : 1 }' <<< "${described}"; then
+      found=true
+      break
+    fi
+    sleep 2
+  done
+  if [[ "${found}" != "true" ]]; then
+    err "No restorable snapshot begins at or after version ${restart_version}: ${described}"
+    return 1
+  fi
+  log "A snapshot that begins after the restart is restorable"
+
+  # The backup is restorable, so discontinue completes it at once, cancelling its tasks through the tag.
+  "${run[@]}" ok discontinue -t "${tag}" "${cluster[@]}" || return 1
+  "${run[@]}" "Cannot modify aborted backup" modify -t "${tag}" --restart-snapshot "${cluster[@]}" || return 1
+
+  if ! clear_data "${local_build_dir}" "${local_scratch_dir}"; then
+    err "Failed clear data in fdb"
+    return 1
+  fi
+  if ! run_restore "${local_build_dir}" "${local_scratch_dir}" "${restart_url}" "${tag}" "" "" "${credentials}"; then
+    err "Failed restore from the restarted snapshot"
+    return 1
+  fi
+  if ! verify_data "${local_build_dir}" "${local_scratch_dir}"; then
+    err "Failed verification of data restored from the restarted snapshot"
+    return 1
+  fi
+
+  # Backups with no range file snapshot to restart. The second one stops once restorable, so give its first snapshot
+  # an hour to keep it from finishing before the check.
+  local incremental_tag="${TAG}_restart_incremental"
+  "${run[@]}" ok start -z --incremental -t "${incremental_tag}" -d "${incremental_url}" "${args[@]}" || return 1
+  "${refused[@]}" "incremental-only" "${incremental_tag}" "${cluster[@]}" || return 1
+  abort_in_use_backup "${local_build_dir}" "${local_scratch_dir}" -t "${incremental_tag}" "${cluster[@]}" || return 1
+  local stopping_tag="${TAG}_restart_stopping"
+  "${run[@]}" ok start --initial-snapshot-interval 3600 -t "${stopping_tag}" -d "${stopping_url}" "${args[@]}" || return 1
+  "${refused[@]}" "stops once restorable" "${stopping_tag}" "${cluster[@]}" || return 1
+  abort_in_use_backup "${local_build_dir}" "${local_scratch_dir}" -t "${stopping_tag}" "${cluster[@]}" || return 1
+
+  log "Verified modify --restart-snapshot"
+  return 0
+}
+
 # Run a backup to s3 and then a restore.
 # $1 The url to use
 # $2 the scratch directory
@@ -339,6 +477,12 @@ function test_s3_backup_and_restore {
   log "Verify restore"
   if ! verify_data "${local_build_dir}" "${local_scratch_dir}"; then
     err "Failed verification of data in fdb"
+    return 1
+  fi
+
+  log "Test modify --restart-snapshot"
+  if ! test_restart_snapshot "${local_build_dir}" "${local_scratch_dir}" "${credentials}"; then
+    err "Failed restart snapshot test"
     return 1
   fi
 
@@ -424,8 +568,9 @@ fi
 readonly BACKUP_URL_KEY_PREFIX="${_raw_key_prefix}"
 unset _raw_key_prefix
 
-# Setup common environment (USE_S3, KNOBS, TLS_CA_FILE, clears HTTP_PROXY/HTTPS_PROXY)
-setup_backup_test_environment 10
+# Setup common environment (USE_S3, KNOBS, TLS_CA_FILE, clears HTTP_PROXY/HTTPS_PROXY).
+# A restarted snapshot starts at the next snapshot dispatch, which runs every 10 minutes by default.
+setup_backup_test_environment 10 "--knob_backup_snapshot_dispatch_interval_sec=10"
 # Process command-line options.
 if (( $# < 2 )) || (( $# > 3 )); then
     echo "ERROR: ${0} requires the fdb src and build directories --"

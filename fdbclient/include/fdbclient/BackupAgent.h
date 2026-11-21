@@ -347,6 +347,25 @@ public:
 		       checkAndDisableBackupWorkers(cx) + checkAndDisableRangePartitionedBackupWorkers(cx);
 	}
 
+	// Why a backup in this state has no range-file snapshot that restartSnapshot() can restart, or empty if it has one.
+	static Optional<std::string> restartSnapshotRefusal(EnumState state,
+	                                                    bool stopWhenDone,
+	                                                    int snapshotMode,
+	                                                    bool incrementalBackupOnly);
+
+	// Drops the in-progress range-file snapshot of the backup on tagName and starts a new one at the transaction's read
+	// version, paced to end intervalSeconds later (default: the backup's initial snapshot interval, or 0). Snapshot
+	// tasks still working on the dropped snapshot stop adding to it; its range files are left for expire to delete.
+	// Returns the new snapshot's begin version.
+	// Throws backup_unneeded if no backup is running on tagName, and backup_error if restartSnapshotRefusal() refuses.
+	Future<Version> restartSnapshot(Reference<ReadYourWritesTransaction> tr,
+	                                Key tagName,
+	                                Optional<int64_t> intervalSeconds = {});
+	Future<Version> restartSnapshot(Database cx, Key tagName, Optional<int64_t> intervalSeconds = {}) {
+		return runRYWTransaction(
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return restartSnapshot(tr, tagName, intervalSeconds); });
+	}
+
 	// Terminate an ongoing backup, without waiting for the backup to finish.
 	// Preconditions:
 	//   A backup is running with the tag of `tagName`.

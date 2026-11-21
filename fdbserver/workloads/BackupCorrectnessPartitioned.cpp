@@ -55,6 +55,9 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 	bool shouldSkipRestoreRanges;
 	bool defaultBackup;
 	Optional<std::string> encryptionKeyFileName;
+	// Restart the snapshot at random times while the backup runs, then check the snapshots completed after.
+	bool restartSnapshots;
+	std::vector<BackupSteps::SnapshotRestart> snapshotRestarts;
 
 	explicit BackupAndRestorePartitionedCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
@@ -74,8 +77,10 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		              deterministicRandom()->random01() < 0.5
 		                  ? deterministicRandom()->random01() * (restoreAfter - backupAfter) + backupAfter
 		                  : 0.0);
-		differentialBackup =
-		    getOption(options, "differentialBackup"_sr, deterministicRandom()->random01() < 0.5 ? true : false);
+		restartSnapshots = getOption(options, "restartSnapshots"_sr, false);
+		// A backup that stops when done refuses restarts, so restart tests mostly run differential backups.
+		differentialBackup = getOption(
+		    options, "differentialBackup"_sr, deterministicRandom()->random01() < (restartSnapshots ? 0.9 : 0.5));
 		stopDifferentialAfter =
 		    getOption(options,
 		              "stopDifferentialAfter"_sr,
@@ -309,7 +314,8 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			                                   StringRef(backupContainer),
 			                                   {},
 			                                   deterministicRandom()->randomInt(0, 60),
-			                                   deterministicRandom()->randomInt(0, 2000),
+			                                   // Short intervals make restarts land near dispatch-to-manifest handoffs.
+			                                   deterministicRandom()->randomInt(0, restartSnapshots ? 100 : 2000),
 			                                   tag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ !stopDifferentialDelay },
@@ -324,11 +330,26 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 				throw;
 		}
 
+		Future<std::vector<BackupSteps::SnapshotRestart>> restarts;
+		bool waitForRestartedSnapshot = false;
+		if (restartSnapshots) {
+			restarts = BackupSteps::restartSnapshots(
+			    cx, backupAgent, tag, deterministicRandom()->randomInt(1, 4), 20.0, "BARW_");
+			// Otherwise the stop below races with the restarted snapshot.
+			waitForRestartedSnapshot = deterministicRandom()->coinflip();
+		}
+
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
 			CODE_PROBE(!stopDifferentialFuture.isReady(),
 			           "Restore starts at specified time - stopDifferential not ready");
 			co_await stopDifferentialFuture;
+			if (waitForRestartedSnapshot) {
+				std::vector<BackupSteps::SnapshotRestart> done = co_await restarts;
+				if (!done.empty()) {
+					co_await BackupSteps::waitForSnapshotAfterRestart(cx, done.back(), 1500.0, "BARW_");
+				}
+			}
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID)
 			    .detail("Tag", printable(tag))
 			    .detail("DifferentialAfter", stopDifferentialDelay);
@@ -340,6 +361,10 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		// Wait for the backup to complete
 		TraceEvent("BARW_DoBackupWaitBackup", randomID).detail("Tag", printable(tag));
 		EBackupState statusValue = co_await backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True);
+		if (restartSnapshots) {
+			std::vector<BackupSteps::SnapshotRestart> done = co_await restarts;
+			snapshotRestarts.insert(snapshotRestarts.end(), done.begin(), done.end());
+		}
 
 		std::string statusText;
 
@@ -444,6 +469,11 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			Key destUidValue = co_await BackupConfig(logUid).destUidValue().getD(cx.getReference());
 			Reference<IBackupContainer> lastBackupContainer =
 			    co_await BackupConfig(logUid).backupContainer().getD(cx.getReference());
+
+			if (restartSnapshots && lastBackupContainer) {
+				BackupDescription desc = co_await lastBackupContainer->describeBackup();
+				BackupSteps::checkSnapshotsAfterRestarts(desc, logUid, snapshotRestarts, "BARW_");
+			}
 
 			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time");
 			co_await startRestore;
