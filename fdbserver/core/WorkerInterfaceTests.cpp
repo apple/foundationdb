@@ -36,6 +36,18 @@ struct LegacyCDCProxyInterface {
 	}
 };
 
+struct OrderedCDCProxyInterface {
+	constexpr static FileIdentifier file_identifier = CDCProxyInterface::file_identifier;
+	Optional<Key> processId;
+	PublicRequestStream<CDCConsumeRequest> consume;
+	bool supportsOrderedStreams = false;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, processId, consume, supportsOrderedStreams);
+	}
+};
+
 } // namespace
 
 TEST_CASE("/NativeCDC/InternalInterfaceFlatBufferRoundTrip") {
@@ -55,6 +67,7 @@ TEST_CASE("/NativeCDC/InternalInterfaceFlatBufferRoundTrip") {
 	CDCProxyInterface cdcProxy;
 	cdcProxy.consume = PublicRequestStream<CDCConsumeRequest>(Endpoint({ cdcAddress }, UID(5, 6)));
 	cdcProxy.supportsOrderedStreams = true;
+	cdcProxy.supportsGuardedRemoval = true;
 
 	RegisterMasterRequest request;
 	request.id = UID(7, 8);
@@ -72,6 +85,16 @@ TEST_CASE("/NativeCDC/InternalInterfaceFlatBufferRoundTrip") {
 	ASSERT(decodedRequest.cdcProxies.front().supportsOrderedStreams);
 	ASSERT_EQ(decodedRequest.cdcProxies.front().registerOrderedStream.getEndpoint().token,
 	          cdcProxy.consume.getEndpoint().getAdjustedEndpoint(9).token);
+	ASSERT(decodedRequest.cdcProxies.front().supportsGuardedRemoval);
+
+	CachedSerialization<ClientDBInfo> clientInfo;
+	clientInfo.mutate().cdcProxies = decodedRequest.cdcProxies;
+	const auto published = ObjectReader::fromStringRef<ErrorOr<EnsureTable<ClientDBInfo>>>(
+	    clientInfo.getCache(), AssumeVersion(g_network->protocolVersion()));
+	const auto& proxies = published.get().asUnderlyingType().cdcProxies;
+	ASSERT_EQ(proxies.size(), 1);
+	ASSERT(proxies.front().supportsGuardedRemoval);
+	ASSERT(proxies.front().removeStreamGuarded.getEndpoint() == cdcProxy.consume.getEndpoint().getAdjustedEndpoint(10));
 
 	return Void();
 }
@@ -84,6 +107,7 @@ TEST_CASE("/NativeCDC/OrderedInterfaceCompatibility") {
 	const auto oldBytes = ObjectWriter::toValue(legacy, Unversioned());
 	const auto decoded = ObjectReader::fromStringRef<CDCProxyInterface>(oldBytes, Unversioned());
 	ASSERT(!decoded.supportsOrderedStreams);
+	ASSERT(!decoded.supportsGuardedRemoval);
 	ASSERT_EQ(decoded.processId, legacy.processId);
 	ASSERT_EQ(decoded.consume.getEndpoint().token, legacy.consume.getEndpoint().token);
 	const std::vector<Endpoint> endpoints{ decoded.registerStream.getEndpoint(),
@@ -99,17 +123,58 @@ TEST_CASE("/NativeCDC/OrderedInterfaceCompatibility") {
 		ASSERT_EQ(endpoints[i].getPrimaryAddress(), address);
 	}
 
-	CDCProxyInterface current = decoded;
-	current.supportsOrderedStreams = true;
+	const OrderedCDCProxyInterface ordered{ legacy.processId, legacy.consume, true };
+	const auto orderedBytes = ObjectWriter::toValue(ordered, Unversioned());
+	const auto decodedOrdered = ObjectReader::fromStringRef<CDCProxyInterface>(orderedBytes, Unversioned());
+	ASSERT(decodedOrdered.supportsOrderedStreams);
+	ASSERT(!decodedOrdered.supportsGuardedRemoval);
+	ASSERT(decodedOrdered.registerOrderedStream.getEndpoint() == legacy.consume.getEndpoint().getAdjustedEndpoint(9));
+
+	CDCProxyInterface current = decodedOrdered;
+	current.supportsGuardedRemoval = true;
 	const auto newBytes = ObjectWriter::toValue(current, Unversioned());
 	const auto decodedLegacy = ObjectReader::fromStringRef<LegacyCDCProxyInterface>(newBytes, Unversioned());
 	ASSERT_EQ(decodedLegacy.processId, legacy.processId);
 	ASSERT_EQ(decodedLegacy.consume.getEndpoint().token, legacy.consume.getEndpoint().token);
+	const auto previous = ObjectReader::fromStringRef<OrderedCDCProxyInterface>(newBytes, Unversioned());
+	ASSERT(previous.supportsOrderedStreams);
+	ASSERT_EQ(previous.processId, ordered.processId);
+	ASSERT(previous.consume.getEndpoint() == ordered.consume.getEndpoint());
 	const auto decodedCurrent = ObjectReader::fromStringRef<CDCProxyInterface>(newBytes, Unversioned());
 	ASSERT(decodedCurrent.supportsOrderedStreams);
+	ASSERT(decodedCurrent.supportsGuardedRemoval);
 	ASSERT_EQ(decodedCurrent.registerOrderedStream.getEndpoint().token,
 	          legacy.consume.getEndpoint().getAdjustedEndpoint(9).token);
 	ASSERT_EQ(decodedCurrent.registerOrderedStream.getEndpoint().getPrimaryAddress(), address);
+	static_assert(
+	    std::is_same_v<decltype(CDCProxyInterface::removeStreamGuarded), PrivateRequestStream<CDCRemoveStreamRequest>>);
+	ASSERT(decodedCurrent.removeStreamGuarded.getEndpoint() == legacy.consume.getEndpoint().getAdjustedEndpoint(10));
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/PositionalInterfaceCompatibility") {
+	const NetworkAddress address(IPAddress(0x05060708), 4501);
+	const std::vector<OrderedCDCProxyInterface> previous{
+		{ Key("first"_sr), PublicRequestStream<CDCConsumeRequest>(Endpoint({ address }, UID(1, 2))), true },
+		{ Key("second"_sr), PublicRequestStream<CDCConsumeRequest>(Endpoint({ address }, UID(3, 4))), false }
+	};
+	const auto oldBytes = BinaryWriter::toValue(previous, IncludeVersion());
+	auto current = BinaryReader::fromStringRef<std::vector<CDCProxyInterface>>(oldBytes, IncludeVersion());
+	ASSERT_EQ(current.size(), previous.size());
+	for (size_t i = 0; i < current.size(); ++i) {
+		ASSERT_EQ(current[i].processId, previous[i].processId);
+		ASSERT(current[i].consume.getEndpoint() == previous[i].consume.getEndpoint());
+		ASSERT_EQ(current[i].supportsOrderedStreams, previous[i].supportsOrderedStreams);
+		ASSERT(!current[i].supportsGuardedRemoval);
+		current[i].supportsGuardedRemoval = true;
+	}
+	// Positional readers have no field lengths: an extra byte would shift the next proxy.
+	ASSERT(BinaryWriter::toValue(current, IncludeVersion()) == oldBytes);
+	const auto first = BinaryWriter::toValue(previous.front(), IncludeVersion());
+	BinaryReader reader(first, IncludeVersion());
+	reader >> current.front();
+	reader.assertEnd();
+	ASSERT(!current.front().supportsGuardedRemoval);
 	return Void();
 }
 

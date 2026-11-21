@@ -559,7 +559,7 @@ Future<CDCStreamId> registerNativeCdcOrderedStream(Database cx,
 	}
 }
 
-Future<bool> removeNativeCdcOrderedStream(Database cx, Key name, CDCStreamId expectedId) {
+Future<bool> removeNativeCdcOrderedStream(Database cx, Key name, CDCStreamId expectedId, TransactionPriority priority) {
 	if (name.empty() || expectedId == 0) {
 		throw client_invalid_operation();
 	}
@@ -570,6 +570,9 @@ Future<bool> removeNativeCdcOrderedStream(Database cx, Key name, CDCStreamId exp
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			if (priority == TransactionPriority::IMMEDIATE) {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			}
 			const Optional<Value> groupValue = co_await tr.get(cdcOrderedStreamKeyFor(expectedId));
 			if (!groupValue.present()) {
 				co_return expectedMetadata.present();
@@ -660,7 +663,11 @@ Future<bool> removeNativeCdcOrderedStream(Database cx, Key name, CDCStreamId exp
 	}
 }
 
-Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, UID proxyId) {
+Future<bool> removeNativeCdcStream(Database cx,
+                                   Key name,
+                                   CDCStreamId streamId,
+                                   UID proxyId,
+                                   TransactionPriority priority) {
 	if (name.empty() || streamId == 0) {
 		throw client_invalid_operation();
 	}
@@ -671,6 +678,9 @@ Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, 
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			if (priority == TransactionPriority::IMMEDIATE) {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			}
 
 			const Key nameKey = cdcStreamNameKeyFor(name);
 			Optional<Value> currentId = co_await tr.get(nameKey);
