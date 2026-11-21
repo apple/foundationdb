@@ -1317,26 +1317,11 @@ std::string const BackupAgentBase::defaultTagName = "default";
 
 void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys) {
 	backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
-
-	for (auto& r : getSystemBackupRanges()) {
-		backupKeys.push_back_deep(backupKeys.arena(), r);
-	}
 }
 
 VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
 	static Standalone<VectorRef<KeyRangeRef>> systemBackupRanges;
 	return systemBackupRanges;
-}
-
-KeyRangeMap<bool> const& systemBackupMutationMask() {
-	static KeyRangeMap<bool> mask;
-	if (mask.size() == 1) {
-		for (auto r : getSystemBackupRanges()) {
-			mask.insert(r, true);
-		}
-	}
-
-	return mask;
 }
 
 KeyRangeRef const& getDefaultBackupSharedRange() {
