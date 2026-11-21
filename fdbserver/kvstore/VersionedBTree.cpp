@@ -1974,7 +1974,7 @@ class DWALPagerSnapshot;
 // alternate pages it references basically serve as a write ahead log for pages that will eventually be copied
 // back to their original location once the original version is no longer needed.
 class DWALPager final : public IPager2 {
-	friend Future<Void> testCloseWithPendingFileExtensions(std::string file);
+	friend Future<Void> testCloseWithPendingFileExtensions(std::string file, bool failTruncate);
 
 public:
 	using LogicalPageQueueT = FIFOQueue<LogicalPageID>;
@@ -2669,8 +2669,11 @@ public:
 			}
 		}
 
-		// Grow the file
-		co_await self->pageFile->truncate(newPageCount * self->physicalPageSize);
+		// Extensions are serialized, so at most one truncate can be in flight. Keep it alive across shutdown.
+		auto truncate = self->pageFile->truncate(newPageCount * self->physicalPageSize);
+		self->pendingTruncate = truncate;
+		co_await truncate;
+		self->pendingTruncate = {};
 
 		// Indicate that extension to the new count has been completed
 		self->filePageCount = newPageCount;
@@ -3794,7 +3797,10 @@ public:
 		             self->filename.c_str(),
 		             toString(self->remappedPages).c_str());
 
-		// Unreference the file and clear
+		// A cancelled extension may already have submitted a truncate using the file descriptor.
+		if (self->pendingTruncate.isValid()) {
+			co_await ready(self->pendingTruncate);
+		}
 		self->pageFile.clear();
 		if (dispose) {
 			if (!self->memoryOnly) {
@@ -4006,6 +4012,7 @@ private:
 	int64_t filePageCountPending;
 	// Future representing the end of all pending truncations
 	Future<Void> fileExtension;
+	Future<Void> pendingTruncate;
 
 	int desiredPageSize;
 	int desiredExtentSize;
@@ -10129,7 +10136,26 @@ TEST_CASE("/redwood/correctness/unit/pagerReleasesPredecessors") {
 	co_await closed;
 }
 
-Future<Void> testCloseWithPendingFileExtensions(std::string file) {
+Future<Void> testCloseWithPendingFileExtensions(std::string file, bool failTruncate) {
+	class PendingTruncateFile final : public IAsyncFile, public ReferenceCounted<PendingTruncateFile> {
+		Promise<Void> truncateDone;
+		Promise<Void> destroyed;
+
+	public:
+		PendingTruncateFile(Promise<Void> truncateDone, Promise<Void> destroyed)
+		  : truncateDone(truncateDone), destroyed(destroyed) {}
+		~PendingTruncateFile() override { destroyed.send(Void()); }
+		void addref() override { ReferenceCounted<PendingTruncateFile>::addref(); }
+		void delref() override { ReferenceCounted<PendingTruncateFile>::delref(); }
+		Future<Void> truncate(int64_t) override { return truncateDone.getFuture(); }
+		Future<int> read(void*, int, int64_t) override { return unsupported_operation(); }
+		Future<Void> write(void const*, int, int64_t) override { return unsupported_operation(); }
+		Future<Void> sync() override { return unsupported_operation(); }
+		Future<int64_t> size() const override { return 0; }
+		int64_t debugFD() const override { return -1; }
+		std::string getFilename() const override { return "pending-extensions.redwood-v1"; }
+	};
+
 	g_redwoodMetricsActor = Void();
 	g_redwoodMetrics.clear();
 	deleteFile(file);
@@ -10141,8 +10167,12 @@ Future<Void> testCloseWithPendingFileExtensions(std::string file) {
 	                            SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 	                            false);
 	co_await pager->init();
-	// Hold the first truncate pending so both generations and their writers are active at shutdown.
-	pager->fileExtension = Never();
+	// Hold the physical truncate pending so both generations and their writers are active at shutdown.
+	Promise<Void> truncateDone;
+	Promise<Void> fileDestroyed;
+	pager->pageFile = makeReference<PendingTruncateFile>(truncateDone, fileDestroyed);
+	pager->ioLock = makeReference<PriorityMultiLock>(2, SERVER_KNOBS->REDWOOD_IO_PRIORITIES);
+	g_redwoodMetrics.ioLock = pager->ioLock.getPtr();
 	auto writePage = [pager](LogicalPageID id) {
 		auto page = pager->newPageBuffer();
 		page->init(EncodingType::XXHash64, PageType::BTreeNode, 1);
@@ -10162,14 +10192,26 @@ Future<Void> testCloseWithPendingFileExtensions(std::string file) {
 
 	auto closed = pager->onClosed();
 	pager->dispose();
-	co_await closed;
+	co_await ready(secondWrite);
+	co_await delay(0);
 	ASSERT(firstExtension.isError() && firstExtension.getError().code() == error_code_actor_cancelled);
 	ASSERT(firstWrite.isError() && firstWrite.getError().code() == error_code_actor_cancelled);
 	ASSERT(secondWrite.isError() && secondWrite.getError().code() == error_code_actor_cancelled);
+	ASSERT_GT(truncateDone.getFutureReferenceCount(), 0);
+	ASSERT(!closed.isReady() && !fileDestroyed.isSet());
+	if (failTruncate) {
+		truncateDone.sendError(io_error());
+	} else {
+		truncateDone.send(Void());
+	}
+	co_await closed;
+	ASSERT(fileDestroyed.isSet());
 }
 
 TEST_CASE("/redwood/correctness/unit/closeWithPendingFileExtensions") {
-	return testCloseWithPendingFileExtensions(joinPath(params.getDataDir(), "pending-extensions.redwood-v1"));
+	auto file = joinPath(params.getDataDir(), "pending-extensions.redwood-v1");
+	co_await testCloseWithPendingFileExtensions(file, false);
+	co_await testCloseWithPendingFileExtensions(file, true);
 }
 
 TEST_CASE("/redwood/correctness/btreeCloseWithQueuedCommits") {
