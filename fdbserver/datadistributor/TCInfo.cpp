@@ -27,6 +27,9 @@
 class TCServerInfoImpl {
 public:
 	static Future<Void> updateServerMetrics(TCServerInfo* server) {
+		if (!server->collection) {
+			co_return;
+		}
 		StorageServerInterface ssi = server->lastKnownInterface;
 		Future<ErrorOr<GetStorageMetricsReply>> metricsRequest =
 		    ssi.getStorageMetrics.tryGetReply(GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch);
@@ -39,10 +42,10 @@ public:
 			if (res.index() == 0) {
 				ErrorOr<GetStorageMetricsReply> rep = std::get<0>(std::move(res));
 				if (rep.present()) {
-					server->metrics = rep;
-					if (server->updated.canBeSet()) {
-						server->updated.send(Void());
+					if (!server->collection) {
+						co_return;
 					}
+					server->metrics = rep;
 					break;
 				}
 				metricsRequest = Never();
@@ -70,13 +73,22 @@ public:
 			}
 		}
 
+		// A notification can remove this server while a metrics reply is being processed.
+		auto keepAlive = Reference<TCServerInfo>::addRef(server);
+		if (server->updated.canBeSet()) {
+			server->updated.send(Void());
+		}
+		if (!server->collection) {
+			co_return;
+		}
+
 		if (server->metrics.get().lastUpdate < now() - SERVER_KNOBS->DD_SS_STUCK_TIME_LIMIT) {
 			if (!server->ssVersionTooFarBehind.get()) {
 				TraceEvent("StorageServerStuck", server->collection->getDistributorId())
 				    .detail("ServerId", server->id.toString())
 				    .detail("LastUpdate", server->metrics.get().lastUpdate);
 				server->ssVersionTooFarBehind.set(true);
-				server->collection->addLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
+				server->refreshLaggingZone();
 			}
 		} else if (server->metrics.get().versionLag > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG) {
 			if (!server->ssVersionTooFarBehind.get()) {
@@ -84,7 +96,7 @@ public:
 				    .detail("ServerId", server->id.toString())
 				    .detail("VersionLag", server->metrics.get().versionLag);
 				server->ssVersionTooFarBehind.set(true);
-				server->collection->addLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
+				server->refreshLaggingZone();
 			}
 		} else if (server->metrics.get().versionLag < SERVER_KNOBS->DD_SS_ALLOWED_VERSIONLAG) {
 			if (server->ssVersionTooFarBehind.get()) {
@@ -92,7 +104,7 @@ public:
 				    .detail("ServerId", server->id.toString())
 				    .detail("VersionLag", server->metrics.get().versionLag);
 				server->ssVersionTooFarBehind.set(false);
-				server->collection->removeLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
+				server->refreshLaggingZone();
 			}
 		}
 
@@ -107,6 +119,9 @@ public:
 				    currentTime - server->lastTimeNotifyLongStorageQueue.get() >
 				        SERVER_KNOBS->DD_REBALANCE_STORAGE_QUEUE_TIME_INTERVAL) {
 					server->longStorageQueue.set(queueSize); // will trigger data move for rebalancing storage queue
+					if (!server->collection) {
+						co_return;
+					}
 					TraceEvent(SevInfo, "SSTrackerTriggerLongStorageQueue", server->getId())
 					    .detail("CurrentQueueSize", queueSize);
 					server->lastTimeNotifyLongStorageQueue = currentTime;
@@ -226,9 +241,36 @@ void TCServerInfo::cancel() {
 	collection = nullptr;
 }
 
+void TCServerInfo::refreshLaggingZone() {
+	if (!collection) {
+		return;
+	}
+	Optional<Key> newZone;
+	if (ssVersionTooFarBehind.get()) {
+		newZone = lastKnownInterface.locality.zoneId().get();
+	}
+	if (laggingZone != newZone) {
+		auto oldZone = laggingZone;
+		laggingZone = newZone;
+		collection->updateLaggingZone(oldZone, newZone);
+	}
+}
+
+void TCServerInfo::removedFromCollection() {
+	// Relocations may retain this server beyond the lifetime of its team collection.
+	auto* owner = collection;
+	collection = nullptr;
+	if (owner && laggingZone.present()) {
+		auto oldZone = laggingZone;
+		laggingZone.reset();
+		owner->updateLaggingZone(oldZone, {});
+	}
+}
+
 void TCServerInfo::updateLastKnown(StorageServerInterface const& ssi, ProcessClass processClass) {
 	lastKnownInterface = ssi;
 	lastKnownClass = processClass;
+	refreshLaggingZone();
 }
 
 Future<Void> TCServerInfo::updateStoreType() {
@@ -284,12 +326,6 @@ void TCServerInfo::removeTeam(Reference<TCTeamInfo> team) {
 
 void TCServerInfo::markTeamUnhealthy(int teamIndex) {
 	teams[teamIndex]->setHealthy(false);
-}
-
-TCServerInfo::~TCServerInfo() {
-	if (collection && ssVersionTooFarBehind.get() && !lastKnownInterface.isTss()) {
-		collection->removeLaggingStorageServer(lastKnownInterface.locality.zoneId().get());
-	}
 }
 
 bool TCMachineTeamInfo::matches(std::vector<Standalone<StringRef>> const& sortedMachineIDs) {
