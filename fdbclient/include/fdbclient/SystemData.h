@@ -686,6 +686,27 @@ extern const KeyRef bulkLoadOwnerPrefix;
 Key bulkDumpOwnerKeyFor(const UID& jobId);
 Key bulkLoadOwnerKeyFor(const UID& jobId);
 
+// Operator control for one bulk job, kept out of the job state: BulkDumpState is a key-range map, so a
+// field added there would be copied into every range entry. An absent key means "no control applied",
+// so there is nothing to migrate.
+// "\xff/bulkDumpControl/[[jobId]]" := "[[BulkJobControlState]]"
+extern const KeyRangeRef bulkDumpControlKeys;
+extern const KeyRef bulkDumpControlPrefix;
+
+// "\xff/bulkLoadControl/[[jobId]]" := "[[BulkJobControlState]]" (reuses same struct)
+extern const KeyRangeRef bulkLoadControlKeys;
+extern const KeyRef bulkLoadControlPrefix;
+Key bulkDumpControlKeyFor(const UID& jobId);
+Key bulkLoadControlKeyFor(const UID& jobId);
+// "\xff/bulkDumpAdmitted/[[jobId]]" := count of tasks data distribution has dispatched, as a
+// little-endian int64 maintained by atomic add.
+extern const KeyRangeRef bulkDumpAdmittedKeys;
+extern const KeyRef bulkDumpAdmittedPrefix;
+Key bulkDumpAdmittedKeyFor(const UID& jobId);
+
+Value bulkJobControlStateValue(const BulkJobControlState& controlState);
+BulkJobControlState decodeBulkJobControlState(const ValueRef& value);
+
 extern const std::string rangeLockNameForBulkLoad;
 extern const KeyRangeRef rangeLockKeys;
 extern const KeyRef rangeLockPrefix;

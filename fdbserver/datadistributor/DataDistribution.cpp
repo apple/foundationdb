@@ -410,6 +410,12 @@ struct DDBulkDumpJobManager {
 	std::map<Key, BulkLoadManifest> taskManifestMap;
 	BulkDumpSkipTracker skipTracker;
 	bool failed = false; // set once an Error range is seen or written; stops scheduling
+	// Remaining keyspace at the last admission, for pacing. Held per job rather than per scheduling pass:
+	// a pass restarts whenever scheduling is interrupted, and with this reset each time, every admission
+	// looked like the first and none was ever paced -- one job restarted 63 passes for 32 admissions.
+	double previousRemainingWidth = -1;
+	// Width of tasks that have failed since pacing last looked, and so left their range undumped.
+	double failedWidth = 0;
 
 	DDBulkDumpJobManager() = default;
 	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -1635,6 +1641,11 @@ Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange taskRan
 	}
 }
 
+Future<bool> bulkJobIsPaused(Database cx, UID jobId, bool isBulkDump) {
+	Optional<BulkJobControlState> control = co_await getBulkJobControl(cx, jobId, isBulkDump);
+	co_return control.present() && control.get().isPaused();
+}
+
 Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 	Key beginKey = normalKeys.begin;
 	Key endKey = normalKeys.end;
@@ -1679,6 +1690,19 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 							break;
 						}
 						co_await self->bulkLoadEngineParallelismLimitor.waitUntilCounterChanged();
+					}
+					// A paused job admits nothing new; tasks already handed to the engine run to completion,
+					// so the job drains rather than stopping on the spot. Read per task and after the
+					// limiter wait: this pass walks every task and blocks on that limiter, so it lasts
+					// about as long as the job, and anything read before the wait would miss a pause that
+					// arrives during it. A task with no owning job cannot be paused.
+					UID taskJobId = bulkLoadTaskState.getJobId();
+					if (taskJobId.isValid() && co_await bulkJobIsPaused(cx, taskJobId, /*isBulkDump=*/false)) {
+						TraceEvent(SevInfo, "DDBulkLoadTaskJobPaused", self->ddId)
+						    .suppressFor(60.0)
+						    .detail("JobId", taskJobId)
+						    .detail("NotAdmittedRange", bulkLoadTaskState.getRange());
+						continue;
 					}
 					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskSchedule", self->ddId)
 					    .detail("Range", bulkLoadTaskState.getRange())
@@ -2717,6 +2741,45 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 	co_await waitForAll(bulkLoadActors);
 }
 
+// Approximate position of a key as a fraction, by reading its leading bytes as a base-256 value.
+//
+// Pacing needs a measure of progress through the job, and the key range is the only thing a bulkdump
+// knows at submit time. Task counts cannot serve: the metadata counts dump batches, and the number of
+// tasks is not bounded by shards either -- a single-shard job still dispatches one task per batch-bounded
+// portion, so the total is only known once the job is over.
+//
+// The value is used solely for ratios between keys in the same job, and only the bytes after the prefix
+// every key in the job shares carry any information about position: skip them, or a job confined to one
+// subspace would read as zero width throughout and never be paced. Eight bytes past the prefix is ample,
+// since the job's own endpoints already differ at the first of them.
+double keyPositionFraction(StringRef key, int skip) {
+	double value = 0;
+	double scale = 1.0 / 256.0;
+	for (int i = 0; i < 8; i++) {
+		int at = skip + i;
+		uint8_t byte = at < key.size() ? key[at] : 0;
+		value += byte * scale;
+		scale /= 256.0;
+	}
+	return value;
+}
+
+// Width of a range as a fraction of the job's keyspace, floored at zero for inverted or empty input.
+double keyRangeWidthFraction(KeyRangeRef range, int skip) {
+	return std::max(0.0, keyPositionFraction(range.end, skip) - keyPositionFraction(range.begin, skip));
+}
+
+// What the previous admission accomplished, as the shrinkage of the unscheduled remainder since it.
+// The remainder shrinks by the range the pass walked past, whether or not the task there did anything, so the
+// width of tasks that have failed since is taken back out: that range is dumped by a later pass, and pacing
+// that credited it would sleep for work that has not happened.
+double bulkDumpConsumedWidth(double previousRemainingWidth, double remainingWidth, double failedWidth) {
+	if (previousRemainingWidth < 0) {
+		return 0;
+	}
+	return std::max(0.0, previousRemainingWidth - remainingWidth - failedWidth);
+}
+
 // The actor spawned by DD dedicated to listen on a SS bulkdump task and holding a budget of parallelismLimitor.
 // The parallelismLimitor is used to limit the maximum concurrent bulkloading tasks spawned by DD.
 // Each DD spawned task corresponds to an actual alive SS bulk dumping task.
@@ -2758,6 +2821,11 @@ Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 		    .detail("Duration", now() - beginTime);
 		if (e.code() == error_code_movekeys_conflict) {
 			throw e; // trigger DD restarts, which resets bulkDumpParallelismLimitor
+		}
+		if (bulkDumpState.getJobId() == self->bulkDumpJobManager.jobState.getJobId()) {
+			KeyRangeRef jobRange = self->bulkDumpJobManager.jobState.getJobRange();
+			self->bulkDumpJobManager.failedWidth +=
+			    keyRangeWidthFraction(bulkDumpState.getRange(), commonPrefixLength(jobRange.begin, jobRange.end));
 		}
 		// Sliently exit for other errors
 	}
@@ -2816,7 +2884,8 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	std::map<Key, KeyRange> skippedRanges;
 	std::vector<Future<Void>> actors;
 	Transaction tr(cx);
-	while (beginKey < endKey) {
+	bool pausedMidPass = false;
+	while (beginKey < endKey && !pausedMidPass) {
 		Error err;
 		try {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
@@ -2898,6 +2967,103 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 						}
 						co_await self->bulkDumpParallelismLimitor.waitUntilCounterChanged();
 					}
+					// One call of this function walks the whole remaining job and blocks on the limiter as it
+					// goes, so it can run for as long as the job does: a pause has to be read here, inside
+					// the dispatch loop and after the limiter wait, or it would not take effect until the
+					// job had finished. One point get per admitted shard task, against dumping a shard.
+					Optional<BulkJobControlState> control = co_await getBulkJobControl(cx, jobId, /*isBulkDump=*/true);
+					if (control.present() && control.get().isPaused()) {
+						TraceEvent(SevInfo, "DDBulkDumpJobScheduleJobPaused", self->ddId)
+						    .suppressFor(60.0)
+						    .detail("JobId", jobId)
+						    .detail("NotAdmittedRange", taskRange);
+						pausedMidPass = true;
+						break;
+					}
+					// Spread admissions across the window the operator asked for. Delaying is the only
+					// lever available: this can hold a job back to the requested pace but cannot make the
+					// cluster finish sooner than it would unpaced, so a target already past just admits.
+					if (!control.present() || !control.get().hasTargetEndTime()) {
+						// Logged, not silent: an unpaced admission and a paced one that declined to wait
+						// are different faults, and without this the trace cannot tell them apart.
+						TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobPacingSkipped", self->ddId)
+						    .suppressFor(10.0)
+						    .detail("JobId", jobId)
+						    .detail("Reason", control.present() ? "NoTargetEndTime" : "NoControlRecord");
+					}
+					if (control.present() && control.get().hasTargetEndTime()) {
+						double remainingSeconds = control.get().targetEndTime - now();
+						if (remainingSeconds <= 0) {
+							TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobPacingSkipped", self->ddId)
+							    .suppressFor(10.0)
+							    .detail("JobId", jobId)
+							    .detail("Reason", "TargetAlreadyPassed")
+							    .detail("TargetEndTime", control.get().targetEndTime);
+						}
+						if (remainingSeconds > 0) {
+							// Spend the remaining window in proportion to the keyspace this task consumes.
+							// A task covering a tenth of what is left should take a tenth of the time that
+							// is left, which needs no count of how many tasks there will be -- the quantity
+							// that defeated every previous attempt, because batches, shards and bytes all
+							// measure something other than the work remaining.
+							// Measure what the previous admission consumed rather than what this one claims.
+							// A task's range is not the work it will do: where the keyspace has not split,
+							// every task is dispatched over the whole remainder and the storage server
+							// dumps only a batch-bounded slice of it. Range width then equals remaining
+							// width on every admission, which is why pacing declined to wait at all on
+							// those seeds. The shrinkage of the remainder between admissions is the work
+							// that actually happened.
+							double remainingWidth =
+							    keyRangeWidthFraction(KeyRangeRef(taskRange.begin, jobRange.end),
+							                          commonPrefixLength(jobRange.begin, jobRange.end));
+							double& previousRemainingWidth = self->bulkDumpJobManager.previousRemainingWidth;
+							double consumedWidth = bulkDumpConsumedWidth(
+							    previousRemainingWidth, remainingWidth, self->bulkDumpJobManager.failedWidth);
+							self->bulkDumpJobManager.failedWidth = 0;
+							previousRemainingWidth = remainingWidth;
+							double waitSeconds = 0;
+							if (remainingWidth > 0 && consumedWidth > 0) {
+								// Never wait past the deadline itself. As the remainder shrinks the ratio
+								// approaches one, so a late chunk would otherwise be allocated the whole
+								// window again and the job would finish well past the time asked for.
+								waitSeconds =
+								    std::min(remainingSeconds * (consumedWidth / remainingWidth), remainingSeconds);
+							}
+							// Emitted whether or not a wait results, so a run that paced nothing still
+							// records why.
+							TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobPacing", self->ddId)
+							    .suppressFor(10.0)
+							    .detail("JobId", jobId)
+							    .detail("WaitSeconds", waitSeconds)
+							    .detail("RemainingSeconds", remainingSeconds)
+							    .detail("ConsumedWidth", consumedWidth)
+							    .detail("RemainingWidth", remainingWidth)
+							    .detail("TaskRange", taskRange);
+							// Sliced, not capped. A cap bounded the total spread to admissions times the
+							// cap, which bore no relation to the target and left pacing unable to reach it.
+							// The wait keeps its length; slicing only makes it interruptible, so a pause
+							// issued during one is still seen promptly.
+							double waitUntil = now() + waitSeconds;
+							while (waitSeconds > 0 && now() < waitUntil) {
+								co_await delay(
+								    std::min(waitUntil - now(), SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC));
+								Optional<BulkJobControlState> duringWait =
+								    co_await getBulkJobControl(cx, jobId, /*isBulkDump=*/true);
+								if (duringWait.present() && duringWait.get().isPaused()) {
+									TraceEvent(SevInfo, "DDBulkDumpJobPausedDuringPacingWait", self->ddId)
+									    .suppressFor(60.0)
+									    .detail("JobId", jobId)
+									    .detail("NotAdmittedRange", taskRange);
+									pausedMidPass = true;
+									break;
+								}
+							}
+							if (pausedMidPass) {
+								break;
+							}
+							tr.reset();
+						}
+					}
 					SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
 					                                        bulkDumpState.generateRangeTask(taskRange),
 					                                        targetDcId);
@@ -2908,6 +3074,28 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					    .detail("TaskJobID", bulkDumpState.getJobId())
 					    .detail("TaskRange", taskRange)
 					    .detail("TaskID", task.bulkDumpState.getTaskId());
+					// Record the dispatch. This is the only durable witness that a task started: the task
+					// metadata records what exists, and progress counts every non-complete entry as
+					// running, so neither can answer whether anything has been handed out since a given
+					// moment. An atomic add keeps it off the read-modify-write path.
+					{
+						Transaction admitTr(cx);
+						int64_t one = 1;
+						Value delta = StringRef(reinterpret_cast<const uint8_t*>(&one), sizeof(one));
+						while (true) {
+							Error admitErr;
+							try {
+								admitTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+								admitTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+								admitTr.atomicOp(bulkDumpAdmittedKeyFor(jobId), delta, MutationRef::AddValue);
+								co_await admitTr.commit();
+								break;
+							} catch (Error& e) {
+								admitErr = e;
+							}
+							co_await admitTr.onError(admitErr);
+						}
+					}
 					actors.push_back(doBulkDumpTask(self, task.targetServer, task.bulkDumpState, task.checksumServers));
 				}
 				beginKey = rangeLocations.back().range.end;
@@ -3147,6 +3335,13 @@ Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 			// through bulkdump_task_outdated.
 			TraceEvent(SevWarnAlways, "DDBulkDumpJobFailed", self->ddId).suppressFor(60.0).detail("JobId", jobId);
 		} else {
+			// Cheap outer guard only: do not start a whole dispatch pass while already paused. A pause
+			// arriving mid-pass is caught inside the dispatch loop, which is the real enforcement point.
+			if (co_await bulkJobIsPaused(cx, jobId, /*isBulkDump=*/true)) {
+				TraceEvent(SevInfo, "DDBulkDumpManagerJobPaused", self->ddId).suppressFor(60.0).detail("JobId", jobId);
+				co_await delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
+				continue;
+			}
 			// Schedule the job
 			co_await scheduleBulkDumpJob(self);
 		}
@@ -6332,6 +6527,42 @@ TEST_CASE("/DataDistribution/BulkDump/SkipTracker") {
 		ASSERT(!tracker.shouldFail(5, 0.0, 0.0));
 		ASSERT(!tracker.shouldFail(5, 1e9, 0.0));
 	}
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/BulkDump/PacingWidthMeasuresWithinTheJobRange") {
+	// A job confined to one subspace: every key shares a long prefix, which used to read as zero width.
+	KeyRange job = KeyRangeRef("mytable/users/"_sr, "mytable/users0"_sr);
+	int skip = commonPrefixLength(job.begin, job.end);
+	ASSERT_EQ(skip, 13);
+	ASSERT_EQ(keyRangeWidthFraction(job, 0), 0.0);
+	ASSERT(keyRangeWidthFraction(job, skip) > 0);
+
+	// Half way through the job is half the width, whatever the prefix.
+	double half =
+	    keyRangeWidthFraction(KeyRangeRef(job.begin, "mytable/users/\x80"_sr), skip) / keyRangeWidthFraction(job, skip);
+	ASSERT(std::abs(half - 0.5) < 1e-9);
+
+	// A whole-keyspace job has no shared prefix and keeps its old scale.
+	ASSERT_EQ(commonPrefixLength(normalKeys.begin, normalKeys.end), 0);
+	ASSERT(std::abs(keyRangeWidthFraction(KeyRangeRef("\x80"_sr, "\xc0"_sr), 0) - 0.25) < 1e-9);
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/BulkDump/PacingDoesNotCreditFailedTasks") {
+	// The first admission has nothing to measure against.
+	ASSERT_EQ(bulkDumpConsumedWidth(-1, 0.9, 0), 0.0);
+	// The remainder shrank by what the pass walked past.
+	ASSERT(std::abs(bulkDumpConsumedWidth(0.9, 0.6, 0) - 0.3) < 1e-12);
+	// A task that failed instantly left its range undumped: nothing was consumed, so nothing is waited for.
+	ASSERT(bulkDumpConsumedWidth(0.9, 0.6, 0.3) < 1e-12);
+	ASSERT(std::abs(bulkDumpConsumedWidth(0.9, 0.6, 0.1) - 0.2) < 1e-12);
+	// A failure reported for an earlier interval cannot make consumption negative.
+	ASSERT_EQ(bulkDumpConsumedWidth(0.9, 0.6, 0.5), 0.0);
+	// A pass restarting from the front grows the remainder; that is not consumption either.
+	ASSERT_EQ(bulkDumpConsumedWidth(0.1, 0.9, 0), 0.0);
 
 	return Void();
 }

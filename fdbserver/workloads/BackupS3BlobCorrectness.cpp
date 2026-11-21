@@ -167,6 +167,13 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	int mutationLogType;
 	// expectBulkPrefixRejection: assert --add-prefix/--remove-prefix is refused on a bulkload restore.
 	bool expectBulkPrefixRejection;
+	// minBulkDumpSnapshots: a backup left running must keep taking bulkdump snapshots, as the rangefile
+	// loop does, so the count of completed snapshots has to reach this.
+	int minBulkDumpSnapshots;
+	// modifyActiveSnapshotInterval: while a bulkdump snapshot is in flight, retarget it the way
+	// `fdbbackup modify --active-snapshot-interval` does and require the job to carry the new target end.
+	// Must differ from snapshotInterval, or the check cannot tell the retarget from the job's own target.
+	int modifyActiveSnapshotInterval;
 	// expectRestoreFailure: the bulkload restore is expected NOT to complete, so the workload asserts the
 	// failure is reported and recovered from rather than that the data arrived.
 	bool expectRestoreFailure;
@@ -253,6 +260,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			mutationLogType = deterministicRandom()->coinflip() ? 1 : 0;
 		}
 		expectBulkPrefixRejection = getOption(options, "expectBulkPrefixRejection"_sr, false);
+		minBulkDumpSnapshots = getOption(options, "minBulkDumpSnapshots"_sr, 0);
+		modifyActiveSnapshotInterval = getOption(options, "modifyActiveSnapshotInterval"_sr, 0);
 		// Mutually exclusive with performValidation, whose audit compares restored contents that by
 		// definition do not exist when the restore is expected to fail.
 		expectRestoreFailure = getOption(options, "expectRestoreFailure"_sr, false);
@@ -441,6 +450,34 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			// puts(statusJSON.c_str());
 			co_await delay(2.0);
 		}
+	}
+
+	// Retargets whichever bulkdump snapshot is in flight and checks the job really carries the new target end. A job
+	// that ends before it can be read back says nothing, so it waits for the next one.
+	static Future<Void> verifyActiveIntervalRetarget(Database cx,
+	                                                 FileBackupAgent* backupAgent,
+	                                                 std::string tag,
+	                                                 int seconds) {
+		double deadline = now() + 1500.0;
+		while (now() < deadline) {
+			Optional<UID> jobId = co_await backupAgent->applyActiveBulkDumpInterval(cx, tag, seconds);
+			if (jobId.present()) {
+				Optional<BulkDumpOwnerInfo> owner = co_await getBulkDumpOwner(cx, jobId.get());
+				Optional<BulkJobControlState> control = co_await getBulkJobControl(cx, jobId.get(), true);
+				if (owner.present() && control.present() && control.get().hasTargetEndTime()) {
+					double expected = owner.get().submitTime + seconds;
+					if (std::abs(control.get().targetEndTime - expected) > 0.001) {
+						TraceEvent(SevError, "BS3BCW_ActiveSnapshotIntervalIgnored")
+						    .detail("BulkDumpJobId", jobId.get())
+						    .detail("TargetEndTime", control.get().targetEndTime)
+						    .detail("Expected", expected);
+					}
+					co_return;
+				}
+			}
+			co_await delay(1.0);
+		}
+		TraceEvent(SevError, "BS3BCW_ActiveSnapshotIntervalNeverApplied");
 	}
 
 	static Future<Void> verifyBulkDumpObservability(Database cx, UID expectedBackupUID, std::string backupTag) {
@@ -778,9 +815,21 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			}
 		}
 
+		Future<Void> retargetCheck = Void();
+		if (modifyActiveSnapshotInterval > 0) {
+			retargetCheck = verifyActiveIntervalRetarget(cx, backupAgent, tag.toString(), modifyActiveSnapshotInterval);
+		}
+
 		// A differential backup only completes once it is discontinued, so end the log copy at the requested time.
 		if (stopDifferentialDelay) {
 			co_await stopDifferentialFuture;
+			// Discontinuing drops the snapshot in flight, so the requested count must already have completed.
+			// The bounded wait leaves a backup that never re-arms to fail the count check rather than hang.
+			double snapshotDeadline = now() + 1800.0;
+			while (g_bulkDumpTaskCompleteCount.load() < minBulkDumpSnapshots && now() < snapshotDeadline) {
+				co_await delay(5.0);
+			}
+			co_await retargetCheck;
 			TraceEvent("BS3BCW_DoBackupStopDifferential", randomID).detail("Tag", printable(tag));
 			// A discontinued backup stops at the version its log copy has reached, so let it catch up first.
 			co_await validation.waitForBackupToCover(cx, backupAgent, tag.toString());
@@ -1264,6 +1313,11 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				    .detail("BulkDumpTaskCompleteCount", bulkDumpCount);
 				// FAIL if BulkDump didn't run
 				ASSERT(bulkDumpCount > 0);
+				if (bulkDumpCount < minBulkDumpSnapshots) {
+					TraceEvent(SevError, "BS3BCW_TooFewBulkDumpSnapshots")
+					    .detail("Completed", bulkDumpCount)
+					    .detail("Expected", minBulkDumpSnapshots);
+				}
 			}
 
 			co_await b;
