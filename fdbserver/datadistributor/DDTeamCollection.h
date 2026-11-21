@@ -711,9 +711,7 @@ public:
 	~DDTeamCollection();
 	size_t teamCount() const { return teams.size(); }
 
-	void addLaggingStorageServer(Key zoneId);
-
-	void removeLaggingStorageServer(Key zoneId);
+	void updateLaggingZone(Optional<Key> const& oldZone, Optional<Key> const& newZone);
 
 	// whether server is under wiggling process, but wiggle is paused for some healthy compliance.
 	bool isWigglePausedServer(const UID& server) const;
