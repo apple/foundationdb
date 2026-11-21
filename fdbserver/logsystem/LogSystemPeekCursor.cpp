@@ -26,6 +26,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "flow/DebugTrace.h"
 #include "flow/CoroUtils.h"
+#include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 
 // Returns a timeout future for peek reply detection. Used by both the non-parallel
@@ -73,12 +74,20 @@ ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInte
                                    Version end,
                                    bool returnIfBlocked,
                                    bool parallelGetMore,
-                                   bool returnEmptyIfStopped)
+                                   bool returnEmptyIfStopped,
+                                   bool useWriteAntiQuorum)
   : interf(interf), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(begin), end(end),
     poppedVersion(0), hasMsg(false), randomID(deterministicRandom()->randomUniqueID()),
     returnIfBlocked(returnIfBlocked), onlySpilled(false), parallelGetMore(parallelGetMore),
     usePeekStream(SERVER_KNOBS->PEEK_USING_STREAMING), sequence(0), lastReset(0), resetCheck(Void()), slowReplies(0),
-    fastReplies(0), unknownReplies(0), returnEmptyIfStopped(returnEmptyIfStopped), replyByteLimit(0) {
+    fastReplies(0), unknownReplies(0), returnEmptyIfStopped(returnEmptyIfStopped),
+    verifyEndOnBlocked(useWriteAntiQuorum && returnEmptyIfStopped &&
+                       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_REPLY_RECOVERY),
+    replyByteLimit(0) {
+	if (verifyEndOnBlocked) {
+		this->returnIfBlocked = true;
+		this->parallelGetMore = false;
+	}
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
 	DebugLogTraceEvent(SevDebug, "SPC_Starting", randomID)
@@ -536,11 +545,19 @@ Future<Void> serverPeekGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) 
 			}
 		}
 	} catch (Error& e) {
-		if (e.code() == error_code_end_of_stream) {
+		if (e.code() != error_code_end_of_stream) {
+			throw;
+		}
+		if (!self->verifyEndOnBlocked) {
 			self->end.reset(self->messageVersion.version);
 			co_return;
 		}
-		throw e;
+	}
+	// A blocked peek alone cannot certify an empty tail. Check the stopped log's durable end
+	// before allowing its cursor to vote for the end of this recovery range.
+	auto lock = co_await LogSystem::lockTLog(self->randomID, self->interf);
+	if (lock.end < self->messageVersion.version) {
+		self->messageVersion = self->end;
 	}
 }
 
@@ -571,8 +588,10 @@ Future<Void> ServerPeekCursor::getMore(TaskPriority taskID) {
 			results.minKnownCommittedVersion = 0;
 			rd = ArenaReader(results.arena, results.messages, Unversioned());
 		}
-		if (usePeekStream &&
-		    (tag.locality >= 0 || tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityRemoteLog)) {
+		if (verifyEndOnBlocked) {
+			more = serverPeekGetMore(this, taskID);
+		} else if (usePeekStream && (tag.locality >= 0 || tag.locality == tagLocalityLogRouter ||
+		                             tag.locality == tagLocalityRemoteLog)) {
 			more = serverPeekStreamGetMore(this, taskID);
 		} else if (parallelGetMore || onlySpilled || !futureResults.empty()) {
 			more = serverPeekParallelGetMore(this, taskID);
@@ -769,30 +788,26 @@ MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> cons
 	sortedVersions.resize(serverCursors.size());
 }
 
-MergedPeekCursor::MergedPeekCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
+MergedPeekCursor::MergedPeekCursor(Reference<LogSet> const& logSet,
                                    int bestServerLogId,
-                                   int readQuorum,
                                    Tag tag,
                                    Version begin,
                                    Version end,
                                    bool parallelGetMore,
-                                   std::vector<LocalityData> const& tLogLocalities,
-                                   Reference<IReplicationPolicy> const tLogPolicy,
-                                   int tLogReplicationFactor,
                                    const Optional<std::vector<uint16_t>>& knownLockedTLogIds)
-  : tag(tag), bestServer(bestServerLogId), currentCursor(0), readQuorum(readQuorum), messageVersion(begin),
+  : logSet(logSet), tag(tag), bestServer(bestServerLogId), currentCursor(0),
+    readQuorum(logSet->logServers.size() + 1 - logSet->tLogReplicationFactor), messageVersion(begin),
     hasNextMessage(false), randomID(deterministicRandom()->randomUniqueID()),
-    tLogReplicationFactor(tLogReplicationFactor) {
-	if (tLogPolicy) {
-		logSet = makeReference<LogSet>();
-		logSet->tLogPolicy = tLogPolicy;
-		logSet->tLogLocalities = tLogLocalities;
-		filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
-		logSet->updateLocalitySet(logSet->tLogLocalities);
-	}
-
+    tLogReplicationFactor(logSet->tLogReplicationFactor) {
+	auto const& logServers = logSet->logServers;
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-		resetBestServerIfNotAvailable(logServers, bestServer, end);
+		if (end != std::numeric_limits<Version>::max() && logSet->tLogWriteAntiQuorum > 0) {
+			antiQuorumPeekEnd = end;
+			readQuorum += logSet->tLogWriteAntiQuorum;
+			bestServer = -1;
+		} else {
+			resetBestServerIfNotAvailable(logServers, bestServer, end);
+		}
 	}
 
 	for (int i = 0; i < logServers.size(); i++) {
@@ -800,8 +815,14 @@ MergedPeekCursor::MergedPeekCursor(std::vector<Reference<AsyncVar<OptionalInterf
 		    ((SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && end != std::numeric_limits<Version>::max())
 		         ? canReturnEmptyVersionRange(bestServer, i /*currentServer*/, end, knownLockedTLogIds)
 		         : false);
-		auto cursor = makeReference<ServerPeekCursor>(
-		    logServers[i], tag, begin, end, bestServer >= 0, parallelGetMore, returnEmptyIfStopped);
+		auto cursor = makeReference<ServerPeekCursor>(logServers[i],
+		                                              tag,
+		                                              begin,
+		                                              end,
+		                                              bestServer >= 0,
+		                                              parallelGetMore,
+		                                              returnEmptyIfStopped,
+		                                              antiQuorumPeekEnd.present());
 		//TraceEvent("MPC_Starting", randomID).detail("Cursor", cursor->randomID).detail("End", end);
 		serverCursors.push_back(cursor);
 	}
@@ -814,10 +835,12 @@ MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> cons
                                    int readQuorum,
                                    Optional<LogMessageVersion> nextVersion,
                                    Reference<LogSet> logSet,
-                                   int tLogReplicationFactor)
+                                   int tLogReplicationFactor,
+                                   Optional<Version> antiQuorumPeekEnd)
   : logSet(logSet), serverCursors(serverCursors), bestServer(bestServer), currentCursor(0), readQuorum(readQuorum),
     nextVersion(nextVersion), messageVersion(messageVersion), hasNextMessage(false),
-    randomID(deterministicRandom()->randomUniqueID()), tLogReplicationFactor(tLogReplicationFactor) {
+    randomID(deterministicRandom()->randomUniqueID()), tLogReplicationFactor(tLogReplicationFactor),
+    antiQuorumPeekEnd(antiQuorumPeekEnd) {
 	sortedVersions.resize(serverCursors.size());
 	calcHasMessage();
 }
@@ -829,7 +852,7 @@ Reference<IReplayPeekCursor> MergedPeekCursor::cloneNoMore() {
 		cursors.push_back(it->cloneServerNoMore());
 	}
 	return makeReference<MergedPeekCursor>(
-	    cursors, messageVersion, bestServer, readQuorum, nextVersion, logSet, tLogReplicationFactor);
+	    cursors, messageVersion, bestServer, readQuorum, nextVersion, logSet, tLogReplicationFactor, antiQuorumPeekEnd);
 }
 
 void MergedPeekCursor::setProtocolVersion(ProtocolVersion version) {
@@ -874,14 +897,49 @@ void MergedPeekCursor::calcHasMessage() {
 	hasNextMessage = false;
 	updateMessage(false);
 
-	if (!hasNextMessage && logSet) {
+	if (!hasNextMessage && logSet && logSet->tLogPolicy) {
 		updateMessage(true);
 	}
 }
 
+static bool canMissReplicaTeam(LogSet const& logSet,
+                               LocalityGroup const& behind,
+                               std::vector<LocalityData> const& ahead) {
+	return behind.size() + logSet.tLogWriteAntiQuorum >= logSet.tLogReplicationFactor &&
+	       !validateAllCombinations(behind, logSet.tLogPolicy, ahead, logSet.tLogWriteAntiQuorum, false);
+}
+
+// A replica may have missed an acknowledged batch. The cursors below the selected version,
+// together with any write anti-quorum of the other cursors, must not contain a replica team.
+static LogMessageVersion antiQuorumPolicyVersion(LogSet const& logSet,
+                                                 std::vector<std::pair<LogMessageVersion, int>>& versions) {
+	std::sort(versions.begin(), versions.end());
+	LocalityGroup behind;
+	for (int i = 0; i < versions.size(); ++i) {
+		behind.add(logSet.tLogLocalities[versions[i].second]);
+		if (i + 1 == versions.size()) {
+			return versions[i].first;
+		}
+		if (versions[i].first == versions[i + 1].first ||
+		    i + 1 + logSet.tLogWriteAntiQuorum < logSet.tLogReplicationFactor) {
+			continue;
+		}
+		std::vector<LocalityData> ahead;
+		for (int j = i + 1; j < versions.size(); ++j) {
+			ahead.push_back(logSet.tLogLocalities[versions[j].second]);
+		}
+		if (canMissReplicaTeam(logSet, behind, ahead)) {
+			return versions[i].first;
+		}
+	}
+	UNREACHABLE();
+}
+
 void MergedPeekCursor::updateMessage(bool usePolicy) {
 	auto selectMessageVersion = [&](auto& versions, LogMessageVersion& selectedVersion) {
-		if (usePolicy) {
+		if (usePolicy && antiQuorumPeekEnd.present()) {
+			selectedVersion = antiQuorumPolicyVersion(*logSet, versions);
+		} else if (usePolicy) {
 			ASSERT(logSet->tLogPolicy);
 			std::sort(versions.begin(), versions.end());
 
@@ -1008,7 +1066,8 @@ Future<Void> MergedPeekCursor::getMore(TaskPriority taskID) {
 }
 
 bool MergedPeekCursor::isExhausted() const {
-	return serverCursors[currentCursor]->isExhausted();
+	return antiQuorumPeekEnd.present() ? messageVersion.version >= antiQuorumPeekEnd.get()
+	                                   : serverCursors[currentCursor]->isExhausted();
 }
 
 const LogMessageVersion& MergedPeekCursor::version() const {
@@ -1068,6 +1127,13 @@ Version MergedPeekCursor::popped() const {
 	return poppedVersion;
 }
 
+static int finiteReadAntiQuorum(LogSet const& logSet, Optional<Version> end) {
+	return SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && end.present() &&
+	               end.get() != std::numeric_limits<Version>::max()
+	           ? logSet.tLogWriteAntiQuorum
+	           : 0;
+}
+
 SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
                              int bestSet,
                              int bestServerLogId,
@@ -1075,12 +1141,16 @@ SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
                              Version begin,
                              Version end,
                              bool parallelGetMore,
-                             const Optional<std::vector<uint16_t>>& knownLockedTLogIds)
+                             const Optional<std::vector<std::vector<uint16_t>>>& knownLockedTLogIds)
   : logSets(logSets), tag(tag), bestSet(bestSet), bestServer(bestServerLogId), currentSet(bestSet), currentCursor(0),
     messageVersion(begin), hasNextMessage(false), useBestSet(true), randomID(deterministicRandom()->randomUniqueID()),
     end(end) {
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && bestSet >= 0) {
-		resetBestServerIfNotAvailable(logSets[bestSet]->logServers, bestServer, end);
+		if (finiteReadAntiQuorum(*logSets[bestSet], end) > 0) {
+			bestServer = -1;
+		} else {
+			resetBestServerIfNotAvailable(logSets[bestSet]->logServers, bestServer, end);
+		}
 	}
 	// Live CDC consumers wait for future mutations; finite recovery and tag-history reads must reach their end.
 	const bool tailingCDC = tag.locality == tagLocalityCDC && end == std::numeric_limits<Version>::max();
@@ -1088,14 +1158,29 @@ SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 	serverCursors.resize(logSets.size());
 	int maxServers = 0;
 	for (int i = 0; i < logSets.size(); i++) {
+		Optional<std::vector<uint16_t>> lockedInSet;
+		if (knownLockedTLogIds.present()) {
+			lockedInSet = knownLockedTLogIds.get()[i];
+		}
+		bool useAntiQuorum = finiteReadAntiQuorum(*logSets[i], end) > 0;
 		for (int j = 0; j < logSets[i]->logServers.size(); j++) {
 			bool returnEmptyIfStopped =
 			    ((SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && end != std::numeric_limits<Version>::max())
-			         ? canReturnEmptyVersionRange(
-			               bestServer, j /*currentServer*/, end, knownLockedTLogIds, bestSet, i /* currentSet */)
+			         ? canReturnEmptyVersionRange(useAntiQuorum ? -1 : bestServer,
+			                                      j /*currentServer*/,
+			                                      end,
+			                                      lockedInSet,
+			                                      bestSet,
+			                                      i /* currentSet */)
 			         : false);
-			auto cursor = makeReference<ServerPeekCursor>(
-			    logSets[i]->logServers[j], tag, begin, end, !tailingCDC, parallelGetMore, returnEmptyIfStopped);
+			auto cursor = makeReference<ServerPeekCursor>(logSets[i]->logServers[j],
+			                                              tag,
+			                                              begin,
+			                                              end,
+			                                              !tailingCDC && !useAntiQuorum,
+			                                              parallelGetMore,
+			                                              returnEmptyIfStopped,
+			                                              useAntiQuorum);
 			serverCursors[i].push_back(cursor);
 		}
 		maxServers = std::max<int>(maxServers, serverCursors[i].size());
@@ -1109,10 +1194,11 @@ SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
                              int bestSet,
                              int bestServer,
                              Optional<LogMessageVersion> nextVersion,
-                             bool useBestSet)
+                             bool useBestSet,
+                             Optional<Version> end)
   : logSets(logSets), serverCursors(serverCursors), bestSet(bestSet), bestServer(bestServer), currentSet(bestSet),
     currentCursor(0), nextVersion(nextVersion), messageVersion(messageVersion), hasNextMessage(false),
-    useBestSet(useBestSet), randomID(deterministicRandom()->randomUniqueID()) {
+    useBestSet(useBestSet), randomID(deterministicRandom()->randomUniqueID()), end(end) {
 	int maxServers = 0;
 	for (int i = 0; i < logSets.size(); i++) {
 		maxServers = std::max<int>(maxServers, serverCursors[i].size());
@@ -1129,7 +1215,8 @@ Reference<IReplayPeekCursor> SetPeekCursor::cloneNoMore() {
 			cursors[i].push_back(serverCursors[i][j]->cloneServerNoMore());
 		}
 	}
-	return makeReference<SetPeekCursor>(logSets, cursors, messageVersion, bestSet, bestServer, nextVersion, useBestSet);
+	return makeReference<SetPeekCursor>(
+	    logSets, cursors, messageVersion, bestSet, bestServer, nextVersion, useBestSet, end);
 }
 
 void SetPeekCursor::setProtocolVersion(ProtocolVersion version) {
@@ -1208,7 +1295,10 @@ void SetPeekCursor::calcHasMessage() {
 
 void SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 	auto selectMessageVersion = [&](auto& versions, LogMessageVersion& selectedVersion) {
-		if (usePolicy) {
+		int antiQuorum = finiteReadAntiQuorum(*logSets[logIdx], end);
+		if (usePolicy && antiQuorum > 0) {
+			selectedVersion = antiQuorumPolicyVersion(*logSets[logIdx], versions);
+		} else if (usePolicy) {
 			std::sort(versions.begin(), versions.end());
 			locations.clear();
 			for (auto sortedVersion : versions) {
@@ -1220,8 +1310,7 @@ void SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 				}
 			}
 		} else {
-			//(int)oldLogData[i].logServers.size() + 1 - oldLogData[i].tLogReplicationFactor
-			auto quorum = logSets[logIdx]->logServers.size() + 1 - logSets[logIdx]->tLogReplicationFactor;
+			auto quorum = logSets[logIdx]->logServers.size() + 1 - logSets[logIdx]->tLogReplicationFactor + antiQuorum;
 			std::nth_element(versions.begin(), versions.end() - quorum, versions.end());
 			selectedVersion = versions[versions.size() - quorum].first;
 		}
@@ -1305,16 +1394,27 @@ Future<Void> setPeekGetMore(SetPeekCursor* self, LogMessageVersion startVersion,
 		} else {
 			// FIXME: if best set is exhausted, do not peek remote servers
 			bool bestSetValid = self->bestSet >= 0;
-			if (bestSetValid) {
+			if (bestSetValid && self->logSets.size() > 1) {
+				auto& logSet = *self->logSets[self->bestSet];
+				auto antiQuorum = finiteReadAntiQuorum(logSet, self->end);
+				LocalityGroup behind;
+				std::vector<LocalityData> ahead;
 				self->locations.clear();
 				for (int i = 0; i < self->serverCursors[self->bestSet].size(); i++) {
 					if (!self->serverCursors[self->bestSet][i]->isActive() &&
 					    self->serverCursors[self->bestSet][i]->version() <= self->messageVersion) {
-						self->locations.push_back(self->logSets[self->bestSet]->getLogEntry(i));
+						if (antiQuorum > 0) {
+							behind.add(logSet.tLogLocalities[i]);
+						} else {
+							self->locations.push_back(logSet.getLogEntry(i));
+						}
+					} else if (antiQuorum > 0) {
+						ahead.push_back(logSet.tLogLocalities[i]);
 					}
 				}
-				bestSetValid = self->locations.size() < self->logSets[self->bestSet]->tLogReplicationFactor ||
-				               !self->logSets[self->bestSet]->satisfiesPolicy(self->locations);
+				bestSetValid = antiQuorum > 0 ? !canMissReplicaTeam(logSet, behind, ahead)
+				                              : self->locations.size() < logSet.tLogReplicationFactor ||
+				                                    !logSet.satisfiesPolicy(self->locations);
 			}
 			if (bestSetValid || self->logSets.size() == 1) {
 				if (!self->useBestSet) {
@@ -1383,6 +1483,10 @@ Future<Void> SetPeekCursor::getMore(TaskPriority taskID) {
 }
 
 bool SetPeekCursor::isExhausted() const {
+	if (std::any_of(
+	        logSets.begin(), logSets.end(), [&](const auto& set) { return finiteReadAntiQuorum(*set, end) > 0; })) {
+		return messageVersion.version >= end.get();
+	}
 	return serverCursors[currentSet][currentCursor]->isExhausted();
 }
 
@@ -1649,6 +1753,112 @@ Version MultiCursor::getMinKnownCommittedVersion() const {
 
 Version MultiCursor::popped() const {
 	return std::max(poppedVersion, cursors.back()->popped());
+}
+
+TEST_CASE("/LogSystem/UnicastRecovery/PeekPastSlowReplica") {
+	auto set = makeReference<LogSet>();
+	set->tLogReplicationFactor = 3;
+	set->tLogWriteAntiQuorum = 1;
+	set->tLogPolicy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+	std::vector<Reference<ServerPeekCursor>> cursors;
+	for (int i = 0; i < 3; ++i) {
+		LocalityData locality;
+		locality.set(LocalityData::keyZoneId, StringRef(std::to_string(i)));
+		set->tLogLocalities.push_back(locality);
+		cursors.push_back(makeReference<ServerPeekCursor>(
+		    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), Tag(0, 0), 0, 100, false, false));
+	}
+	set->updateLocalitySet(set->tLogLocalities);
+	auto merged = makeReference<MergedPeekCursor>(
+	    cursors, LogMessageVersion(0), -1, 2, Optional<LogMessageVersion>(), set, 3, Version(100));
+
+	TLogPeekReply empty;
+	empty.end = 100;
+	updateCursorWithReply(cursors[0].getPtr(), empty);
+	merged->calcHasMessage();
+	ASSERT_EQ(merged->version().version, 0);
+	ASSERT(!merged->isExhausted());
+	auto clone = merged->cloneNoMore();
+	ASSERT_EQ(clone->version().version, 0);
+	ASSERT(!clone->isExhausted());
+
+	updateCursorWithReply(cursors[1].getPtr(), empty);
+	merged->calcHasMessage();
+	ASSERT_EQ(merged->version().version, 100);
+	ASSERT(merged->isExhausted());
+	return Void();
+}
+
+TEST_CASE("/LogSystem/UnicastRecovery/PeekMarkerWithOneUnavailableReplica") {
+	auto* knobs = const_cast<ServerKnobs*>(SERVER_KNOBS);
+	const bool wasVersionVector = std::exchange(knobs->ENABLE_VERSION_VECTOR, true);
+	const bool wasUnicast = std::exchange(knobs->ENABLE_VERSION_VECTOR_TLOG_UNICAST, true);
+	const bool wasReplyRecovery = std::exchange(knobs->ENABLE_VERSION_VECTOR_REPLY_RECOVERY, false);
+	ScopeExit restore([&]() {
+		knobs->ENABLE_VERSION_VECTOR = wasVersionVector;
+		knobs->ENABLE_VERSION_VECTOR_TLOG_UNICAST = wasUnicast;
+		knobs->ENABLE_VERSION_VECTOR_REPLY_RECOVERY = wasReplyRecovery;
+	});
+
+	auto set = makeReference<LogSet>();
+	set->tLogReplicationFactor = 3;
+	set->tLogWriteAntiQuorum = 1;
+	set->tLogPolicy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+	std::vector<TLogInterface> servers;
+	for (int i = 0; i < 3; ++i) {
+		LocalityData locality;
+		locality.set(LocalityData::keyZoneId, StringRef(std::to_string(i)));
+		set->tLogLocalities.push_back(locality);
+		servers.emplace_back(locality);
+		auto client = servers.back();
+		OptionalInterface<TLogInterface> log(client.id());
+		if (i < 2) {
+			client.peekMessages = RequestStream<TLogPeekRequest>(client.peekMessages.getEndpoint());
+			client.lock = RequestStream<ReplyPromise<TLogLockResult>>(client.lock.getEndpoint());
+			log = OptionalInterface<TLogInterface>(client);
+		}
+		set->logServers.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(log));
+	}
+	set->updateLocalitySet(set->tLogLocalities);
+	constexpr Version version = 100;
+	const Tag tag(0, 0);
+	auto cursor =
+	    makeReference<MergedPeekCursor>(set, 0, tag, version, version + 1, true, std::vector<uint16_t>{ 0, 1 });
+	Future<Void> read = cursor->getMore();
+
+	// The preferred log is locked one version behind. Give its empty vote before releasing the marker.
+	auto slowPeek = co_await timeoutError(waitAndForward(servers[0].peekMessages.getFuture()), 5.0);
+	ASSERT(slowPeek.returnIfBlocked);
+	ASSERT_EQ(slowPeek.begin, version);
+	slowPeek.reply.sendError(end_of_stream());
+	auto lock = co_await timeoutError(waitAndForward(servers[0].lock.getFuture()), 5.0);
+	TLogLockResult locked;
+	locked.logId = servers[0].id();
+	locked.end = locked.knownCommittedVersion = version - 1;
+	lock.send(locked);
+	ASSERT(!read.isReady());
+
+	auto fastPeek = co_await timeoutError(waitAndForward(servers[1].peekMessages.getFuture()), 5.0);
+	ASSERT_EQ(fastPeek.begin, version);
+	const StringRef marker = "acknowledged"_sr;
+	BinaryWriter message(Unversioned());
+	message << uint32_t(1) << uint16_t(1) << tag;
+	message.serializeBytes(marker);
+	BinaryWriter frame(AssumeVersion(g_network->protocolVersion()));
+	frame << VERSION_HEADER << version << message.toValue();
+	TLogPeekReply reply;
+	reply.begin = version;
+	reply.end = version + 1;
+	reply.maxKnownVersion = reply.minKnownCommittedVersion = version;
+	reply.messages = StringRef(reply.arena, frame.toValue());
+	fastPeek.reply.send(reply);
+
+	co_await timeoutError(read, 5.0);
+	ASSERT(cursor->hasMessage());
+	ASSERT_EQ(cursor->version().version, version);
+	ASSERT(cursor->getMessage() == marker);
+	cursor->nextMessage();
+	ASSERT(cursor->isExhausted());
 }
 
 TEST_CASE("/NativeCDC/ReplayPeekReplyAccounting") {
