@@ -2561,16 +2561,16 @@ std::pair<Version, Version> getMaxMinRestorableVersions(const BackupDescription&
 // If restoreVersion is invalidVersion or latestVersion, use the maximum or minimum restorable version respectively for
 // selected key ranges. If restoreTimestamp is specified, any specified restoreVersion will be overridden to the version
 // resolved to that timestamp.
-Future<Void> queryBackup(const char* name,
-                         std::string destinationContainer,
-                         Optional<std::string> proxy,
-                         Standalone<VectorRef<KeyRangeRef>> keyRangesFilter,
-                         Version restoreVersion,
-                         Version snapshotVersion,
-                         std::string originalClusterFile,
-                         std::string restoreTimestamp,
-                         Verbose verbose,
-                         Optional<Database> cx) {
+Future<int> queryBackup(const char* name,
+                        std::string destinationContainer,
+                        Optional<std::string> proxy,
+                        Standalone<VectorRef<KeyRangeRef>> keyRangesFilter,
+                        Version restoreVersion,
+                        Version snapshotVersion,
+                        std::string originalClusterFile,
+                        std::string restoreTimestamp,
+                        Verbose verbose,
+                        Optional<Database> cx) {
 	UID operationId = deterministicRandom()->randomUniqueID();
 	JsonBuilderObject result;
 	std::string errorMessage;
@@ -2586,37 +2586,38 @@ Future<Void> queryBackup(const char* name,
 	    .detail("RestoreTimestamp", restoreTimestamp)
 	    .detail("BackupClusterFile", originalClusterFile);
 
-	// Resolve restoreTimestamp if given
-	if (!restoreTimestamp.empty()) {
-		if (originalClusterFile.empty()) {
-			reportBackupQueryError(
-			    operationId,
-			    result,
-			    format("a cluster file must be given in order to resolve restore target timestamp '%s'",
-			           restoreTimestamp.c_str()));
-			co_return;
-		}
-
-		if (!fileExists(originalClusterFile)) {
-			reportBackupQueryError(operationId,
-			                       result,
-			                       format("The specified original source database cluster file '%s' does not exist\n",
-			                              originalClusterFile.c_str()));
-			co_return;
-		}
-
-		Database origDb = Database::createDatabase(originalClusterFile, ApiVersion::LATEST_VERSION);
-		Version v = co_await timeKeeperVersionFromDatetime(restoreTimestamp, origDb);
-		result["restore_timestamp"] = restoreTimestamp;
-		result["restore_timestamp_resolved_version"] = v;
-		restoreVersion = v;
-	}
-
 	int64_t totalRangeFilesSize = 0;
 	int64_t totalLogFilesSize = 0;
 	JsonBuilderArray rangeFilesJson;
 	JsonBuilderArray logFilesJson;
 	try {
+		// Resolve restoreTimestamp if given
+		if (!restoreTimestamp.empty()) {
+			if (originalClusterFile.empty()) {
+				reportBackupQueryError(
+				    operationId,
+				    result,
+				    format("a cluster file must be given in order to resolve restore target timestamp '%s'",
+				           restoreTimestamp.c_str()));
+				co_return FDB_EXIT_ERROR;
+			}
+
+			if (!fileExists(originalClusterFile)) {
+				reportBackupQueryError(
+				    operationId,
+				    result,
+				    format("The specified original source database cluster file '%s' does not exist\n",
+				           originalClusterFile.c_str()));
+				co_return FDB_EXIT_ERROR;
+			}
+
+			Database origDb = Database::createDatabase(originalClusterFile, ApiVersion::LATEST_VERSION);
+			Version v = co_await timeKeeperVersionFromDatetime(restoreTimestamp, origDb);
+			result["restore_timestamp"] = restoreTimestamp;
+			result["restore_timestamp_resolved_version"] = v;
+			restoreVersion = v;
+		}
+
 		Reference<IBackupContainer> bc = openBackupContainer(name, destinationContainer, proxy, {}, 0);
 		BackupDescription desc = co_await bc->describeBackup();
 		// Use continuous log end version for the maximum restorable version for the key ranges when a restorable
@@ -2639,7 +2640,7 @@ Future<Void> queryBackup(const char* name,
 			                       result,
 			                       errorMessage =
 			                           format("the specified restorable version %lld is not valid", restoreVersion));
-			co_return;
+			co_return FDB_EXIT_ERROR;
 		}
 
 		Optional<RestorableFileSet> fileSet;
@@ -2687,7 +2688,7 @@ Future<Void> queryBackup(const char* name,
 				    result,
 				    format("no restorable files set found for specified key ranges from snapshotVersion %lld",
 				           snapshotVersion));
-				co_return;
+				co_return FDB_EXIT_ERROR;
 			}
 
 			// We only need to know all the mutation logs from `snapshotVersion` to `restoreVersion`.
@@ -2730,12 +2731,12 @@ Future<Void> queryBackup(const char* name,
 			    .detail("LogFilesBytes", totalLogFilesSize);
 		} else if (snapshotVersion == invalidVersion) {
 			reportBackupQueryError(operationId, result, "no restorable files set found for specified key ranges");
-			co_return;
+			co_return FDB_EXIT_ERROR;
 		}
 
 	} catch (Error& e) {
 		reportBackupQueryError(operationId, result, e.what());
-		co_return;
+		co_return FDB_EXIT_ERROR;
 	}
 
 	result["total_range_files_size"] = totalRangeFilesSize;
@@ -2747,6 +2748,7 @@ Future<Void> queryBackup(const char* name,
 	}
 
 	printf("%s\n", result.getJson().c_str());
+	co_return FDB_EXIT_SUCCESS;
 }
 
 Future<Void> listBackup(std::string baseUrl, Optional<std::string> proxy) {
@@ -4329,16 +4331,16 @@ int main(int argc, char* argv[]) {
 
 			case BackupType::QUERY:
 				initTraceFile();
-				f = stopAfter(queryBackup(newArgV[0],
-				                          destinationContainer,
-				                          proxy,
-				                          backupKeysFilter,
-				                          restoreVersion,
-				                          snapshotVersion,
-				                          clusterFile,
-				                          restoreTimestamp,
-				                          Verbose{ !quietDisplay },
-				                          db));
+				fstatus = stopAfter(queryBackup(newArgV[0],
+				                                destinationContainer,
+				                                proxy,
+				                                backupKeysFilter,
+				                                restoreVersion,
+				                                snapshotVersion,
+				                                clusterFile,
+				                                restoreTimestamp,
+				                                Verbose{ !quietDisplay },
+				                                db));
 				break;
 
 			case BackupType::DUMP:
@@ -4482,8 +4484,8 @@ int main(int argc, char* argv[]) {
 			status = FDB_EXIT_ERROR;
 		}
 
-		if (fstatus.isValid() && fstatus.isReady() && !fstatus.isError() && fstatus.get().present()) {
-			status = fstatus.get().get();
+		if (fstatus.isValid() && fstatus.isReady() && !fstatus.isError()) {
+			status = fstatus.get().orDefault(FDB_EXIT_ERROR);
 		}
 
 #ifdef ALLOC_INSTRUMENTATION
