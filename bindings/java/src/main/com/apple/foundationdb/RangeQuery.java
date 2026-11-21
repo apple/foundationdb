@@ -86,8 +86,8 @@ class RangeQuery implements AsyncIterable<KeyValue> {
 
 			FutureResults range = tr.getRange_internal(this.begin, this.end, this.rowLimit, 0,
 			                                           StreamingMode.EXACT.code(), 1, this.snapshot, this.reverse);
-			return range.thenApply(result -> result.get().values)
-					.whenComplete((result, e) -> range.close());
+			return range.whenComplete((result, e) -> range.close())
+					.thenApply(result -> result.get().values);
 		}
 
 		// If the streaming mode is not EXACT, simply collect the results of an
