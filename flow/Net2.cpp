@@ -2094,18 +2094,44 @@ static Future<Void> coordinatorDNSCacheRefresh(Net2* self) {
 	}
 }
 
+static Future<std::vector<NetworkAddress>> cacheResolvedTCPEndpoint(DNSCache* cache,
+                                                                    std::string host,
+                                                                    std::string service,
+                                                                    Future<std::vector<NetworkAddress>> resolution) {
+	std::vector<NetworkAddress> addresses = co_await resolution;
+	cache->add(host, service, addresses);
+	co_return addresses;
+}
+
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const std::string& host,
                                                                          const std::string& service) {
 	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
 		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
 		if (cache.present()) {
-			co_return cache.get();
+			return cache.get();
 		}
-		std::vector<NetworkAddress> addresses = co_await resolveTCPEndpoint_impl(this, host, service);
-		dnsCache.add(host, service, addresses);
-		co_return addresses;
+		return cacheResolvedTCPEndpoint(&dnsCache, host, service, resolveTCPEndpoint_impl(this, host, service));
 	}
-	co_return co_await resolveTCPEndpoint_impl(this, host, service);
+	return resolveTCPEndpoint_impl(this, host, service);
+}
+
+TEST_CASE("/flow/Net2/DNSCacheArgumentLifetime") {
+	DNSCache cache;
+	std::string host = "original-host";
+	std::string service = "4500";
+	Promise<std::vector<NetworkAddress>> resolution;
+	Future<std::vector<NetworkAddress>> result =
+	    cacheResolvedTCPEndpoint(&cache, host, service, resolution.getFuture());
+	ASSERT(!result.isReady());
+	host = "changed-host";
+	service = "4501";
+	const std::vector<NetworkAddress> addresses{ NetworkAddress::parse("127.0.0.1:4500") };
+	resolution.send(addresses);
+	ASSERT(result.isReady());
+	ASSERT(result.get() == addresses);
+	ASSERT(cache.find("original-host", "4500").get() == addresses);
+	ASSERT(!cache.find(host, service).present());
+	return Void();
 }
 
 std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& host, const std::string& service) {
