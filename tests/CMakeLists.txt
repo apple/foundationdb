@@ -47,10 +47,15 @@ set(TEST_LOG_FORMAT "xml" CACHE STRING "Format for test trace files (xml, json)"
 set(TEST_INCLUDE ".*" CACHE STRING "Include only tests that match the given regex")
 set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
 
-# For the restart test, prefer an installed fdbserver from an older stable release
-# to exercise upgrade paths from existing on-disk state. If it is unavailable,
-# the current build is used instead.
 if(WITH_PYTHON)
+  add_test(NAME testrunner/restart_test_policy
+    COMMAND $<TARGET_FILE:Python3::Interpreter>
+      ${PROJECT_SOURCE_DIR}/tests/TestRunner/tests/test_restart_test_policy.py)
+  set_tests_properties(testrunner/restart_test_policy PROPERTIES LABELS "unit;testrunner" TIMEOUT 30)
+
+  # For the restart test, prefer an installed fdbserver from an older stable release
+  # to exercise upgrade paths from existing on-disk state. If it is unavailable,
+  # the current build is used instead.
   find_program(OLD_FDBSERVER_BINARY
     fdbserver-7.1.69 fdbserver fdbserver.exe
     HINTS /opt/foundationdb/old/7.1.69/bin/ /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)

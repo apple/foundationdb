@@ -44,6 +44,8 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 
+#include <atomic>
+
 #ifdef __unixish__
 #include <fcntl.h>
 #endif // __unixish__
@@ -3046,7 +3048,7 @@ TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing") {
 	return Void();
 }
 
-class ValidateFuture final : public ThreadCallback {
+class ValidateFuture final : public ThreadCallback, public ThreadSafeReferenceCounted<ValidateFuture> {
 public:
 	ValidateFuture(ThreadFuture<int> f, ErrorOr<int> expectedValue, std::set<int> legalErrors)
 	  : f(f), expectedValue(expectedValue), legalErrors(legalErrors) {}
@@ -3054,20 +3056,31 @@ public:
 	bool canFire(int notMadeActive) const override { return true; }
 
 	void fire(const Void& unused, int& userParam) override {
-		ASSERT(!f.isError() && !expectedValue.isError() && f.get() == expectedValue.get());
-		delete this;
+		int value = f.get();
+		ASSERT(!expectedValue.isError());
+		ASSERT_EQ(value, expectedValue.get());
+		valueRead = true;
+		delref();
 	}
 
 	void error(const Error& e, int& userParam) override {
 		ASSERT(legalErrors.contains(e.code()) ||
 		       (f.isError() && expectedValue.isError() && f.getError().code() == expectedValue.getError().code()));
-		delete this;
+		delref();
+	}
+
+	void releaseValidatedValue() {
+		// The release thread may consume the value reference acquired by fire() only after it checks the result.
+		if (valueRead.exchange(false)) {
+			f.getPtr()->releaseMemory();
+		}
 	}
 
 private:
 	ThreadFuture<int> f;
 	ErrorOr<int> expectedValue;
 	std::set<int> legalErrors;
+	std::atomic<bool> valueRead{ false };
 };
 
 struct FutureInfo {
@@ -3082,9 +3095,12 @@ struct FutureInfo {
 	FutureInfo(ThreadFuture<int> future, ErrorOr<int> expectedValue, std::set<int> legalErrors = std::set<int>())
 	  : future(future), expectedValue(expectedValue), legalErrors(legalErrors) {}
 
-	void validate() {
+	Reference<ValidateFuture> validate() {
 		int userParam;
-		future.callOrSetAsCallback(new ValidateFuture(future, expectedValue, legalErrors), userParam, 0);
+		auto validator = makeReference<ValidateFuture>(future, expectedValue, legalErrors);
+		validator->addref(); // The callback owns this reference until fire() or error() returns.
+		future.callOrSetAsCallback(validator.getPtr(), userParam, 0);
+		return validator;
 	}
 
 	ThreadFuture<int> future;
@@ -3133,15 +3149,10 @@ THREAD_FUNC setAbort(void* arg) {
 }
 
 THREAD_FUNC releaseMem(void* arg) {
+	Reference<ValidateFuture> validator(static_cast<ValidateFuture*>(arg));
 	threadSleep(0.1 * deterministicRandom()->random01());
 	try {
-		// Must get for releaseMemory to work
-		((ThreadSingleAssignmentVar<int>*)arg)->get();
-	} catch (Error&) {
-		// Swallow
-	}
-	try {
-		((ThreadSingleAssignmentVar<int>*)arg)->releaseMemory();
+		validator->releaseValidatedValue();
 	} catch (Error& e) {
 		printf("Caught error in releaseMem: %s\n", e.name());
 		ASSERT(false);
@@ -3234,13 +3245,14 @@ THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 				}
 
 				tf.legalErrors.insert(error_code_operation_cancelled);
-				tf.validate();
+				auto validator = tf.validate();
 
 				auto tfp = tf.future.extractPtr();
 
 				if (deterministicRandom()->coinflip()) {
 					if (deterministicRandom()->coinflip()) {
-						threads.push_back(g_network->startThread(releaseMem, tfp, 0, "fdb-release-mem"));
+						threads.push_back(
+						    g_network->startThread(releaseMem, validator.extractPtr(), 0, "fdb-release-mem"));
 					}
 					threads.push_back(g_network->startThread(cancel, tfp, 0, "fdb-cancel"));
 					undestroyed.push_back((ThreadSingleAssignmentVar<int>*)tfp);
@@ -3413,6 +3425,29 @@ TEST_CASE("fdbclient/multiversionclient/MapSingleAssignmentVar") {
 	}
 
 	waitThread(thread);
+}
+
+TEST_CASE("fdbclient/multiversionclient/MapSingleAssignmentVar/releaseValidatedValue") {
+	ThreadFuture<int> source{ Never() };
+	auto future = mapThreadFuture<int, int>(source, [](ErrorOr<int> result) -> ErrorOr<int> {
+		ASSERT(result.isError());
+		ASSERT_EQ(result.getError().code(), error_code_operation_cancelled);
+		return 42;
+	});
+	FutureInfo mapped(future, 42);
+	auto validator = mapped.validate();
+	validator->releaseValidatedValue();
+
+	auto toCancel = mapped.future;
+	toCancel.cancel();
+	ASSERT_EQ(mapped.future.getPtr()->getErrorCode(), error_code_success);
+	validator->releaseValidatedValue();
+	ASSERT_EQ(mapped.future.getPtr()->getErrorCode(), error_code_future_released);
+
+	FutureInfo failed(ThreadFuture<int>{ operation_cancelled() }, operation_cancelled());
+	failed.validate()->releaseValidatedValue();
+	ASSERT_EQ(failed.future.getError().code(), error_code_operation_cancelled);
+	return Void();
 }
 
 struct FlatMapTest {
