@@ -40,6 +40,11 @@ public:
 
 	Future<Void> renameFile(std::string const& from, std::string const& to) override;
 
+#ifdef __unixish__
+	// Resolve and create the parent on EIO. An already submitted job can finish after cancellation.
+	static Future<Void> createParentDirectory(std::string filename);
+#endif
+
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet& getActorLineageSet() override;
 #endif

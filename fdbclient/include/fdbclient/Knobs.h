@@ -201,6 +201,8 @@ public:
 
 	// Backup
 	int BACKUP_LOCAL_FILE_WRITE_BLOCK;
+	// Opt file:// backup writes into EIO path preparation and atomic finalization on Unix.
+	bool BACKUP_LOCAL_FILE_ASYNC_METADATA;
 	int BACKUP_MANIFEST_CHUNK_SIZE;
 	int BACKUP_CONCURRENT_DELETES;
 	int BACKUP_SIMULATED_LIMIT_BYTES;

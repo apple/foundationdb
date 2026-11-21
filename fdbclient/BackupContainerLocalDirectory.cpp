@@ -21,6 +21,7 @@
 #include "BackupContainerLocalDirectory.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileReadAhead.h"
+#include "fdbrpc/Net2FileSystem.h"
 #include "flow/IAsyncFile.h"
 #include "flow/FaultInjection.h"
 #include "flow/Platform.h"
@@ -303,15 +304,29 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 	return f;
 }
 
+static Future<Reference<IAsyncFile>> openBackupTempFile(const std::string& fullPath, int extraFlags = 0) {
+	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
+	            IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | extraFlags;
+	// A cancelled rename can finish later, so only unique intermediate names are safe.
+	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
+	return IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
+}
+
 Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const std::string& path) {
 	validatePathInContainer(path, m_path, /*allowContainerRoot=*/false);
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::writeFile");
-	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
-	            IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
 	std::string fullPath = joinPath(m_path, path);
-	platform::createDirectory(parentDirectory(fullPath));
-	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
-	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
+	Future<Reference<IAsyncFile>> f;
+#ifdef __unixish__
+	if (CLIENT_KNOBS->BACKUP_LOCAL_FILE_ASYNC_METADATA && !g_network->isSimulated()) {
+		f = mapAsync(Net2FileSystem::createParentDirectory(fullPath),
+		             [fullPath](Void) { return openBackupTempFile(fullPath, IAsyncFile::OPEN_ASYNC_ATOMIC_RENAME); });
+	} else
+#endif
+	{
+		platform::createDirectory(parentDirectory(fullPath));
+		f = openBackupTempFile(fullPath);
+	}
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
 		f = encryptedFile(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
