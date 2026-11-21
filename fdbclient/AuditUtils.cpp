@@ -630,8 +630,15 @@ Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx, AuditTy
 		AuditStorageState auditState(auditId, currentRange, type);
 		if (!auditStates[i].value.empty()) {
 			AuditStorageState auditState_ = decodeAuditStorageState(auditStates[i].value);
-			auditState.setPhase(auditState_.getPhase());
-			auditState.error = auditState_.error;
+			// A Complete RangeDigest row that getRangeDigestSummary refuses to count (re-anchored by a later
+			// narrower write, or persisted without a digest) must read as unaudited. Otherwise the scheduler
+			// skips it while the coverage check rejects it, and the audit retries forever.
+			const bool uncountable = type == AuditType::RangeDigest && auditState_.getPhase() == AuditPhase::Complete &&
+			                         rangeDigestRowRejectReason(auditState_, currentRange) != nullptr;
+			if (!uncountable) {
+				auditState.setPhase(auditState_.getPhase());
+				auditState.error = auditState_.error;
+			}
 		}
 		res.push_back(auditState);
 	}
