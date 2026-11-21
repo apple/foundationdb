@@ -81,9 +81,12 @@ public:
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider, TrackCodeProbes) override;
 };
 
-// Evaluates whether any worker is currently reporting a latest process error.
+// Evaluates whether any worker is reporting a process error within the configured age limit.
 class ProcessErrorsFactor final : public IFactor {
+	double maxErrorAge;
+
 public:
+	explicit ProcessErrorsFactor(double maxErrorAge);
 	std::string_view getName() const override;
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider, TrackCodeProbes) override;
 };
