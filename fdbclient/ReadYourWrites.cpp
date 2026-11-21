@@ -188,9 +188,27 @@ public:
 	}
 
 	static Future<Key> readThrough(ReadYourWritesTransaction* ryw, GetKeyReq read, Snapshot snapshot) {
-		Key key = co_await ryw->tr.getKey(read.key, snapshot);
+		// Read as a snapshot so the underlying transaction doesn't derive a conflict range from a result that we may
+		// clip below. getKey can run past the end of the user keyspace, and that range would cover system keys the
+		// transaction cannot observe.
+		Key key = co_await ryw->tr.getKey(read.key, Snapshot::True);
 		if (ryw->getMaxReadKey() < key)
-			co_return ryw->getMaxReadKey(); // Filter out results in the system keys if they are not accessible
+			key = ryw->getMaxReadKey(); // Filter out results in the system keys if they are not accessible
+
+		if (!snapshot) {
+			KeyRangeRef range;
+			if (read.key.offset <= 0) {
+				range = KeyRangeRef(key,
+				                    read.key.orEqual ? keyAfter(read.key.getKey(), ryw->arena)
+				                                     : KeyRef(ryw->arena, read.key.getKey()));
+			} else {
+				range = KeyRangeRef(read.key.orEqual ? keyAfter(read.key.getKey(), ryw->arena)
+				                                     : KeyRef(ryw->arena, read.key.getKey()),
+				                    keyAfter(key, ryw->arena));
+			}
+			if (!range.empty())
+				ryw->tr.addReadConflictRange(range);
+		}
 		co_return key;
 	}
 
