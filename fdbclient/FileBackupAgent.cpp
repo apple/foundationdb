@@ -4059,6 +4059,28 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				// Store job ID for monitoring
 				Params.bulkDumpJobId().set(task, bulkDumpJob.getJobId().toString());
 
+				// Also record it on the config now rather than only on completion, so that status and any
+				// operator tooling can name the job while it is still running. Restorability is reported
+				// from bulkDumpSnapshotEndVersion, which is set only once the dump finishes, so an id
+				// present here does not imply the data exists yet.
+				{
+					Transaction idTr(cx);
+					std::string runningJobId = bulkDumpJob.getJobId().toString();
+					while (true) {
+						Error err;
+						try {
+							idTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							idTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+							config.bulkDumpJobId().set(&idTr, runningJobId);
+							co_await idTr.commit();
+							break;
+						} catch (Error& e) {
+							err = e;
+						}
+						co_await idTr.onError(err);
+					}
+				}
+
 				// Monitor BulkDump progress - timeout is configurable for large datasets
 				bool completed = co_await monitorBulkDumpJobCompletion(cx,
 				                                                       bulkDumpJob.getJobId(),
@@ -4197,13 +4219,6 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 		// This is used by getLatestRestorableVersion() for mode=BOTH to ensure both
 		// rangefile and bulkdump data exist before marking backup as restorable
 		config.bulkDumpSnapshotEndVersion().set(tr, snapshotVersion);
-
-		// CRITICAL: Set bulkDumpJobId on the backup CONFIG so that status checks
-		// and restore operations can find it. Without this, the backup status shows
-		// "BulkLoad Compatible: no" and bulkload restore fails with "Missing backup data".
-		if (!jobId.empty()) {
-			config.bulkDumpJobId().set(tr, jobId);
-		}
 
 		// Set firstSnapshotEndVersion if not already set, BUT only if we're NOT in
 		// mode=BOTH. In mode=BOTH, firstSnapshotEndVersion tracks the rangefile snapshot
@@ -8630,9 +8645,10 @@ public:
 					}
 					doc.setKey("SnapshotMode", snapshotModeText);
 
-					// Check if backup is BulkLoad compatible
-					Optional<std::string> bulkDumpJobIdOpt = co_await config.bulkDumpJobId().get(tr);
-					doc.setKey("BulkLoadCompatible", bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty());
+					// Check if backup is BulkLoad ready: keyed off bulkDumpSnapshotEndVersion, the marker
+					// that the dumped data exists, rather than the job id, which only names the job.
+					Optional<Version> bulkDumpSnapshotEnd = co_await config.bulkDumpSnapshotEndVersion().get(tr);
+					doc.setKey("BulkLoadReady", bulkDumpSnapshotEnd.present());
 
 					// If using bulkdump mode, get bulkdump progress
 					if (snapshotModeValue == 1 || snapshotModeValue == 2) {
@@ -8777,13 +8793,14 @@ public:
 					    co_await config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
 					statusText += format("Mutation Log Type: %s\n", mutationLogTypeToString(mutationLogType).c_str());
 
-					// Check if backup is BulkLoad compatible (has bulkdump_data/).
+					// Check if backup is BulkLoad ready (has bulkdump_data/).
 					// In rangefile mode no bulkdump task ever runs, so the answer is
 					// always "no" and the line carries no information — skip it.
+					// Keyed off bulkDumpSnapshotEndVersion, the marker that the dumped data exists, rather than
+					// the job id, which only names the job.
 					if (snapshotModeValue != 0) {
-						Optional<std::string> bulkDumpJobIdOpt = co_await config.bulkDumpJobId().get(tr);
-						bool bulkLoadCompatible = bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty();
-						statusText += format("BulkLoad Compatible: %s\n", bulkLoadCompatible ? "yes" : "no");
+						Optional<Version> bulkDumpSnapshotEnd = co_await config.bulkDumpSnapshotEndVersion().get(tr);
+						statusText += format("BulkLoad Ready: %s\n", bulkDumpSnapshotEnd.present() ? "yes" : "no");
 					}
 
 					bool showBulkDump = (snapshotModeValue == 1 || snapshotModeValue == 2);

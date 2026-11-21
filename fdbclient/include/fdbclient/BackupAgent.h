@@ -953,7 +953,7 @@ public:
 	// Original BulkDump mode before backup enabled it - used to restore state after completion/crash
 	KeyBackedProperty<int> originalBulkDumpMode() { return configSpace.pack(__FUNCTION__sr); }
 
-	// BulkDump job ID - stored when BulkDump snapshot completes, used by BulkLoad restore
+	// BulkDump job ID - stored when the BulkDump job is submitted or attached to, so it is known while the job runs
 	KeyBackedProperty<std::string> bulkDumpJobId() { return configSpace.pack(__FUNCTION__sr); }
 
 	// BulkDump total bytes - stored when BulkDump snapshot completes
