@@ -854,12 +854,50 @@ std::vector<ProcessData> ManagementAPI::decodeWorkers(const RangeResult& process
 	return results;
 }
 
+TEST_CASE("/ManagementAPI/DecodeWorkers/InvalidProcessClassVersion") {
+	RangeResult classes;
+	RangeResult workers;
+	ASSERT(ManagementAPI::decodeWorkers(classes, workers).empty());
+
+	classes.push_back_deep(classes.arena(),
+	                       KeyValueRef(processClassKeyFor("worker"_sr), "\x00\x00\x00\x00\x00\x00\x00\x00"_sr));
+	try {
+		ManagementAPI::decodeWorkers(classes, workers);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_incompatible_protocol_version);
+		co_return;
+	}
+	ASSERT(false);
+}
+
 Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
 	Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
 	Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
 
 	co_await (success(processClasses) && success(processData));
 	co_return ManagementAPI::decodeWorkers(processClasses.get(), processData.get());
+}
+
+Future<std::vector<ProcessData>> getWorkers(Reference<IDatabase> db) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			co_return co_await ManagementAPI::getWorkers(tr, ThreadFuture<RangeResult>(), ThreadFuture<RangeResult>());
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+
+			err = e;
+		}
+
+		TraceEvent(SevWarn, "GetWorkersError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
+	}
 }
 
 Future<std::vector<ProcessData>> getWorkers(Database cx) {

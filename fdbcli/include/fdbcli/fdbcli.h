@@ -119,7 +119,6 @@ extern const KeyRangeRef processClassTypeSpecialKeyRange;
 inline const KeyRef errorMsgSpecialKey = "\xff\xff/error_message"_sr;
 inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 
-Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
 Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                         std::map<std::string, StorageServerInterface>* interfaces);
 
