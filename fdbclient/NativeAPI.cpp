@@ -2183,33 +2183,32 @@ Future<Void> watchStorageServerResp(Key key, Database cx) {
 	}
 }
 
+Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters);
+
+// A competing same-version lookup can install a matching watch while the storage read is pending.
+Future<Void> reconcileWatchValue(Database cx, Reference<WatchParameters> parameters, const Optional<Value>& observed) {
+	auto metadata = cx->getWatchMetadata(parameters->key);
+	if (metadata.isValid() && metadata->parameters->version <= parameters->version &&
+	    metadata->parameters->value != observed) {
+		cx->deleteWatchMetadata(parameters->key);
+		metadata->watchPromise.send(parameters->version);
+		metadata->watchFutureSS.cancel();
+	}
+
+	if (observed != parameters->value) {
+		return Void();
+	}
+	return getWatchFuture(cx, parameters);
+}
+
 Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> parameters) {
 	ReadYourWritesTransaction tr(cx);
-
 	while (true) {
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> valSS = co_await tr.get(parameters->key);
-			Reference<WatchMetadata> metadata = cx->getWatchMetadata(parameters->key);
-
-			// val_3 != val_1 (storage server value doesn't match value in map)
-			if (metadata.isValid() && valSS != metadata->parameters->value) {
-				cx->deleteWatchMetadata(parameters->key);
-
-				metadata->watchPromise.send(parameters->version);
-				metadata->watchFutureSS.cancel();
-			}
-
-			// val_3 == val_2 (storage server value matches value passed into the function -> new watch)
-			if (valSS == parameters->value) {
-				metadata = makeReference<WatchMetadata>(parameters);
-				cx->setWatchMetadata(metadata);
-
-				metadata->watchFutureSS = watchStorageServerResp(parameters->key, cx);
-				co_await metadata->watchPromise.getFuture();
-			}
-
+			Optional<Value> observed = co_await tr.get(parameters->key);
+			co_await reconcileWatchValue(cx, parameters, observed);
 			co_return;
 		} catch (Error& e) {
 			err = e;
@@ -2655,7 +2654,11 @@ void getRangeFinished(Reference<TransactionState> trState,
                       Snapshot snapshot,
                       Promise<std::pair<Key, Key>> conflictRange,
                       Reverse reverse,
-                      RangeResultFamily result) {
+                      RangeResultFamily& result) {
+	// A reverse read can normalize its begin selector before reading any of the shards below its first page.
+	if (begin.getKey() == allKeys.begin && begin.offset < 1 && (!reverse || !result.more)) {
+		result.readToBegin = true;
+	}
 	int64_t bytes = getRangeResultFamilyBytes(result);
 
 	trState->totalCost += getReadOperationCost(bytes);
@@ -2675,6 +2678,9 @@ void getRangeFinished(Reference<TransactionState> trState,
 
 		if (result.readToBegin) {
 			rangeBegin = allKeys.begin;
+		} else if (reverse && result.readThrough.present()) {
+			// The next reverse page excludes readThrough, so this page must protect it.
+			rangeBegin = result.readThrough.get();
 		} else if (((!reverse || !result.more || begin.offset > 1) && begin.offset > 0) || result.size() == 0) {
 			rangeBegin = Key(begin.getKey(), begin.arena());
 		} else {
@@ -2699,6 +2705,36 @@ void getRangeFinished(Reference<TransactionState> trState,
 
 		conflictRange.send(std::make_pair(rangeBegin, rangeEnd));
 	}
+}
+
+TEST_CASE("/fdbclient/NativeAPI/getRange/reverseReadToBegin") {
+	auto state = makeReference<TransactionState>(TaskPriority::DefaultEndpoint, SpanContext());
+	state->cx = Database(new DatabaseContext(operation_failed()));
+	auto checkPage = [&](RangeResult result, KeyRef expectedConflictBegin) {
+		Promise<std::pair<Key, Key>> conflict;
+		getRangeFinished(state,
+		                 now(),
+		                 lastLessThan(allKeys.begin),
+		                 firstGreaterOrEqual("z"_sr),
+		                 Snapshot::False,
+		                 conflict,
+		                 Reverse::True,
+		                 result);
+		ASSERT_EQ(result.readToBegin, !result.more);
+		ASSERT_EQ(conflict.getFuture().get().first, expectedConflictBegin);
+	};
+
+	RangeResult page;
+	page.more = true;
+	page.setReadThrough("m"_sr);
+	checkPage(page, "m"_sr);
+	page.push_back_deep(page.arena(), KeyValueRef("row"_sr, "value"_sr));
+	checkPage(page, "m"_sr);
+	page.readThrough.reset();
+	checkPage(page, "row"_sr);
+	page.more = false;
+	checkPage(page, allKeys.begin);
+	return Void();
 }
 
 template <class GetKeyValuesFamilyRequest, // GetKeyValuesRequest or GetMappedKeyValuesRequest
@@ -2738,7 +2774,6 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trStateInput,
 		double startTime = now();
 
 		if (begin.getKey() == allKeys.begin && begin.offset < 1) {
-			output.readToBegin = true;
 			begin = KeySelector(firstGreaterOrEqual(begin.getKey()), begin.arena());
 		}
 
@@ -2889,14 +2924,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trStateInput,
 
 				// optimization: first request got all data--just return it
 				if (finished && !output.size()) {
-					bool readToBegin = output.readToBegin;
-					bool readThroughEnd = output.readThroughEnd;
-
 					using RangeResultRefFamily = typename RangeResultFamily::RefType;
 					output = RangeResultFamily(
 					    RangeResultRefFamily(rep.data, modifiedSelectors || limits.isReached() || rep.more), rep.arena);
-					output.readToBegin = readToBegin;
-					output.readThroughEnd = readThroughEnd;
 
 					if (buggify() && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) &&
 					    (!std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value)) {
@@ -4480,6 +4510,10 @@ void Transaction::setupWatches() {
 		Future<Version> watchVersion = getCommittedVersion() > 0 ? getCommittedVersion() : getReadVersion();
 
 		for (auto& watch : watches) {
+			// A locally triggered watch may have expected a value that was never committed.
+			if (watch->onChangeTrigger.isSet()) {
+				continue;
+			}
 			watch->setWatch(
 			    watchValueMap(watchVersion,
 			                  watch->key,
@@ -6542,6 +6576,36 @@ TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/multipleShards") {
 	       unlimitedResults[3] == "B"_sr && unlimitedResults[4] == "B1"_sr && unlimitedResults[5] == "B2"_sr &&
 	       unlimitedResults[6] == "C"_sr && unlimitedResults[7] == "Z"_sr);
 
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/sameVersionWatch/preservesInstalledWatch") {
+	Database database(new DatabaseContext(operation_failed()));
+	auto watch = [](Value value, Version version) {
+		return makeReference<WatchParameters>("k"_sr,
+		                                      value,
+		                                      version,
+		                                      TagSet(),
+		                                      SpanContext(),
+		                                      TaskPriority::DefaultEndpoint,
+		                                      Optional<UID>(),
+		                                      UseProvisionalProxies::False);
+	};
+
+	auto current = watch("v"_sr, 2);
+	auto metadata = makeReference<WatchMetadata>(current);
+	database->setWatchMetadata(metadata);
+	Future<Void> first = getWatchFuture(database, current);
+	auto matching = watch("v"_sr, 2);
+	Future<Void> second = reconcileWatchValue(database, matching, current->value);
+	auto older = watch("old"_sr, 1);
+	Future<Void> obsolete = reconcileWatchValue(database, older, older->value);
+	ASSERT(obsolete.isReady() && !obsolete.isError());
+	ASSERT(!first.isReady() && !second.isReady());
+
+	database->getWatchMetadata(current->key)->watchPromise.send(3);
+	ASSERT(first.isReady() && !first.isError());
+	ASSERT(second.isReady() && !second.isError());
 	return Void();
 }
 
