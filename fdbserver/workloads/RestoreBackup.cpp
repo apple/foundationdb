@@ -55,6 +55,8 @@ struct RestoreBackupWorkload : TestWorkload {
 	bool reportBackupMetrics;
 	std::vector<PerfMetric> backupMetrics;
 	BackupSteps::BackupVersion version;
+	// Fail unless the backup is completed and has nothing registered with the cluster before the restore starts.
+	bool requireBackupStopped;
 	Optional<double> restoreDuration;
 	Optional<double> snapshotMB;
 
@@ -64,6 +66,7 @@ struct RestoreBackupWorkload : TestWorkload {
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
 		version = BackupSteps::parseBackupVersion(getOption(options, "version"_sr, "v1"_sr));
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, false));
+		requireBackupStopped = getOption(options, "requireBackupStopped"_sr, true);
 		restoreRanges = BackupRangeSpec::readOptionalRanges(options, "restoreRanges"_sr, "restoreRangePrefix"_sr);
 		addPrefix = BackupRangeSpec::readKeyOption(options, "addPrefix"_sr);
 		removePrefix = BackupRangeSpec::readKeyOption(options, "removePrefix"_sr);
@@ -106,7 +109,9 @@ struct RestoreBackupWorkload : TestWorkload {
 				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
 				    .detail("TargetVersion", waitForVersion);
 				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() >= waitForVersion) {
-					co_await BackupSteps::discontinueBackup(cx, &backupAgent, tag);
+					double stopStart = now();
+					co_await BackupSteps::stopBackup(cx, &backupAgent, tag);
+					backupMetrics.emplace_back("Backup stop wait (s)", now() - stopStart, Averaged::False);
 					co_return;
 				}
 				co_await delay(5.0);
@@ -169,6 +174,36 @@ struct RestoreBackupWorkload : TestWorkload {
 		}
 	}
 
+	// A restore must not share the cluster with backup work: a registered mutation log would copy the restore's own
+	// writes into the log keyspace.
+	Future<Void> confirmBackupStopped(Database cx) {
+		BackupSteps::BackupStopReport report = co_await BackupSteps::checkBackupStopped(cx, backupUID);
+		if (!report.stopped()) {
+			TraceEvent(requireBackupStopped ? SevWarnAlways : SevWarn, "RestoreBackupBackupNotStopped")
+			    .detail("Tag", tag)
+			    .detail("OwnRecordLeft", report.ownRecordLeft)
+			    .detail("OtherBackups", report.otherBackups)
+			    .detail("LogRangesLeft", report.logRangesLeft)
+			    .detail("LogDataLeft", report.logDataLeft);
+			if (requireBackupStopped) {
+				throw backup_error();
+			}
+		}
+	}
+
+	// The ranges must be quiescent: a write between the clear and this check fails the restore.
+	static Future<Void> checkRangesEmpty(Database cx, Standalone<VectorRef<KeyRangeRef>> ranges) {
+		for (auto const& r : ranges) {
+			Optional<Key> first = co_await BackupSteps::firstKeyIn(cx, r);
+			if (first.present()) {
+				TraceEvent(SevWarnAlways, "RestoreBackupRangeNotCleared")
+				    .detail("Range", BackupSteps::describeRange(r))
+				    .detail("FirstKey", first.get());
+				throw restore_error();
+			}
+		}
+	}
+
 	// Returns the ranges to restore: restoreRanges if set, else the ranges the backup covers. Every restoreRanges
 	// entry must lie within one backup range: submitBackup coalesces them, so a range spanning two is not covered.
 	Future<Standalone<VectorRef<KeyRangeRef>>> getRangesToRestore(Database cx) {
@@ -189,6 +224,7 @@ struct RestoreBackupWorkload : TestWorkload {
 	Future<Void> _start(Database cx) {
 		co_await delay(delayFor);
 		co_await waitOnBackup(cx);
+		co_await confirmBackupStopped(cx);
 		if (reportBackupMetrics) {
 			try {
 				co_await describeBackupMetrics();
@@ -206,6 +242,7 @@ struct RestoreBackupWorkload : TestWorkload {
 		bool inPlace = addPrefix.empty() && removePrefix.empty();
 		if (inPlace) {
 			co_await clearRanges(cx, ranges);
+			co_await checkRangesEmpty(cx, ranges);
 		}
 
 		LockDB lockDB(inPlace);
