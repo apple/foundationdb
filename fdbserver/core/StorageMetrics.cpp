@@ -620,6 +620,9 @@ std::vector<KeyRef> StorageServerMetrics::getSplitPoints(KeyRangeRef range,
                                                          int64_t chunkSize,
                                                          Optional<KeyRef> prefixToRemove,
                                                          int limit) const {
+	if (chunkSize <= 0) {
+		throw client_invalid_operation();
+	}
 	std::vector<KeyRef> toReturn;
 	KeyRef beginKey = range.begin;
 	IndexedSet<Key, int64_t>::const_iterator endKey =
@@ -996,6 +999,32 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/chunkTooLarge") {
 	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 1000 * sampleUnit, {});
 
 	ASSERT(t.empty());
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/nonPositiveChunkSize") {
+
+	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+	StorageServerMetrics ssm;
+
+	ssm.byteSample.sample.insert("A"_sr, 200 * sampleUnit);
+	ssm.byteSample.sample.insert("Absolute"_sr, 800 * sampleUnit);
+	ssm.byteSample.sample.insert("Bah"_sr, 20 * sampleUnit);
+	ssm.byteSample.sample.insert("Cat"_sr, 300 * sampleUnit);
+
+	try {
+		ssm.getSplitPoints(KeyRangeRef("Absolute"_sr, "C"_sr), 0, {});
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_client_invalid_operation);
+	}
+	try {
+		ssm.getSplitPoints(KeyRangeRef("Absolute"_sr, "C"_sr), -1, {});
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_client_invalid_operation);
+	}
 
 	return Void();
 }
