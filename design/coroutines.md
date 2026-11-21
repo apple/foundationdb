@@ -316,6 +316,13 @@ Here the frame owns a `Key`. Passing a `KeyRef`, `ValueRef`, or `StringRef` by v
 extend its arena's lifetime. Use an owning type such as `Key`, `Value`, or `Standalone<T>` when bytes must outlive
 the caller.
 
+An ordinary `Future<T>` can keep the coroutine frame and its by-value parameters alive after the body returns.
+If an object stores that future and a parameter owns the object, each can keep the other alive. Move the owning
+parameter into a local at entry so it releases the object when the body exits. The same rule applies when an
+operation stores its future in place of a previous one. Release the previous future after waiting for it, or the
+latest result can retain every earlier frame. To test either case, keep the completed future alive and check
+that the owner or previous operation has been released.
+
 If an API must take a reference, establish the required ownership before suspension and use only the owned copy
 thereafter. Copying inside the body before the first await works for an eager `Future<T>` coroutine, but not for an
 initially suspended `AsyncGenerator<T>` whose caller may already have destroyed the argument before the body starts.

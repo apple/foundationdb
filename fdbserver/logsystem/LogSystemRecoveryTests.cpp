@@ -296,6 +296,13 @@ TEST_CASE("/LogSystem/RetireOldLogRoles/FinalCoreState") {
 	co_return;
 }
 
+TEST_CASE("/LogSystem/PushResetChecker/ReleasesTracker") {
+	auto tracker = makeReference<ConnectionResetInfo>();
+	tracker->resetCheck = LogSystem::pushResetChecker(tracker, NetworkAddress());
+	co_await tracker->resetCheck;
+	ASSERT(tracker->isSoleOwner());
+}
+
 TEST_CASE("/LogSystem/RemoteLogPrefix/TrackerInstallation") {
 	constexpr double timeoutSeconds = 30.0;
 	LocalityData locality;

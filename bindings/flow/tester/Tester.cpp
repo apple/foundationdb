@@ -43,7 +43,7 @@ std::map<Standalone<StringRef>, Reference<Transaction>> trMap;
 const int ITERATION_PROGRESSION[] = { 256, 1000, 4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000 };
 const int MAX_ITERATION = sizeof(ITERATION_PROGRESSION) / sizeof(int);
 
-static Future<Void> runTest(Reference<FlowTesterData> data, Reference<Database> db, Standalone<StringRef> prefix);
+static Future<Void> runTest(Reference<FlowTesterData> dataInput, Reference<Database> db, Standalone<StringRef> prefix);
 
 THREAD_FUNC networkThread(void* api) {
 	// This is the fdb_flow network we're running on a thread
@@ -1713,10 +1713,12 @@ static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 	// printf("Total num instructions:%d\n", data->instructions.size());
 }
 
-static Future<Void> runTest(Reference<FlowTesterData> data, Reference<Database> db, Standalone<StringRef> prefix) {
+static Future<Void> runTest(Reference<FlowTesterData> dataInput, Reference<Database> db, Standalone<StringRef> prefix) {
+	// START_THREAD keeps the completed future until the parent tester finishes.
+	auto data = std::move(dataInput);
 	ASSERT(data);
 	try {
-		data->db = db;
+		data->db = std::move(db);
 		co_await getInstructions(data, prefix);
 		co_await doInstructions(data);
 		co_await waitForAll(data->subThreads);
