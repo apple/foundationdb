@@ -144,8 +144,10 @@ Future<Void> GrpcServer::stopServer() {
 	}
 
 	state_ = State::Stopping;
-	co_await pool_.post([&]() {
-		stopServerSyncInternal();
+	// The task must not touch `this`: the GrpcServer can be destroyed while it is queued or running.
+	co_await pool_.post([server = server_]() {
+		server->Shutdown();
+		server->Wait();
 		return Void();
 	});
 

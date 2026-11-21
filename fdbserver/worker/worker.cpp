@@ -2034,7 +2034,7 @@ Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionReco
 	auto db = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION);
 	Reference<IDatabase> idb = co_await safeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(db));
 	auto services = GrpcServer::ServiceList{ std::make_shared<fdbctl::ControlServiceImpl>(idb) };
-	GrpcServer::instance()->registerRoleServices(UID(), services);
+	GrpcServer::instance()->registerRoleServices(id, services);
 	TraceEvent("WorkerGrpcServerStart").detail("Address", GrpcServer::instance()->getAddress());
 	co_await Future<Void>(Never());
 }
