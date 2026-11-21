@@ -295,7 +295,14 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 		                     dbgid,
 		                     SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
 		                     getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME),
-		                     [this](TraceEvent& te) { te.detail("RecoveryState", static_cast<int>(recoveryState)); });
+		                     [this](TraceEvent& te) { 
+								te.detail("RecoveryState", static_cast<int>(recoveryState));
+#ifdef __linux__
+								auto cpuTime = getCpuTimeDuringInterval();
+								te.detail("CpuTimeSampleInterval", cpuTime.intervalTime);
+								te.detail("CpuTimeDuringInterval", cpuTime.cpuTime);
+#endif // __linux__
+							 });
 		if (forceRecovery && !controllerData->clusterControllerDcId.present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;
