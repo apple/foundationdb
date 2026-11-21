@@ -315,49 +315,8 @@ endif()
 set(WITH_GRPC ON CACHE BOOL "Build FDB with gRPC support")
 
 if (WITH_GRPC)
-  # Setup search paths.
-  if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$" AND USE_LIBCXX)
-    list(APPEND CMAKE_PREFIX_PATH /opt/grpc_clang)
-    message(STATUS "Using Clang version of gRPC")
-  else ()
-    list(APPEND CMAKE_PREFIX_PATH /opt/grpc)
-    message(STATUS "Using g++ version of gRPC")
-  endif ()
-
-  # Find dependencies for gRPC.
-  find_program(PROTOC_EXECUTABLE protoc
-    HINTS ${CMAKE_PREFIX_PATH}
-    PATH_SUFFIXES bin 
-  )
-  if (PROTOC_EXECUTABLE)
-    execute_process(
-      COMMAND ${PROTOC_EXECUTABLE} --version
-      OUTPUT_VARIABLE PROTOC_VERSION
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    string(REGEX MATCH "([0-9]+\\.[0-9]+)+" PROTOC_VERSION ${PROTOC_VERSION})
-    message(STATUS "protoc version: ${PROTOC_COMPILER} ${PROTOC_VERSION}")
-
-    if (PROTOC_VERSION VERSION_LESS "29.0")
-      message(WARNING "protoc version ${PROTOC_VERSION} is too old. Required: 29.0+")
-      set(PROTOC_EXECUTABLE NOTFOUND)
-    endif()
-  else ()
-    message(WARNING "protoc executable not found")
-  endif()
-
-  find_package(absl CONFIG)
-  find_package(utf8_range CONFIG)
-  find_package(protobuf CONFIG)
-  find_package(gRPC CONFIG)
-
-  if (PROTOC_EXECUTABLE AND gRPC_FOUND)
-    message(STATUS "gRPC found. Enabling gRPC for Flow.")
-    add_compile_definitions(FLOW_GRPC_ENABLED)
-  else()
-    message(WARNING "gRPC can't be enabled because of missing dependencies")
-    set(WITH_GRPC OFF)
-  endif()
+  include(CompileGrpc)
+  add_compile_definitions(FLOW_GRPC_ENABLED)
 endif()
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
