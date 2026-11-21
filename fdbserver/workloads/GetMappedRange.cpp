@@ -450,6 +450,12 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
 					for (StatusObjectReader role : rolesArray) {
 						if (role["role"].get_str() == "storage") {
+							// Fault injection can stall a test storage server indefinitely.
+							bool isTss = false;
+							role.get("tss", isTss);
+							if (isTss) {
+								continue;
+							}
 							role.get("query_queue_max", queryQueueMax);
 							CODE_PROBE(queryQueueMax > 0, " SS query queue is non-empty");
 							TraceEvent(SevDebug, "QueryQueueMax")
