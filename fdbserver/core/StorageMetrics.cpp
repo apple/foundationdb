@@ -114,6 +114,11 @@ int64_t StorageMetricSample::getEstimate(KeyRangeRef keys) const {
 	return sample.sumRange(keys.begin, keys.end);
 }
 
+std::pair<KeyRef, int64_t> StorageMetricSample::splitAndEstimate(KeyRangeRef range, int64_t offset, bool front) const {
+	KeyRef key = splitEstimate(range, offset, front);
+	return { key, getEstimate(front ? KeyRangeRef(range.begin, key) : KeyRangeRef(key, range.end)) };
+}
+
 KeyRef StorageMetricSample::splitEstimate(KeyRangeRef range, int64_t offset, bool front) const {
 	auto fwd_split = sample.index(front ? sample.sumTo(sample.lower_bound(range.begin)) + offset
 	                                    : sample.sumTo(sample.lower_bound(range.end)) - offset);
