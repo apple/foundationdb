@@ -21,6 +21,7 @@
 // Unit tests for the Flow runtime and libraries
 
 #include <chrono>
+#include <memory>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -28,6 +29,7 @@
 #include "flow/Error.h"
 #include "flow/ProcessEvents.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
@@ -527,6 +529,47 @@ TEST_CASE("/flow/flow/networked futures") {
 	return Void();
 }
 
+TEST_CASE("/fdbrpc/ReplyPromise/reentrantReplacement") {
+	for (bool move : { false, true }) {
+		ReplyPromise<Void> reply, replacement;
+		auto original = reply.getFuture();
+		auto expected = replacement.getFuture();
+		Future<Void> duringNotification, afterReset;
+		onReady(
+		    reply.getFuture(),
+		    [](Void) { ASSERT_ABORT(false); },
+		    [&](Error) {
+			    duringNotification = reply.getFuture();
+			    reply.reset();
+			    afterReset = reply.getFuture();
+		    });
+		if (move) {
+			reply = std::move(replacement);
+		} else {
+			reply = replacement;
+		}
+		ASSERT(original.isError() && original.getError().code() == error_code_broken_promise);
+		ASSERT(duringNotification == expected);
+		reply.send(Void());
+		ASSERT(afterReset.canGet());
+	}
+
+	ReplyPromise<Void> requester, reply, moved;
+	onReady(
+	    reply.getFuture(),
+	    [](Void) { ASSERT_ABORT(false); },
+	    [&](Error error) {
+		    ASSERT_EQ(error.code(), error_code_broken_promise);
+		    moved = std::move(reply);
+	    });
+	auto response = requester.getFuture();
+	Endpoint endpoint(FlowTransport::transport().getLocalAddresses(), requester.getEndpoint().token);
+	reply.loadRemoteEndpoint(endpoint);
+	ASSERT(!reply.isValid());
+	moved.send(Void());
+	co_await timeoutError(response, 5.0);
+}
+
 TEST_CASE("/fdbrpc/ReplyPromise/reuse state on deserialize") {
 	using flow_tests_details::Int;
 	const Endpoint remote({ NetworkAddress(IPAddress(0x01010101), 1) }, UID(1, 2));
@@ -652,6 +695,142 @@ TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/networkSenderKnownErrors") {
 		co_return;
 	}
 	co_await flow_tests_details::checkNetworkSenderKnownErrors();
+}
+
+namespace {
+struct TestStreamReply : ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 1449985;
+
+	size_t expectedSize() const { return sizeof(sequence); }
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, acknowledgeToken, sequence);
+	}
+};
+
+struct TestStreamRequest {
+	constexpr static FileIdentifier file_identifier = 1449986;
+	ReplyPromiseStream<TestStreamReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+template <class Request, class Stream = RequestStream<Request>, class Dispatch>
+auto destroyCallerDuringLocalDispatch(Dispatch dispatch) {
+	auto sender = std::make_unique<Stream>();
+	auto request = std::make_unique<Request>();
+	auto dropCaller = [](auto& sender, auto& request) -> AsyncResult<Void> {
+		ScopeExit cleanup([&] {
+			if constexpr (requires { sender->getReceiver(); }) {
+				ASSERT(!sender->getReceiver().first->getRawEndpoint().isValid());
+				sender->getEndpoint(TaskPriority::ReadSocket);
+			}
+			request.reset();
+			sender.reset();
+		});
+		co_await Future<Void>(Never());
+	};
+
+	auto delivered = race(sender->getFuture(), dropCaller(sender, request));
+	auto response = dispatch(*sender, *request);
+	ASSERT(!sender && !request);
+	ASSERT(delivered.canGet() && delivered.get().index() == 0);
+	return std::pair{ std::get<0>(delivered.get()), std::move(response) };
+}
+
+template <class Stream>
+Stream takeReplacementDuringRaceCleanup(const Stream& expected, bool move) {
+	Stream sender, saved;
+	Stream replacement(expected);
+	auto takeOnCancel = [](Stream& sender, const Stream& expected, Stream& saved) -> AsyncResult<Void> {
+		ScopeExit cleanup([&] {
+			if (sender == expected) {
+				saved = std::move(sender);
+			}
+		});
+		co_await Future<Void>(Never());
+	};
+	auto raced = race(sender.getFuture(), takeOnCancel(sender, expected, saved));
+	if (move) {
+		sender = std::move(replacement);
+	} else {
+		sender = replacement;
+	}
+	ASSERT(raced.isError() && raced.getError().code() == error_code_broken_promise);
+	ASSERT(saved == expected);
+	return saved;
+}
+} // namespace
+
+TEST_CASE("/fdbrpc/RequestStream/reentrantReplacement") {
+	for (bool move : { false, true }) {
+		RequestStream<flow_tests_details::Int> expected;
+		auto saved = takeReplacementDuringRaceCleanup(expected, move);
+		saved.send(flow_tests_details::Int(17));
+		ASSERT_EQ(expected.getFuture().pop().value, 17);
+	}
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/RequestStream/destroyCallerDuringLocalDispatch") {
+	using flow_tests_details::Int;
+	auto check = [](auto dispatch) {
+		auto [request, response] = destroyCallerDuringLocalDispatch<ReplyPromise<Int>>(dispatch);
+		request.send(Int(17));
+		ASSERT(response.canGet() && response.get().present());
+		ASSERT_EQ(response.get().get().value, 17);
+	};
+	check([](auto& stream, auto& req) { return errorOr(stream.getReply(req)); });
+	check([](auto& stream, auto& req) { return stream.tryGetReply(req); });
+	check([](auto& stream, auto& req) { return stream.tryGetReply(req, TaskPriority::DefaultEndpoint); });
+	check([](auto& stream, auto& req) { return stream.getReplyUnlessFailedFor(req, 60.0, 0.0); });
+	check([](auto& stream, auto& req) {
+		return stream.getReplyUnlessFailedFor(req, 60.0, 0.0, TaskPriority::DefaultEndpoint);
+	});
+
+	auto [request, response] = destroyCallerDuringLocalDispatch<TestStreamRequest>(
+	    [](auto& stream, auto& req) { return stream.getReplyStream(req); });
+	request.reply.sendError(end_of_stream());
+	ASSERT_EQ(response.getFuture().getError().code(), error_code_end_of_stream);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/PromiseStream/destroyCallerDuringLocalDispatch") {
+	using Request = flow_tests_details::ReplyPromiseReuseRequest;
+	auto [received, response] = destroyCallerDuringLocalDispatch<Request, PromiseStream<Request>>(
+	    [](auto& stream, auto& request) { return stream.getReply(request); });
+	received.reply.send(flow_tests_details::Int(17));
+	ASSERT(response.canGet() && response.get().value == 17);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromiseStream/reentrantReplacement") {
+	for (bool move : { false, true }) {
+		ReplyPromiseStream<TestStreamReply> expected;
+		auto alias = expected;
+		auto disconnectError = alias.getErrorFutureAndDelPromiseRef();
+		auto saved = takeReplacementDuringRaceCleanup(expected, move);
+		saved.sendError(io_error());
+		auto reader = expected.getFuture();
+		ASSERT(reader.isError() && reader.getError().code() == error_code_io_error);
+		ASSERT(disconnectError.isError() && disconnectError.getError().code() == error_code_io_error);
+	}
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromiseStream/destroySenderDuringErrorDelivery") {
+	auto sender = std::make_unique<ReplyPromiseStream<TestStreamReply>>();
+	auto disconnectError = ReplyPromiseStream<TestStreamReply>(*sender).getErrorFutureAndDelPromiseRef();
+	onReady(sender->onError(), [](Void) { ASSERT_ABORT(false); }, [&](Error) { sender.reset(); });
+
+	sender->sendError(io_error());
+	ASSERT(!sender);
+	ASSERT(disconnectError.isError());
+	ASSERT_EQ(disconnectError.getError().code(), error_code_io_error);
+	return Void();
 }
 
 TEST_CASE("/flow/flow/quorum") {

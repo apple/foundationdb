@@ -29,6 +29,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.h"
 #include "fdbrpc/simulator.h"
+#include <utility>
 #ifdef WITH_SWIFT
 #include <swift/bridging>
 #endif /* WITH_SWIFT */
@@ -184,6 +185,7 @@ public:
 		return sav->getEndpoint(taskID);
 	}
 	void loadRemoteEndpoint(const Endpoint& endpoint) {
+		ReplyPromise<T> previous(nullptr);
 		// Request deserialization first creates an unused local reply state. Reuse it when it has no observers,
 		// aliases, endpoint, or compatibility policy; all other states retain the original replacement semantics.
 		if (sav != nullptr && sav->canBeSet() && sav->getFutureReferenceCount() == 0 &&
@@ -191,7 +193,9 @@ public:
 		    !sav->hasPeerCompatibilityPolicy()) {
 			sav->setRemoteEndpoint(endpoint, false);
 		} else {
-			*this = ReplyPromise<T>(endpoint);
+			// An old waiter can move or reset this handle. Keep its state alive until the sender is attached.
+			previous = ReplyPromise<T>(endpoint);
+			swap(previous);
 		}
 		networkSender(Uncancellable(), getFuture(), &sav->getRawEndpoint());
 	}
@@ -201,16 +205,11 @@ public:
 	void operator=(const ReplyPromise& rhs) {
 		if (rhs.sav)
 			rhs.sav->addPromiseRef();
-		if (sav)
-			sav->delPromiseRef();
-		sav = rhs.sav;
+		replaceState(rhs.sav);
 	}
 	void operator=(ReplyPromise&& rhs) noexcept {
 		if (sav != rhs.sav) {
-			if (sav)
-				sav->delPromiseRef();
-			sav = rhs.sav;
-			rhs.sav = 0;
+			replaceState(std::exchange(rhs.sav, nullptr));
 		}
 	}
 	void reset() { *this = ReplyPromise<T>(); }
@@ -228,6 +227,13 @@ public:
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
 
 private:
+	// Dropping the last promise can deliver broken_promise and reenter this handle.
+	void replaceState(NetSAV<T>* next) {
+		if (auto* old = std::exchange(sav, next)) {
+			old->delPromiseRef();
+		}
+	}
+
 	NetSAV<T>* sav;
 };
 
@@ -519,9 +525,12 @@ public:
 				    SerializeSource<ErrorOr<EnsureTable<T>>>(exc), getEndpoint(), false);
 			}
 		} else {
-			queue->sendError(exc);
-			if (errors && errors->canBeSet()) {
-				errors->sendError(exc);
+			// An onError observer can destroy the sending handle before the queue finishes notifying waiters.
+			ReplyPromiseStream sender(*this);
+			const Error error = exc;
+			sender.queue->sendError(error);
+			if (sender.errors && sender.errors->canBeSet()) {
+				sender.errors->sendError(error);
 			}
 		}
 	}
@@ -635,37 +644,32 @@ public:
 	// client
 	void setByteLimit(int64_t byteLimit) const { queue->acknowledgements.bytesLimit = byteLimit; }
 
-	// Acquiring each incoming reference before releasing its old reference preserves self-assignment.
-	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const ReplyPromiseStream& rhs) {
-		rhs.queue->addPromiseRef();
-		if (queue)
-			queue->delPromiseRef();
-		queue = rhs.queue;
-		if (rhs.errors)
-			rhs.errors->addPromiseRef();
-		if (errors)
-			errors->delPromiseRef();
-		errors = rhs.errors;
+		if (this != &rhs) {
+			replaceState(rhs);
+		}
 	}
 	void operator=(ReplyPromiseStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
-			if (queue)
-				queue->delPromiseRef();
-			queue = rhs.queue;
-			rhs.queue = 0;
-		}
-		if (errors != rhs.errors) {
-			if (errors)
-				errors->delPromiseRef();
-			errors = rhs.errors;
-			rhs.errors = 0;
+			replaceState(std::move(rhs));
+		} else if (errors != rhs.errors) {
+			// Aliases retain their shared queue. One may have relinquished its disconnect-error reference.
+			auto* previous = errors;
+			errors = std::exchange(rhs.errors, nullptr);
+			if (previous)
+				previous->delPromiseRef();
 		}
 	}
 
 	void reset() { *this = ReplyPromiseStream<T>(); }
 
 private:
+	// Releasing either old sender can synchronously invoke callbacks that move or destroy this handle.
+	void replaceState(ReplyPromiseStream replacement) noexcept {
+		std::swap(queue, replacement.queue);
+		std::swap(errors, replacement.errors);
+	}
+
 	NetNotifiedQueueWithAcknowledgements<T>* queue;
 	SAV<Void>* errors;
 };
@@ -784,15 +788,15 @@ public:
 	//   If cancelled, request was or will be delivered zero or more times.
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value) const {
-		// Ensure the same request isn't used multiple times
-		ASSERT(!getReplyPromise(value).isSet());
 		if (queue->isRemoteEndpoint()) {
-			return sendCanceler(getReplyPromise(value),
-			                    FlowTransport::transport().sendReliable(SerializeSource<T>(value), getEndpoint()),
-			                    getEndpoint());
+			auto reply = getReplyPromise(value);
+			ASSERT(!reply.isSet());
+			Endpoint endpoint = getEndpoint();
+			auto* packet = FlowTransport::transport().sendReliable(SerializeSource<T>(value), endpoint);
+			return sendCanceler(std::move(reply), packet, std::move(endpoint));
 		}
-		send(value);
-		return reportEndpointFailure(getReplyPromise(value).getFuture(), getEndpoint());
+		auto [reply, endpoint] = getLocalReply(value, TaskPriority::DefaultEndpoint);
+		return reportEndpointFailure(std::move(reply), std::move(endpoint));
 	}
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) const {
@@ -818,45 +822,12 @@ public:
 	template <class X>
 	Future<ErrorOr<REPLY_TYPE(X)>> tryGetReply(const X& value, TaskPriority taskID) const {
 		setReplyPriority(value, taskID);
-		if (queue->isRemoteEndpoint()) {
-			Future<Void> disc =
-			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint(taskID));
-			if (disc.isReady()) {
-				if (IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint(taskID))) {
-					return ErrorOr<REPLY_TYPE(X)>(unauthorized_attempt());
-				}
-				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
-			}
-			Reference<Peer> peer =
-			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
-			auto& p = getReplyPromise(value);
-			return waitValueOrSignal(p.getFuture(), std::move(disc), getEndpoint(taskID), p, std::move(peer));
-		}
-		send(value);
-		auto& p = getReplyPromise(value);
-		return waitValueOrSignal(p.getFuture(), Never(), getEndpoint(taskID), p);
+		return tryGetReplyAt(value, taskID);
 	}
 
 	template <class X>
 	Future<ErrorOr<REPLY_TYPE(X)>> tryGetReply(const X& value) const {
-		if (queue->isRemoteEndpoint()) {
-			Future<Void> disc =
-			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
-			if (disc.isReady()) {
-				if (IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint())) {
-					return ErrorOr<REPLY_TYPE(X)>(unauthorized_attempt());
-				}
-				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
-			}
-			Reference<Peer> peer =
-			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
-			auto& p = getReplyPromise(value);
-			return waitValueOrSignal(p.getFuture(), std::move(disc), getEndpoint(), p, std::move(peer));
-		} else {
-			send(value);
-			auto& p = getReplyPromise(value);
-			return waitValueOrSignal(p.getFuture(), Never(), getEndpoint(), p);
-		}
+		return tryGetReplyAt(value, TaskPriority::DefaultEndpoint);
 	}
 
 	// stream.getReplyStream( request )
@@ -867,27 +838,25 @@ public:
 
 	template <class X>
 	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value) const {
+		auto reply = getReplyPromiseStream(value);
 		if (queue->isRemoteEndpoint()) {
-			Future<Void> disc =
-			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
-			auto& p = getReplyPromiseStream(value);
+			Endpoint endpoint = getEndpoint();
+			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(endpoint);
 			if (disc.isReady() || (g_network->isSimulated() && !g_simulator->speedUpSimulation && buggify(0.01))) {
-				if (disc.isReady() && IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint())) {
-					p.sendError(unauthorized_attempt());
+				if (disc.isReady() && IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)) {
+					reply.sendError(unauthorized_attempt());
 				} else {
-					p.sendError(request_maybe_delivered());
+					reply.sendError(request_maybe_delivered());
 				}
 			} else {
 				Reference<Peer> peer =
-				    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
-				endStreamOnDisconnect(Uncancellable(), disc, p, getEndpoint(), peer);
+				    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), endpoint, true);
+				endStreamOnDisconnect(Uncancellable(), std::move(disc), reply, std::move(endpoint), std::move(peer));
 			}
-			return p;
 		} else {
 			send(value);
-			auto& p = getReplyPromiseStream(value);
-			return p;
 		}
+		return reply;
 	}
 
 	// stream.getReplyUnlessFailedFor( request, double sustainedFailureDuration, double sustainedFailureSlope )
@@ -904,22 +873,16 @@ public:
 	                                                       double sustainedFailureDuration,
 	                                                       double sustainedFailureSlope,
 	                                                       TaskPriority taskID) const {
-		// If it is local endpoint, no need for failure monitoring
-		return waitValueOrSignal(getReply(value, taskID),
-		                         makeDependent<T>(IFailureMonitor::failureMonitor())
-		                             .onFailedFor(getEndpoint(taskID), sustainedFailureDuration, sustainedFailureSlope),
-		                         getEndpoint(taskID));
+		setReplyPriority(value, taskID);
+		return getReplyUnlessFailedForAt(value, sustainedFailureDuration, sustainedFailureSlope, taskID);
 	}
 
 	template <class X>
 	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(const X& value,
 	                                                       double sustainedFailureDuration,
 	                                                       double sustainedFailureSlope) const {
-		// If it is local endpoint, no need for failure monitoring
-		return waitValueOrSignal(getReply(value),
-		                         makeDependent<T>(IFailureMonitor::failureMonitor())
-		                             .onFailedFor(getEndpoint(), sustainedFailureDuration, sustainedFailureSlope),
-		                         getEndpoint());
+		return getReplyUnlessFailedForAt(
+		    value, sustainedFailureDuration, sustainedFailureSlope, TaskPriority::DefaultEndpoint);
 	}
 
 	template <class X>
@@ -965,40 +928,14 @@ public:
 		// destructor does not release a tracking record now owned by *this (avoids double-release).
 		rhs.m_promiseRefTrackingId = -1;
 	}
-	// Acquiring each incoming reference before releasing its old reference preserves self-assignment.
-	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const RequestStream& rhs) {
-		rhs.queue->addPromiseRef();
-		int64_t newTrackingId = -1;
-		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.queue->isRemoteEndpoint() && g_network &&
-		    g_network->global(INetwork::enFlowTransport)) {
-			const auto& ep = rhs.queue->getEndpoint(TaskPriority::DefaultEndpoint);
-			newTrackingId =
-			    FlowTransport::transport().interfaceTracker.promiseRefAdded(ep.getPrimaryAddress(), ep.token);
+		if (this != &rhs) {
+			replaceState(rhs);
 		}
-		if (queue) {
-			queue->delPromiseRef();
-			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_promiseRefTrackingId >= 0 && g_network &&
-			    g_network->global(INetwork::enFlowTransport)) {
-				FlowTransport::transport().interfaceTracker.promiseRefReleased(m_promiseRefTrackingId);
-			}
-		}
-		queue = rhs.queue;
-		m_promiseRefTrackingId = newTrackingId;
 	}
 	void operator=(RequestStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
-			if (queue) {
-				queue->delPromiseRef();
-				if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_promiseRefTrackingId >= 0 && g_network &&
-				    g_network->global(INetwork::enFlowTransport)) {
-					FlowTransport::transport().interfaceTracker.promiseRefReleased(m_promiseRefTrackingId);
-				}
-			}
-			queue = rhs.queue;
-			m_promiseRefTrackingId = rhs.m_promiseRefTrackingId;
-			rhs.queue = 0;
-			rhs.m_promiseRefTrackingId = -1;
+			replaceState(std::move(rhs));
 		}
 	}
 	~RequestStream() {
@@ -1030,6 +967,74 @@ public:
 	}
 
 private:
+	// A local handler can register the endpoint at its own priority and destroy the caller during dispatch.
+	template <class X>
+	Endpoint sendLocalAndGetEndpoint(const X& value, TaskPriority taskID) const {
+		auto* source = queue;
+		auto reader = getFuture();
+		source->send(value);
+		return source->getEndpoint(taskID);
+	}
+
+	template <class X>
+	std::pair<Future<REPLY_TYPE(X)>, Endpoint> getLocalReply(const X& value, TaskPriority taskID) const {
+		const auto& reply = getReplyPromise(value);
+		ASSERT(!reply.isSet());
+		auto response = reply.getFuture();
+		return { std::move(response), sendLocalAndGetEndpoint(value, taskID) };
+	}
+
+	template <class X>
+	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedForAt(const X& value,
+	                                                         double sustainedFailureDuration,
+	                                                         double sustainedFailureSlope,
+	                                                         TaskPriority taskID) const {
+		Endpoint endpoint;
+		Future<REPLY_TYPE(X)> reply;
+		if (queue->isRemoteEndpoint()) {
+			endpoint = getEndpoint(taskID);
+			reply = getReply(value);
+		} else {
+			auto [response, localEndpoint] = getLocalReply(value, taskID);
+			endpoint = std::move(localEndpoint);
+			reply = reportEndpointFailure(std::move(response), endpoint);
+		}
+		auto failure = makeDependent<T>(IFailureMonitor::failureMonitor())
+		                   .onFailedFor(endpoint, sustainedFailureDuration, sustainedFailureSlope);
+		return waitValueOrSignal(std::move(reply), std::move(failure), std::move(endpoint));
+	}
+
+	template <class X>
+	Future<ErrorOr<REPLY_TYPE(X)>> tryGetReplyAt(const X& value, TaskPriority taskID) const {
+		Endpoint endpoint;
+		auto reply = getReplyPromise(value);
+		Future<Void> disconnect;
+		Reference<Peer> peer;
+		if (queue->isRemoteEndpoint()) {
+			endpoint = getEndpoint(taskID);
+			disconnect = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(endpoint);
+			if (disconnect.isReady()) {
+				if (IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)) {
+					return ErrorOr<REPLY_TYPE(X)>(unauthorized_attempt());
+				}
+				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
+			}
+			peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), endpoint, true);
+		} else {
+			endpoint = sendLocalAndGetEndpoint(value, taskID);
+			disconnect = Never();
+		}
+		auto result = reply.getFuture();
+		return waitValueOrSignal(
+		    std::move(result), std::move(disconnect), std::move(endpoint), std::move(reply), std::move(peer));
+	}
+
+	// Publish the queue and its tracking ID before the old queue can notify a broken_promise waiter.
+	void replaceState(RequestStream replacement) noexcept {
+		std::swap(queue, replacement.queue);
+		std::swap(m_promiseRefTrackingId, replacement.m_promiseRefTrackingId);
+	}
+
 	NetNotifiedQueue<T, IsPublic>* queue;
 	// InterfaceTracker id for this stream's promise-ref, or -1 when not tracked. It stays -1
 	// whenever STALE_PEER_OBSERVABILITY is off (the gated *RefAdded blocks never run), so the

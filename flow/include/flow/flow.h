@@ -724,6 +724,9 @@ struct LocalLineage {
 	}
 };
 
+template <class T>
+class Promise;
+
 // SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
@@ -732,6 +735,16 @@ struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
 
 private:
 	typename std::aligned_storage<sizeof(T), __alignof(T)>::type value_storage;
+
+	// A value constructor or callback can release the sending Promise and every observer before send returns.
+	Promise<T> holdForSend() {
+		if (!promises) {
+			// A Future constructed already ready owns its unpublished SAV directly.
+			return Promise<T>(nullptr);
+		}
+		addPromiseRef();
+		return Promise<T>(this);
+	}
 
 public:
 	Error error_state;
@@ -763,6 +776,7 @@ public:
 	template <class U>
 	void send(U&& value) {
 		ASSERT(canBeSet());
+		auto sender = holdForSend();
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
 
@@ -778,6 +792,7 @@ public:
 
 	void sendError(Error err) {
 		ASSERT(canBeSet() && int16_t(err.code()) > 0);
+		auto sender = holdForSend();
 		this->error_state = err;
 		while (Callback<T>::next != this) {
 			Callback<T>::next->error(err);
@@ -911,9 +926,6 @@ public:
 	void fire(T const&) override { ASSERT(false); }
 };
 
-template <class T>
-class Promise;
-
 #ifdef WITH_SWIFT
 #ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
 using flow_swift::FlowCheckedContinuation;
@@ -1003,8 +1015,9 @@ public:
 			sav->addFutureRef();
 	}
 	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = nullptr; }
-	Future(const T& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(presentValue); }
-	Future(T&& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(std::move(presentValue)); }
+	// Own the SAV before constructing T so a throwing copy or move releases the allocation.
+	Future(const T& presentValue) : Future(new SAV<T>(1, 0)) { sav->send(presentValue); }
+	Future(T&& presentValue) : Future(new SAV<T>(1, 0)) { sav->send(std::move(presentValue)); }
 	Future(Never) : sav(new SAV<T>(1, 0)) { sav->send(Never()); }
 	Future(const Error& error) : sav(new SAV<T>(1, 0)) { sav->sendError(error); }
 
@@ -1017,16 +1030,11 @@ public:
 	void operator=(const Future<T>& rhs) {
 		if (rhs.sav)
 			rhs.sav->addFutureRef();
-		if (sav)
-			sav->delFutureRef();
-		sav = rhs.sav;
+		replaceState(rhs.sav);
 	}
 	void operator=(Future<T>&& rhs) noexcept {
 		if (sav != rhs.sav) {
-			if (sav)
-				sav->delFutureRef();
-			sav = rhs.sav;
-			rhs.sav = nullptr;
+			replaceState(std::exchange(rhs.sav, nullptr));
 		}
 	}
 	bool operator==(const Future& rhs) { return rhs.sav == sav; }
@@ -1058,6 +1066,13 @@ public:
 	explicit Future(SAV<T>* sav) : sav(sav) {}
 
 private:
+	// Dropping the last future can cancel a producer whose cleanup reenters this handle.
+	void replaceState(SAV<T>* next) {
+		if (auto* old = std::exchange(sav, next)) {
+			old->delFutureRef();
+		}
+	}
+
 	SAV<T>* sav;
 	friend class Promise<T>;
 };
@@ -1124,16 +1139,11 @@ public:
 	void operator=(const Promise& rhs) {
 		if (rhs.sav)
 			rhs.sav->addPromiseRef();
-		if (sav)
-			sav->delPromiseRef();
-		sav = rhs.sav;
+		replaceState(rhs.sav);
 	}
 	void operator=(Promise&& rhs) noexcept {
 		if (sav != rhs.sav) {
-			if (sav)
-				sav->delPromiseRef();
-			sav = rhs.sav;
-			rhs.sav = 0;
+			replaceState(std::exchange(rhs.sav, nullptr));
 		}
 	}
 	void reset() { *this = Promise<T>(); }
@@ -1151,6 +1161,13 @@ public:
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
 
 private:
+	// Dropping the last promise can deliver broken_promise and reenter this handle.
+	void replaceState(SAV<T>* next) {
+		if (auto* old = std::exchange(sav, next)) {
+			old->delPromiseRef();
+		}
+	}
+
 	SAV<T>* sav;
 };
 
@@ -1318,10 +1335,12 @@ public:
 		m_futureRefTrackingId = -1;
 	}
 	FutureStream() : queue(nullptr), m_futureRefTrackingId(-1) {}
-	FutureStream(const FutureStream& rhs) : queue(rhs.queue), m_futureRefTrackingId(-1) {
-		queue->addFutureRef();
-		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.m_futureRefTrackingId >= 0 && g_futureRefCopiedCallback) {
-			m_futureRefTrackingId = g_futureRefCopiedCallback(rhs.m_futureRefTrackingId);
+	FutureStream(const FutureStream& rhs) : FutureStream(rhs.queue) {
+		if (queue) {
+			queue->addFutureRef();
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.m_futureRefTrackingId >= 0 && g_futureRefCopiedCallback) {
+				m_futureRefTrackingId = g_futureRefCopiedCallback(rhs.m_futureRefTrackingId);
+			}
 		}
 	}
 	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue), m_futureRefTrackingId(rhs.m_futureRefTrackingId) {
@@ -1336,32 +1355,13 @@ public:
 		}
 	}
 	void operator=(const FutureStream& rhs) {
-		if (this == &rhs) {
-			return;
-		}
-		rhs.queue->addFutureRef();
-		if (queue)
-			queue->delFutureRef();
-		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback) {
-			g_futureRefReleasedCallback(m_futureRefTrackingId);
-		}
-		queue = rhs.queue;
-		m_futureRefTrackingId = -1;
-		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.m_futureRefTrackingId >= 0 && g_futureRefCopiedCallback) {
-			m_futureRefTrackingId = g_futureRefCopiedCallback(rhs.m_futureRefTrackingId);
+		if (this != &rhs) {
+			replaceState(rhs);
 		}
 	}
 	void operator=(FutureStream&& rhs) noexcept {
 		if (rhs.queue != queue) {
-			if (queue)
-				queue->delFutureRef();
-			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback) {
-				g_futureRefReleasedCallback(m_futureRefTrackingId);
-			}
-			queue = rhs.queue;
-			m_futureRefTrackingId = rhs.m_futureRefTrackingId;
-			rhs.queue = nullptr;
-			rhs.m_futureRefTrackingId = -1;
+			replaceState(std::move(rhs));
 		}
 	}
 	bool operator==(const FutureStream& rhs) { return rhs.queue == queue; }
@@ -1380,6 +1380,12 @@ public:
 	int64_t getFutureRefTrackingId() const { return m_futureRefTrackingId; }
 
 private:
+	// Dropping the last reader can break the old queue's onEmpty promise and reenter this handle.
+	void replaceState(FutureStream replacement) noexcept {
+		std::swap(queue, replacement.queue);
+		std::swap(m_futureRefTrackingId, replacement.m_futureRefTrackingId);
+	}
+
 	NotifiedQueue<T>* queue;
 	int64_t m_futureRefTrackingId;
 };
@@ -1433,8 +1439,9 @@ public:
 	//   If cancelled, request was or will be delivered zero or more times.
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value) {
+		auto reply = getReplyPromise(value).getFuture();
 		send(value);
-		return getReplyPromise(value).getFuture();
+		return reply;
 	}
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) {
@@ -1465,17 +1472,13 @@ public:
 	// Acquiring the incoming reference first keeps the shared state alive during self-assignment.
 	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const PromiseStream& rhs) {
-		rhs.queue->addPromiseRef();
-		if (queue)
-			queue->delPromiseRef();
-		queue = rhs.queue;
+		if (rhs.queue)
+			rhs.queue->addPromiseRef();
+		replaceState(rhs.queue);
 	}
 	void operator=(PromiseStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
-			if (queue)
-				queue->delPromiseRef();
-			queue = rhs.queue;
-			rhs.queue = 0;
+			replaceState(std::exchange(rhs.queue, nullptr));
 		}
 	}
 	~PromiseStream() {
@@ -1502,6 +1505,13 @@ public:
 	int getPromiseReferenceCount() const { return queue->getPromiseReferenceCount(); }
 
 private:
+	// Dropping the last sender can synchronously deliver broken_promise to the reader.
+	void replaceState(NotifiedQueue<T>* next) {
+		if (auto* old = std::exchange(queue, next)) {
+			old->delPromiseRef();
+		}
+	}
+
 	NotifiedQueue<T>* queue;
 };
 
@@ -1533,7 +1543,7 @@ static inline void destruct(T& t) {
 
 // These stay as int8_t constants rather than an enum class because actor_wait_state also stores generated callback
 // group numbers, so the code frequently mixes named sentinel states with arbitrary positive integer values.
-constexpr int8_t ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK = -2;
+constexpr int8_t ACTOR_WAIT_STATE_CANCELLED_NO_CALLBACK = -2;
 constexpr int8_t ACTOR_WAIT_STATE_CANCELLED = -1;
 constexpr int8_t ACTOR_WAIT_STATE_NOT_WAITING = 0;
 constexpr int8_t ACTOR_WAIT_STATE_WAITING = 1;
