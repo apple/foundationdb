@@ -1811,7 +1811,7 @@ Future<Void> recurringAsync(
 }
 
 template <class T>
-Future<T> brokenPromiseToNever(Future<T> in, ExplicitVoid = {}) {
+Future<T> brokenPromiseToNever(Future<T> in, ExplicitVoid = {}, NoThrowOnCancel = {}) {
 	Error err;
 	try {
 		T t = co_await in;
