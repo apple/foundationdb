@@ -343,6 +343,7 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml IGNORE)
 
     add_fdb_test(TEST_FILES rare/PerpetualWiggleStorageMigration.toml)
+    add_fdb_test(TEST_FILES rare/YCSBKVStoreRocksDB.toml)
   else()
     add_fdb_test(TEST_FILES fast/ValidateStorage.toml IGNORE)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml IGNORE)
@@ -353,6 +354,7 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml IGNORE)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml IGNORE)
     add_fdb_test(TEST_FILES rare/PerpetualWiggleStorageMigration.toml IGNORE)
+    add_fdb_test(TEST_FILES rare/YCSBKVStoreRocksDB.toml IGNORE)
 
   endif()
 
@@ -386,6 +388,10 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/AllSimUnitTests.toml IGNORE)
   add_fdb_test(TEST_FILES rare/StatusBuilderPerf.toml)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
+  add_fdb_test(TEST_FILES rare/ConcurrentClearRange.toml)
+  add_fdb_test(TEST_FILES rare/ExcludeProcessesYCSB.toml)
+  add_fdb_test(TEST_FILES rare/YCSB.toml)
+  add_fdb_test(TEST_FILES rare/YCSBKVStore.toml)
 
   if (RESTART_TEST)
     add_fdb_test(

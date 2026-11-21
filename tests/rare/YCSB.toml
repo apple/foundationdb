@@ -1,0 +1,56 @@
+# YCSB against a cluster in both layouts. Each layout loads its own dataset under a distinct nodePrefix.
+
+[[test]]
+testTitle = 'YCSBSingleCFReadOnly'
+clearAfterTest = false
+waitForQuiescence = false
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'YCSB'
+    testDuration = 15.0
+    threads = 4
+    nodeCount = 1000
+    nodePrefix = 1
+    keyBytes = 32
+    tps = 100
+    valueBytes = 1024
+    readWeight = 100
+    updateWeight = 0
+    variant = 'singleCF'
+
+[[test]]
+testTitle = 'YCSBSingleCFReadWrite'
+clearAfterTest = false
+runSetup = false
+
+    [[test.workload]]
+    testName = 'YCSB'
+    testDuration = 15.0
+    threads = 4
+    nodeCount = 1000
+    nodePrefix = 1
+    keyBytes = 32
+    tps = 100
+    valueBytes = 1024
+    readWeight = 80
+    updateWeight = 20
+    variant = 'singleCF'
+    distribution = 'random'
+
+[[test]]
+testTitle = 'YCSBMultiCFReadWriteUnlimited'
+
+    [[test.workload]]
+    testName = 'YCSB'
+    testDuration = 15.0
+    # fewer threads than clients, so some clients run none
+    threads = 1
+    nodeCount = 1000
+    nodePrefix = 2
+    keyBytes = 32
+    tps = 0
+    valueBytes = 1024
+    readWeight = 80
+    updateWeight = 20
+    variant = 'multiCF'

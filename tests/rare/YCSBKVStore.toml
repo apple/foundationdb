@@ -1,0 +1,99 @@
+# YCSB directly against Redwood and SQLite storage engine instances in the tester process, covering both layouts,
+# random order loads, vacuum, reusing a loaded store in a later test, and dropping caches before reads.
+
+[[test]]
+testTitle = 'YCSBKVStoreSingleCFReadWrite'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'YCSBKVStore'
+    testDuration = 5.0
+    numActors = 4
+    commitInterval = 50
+    tps = 100
+    nodeCount = 1000
+    valueBytes = 1024
+    readWeight = 80
+    updateWeight = 20
+    variant = 'singleCF'
+    storeType = 'ssd-redwood-1'
+
+[[test]]
+testTitle = 'YCSBKVStoreMultiCFReadWrite'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'YCSBKVStore'
+    testDuration = 5.0
+    numActors = 4
+    commitInterval = 50
+    tps = 100
+    nodeCount = 1000
+    valueBytes = 1024
+    readWeight = 80
+    updateWeight = 20
+    variant = 'multiCF'
+    storeType = 'ssd-redwood-1'
+
+[[test]]
+testTitle = 'YCSBKVStoreRandomLoadVacuum'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'YCSBKVStore'
+    testDuration = 0.0
+    nodeCount = 2000
+    valueBytes = 100
+    fieldCount = 10
+    variant = 'multiCF'
+    storeType = 'ssd-redwood-1'
+    loadOrder = 'random'
+    loadBatchBytes = 100000
+    vacuum = true
+    filename = 'ycsb-kv-reuse.redwood-v1'
+
+[[test]]
+testTitle = 'YCSBKVStoreReadOnlyReuse'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'YCSBKVStore'
+    testDuration = 5.0
+    numActors = 4
+    tps = 100
+    nodeCount = 2000
+    valueBytes = 100
+    fieldCount = 10
+    readWeight = 100
+    updateWeight = 0
+    variant = 'multiCF'
+    distribution = 'random'
+    storeType = 'ssd-redwood-1'
+    skipLoad = true
+    dropCaches = true
+    filename = 'ycsb-kv-reuse.redwood-v1'
+
+[[test]]
+testTitle = 'YCSBKVStoreSQLiteRandomLoadVacuum'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'YCSBKVStore'
+    testDuration = 5.0
+    numActors = 4
+    tps = 0
+    nodeCount = 1000
+    valueBytes = 1024
+    readWeight = 100
+    updateWeight = 0
+    variant = 'singleCF'
+    storeType = 'ssd-2'
+    loadOrder = 'random'
+    loadBatchBytes = 100000
+    vacuum = true
+    dropCaches = true

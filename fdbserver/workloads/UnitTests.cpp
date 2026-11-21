@@ -23,6 +23,7 @@
 
 void forceLinkIndexedSetTests();
 void forceLinkDequeTests();
+void forceLinkFeistelPermutationTests();
 void forceLinkFlowTests();
 void forceLinkCoroTests();
 void forceLinkCoroFlowTests();
@@ -110,6 +111,7 @@ struct UnitTestWorkload : TestWorkload {
 
 		forceLinkIndexedSetTests();
 		forceLinkDequeTests();
+		forceLinkFeistelPermutationTests();
 		forceLinkFlowTests();
 		forceLinkCoroTests();
 		forceLinkCoroFlowTests();

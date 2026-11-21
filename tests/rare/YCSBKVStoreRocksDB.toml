@@ -1,0 +1,47 @@
+# YCSB directly against a RocksDB storage engine instance in the tester process: a random order load with vacuum
+# (full compaction), then reads of the reused store with background compaction paused.
+
+[[test]]
+testTitle = 'YCSBKVStoreRocksDBRandomLoadVacuum'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'YCSBKVStore'
+    testDuration = 5.0
+    numActors = 4
+    commitInterval = 50
+    tps = 100
+    nodeCount = 1000
+    valueBytes = 1024
+    readWeight = 80
+    updateWeight = 20
+    variant = 'singleCF'
+    storeType = 'ssd-rocksdb-v1'
+    loadOrder = 'random'
+    loadBatchBytes = 100000
+    vacuum = true
+    pageCacheBytes = 1048576
+    filename = 'ycsb-kv-reuse.rocksdb'
+
+[[test]]
+testTitle = 'YCSBKVStoreRocksDBReadOnlyReuse'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'YCSBKVStore'
+    testDuration = 5.0
+    numActors = 4
+    tps = 100
+    nodeCount = 1000
+    valueBytes = 1024
+    readWeight = 100
+    updateWeight = 0
+    variant = 'singleCF'
+    storeType = 'ssd-rocksdb-v1'
+    skipLoad = true
+    pauseBackgroundWork = true
+    dropCaches = true
+    pageCacheBytes = 1048576
+    filename = 'ycsb-kv-reuse.rocksdb'
