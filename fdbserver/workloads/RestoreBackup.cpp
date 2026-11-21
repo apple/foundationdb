@@ -62,6 +62,8 @@ struct RestoreBackupWorkload : TestWorkload {
 	bool reportBackupMetrics;
 	std::vector<PerfMetric> backupMetrics;
 	BackupSteps::BackupVersion version;
+	// Range file restore when unset.
+	Optional<RestoreMode> restoreMode;
 	// Fail unless the backup is completed and has nothing registered with the cluster before the restore starts.
 	bool requireBackupStopped;
 	// Compare the RangeDigest of the restored ranges with that of the live data before it was cleared. Needs an
@@ -89,6 +91,10 @@ struct RestoreBackupWorkload : TestWorkload {
 		tag = getOption(options, "tag"_sr, "default"_sr);
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
 		version = BackupSteps::parseBackupVersion(getOption(options, "version"_sr, "v1"_sr));
+		Standalone<StringRef> restoreModeName = getOption(options, "restoreMode"_sr, ""_sr);
+		if (!restoreModeName.empty()) {
+			restoreMode = BackupSteps::parseRestoreMode(restoreModeName);
+		}
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, false));
 		requireBackupStopped = getOption(options, "requireBackupStopped"_sr, true);
 		restoreRanges = BackupRangeSpec::readOptionalRanges(options, "restoreRanges"_sr, "restoreRangePrefix"_sr);
@@ -315,12 +321,24 @@ struct RestoreBackupWorkload : TestWorkload {
 	}
 
 	Future<Void> _start(Database cx) {
+		co_await BackupSteps::startMockS3ForLocalUrl(backupDir.toString());
 		co_await delay(delayFor);
 		if (useExistingBackup) {
 			co_await openExistingBackup();
 		} else {
 			co_await waitOnBackup(cx);
 			co_await confirmBackupStopped(cx);
+		}
+		if (version != BackupSteps::BackupVersion::V1) {
+			// A spec that names a version must be restoring a backup of that version.
+			BackupDescription desc = co_await backupContainer->describeBackup();
+			if (desc.mutationLogType != BackupSteps::mutationLogTypeOf(version)) {
+				TraceEvent(SevWarnAlways, "RestoreBackupLogTypeMismatch")
+				    .detail("Tag", tag)
+				    .detail("ExpectedLogType", mutationLogTypeToString(BackupSteps::mutationLogTypeOf(version)))
+				    .detail("ContainerLogType", mutationLogTypeToString(desc.mutationLogType));
+				throw restore_error();
+			}
 		}
 		if (reportBackupMetrics) {
 			try {
@@ -338,6 +356,20 @@ struct RestoreBackupWorkload : TestWorkload {
 			restoreTarget = co_await resolveTargetVersion();
 		}
 		Standalone<VectorRef<KeyRangeRef>> ranges = co_await getRangesToRestore(cx, restoreTarget);
+		// A bulk load restore has limits of its own; find out before anything is cleared.
+		if (restoreMode.orDefault(RestoreMode::RANGEFILE) == RestoreMode::BULKLOAD) {
+			Optional<std::string> refusal = FileBackupAgent::bulkLoadRestoreRefusal(tag,
+			                                                                        ranges,
+			                                                                        addPrefix,
+			                                                                        removePrefix,
+			                                                                        OnlyApplyMutationLogs::False,
+			                                                                        encryptionKeyFileName,
+			                                                                        /*useRangeFileRestore=*/false);
+			if (refusal.present()) {
+				TraceEvent(SevWarnAlways, "RestoreBackupBulkLoadRefused").detail("Reason", refusal.get());
+				throw restore_error();
+			}
+		}
 		// An in-place restore overwrites live keys: it clears exactly the ranges it restores and takes the database
 		// lock. With a prefix change the destination must already be empty, so nothing is cleared and the restore
 		// must not block other clients or restores.
@@ -391,6 +423,7 @@ struct RestoreBackupWorkload : TestWorkload {
 		spec.removePrefix = removePrefix;
 		spec.lockDB = lockDB;
 		spec.encryptionKeyFileName = encryptionKeyFileName;
+		spec.restoreMode = restoreMode;
 		spec.targetVersion = restoreTarget;
 		Version restoredVersion = co_await BackupSteps::restoreBackup(cx, &backupAgent, version, spec);
 		restoreDuration = now() - restoreStart;

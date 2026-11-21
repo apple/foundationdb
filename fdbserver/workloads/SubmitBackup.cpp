@@ -35,6 +35,8 @@ struct SubmitBackupWorkload : TestWorkload {
 	Standalone<StringRef> tag;
 	double delayFor;
 	BackupSteps::BackupVersion version;
+	// Range file snapshots when unset.
+	Optional<SnapshotMode> snapshotMode;
 	int initSnapshotInterval;
 	int snapshotInterval;
 	StopWhenDone stopWhenDone{ false };
@@ -48,6 +50,10 @@ struct SubmitBackupWorkload : TestWorkload {
 		tag = getOption(options, "tag"_sr, "default"_sr);
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
 		version = BackupSteps::parseBackupVersion(getOption(options, "version"_sr, "v1"_sr));
+		Standalone<StringRef> snapshotModeName = getOption(options, "snapshotMode"_sr, ""_sr);
+		if (!snapshotModeName.empty()) {
+			snapshotMode = BackupSteps::parseSnapshotMode(snapshotModeName);
+		}
 		initSnapshotInterval = getOption(options, "initSnapshotInterval"_sr, 0);
 		snapshotInterval = getOption(options, "snapshotInterval"_sr, 1e8);
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, true));
@@ -60,6 +66,7 @@ struct SubmitBackupWorkload : TestWorkload {
 	}
 
 	Future<Void> _start(Database cx) {
+		co_await BackupSteps::startMockS3ForLocalUrl(backupDir.toString());
 		co_await delay(delayFor);
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		if (explicitBackupRanges.present()) {
@@ -82,6 +89,7 @@ struct SubmitBackupWorkload : TestWorkload {
 			spec.stopWhenDone = stopWhenDone;
 			spec.incremental = incremental;
 			spec.encryptionKeyFileName = encryptionKeyFileName;
+			spec.snapshotMode = snapshotMode;
 			co_await BackupSteps::submitBackup(cx, &backupAgent, version, spec);
 		} catch (Error& e) {
 			TraceEvent("BackupSubmitError").error(e);

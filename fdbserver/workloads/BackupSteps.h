@@ -34,6 +34,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/mocks3/MockS3Server.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/tester/workloads.h"
 
@@ -53,16 +54,80 @@ inline Future<Void> discontinueBackup(Database cx, FileBackupAgent* agent, Key t
 	}
 }
 
-// Which backup system a step drives. Only the file backup agent (v1) is implemented; parseBackupVersion rejects any
-// other name with unsupported_operation.
-enum class BackupVersion { V1 };
+// Which backup system a step drives. The product takes independent choices: how snapshots are made (SnapshotMode), how
+// they are restored (RestoreMode) and the type of the mutation logs. `version` picks the logs and the defaults of the
+// other two:
+//   v1: range file snapshots and restore, mutation logs written by the backup agents.
+//   v2: partitioned mutation logs written by backup workers; snapshots and restore as in v1.
+// BulkDump snapshots and BulkLoad restore are chosen by name (parseSnapshotMode, parseRestoreMode) and work with
+// either. v3 (range-partitioned mutation logs) is rejected: the product writes them but has no restore for them yet.
+enum class BackupVersion { V1, V2 };
 
 inline BackupVersion parseBackupVersion(StringRef name) {
 	if (name == "v1"_sr) {
 		return BackupVersion::V1;
 	}
-	TraceEvent(SevWarnAlways, "BackupVersionNotSupported").detail("Version", name);
+	if (name == "v2"_sr) {
+		return BackupVersion::V2;
+	}
+	TraceEvent(SevWarnAlways, "BackupVersionNotSupported")
+	    .detail("Version", name)
+	    .detail("Reason",
+	            name == "v3"_sr ? "range-partitioned mutation logs cannot be restored yet" : "unknown version");
 	throw unsupported_operation();
+}
+
+inline MutationLogType mutationLogTypeOf(BackupVersion version) {
+	switch (version) {
+	case BackupVersion::V1:
+		return MutationLogType::DEFAULT;
+	case BackupVersion::V2:
+		return MutationLogType::PARTITIONED_LOG;
+	}
+	UNREACHABLE();
+}
+
+inline SnapshotMode parseSnapshotMode(StringRef name) {
+	if (name == "rangefile"_sr) {
+		return SnapshotMode::RANGEFILE;
+	}
+	if (name == "bulkdump"_sr) {
+		return SnapshotMode::BULKDUMP;
+	}
+	if (name == "both"_sr) {
+		return SnapshotMode::BOTH;
+	}
+	TraceEvent(SevWarnAlways, "BackupSnapshotModeNotSupported").detail("SnapshotMode", name);
+	throw test_specification_invalid();
+}
+
+inline RestoreMode parseRestoreMode(StringRef name) {
+	if (name == "rangefile"_sr) {
+		return RestoreMode::RANGEFILE;
+	}
+	if (name == "bulkload"_sr) {
+		return RestoreMode::BULKLOAD;
+	}
+	TraceEvent(SevWarnAlways, "BackupRestoreModeNotSupported").detail("RestoreMode", name);
+	throw test_specification_invalid();
+}
+
+// In simulation, serves a blobstore:// URL that points at this machine with the MockS3 server, unless a server is
+// already registered for the address. Callers racing on it wait for the same registration. Other URLs and real clusters
+// are left alone.
+inline Future<Void> startMockS3ForLocalUrl(std::string url) {
+	static Future<Void> registration;
+	if (!g_network->isSimulated() || !url.starts_with("blobstore://") ||
+	    (url.find("127.0.0.1") == std::string::npos && url.find("localhost") == std::string::npos)) {
+		co_return;
+	}
+	if (!registration.isValid()) {
+		if (g_simulator->httpHandlers.contains("127.0.0.1:8080")) {
+			co_return;
+		}
+		registration = registerMockS3Server("127.0.0.1", "8080");
+	}
+	co_await registration;
 }
 
 // Clears `ranges`, user and system keys alike.
@@ -188,6 +253,8 @@ struct RestoreSpec {
 	LockDB lockDB{ false };
 	Version targetVersion = ::invalidVersion;
 	Optional<std::string> encryptionKeyFileName;
+	// Range file restore when absent.
+	Optional<RestoreMode> restoreMode;
 };
 
 // A key range of about `bytes` of snapshot data, picked at random from the range files of the restore set of
@@ -322,7 +389,6 @@ inline RestoreSpec prefixedRestoreSpec(Reference<IBackupContainer> container,
 
 // Restores `spec` and returns the version restored to.
 inline Future<Version> restoreBackup(Database cx, FileBackupAgent* agent, BackupVersion version, RestoreSpec spec) {
-	ASSERT(version == BackupVersion::V1);
 	co_return co_await agent->restore(cx,
 	                                  cx,
 	                                  spec.tag,
@@ -339,7 +405,9 @@ inline Future<Version> restoreBackup(Database cx, FileBackupAgent* agent, Backup
 	                                  OnlyApplyMutationLogs::False,
 	                                  InconsistentSnapshotOnly::False,
 	                                  ::invalidVersion,
-	                                  spec.encryptionKeyFileName);
+	                                  spec.encryptionKeyFileName,
+	                                  Optional<UID>(),
+	                                  spec.restoreMode.orDefault(RestoreMode::RANGEFILE) == RestoreMode::RANGEFILE);
 }
 
 // What starting a backup needs.
@@ -352,10 +420,11 @@ struct SubmitSpec {
 	StopWhenDone stopWhenDone{ true };
 	IncrementalBackupOnly incremental{ false };
 	Optional<std::string> encryptionKeyFileName;
+	// Range file snapshots when absent.
+	Optional<SnapshotMode> snapshotMode;
 };
 
 inline Future<Void> submitBackup(Database cx, FileBackupAgent* agent, BackupVersion version, SubmitSpec spec) {
-	ASSERT(version == BackupVersion::V1);
 	co_await agent->submitBackup(cx,
 	                             spec.backupDir,
 	                             {},
@@ -364,11 +433,11 @@ inline Future<Void> submitBackup(Database cx, FileBackupAgent* agent, BackupVers
 	                             spec.tag.toString(),
 	                             spec.ranges,
 	                             spec.stopWhenDone,
-	                             MutationLogType::DEFAULT,
+	                             mutationLogTypeOf(version),
 	                             spec.incremental,
 	                             spec.encryptionKeyFileName,
 	                             spec.encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
-	                             0);
+	                             static_cast<int>(spec.snapshotMode.orDefault(SnapshotMode::RANGEFILE)));
 }
 
 // Discontinues the backup `tag` and waits until it is COMPLETED, so that no backup work is left on the cluster.
