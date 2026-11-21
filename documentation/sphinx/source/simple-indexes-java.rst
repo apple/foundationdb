@@ -87,7 +87,7 @@ In this example, we’re storing user data based on user ID but sometimes need t
         private static final Subspace index;
 
         static {
-            fdb = FDB.selectAPIVersion(800);
+            fdb = FDB.selectAPIVersion(900);
             db = fdb.open();
             main = new Subspace(Tuple.from("user"));
             index = new Subspace(Tuple.from("zipcode_index"));
