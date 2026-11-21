@@ -10148,16 +10148,19 @@ TEST_CASE("/redwood/correctness/unit/pagerReleasesPredecessors") {
 
 Future<Void> testCloseWithPendingFileExtensions(std::string file, bool failTruncate) {
 	class PendingTruncateFile final : public IAsyncFile, public ReferenceCounted<PendingTruncateFile> {
-		Promise<Void> truncateDone;
+		Future<Void> truncateCompletion;
 		Promise<Void> destroyed;
 
 	public:
-		PendingTruncateFile(Promise<Void> truncateDone, Promise<Void> destroyed)
-		  : truncateDone(truncateDone), destroyed(destroyed) {}
+		PendingTruncateFile(Future<Void> truncateCompletion, Promise<Void> destroyed)
+		  : truncateCompletion(std::move(truncateCompletion)), destroyed(destroyed) {}
 		~PendingTruncateFile() override { destroyed.send(Void()); }
 		void addref() override { ReferenceCounted<PendingTruncateFile>::addref(); }
 		void delref() override { ReferenceCounted<PendingTruncateFile>::delref(); }
-		Future<Void> truncate(int64_t) override { return truncateDone.getFuture(); }
+		Future<Void> truncate(int64_t) override {
+			ASSERT(truncateCompletion.isValid());
+			return std::move(truncateCompletion);
+		}
 		Future<int> read(void*, int, int64_t) override { return unsupported_operation(); }
 		Future<Void> write(void const*, int, int64_t) override { return unsupported_operation(); }
 		Future<Void> sync() override { return unsupported_operation(); }
@@ -10180,7 +10183,7 @@ Future<Void> testCloseWithPendingFileExtensions(std::string file, bool failTrunc
 	// Hold the physical truncate pending so both generations and their writers are active at shutdown.
 	Promise<Void> truncateDone;
 	Promise<Void> fileDestroyed;
-	pager->pageFile = makeReference<PendingTruncateFile>(truncateDone, fileDestroyed);
+	pager->pageFile = makeReference<PendingTruncateFile>(truncateDone.getFuture(), fileDestroyed);
 	pager->ioLock = makeReference<PriorityMultiLock>(2, SERVER_KNOBS->REDWOOD_IO_PRIORITIES);
 	g_redwoodMetrics.ioLock = pager->ioLock.getPtr();
 	auto writePage = [pager](LogicalPageID id) {
@@ -10202,7 +10205,7 @@ Future<Void> testCloseWithPendingFileExtensions(std::string file, bool failTrunc
 
 	auto closed = pager->onClosed();
 	pager->dispose();
-	co_await ready(secondWrite);
+	co_await timeoutError(ready(secondWrite), 5.0);
 	co_await delay(0);
 	ASSERT(firstExtension.isError() && firstExtension.getError().code() == error_code_actor_cancelled);
 	ASSERT(firstWrite.isError() && firstWrite.getError().code() == error_code_actor_cancelled);
@@ -10214,7 +10217,7 @@ Future<Void> testCloseWithPendingFileExtensions(std::string file, bool failTrunc
 	} else {
 		truncateDone.send(Void());
 	}
-	co_await closed;
+	co_await timeoutError(closed, 5.0);
 	ASSERT(fileDestroyed.isSet());
 }
 
