@@ -5098,6 +5098,11 @@ public:
 		// TODO: Is it contractually okay to always to read at the latest version?
 		Reference<IPagerSnapshot> snapshot = self->m_pager->getReadSnapshot(self->m_pager->getLastCommittedVersion());
 		int freedPages = 0;
+		TaskPriority const priority = g_network->getCurrentTask();
+		int yieldCount = 0;
+		int const yieldInterval = SERVER_KNOBS->REDWOOD_LAZY_CLEAR_YIELD_INTERVAL > 0
+		                              ? SERVER_KNOBS->REDWOOD_LAZY_CLEAR_YIELD_INTERVAL
+		                              : std::numeric_limits<int>::max();
 
 		while (true) {
 			int toPop = SERVER_KNOBS->REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES;
@@ -5174,6 +5179,13 @@ public:
 				freedPages += entry.pageID.size();
 				metrics.lazyClearFree += 1;
 				metrics.lazyClearFreeExt += entry.pageID.size() - 1;
+
+				// Freeing or queueing the hundreds of children of each internal page can cause slow tasks if not
+				// broken up
+				if (++yieldCount >= yieldInterval) {
+					yieldCount = 0;
+					co_await delay(0, priority);
+				}
 			}
 
 			// Stop if

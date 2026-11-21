@@ -1397,6 +1397,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
 	init( REDWOOD_LAZY_CLEAR_MIN_PAGES,                            0 );
 	init( REDWOOD_LAZY_CLEAR_MAX_PAGES,                          1e6 );
+	init( REDWOOD_LAZY_CLEAR_YIELD_INTERVAL,                       0 ); if( randomize && buggify() ) REDWOOD_LAZY_CLEAR_YIELD_INTERVAL = deterministicRandom()->randomInt(0, 32);
 	init( REDWOOD_REMAP_CLEANUP_WINDOW_BYTES, 4LL * 1024 * 1024 * 1024 );
 	init( REDWOOD_REMAP_CLEANUP_TOLERANCE_RATIO,                0.05 );
 	init( REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES,                  20000 ); if( randomize && buggify() ) { REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES = deterministicRandom()->randomInt(200, 1000); }
