@@ -193,7 +193,8 @@ public:
 		if (!checksumHistoryBudget.present()) {
 			checksumHistoryBudget = FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY;
 		}
-		pageBuffer = (void*)new char[checksumHistoryPageSize];
+		// unbuffered files (kernel AIO) need the read buffer aligned to 4 KB
+		pageBuffer = allocateFast4kAligned(checksumHistoryPageSize);
 		totalCheckedSucceed = 0;
 		totalCheckedFail = 0;
 		lru = LRU(m_f->getFilename());
@@ -203,7 +204,7 @@ public:
 
 	~AsyncFileWriteChecker() override {
 		checksumHistoryBudget.get() += lru.size();
-		delete[] reinterpret_cast<char*>(pageBuffer);
+		freeFast4kAligned(checksumHistoryPageSize, pageBuffer);
 	}
 
 private:
@@ -225,15 +226,27 @@ private:
 		loop {
 			// for each page, read and do checksum
 			// scan from the least recently used, thus it is safe to quit if data has not been synced
+			// pick the page again on every loop, so pages written while we waited are found
 			state uint32_t page = self->lru.leastRecentlyUsedPage();
-			while (self->writing.find(page) != self->writing.end() || page == 0) {
-				// avoid concurrent ops
+			if (page == 0 || self->writing.find(page) != self->writing.end()) {
+				// no page to check, or the page is being written (avoid concurrent ops)
 				wait(delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY));
 				continue;
 			}
-			int64_t offset = page * checksumHistoryPageSize;
+			// page numbers start at 1, so page p starts at byte (p - 1) * page size
+			int64_t offset = (int64_t)(page - 1) * checksumHistoryPageSize;
 			// perform a read to verify checksum, it will remove the entry upon success
-			wait(success(self->read(self->pageBuffer, checksumHistoryPageSize, offset)));
+			int bytesRead = wait(self->read(self->pageBuffer, checksumHistoryPageSize, offset));
+			if (bytesRead < checksumHistoryPageSize) {
+				// the page is not fully in the file, so it can't be checked; stop tracking it
+				if (self->lru.exist(page)) {
+					self->lru.remove(page);
+					checksumHistoryBudget.get() += 1;
+				}
+			} else if (self->lru.leastRecentlyUsedPage() == page) {
+				// the page was not removed because it has not been synced yet; wait before checking again
+				wait(delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY));
+			}
 		}
 	}
 
@@ -252,7 +265,7 @@ private:
 	}
 
 	// return true if there are still remaining valid synced pages to check, otherwise false
-	// this method removes the page entry from checksum history upon a successful check
+	// this method removes the page entry from checksum history once the page is checked
 	bool verifyChecksum(uint32_t page, uint32_t checksum, uint8_t* start) {
 		if (!lru.exist(page)) {
 			// it has already been verified succesfully and removed by checksumWorker
@@ -274,10 +287,12 @@ private:
 				    .detail("LastWriteTime", history.timestamp / millisecondsPerSecond);
 				totalCheckedFail += 1;
 			} else {
-				checksumHistoryBudget.get() += 1;
-				lru.remove(page);
 				totalCheckedSucceed += 1;
 			}
+			// the page has been checked, so stop tracking it, even when the check failed;
+			// otherwise a failed page stays the oldest one forever and the sweep can't move past it
+			checksumHistoryBudget.get() += 1;
+			lru.remove(page);
 			return true;
 		} else {
 			return false;
@@ -299,7 +314,7 @@ private:
 			start += (checksumHistoryPageSize - slack);
 		}
 		uint32_t startPage = page;
-		uint32_t pageEnd = (offset + len) / checksumHistoryPageSize; // Last page plus 1
+		uint32_t pageEnd = (offset + len) / checksumHistoryPageSize + 1; // Last page plus 1 (pages start at 1)
 		while (page < pageEnd) {
 			uint32_t checksum = crc32c_append(0xab12fd93, start, checksumHistoryPageSize);
 #if VALGRIND
