@@ -498,9 +498,9 @@ private:
 };
 
 #ifndef _WIN32
-// Waits on one thread for many descriptors to become readable, using epoll on Linux and kqueue elsewhere. Readiness is
-// edge-triggered: a descriptor is reported when it becomes readable (data, hang-up or error) and not again until more
-// arrives, so its reader must read until EAGAIN before waiting again. Only wake() may be called from other threads.
+// Waits on one thread for many descriptors, using epoll on Linux and kqueue elsewhere. Watch one direction per
+// descriptor. Readiness is edge-triggered, so callers must drive I/O until EAGAIN before waiting again.
+// Only wake() may be called from other threads.
 class ReadinessPoller {
 public:
 	// Throws platform_error() if the kernel objects cannot be created.
@@ -510,15 +510,14 @@ public:
 	ReadinessPoller(const ReadinessPoller&) = delete;
 	ReadinessPoller& operator=(const ReadinessPoller&) = delete;
 
-	// Starts watching `fd`: wait() reports `tag` (not null) when it becomes readable, at once if it already is.
+	// Starts watching `fd`: wait() reports `tag` when the requested direction is ready or the peer closes.
 	// Returns 0 or an errno value.
-	int watch(int fd, void* tag);
+	int watch(int fd, void* tag, bool write);
 
-	// Stops watching `fd`.
-	void unwatch(int fd);
+	// Stops watching the current direction of `fd`.
+	void unwatch(int fd, bool write);
 
-	// Waits until a watched descriptor becomes readable, wake() is called, or `timeoutMs` passes (-1 for no limit).
-	// Then appends to `ready` the tag of each descriptor that became readable, at most once each.
+	// Waits for readiness, wake(), or the timeout (-1 for no limit). Appends each ready tag at most once.
 	void wait(int timeoutMs, std::vector<void*>& ready);
 
 	// Makes the current or the next wait() return. Safe to call from any thread.
@@ -531,9 +530,6 @@ private:
 #endif
 };
 
-// Bytes in `fd`'s send queue that the peer has not yet acknowledged (Linux) or that are not yet sent (macOS), or -1
-// where the platform cannot tell.
-int socketSendQueueBytes(int fd);
 #endif // _WIN32
 
 } // namespace platform

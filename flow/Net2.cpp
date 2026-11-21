@@ -837,7 +837,7 @@ public:
 	NetworkAddress getListenAddress() const override { return listenAddress; }
 };
 
-using ssl_socket = boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>;
+using ssl_socket = TLSHandshakeSocket;
 
 struct SSLHandshakerThread final : IThreadPoolReceiver {
 	SSLHandshakerThread() = default;
@@ -1300,7 +1300,7 @@ public:
 
 private:
 	UID id;
-	tcp::socket socket;
+	TLSHandshakeTransport socket;
 	ssl_socket ssl_sock;
 	NetworkAddress peer_address;
 	Reference<ReferencedObject<boost::asio::ssl::context>> sslContext;
@@ -1617,13 +1617,17 @@ void Net2::initTLS(ETLSInitState targetState) {
 				}
 			}
 
+			if (useNonBlockingWorkers) {
+				// Leave no allocation between starting a worker and recording ownership of it.
+				sslHandshakeWorkers.reserve(sslHandshakerThreadsStarted + threadsToStart);
+			}
 			for (int i = 0; i < threadsToStart; ++i) {
-				++sslHandshakerThreadsStarted;
 				if (useNonBlockingWorkers) {
 					sslHandshakeWorkers.push_back(newHandshakeWorker());
 				} else {
 					sslHandshakerPool->addThread(new SSLHandshakerThread(), "fdb-ssl-connect");
 				}
+				++sslHandshakerThreadsStarted;
 			}
 		}
 

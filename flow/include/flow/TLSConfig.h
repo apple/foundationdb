@@ -29,13 +29,13 @@
 #include <vector>
 
 #include <boost/system/system_error.hpp>
-#include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
 
 #include <openssl/x509.h>
 
 #include "flow/FastRef.h"
 #include "flow/Knobs.h"
+#include "flow/TLSHandshakeSocket.h"
 #include "flow/flow.h"
 
 using NID = int;
@@ -224,7 +224,7 @@ void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::contex
 // e.g. for peer with a valid, trusted length-3 certificate chain (root CA, intermediate CA, and server certs),
 // callback(true) will be called 3 times.
 void ConfigureSSLStream(Reference<TLSPolicy> policy,
-                        boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>& stream,
+                        TLSHandshakeSocket& stream,
                         const NetworkAddress& peerAddress,
                         std::function<void(bool)> callback);
 
