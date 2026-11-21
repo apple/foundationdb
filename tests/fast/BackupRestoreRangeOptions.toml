@@ -7,12 +7,17 @@
 # each ring is an independent cycle, so every ring is checked with the Cycle invariant.
 #
 # Before either restore, ValidateBackup checks backup B against the live data (a prefixed restore plus a ValidateRestore
-# audit, no in-place restore). The previous test's writers have stopped when it starts; it reads its quiescent version
+# audit, no in-place restore). The writers have stopped before it starts; it reads its quiescent version
 # validateAfter seconds into its test, well after the Cycle end time (Cycle can still land commits shortly after it).
 # The validation copy is cleared after the audit; the workload fails if any of it remains.
 #
+# Before that, CompareBackups restores both backups to the same version inside both restorable windows, each under its own
+# prefix, and compares the two copies key by key; a second run of it checks that injected differences are found, and a third
+# compares a random key range (rangeBytes) picked from backup A and restored from both.
+#
 # Backup A is also restored from its container (useExistingBackup) once no backup is logging: 'cy2/' to the latest
-# restorable version, with a RangeDigest before the clear and after the restore (verifyDigest), and 'cy2/' to the middle of
+# restorable version, with a RangeDigest before the clear and after the restore (verifyDigest), a random run of its range files
+# (restoreRandomBytes) the same way, and 'cy2/' to the middle of
 # the restorable window (targetVersionFraction, checked against the window), where the Cycle
 # invariant must hold.
 
@@ -62,6 +67,62 @@ runConsistencyCheck = false
     stopWhenDone = false
     encrypted = false
     backupRangePrefix = 'cy/'
+
+[[test]]
+testTitle = 'CompareBackupsAAndB'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    # Both backups cover 'cy/' and are still running: they are restored to a version inside both windows, each under its own
+    # prefix, and the copies must be identical.
+    [[test.workload]]
+    testName = 'CompareBackups'
+    backupDirA = 'file://simfdb/backups/rangesA/'
+    backupDirB = 'file://simfdb/backups/prefixB/'
+    rangePrefix = 'cy/'
+    # A snapshot can take a long time under the clogging of the simulation.
+    waitRestorableSeconds = 3000.0
+    # Small shards and pages make the comparison cross several of both.
+    shardBytes = 20000
+    pageRows = 100
+
+[[test]]
+testTitle = 'CompareBackupsFindsAnInjectedDifference'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    # The workload makes the copies differ by a key only in each of them and by one value, and fails unless the comparison
+    # finds exactly those three.
+    [[test.workload]]
+    testName = 'CompareBackups'
+    backupDirA = 'file://simfdb/backups/rangesA/'
+    backupDirB = 'file://simfdb/backups/prefixB/'
+    rangePrefix = 'cy/'
+    # A snapshot can take a long time under the clogging of the simulation.
+    waitRestorableSeconds = 3000.0
+    expectDifferences = true
+    shardBytes = 20000
+    pageRows = 100
+
+[[test]]
+testTitle = 'CompareBackupsRandomRange'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    # A random run of range files inside 'cy/' is picked from backup A and the same key range is restored from both backups and compared.
+    [[test.workload]]
+    testName = 'CompareBackups'
+    backupDirA = 'file://simfdb/backups/rangesA/'
+    backupDirB = 'file://simfdb/backups/prefixB/'
+    rangePrefix = 'cy/'
+    rangeBytes = 1
+    rangeSeed = 11
+    waitRestorableSeconds = 3000.0
+    shardBytes = 20000
+    pageRows = 100
 
 [[test]]
 testTitle = 'ValidateBackupB'
@@ -181,6 +242,25 @@ clearAfterTest = false
     testName = 'Cycle'
     nodeCount = 1000
     keyPrefix = 'other/'
+
+[[test]]
+testTitle = 'RestoreARandomRangeFromItsContainer'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    # A random run of range files of 'cy2/' (the smallest that holds restoreRandomBytes), restored in place at the latest version; the digest of the
+    # picked range must be the same before and after.
+    [[test.workload]]
+    testName = 'RestoreBackup'
+    tag = 'randomA'
+    backupDir = 'file://simfdb/backups/rangesA/'
+    useExistingBackup = true
+    delayFor = 0
+    restoreRangePrefix = 'cy2/'
+    restoreRandomBytes = 1
+    restoreRandomSeed = 5
+    verifyDigest = true
 
 [[test]]
 testTitle = 'RestoreAToMiddleOfItsWindow'

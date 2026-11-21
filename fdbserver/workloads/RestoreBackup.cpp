@@ -31,7 +31,6 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.h"
-#include "fdbserver/tester/TestEncryptionUtils.h"
 #include "BackupRangeSpec.h"
 #include "BackupSteps.h"
 #include "ValidateRestoreAudit.h"
@@ -51,6 +50,11 @@ struct RestoreBackupWorkload : TestWorkload {
 	Optional<std::string> encryptionKeyFileName;
 	// A subset of the backup's ranges to restore; the whole backup when unset.
 	Optional<Standalone<VectorRef<KeyRangeRef>>> restoreRanges;
+	// With an existing backup: restore a random key range of about this many bytes of snapshot data (0: restoreRanges
+	// as given), chosen inside restoreRanges when they are given, else anywhere in the backup. The pick is repeatable
+	// with a non-zero seed.
+	int64_t restoreRandomBytes;
+	int64_t restoreRandomSeed;
 	Key addPrefix;
 	Key removePrefix;
 	UID backupUID;
@@ -88,6 +92,8 @@ struct RestoreBackupWorkload : TestWorkload {
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, false));
 		requireBackupStopped = getOption(options, "requireBackupStopped"_sr, true);
 		restoreRanges = BackupRangeSpec::readOptionalRanges(options, "restoreRanges"_sr, "restoreRangePrefix"_sr);
+		restoreRandomBytes = getOption(options, "restoreRandomBytes"_sr, static_cast<int64_t>(0));
+		restoreRandomSeed = getOption(options, "restoreRandomSeed"_sr, static_cast<int64_t>(0));
 		addPrefix = BackupRangeSpec::readKeyOption(options, "addPrefix"_sr);
 		removePrefix = BackupRangeSpec::readKeyOption(options, "removePrefix"_sr);
 		reportBackupMetrics = getOption(options, "reportBackupMetrics"_sr, !g_network->isSimulated());
@@ -99,7 +105,14 @@ struct RestoreBackupWorkload : TestWorkload {
 		if (!std::isnan(fraction)) {
 			targetVersionFraction = fraction;
 		}
-		if (useExistingBackup && (!restoreRanges.present() || stopWhenDone)) {
+		if (restoreRandomBytes < 0 || (restoreRandomBytes > 0 && !useExistingBackup)) {
+			TraceEvent(SevWarnAlways, "RestoreBackupRandomRangeInvalidOptions")
+			    .detail("Tag", tag)
+			    .detail("RestoreRandomBytes", restoreRandomBytes)
+			    .detail("UseExistingBackup", useExistingBackup);
+			throw test_specification_invalid();
+		}
+		if (useExistingBackup && ((!restoreRanges.present() && restoreRandomBytes == 0) || stopWhenDone)) {
 			TraceEvent(SevWarnAlways, "RestoreBackupExistingBackupInvalidOptions")
 			    .detail("Tag", tag)
 			    .detail("HasRanges", restoreRanges.present())
@@ -119,11 +132,7 @@ struct RestoreBackupWorkload : TestWorkload {
 			throw test_specification_invalid();
 		}
 
-		std::string keyFileName = "simfdb/" + getTestEncryptionFileName();
-		// Only set encryptionKeyFileName if the encryption key file exists during backup.
-		if (fileExists(keyFileName)) {
-			encryptionKeyFileName = keyFileName;
-		}
+		encryptionKeyFileName = BackupSteps::testEncryptionKeyFile();
 	}
 
 	static constexpr auto NAME = "RestoreBackup";
@@ -276,9 +285,19 @@ struct RestoreBackupWorkload : TestWorkload {
 	// Returns the ranges to restore: restoreRanges if set, else the ranges the backup covers. Every restoreRanges
 	// entry must lie within one backup range: submitBackup coalesces them, so a range spanning two is not covered.
 	// An existing backup is not read for its ranges: they are restoreRanges.
-	Future<Standalone<VectorRef<KeyRangeRef>>> getRangesToRestore(Database cx) {
+	Future<Standalone<VectorRef<KeyRangeRef>>> getRangesToRestore(Database cx, Version restoreTarget) {
 		Standalone<VectorRef<KeyRangeRef>> ranges;
-		if (useExistingBackup) {
+		if (restoreRandomBytes > 0) {
+			BackupSteps::PickedRange picked = co_await BackupSteps::pickRandomRange(
+			    backupContainer,
+			    restoreTarget,
+			    restoreRandomBytes,
+			    restoreRandomSeed,
+			    restoreRanges.present() ? restoreRanges.get() : Standalone<VectorRef<KeyRangeRef>>());
+			ranges.push_back_deep(ranges.arena(), picked.range);
+			backupMetrics.emplace_back("Picked range files", picked.files, Averaged::False);
+			backupMetrics.emplace_back("Picked range data (MB)", picked.bytes / 1e6, Averaged::False);
+		} else if (useExistingBackup) {
 			ranges = restoreRanges.get();
 		} else {
 			std::vector<KeyRange> backupRanges = co_await BackupSteps::readBackupRanges(cx, backupUID);
@@ -313,12 +332,12 @@ struct RestoreBackupWorkload : TestWorkload {
 				TraceEvent(SevWarn, "RestoreBackupDescribeFailed").error(e);
 			}
 		}
-		Standalone<VectorRef<KeyRangeRef>> ranges = co_await getRangesToRestore(cx);
 		// A running backup is restored to its latest restorable version unless a version is asked for.
 		Version restoreTarget = ::invalidVersion;
 		if (useExistingBackup || targetVersion != ::invalidVersion || targetVersionFraction.present()) {
 			restoreTarget = co_await resolveTargetVersion();
 		}
+		Standalone<VectorRef<KeyRangeRef>> ranges = co_await getRangesToRestore(cx, restoreTarget);
 		// An in-place restore overwrites live keys: it clears exactly the ranges it restores and takes the database
 		// lock. With a prefix change the destination must already be empty, so nothing is cleared and the restore
 		// must not block other clients or restores.
