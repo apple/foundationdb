@@ -410,12 +410,12 @@ struct DDBulkDumpJobManager {
 	std::map<Key, BulkLoadManifest> taskManifestMap;
 	BulkDumpSkipTracker skipTracker;
 	bool failed = false; // set once an Error range is seen or written; stops scheduling
-	// Remaining keyspace at the last admission, for pacing. Held per job rather than per scheduling pass:
-	// a pass restarts whenever scheduling is interrupted, and with this reset each time, every admission
-	// looked like the first and none was ever paced -- one job restarted 63 passes for 32 admissions.
-	double previousRemainingWidth = -1;
-	// Width of tasks that have failed since pacing last looked, and so left their range undumped.
-	double failedWidth = 0;
+	// Width of the job dumped so far, summed over the tasks that have ended, and its value when pacing last
+	// looked. Held per job rather than per scheduling pass, which restarts whenever scheduling is
+	// interrupted: with the baseline reset each time, every admission looked like the first and none was
+	// ever paced -- one job restarted 63 passes for 32 admissions.
+	double completedWidth = 0;
+	double completedWidthAtLastPacing = 0;
 
 	DDBulkDumpJobManager() = default;
 	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
@@ -2764,15 +2764,46 @@ double keyRangeWidthFraction(KeyRangeRef range, int skip) {
 	return std::max(0.0, keyPositionFraction(range.end, skip) - keyPositionFraction(range.begin, skip));
 }
 
-// What the previous admission accomplished, as the shrinkage of the unscheduled remainder since it.
-// The remainder shrinks by the range the pass walked past, whether or not the task there did anything, so the
-// width of tasks that have failed since is taken back out: that range is dumped by a later pass, and pacing
-// that credited it would sleep for work that has not happened.
-double bulkDumpConsumedWidth(double previousRemainingWidth, double remainingWidth, double failedWidth) {
-	if (previousRemainingWidth < 0) {
+// How long to hold the next admission so the job ends when asked: spend the time left in proportion to the
+// share of the work left that has just been done. Because both shrink together the ratio of time left to work
+// left does not change, so the spread is even whatever the size of the tasks.
+double bulkDumpPacingWait(double remainingSeconds, double consumedWidth, double remainingWidth) {
+	if (remainingSeconds <= 0 || consumedWidth <= 0 || remainingWidth <= 0) {
 		return 0;
 	}
-	return std::max(0.0, previousRemainingWidth - remainingWidth - failedWidth);
+	// Never wait past the deadline itself: as the remainder shrinks the ratio approaches one, so a late chunk
+	// would otherwise be allocated the whole window again.
+	return std::min(remainingSeconds * (consumedWidth / remainingWidth), remainingSeconds);
+}
+
+// Width of `range` that the job has finished dumping, read from its metadata. The range a task was handed is
+// not the work it did: the storage server dumps a bounded number of batches per request and the rest of the
+// range is dispatched again by a later pass, and a task that failed dumped nothing or part. Only what the
+// metadata records as complete counts.
+Future<double> bulkDumpCompletedWidth(Database cx, UID jobId, KeyRange range, int skip) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			RangeResult entries = co_await krmGetRanges(&tr, bulkDumpPrefix, range);
+			double width = 0;
+			for (int i = 0; i + 1 < static_cast<int>(entries.size()); ++i) {
+				if (entries[i].value.empty()) {
+					continue;
+				}
+				BulkDumpState state = decodeBulkDumpState(entries[i].value);
+				if (state.isValid() && state.getJobId() == jobId && state.getPhase() == BulkDumpPhase::Complete) {
+					width += keyRangeWidthFraction(KeyRangeRef(entries[i].key, entries[i + 1].key), skip);
+				}
+			}
+			co_return width;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
 }
 
 // The actor spawned by DD dedicated to listen on a SS bulkdump task and holding a budget of parallelismLimitor.
@@ -2817,12 +2848,28 @@ Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 		if (e.code() == error_code_movekeys_conflict) {
 			throw e; // trigger DD restarts, which resets bulkDumpParallelismLimitor
 		}
-		if (bulkDumpState.getJobId() == self->bulkDumpJobManager.jobState.getJobId()) {
-			KeyRangeRef jobRange = self->bulkDumpJobManager.jobState.getJobRange();
-			self->bulkDumpJobManager.failedWidth +=
-			    keyRangeWidthFraction(bulkDumpState.getRange(), commonPrefixLength(jobRange.begin, jobRange.end));
-		}
 		// Sliently exit for other errors
+	}
+	// Credit what the task actually dumped before releasing its slot, so pacing sees it before the next
+	// admission. A failed read credits nothing, which only makes pacing wait less.
+	if (bulkDumpState.getJobId() == self->bulkDumpJobManager.jobState.getJobId()) {
+		Error creditError;
+		try {
+			KeyRangeRef jobRange = self->bulkDumpJobManager.jobState.getJobRange();
+			double completed = co_await bulkDumpCompletedWidth(self->txnProcessor->context(),
+			                                                   bulkDumpState.getJobId(),
+			                                                   bulkDumpState.getRange(),
+			                                                   commonPrefixLength(jobRange.begin, jobRange.end));
+			self->bulkDumpJobManager.completedWidth += completed;
+		} catch (Error& e) {
+			creditError = e;
+		}
+		if (creditError.isValid()) {
+			if (creditError.code() == error_code_actor_cancelled) {
+				throw creditError;
+			}
+			TraceEvent(SevWarn, "DDBulkDumpCreditCompletedWidthFailed", self->ddId).error(creditError);
+		}
 	}
 	self->bulkDumpParallelismLimitor.decrementTaskCounter();
 }
@@ -3001,29 +3048,18 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 							// is left, which needs no count of how many tasks there will be -- the quantity
 							// that defeated every previous attempt, because batches, shards and bytes all
 							// measure something other than the work remaining.
-							// Measure what the previous admission consumed rather than what this one claims.
-							// A task's range is not the work it will do: where the keyspace has not split,
-							// every task is dispatched over the whole remainder and the storage server
-							// dumps only a batch-bounded slice of it. Range width then equals remaining
-							// width on every admission, which is why pacing declined to wait at all on
-							// those seeds. The shrinkage of the remainder between admissions is the work
-							// that actually happened.
+							// Measure what has been dumped, not what a task was handed. A task's range is not
+							// the work it does: the storage server dumps a bounded slice per request, so where
+							// the keyspace has not split a task can cover a large part of the job and dump a
+							// few percent of it. Crediting the range slept through windows with nothing done.
 							double remainingWidth =
-							    keyRangeWidthFraction(KeyRangeRef(taskRange.begin, jobRange.end),
-							                          commonPrefixLength(jobRange.begin, jobRange.end));
-							double& previousRemainingWidth = self->bulkDumpJobManager.previousRemainingWidth;
-							double consumedWidth = bulkDumpConsumedWidth(
-							    previousRemainingWidth, remainingWidth, self->bulkDumpJobManager.failedWidth);
-							self->bulkDumpJobManager.failedWidth = 0;
-							previousRemainingWidth = remainingWidth;
-							double waitSeconds = 0;
-							if (remainingWidth > 0 && consumedWidth > 0) {
-								// Never wait past the deadline itself. As the remainder shrinks the ratio
-								// approaches one, so a late chunk would otherwise be allocated the whole
-								// window again and the job would finish well past the time asked for.
-								waitSeconds =
-								    std::min(remainingSeconds * (consumedWidth / remainingWidth), remainingSeconds);
-							}
+							    keyRangeWidthFraction(jobRange, commonPrefixLength(jobRange.begin, jobRange.end)) -
+							    self->bulkDumpJobManager.completedWidth;
+							double consumedWidth = self->bulkDumpJobManager.completedWidth -
+							                       self->bulkDumpJobManager.completedWidthAtLastPacing;
+							self->bulkDumpJobManager.completedWidthAtLastPacing =
+							    self->bulkDumpJobManager.completedWidth;
+							double waitSeconds = bulkDumpPacingWait(remainingSeconds, consumedWidth, remainingWidth);
 							// Emitted whether or not a wait results, so a run that paced nothing still
 							// records why.
 							TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobPacing", self->ddId)
@@ -6509,18 +6545,37 @@ TEST_CASE("/DataDistribution/BulkDump/PacingWidthMeasuresWithinTheJobRange") {
 	return Void();
 }
 
-TEST_CASE("/DataDistribution/BulkDump/PacingDoesNotCreditFailedTasks") {
-	// The first admission has nothing to measure against.
-	ASSERT_EQ(bulkDumpConsumedWidth(-1, 0.9, 0), 0.0);
-	// The remainder shrank by what the pass walked past.
-	ASSERT(std::abs(bulkDumpConsumedWidth(0.9, 0.6, 0) - 0.3) < 1e-12);
-	// A task that failed instantly left its range undumped: nothing was consumed, so nothing is waited for.
-	ASSERT(bulkDumpConsumedWidth(0.9, 0.6, 0.3) < 1e-12);
-	ASSERT(std::abs(bulkDumpConsumedWidth(0.9, 0.6, 0.1) - 0.2) < 1e-12);
-	// A failure reported for an earlier interval cannot make consumption negative.
-	ASSERT_EQ(bulkDumpConsumedWidth(0.9, 0.6, 0.5), 0.0);
-	// A pass restarting from the front grows the remainder; that is not consumption either.
-	ASSERT_EQ(bulkDumpConsumedWidth(0.1, 0.9, 0), 0.0);
+TEST_CASE("/DataDistribution/BulkDump/PacingWaitFollowsWorkDone") {
+	// Nothing to wait for before anything is done, once the time is up, or once the work is.
+	ASSERT_EQ(bulkDumpPacingWait(1800, 0, 0.9), 0.0);
+	ASSERT_EQ(bulkDumpPacingWait(0, 0.1, 0.9), 0.0);
+	ASSERT_EQ(bulkDumpPacingWait(-5, 0.1, 0.9), 0.0);
+	ASSERT_EQ(bulkDumpPacingWait(1800, 0.1, 0), 0.0);
+
+	// A tenth of what is left done takes a tenth of the time left.
+	ASSERT(std::abs(bulkDumpPacingWait(1800, 0.09, 0.9) - 180.0) < 1e-9);
+
+	// Never past the deadline.
+	ASSERT_EQ(bulkDumpPacingWait(100, 0.9, 0.5), 100.0);
+
+	// A coarse shard whose task dumped about two percent of its declared range: credited by what was dumped
+	// the wait is seconds; credited by the declared range it was most of the window.
+	double dumped = 0.0094;
+	double declared = 0.4718;
+	double remaining = 0.97;
+	ASSERT(bulkDumpPacingWait(1700, dumped, remaining) < 20.0);
+	ASSERT(bulkDumpPacingWait(1700, declared, remaining) > 800.0);
+
+	// The ratio of time left to work left survives a wait, so the spread stays even.
+	double seconds = 1800;
+	double work = 1.0;
+	double ratio = seconds / work;
+	for (double done : { 0.05, 0.2, 0.01, 0.3 }) {
+		double wait = bulkDumpPacingWait(seconds, done, work);
+		seconds -= wait;
+		work -= done;
+		ASSERT(std::abs(seconds / work - ratio) < 1e-9);
+	}
 
 	return Void();
 }
