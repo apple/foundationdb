@@ -252,13 +252,9 @@ struct BulkDumping : TestWorkload {
 		}
 	}
 
-	// Return error tasks
-	// If allowIntermediateStates is true, tasks in Running/Complete phases are allowed (for timeout scenarios)
-	Future<std::vector<BulkLoadTaskState>> validateAllBulkLoadTaskAcknowledgedOrError(
-	    Database cx,
-	    UID jobId,
-	    KeyRange jobRange,
-	    bool allowIntermediateStates = false) {
+	Future<std::vector<BulkLoadTaskState>> validateAllBulkLoadTaskAcknowledgedOrError(Database cx,
+	                                                                                  UID jobId,
+	                                                                                  KeyRange jobRange) {
 		RangeResult rangeResult;
 		Key beginKey = jobRange.begin;
 		Key endKey = jobRange.end;
@@ -267,8 +263,7 @@ struct BulkDumping : TestWorkload {
 		TraceEvent("BulkDumpingWorkLoad")
 		    .detail("Phase", "ValidateAllBulkLoadTaskAcknowledgedOrError")
 		    .detail("Job", jobId.toString())
-		    .detail("Range", jobRange)
-		    .detail("AllowIntermediateStates", allowIntermediateStates);
+		    .detail("Range", jobRange);
 		while (beginKey < endKey) {
 			Error err;
 			try {
@@ -297,8 +292,7 @@ struct BulkDumping : TestWorkload {
 						    .detail("Task", bulkLoadTaskState.toString());
 						errorTasks.push_back(bulkLoadTaskState);
 					}
-					// Only assert on wrong phases if we're in normal completion mode (not timeout)
-					if (!allowIntermediateStates && bulkLoadTaskState.phase != BulkLoadPhase::Acknowledged &&
+					if (bulkLoadTaskState.phase != BulkLoadPhase::Acknowledged &&
 					    bulkLoadTaskState.phase != BulkLoadPhase::Error) {
 						TraceEvent(SevError, "BulkDumpingWorkLoadBulkLoadTaskWrongPhase")
 						    .setMaxEventLength(-1)
@@ -324,21 +318,16 @@ struct BulkDumping : TestWorkload {
 	                                                                       KeyRange jobRange) {
 		double startTime = now();
 		while (true) {
-			// Check for timeout to prevent infinite waiting
-			if (now() - startTime > self->jobCompletionTimeout) {
-				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadJobTimeout")
-				    .detail("Job", jobId.toString())
-				    .detail("Range", jobRange)
-				    .detail("WaitTime", now() - startTime);
-				// Timeout: validate what we have and return (allow intermediate states since job may still be running)
-				std::vector<BulkLoadTaskState> errorTasks =
-				    co_await self->validateAllBulkLoadTaskAcknowledgedOrError(cx, jobId, jobRange, true);
-				co_return errorTasks;
-			}
-
 			Optional<BulkLoadJobState> runningJob = co_await getRunningBulkLoadJob(cx);
 			if (runningJob.present()) {
 				ASSERT(runningJob.get().getJobId() == jobId);
+				if (now() - startTime > self->jobCompletionTimeout) {
+					TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadJobTimeout")
+					    .detail("Job", jobId.toString())
+					    .detail("Range", jobRange)
+					    .detail("WaitTime", now() - startTime);
+					throw timed_out();
+				}
 				// During the wait for the job completion, we may inject the job cancellation.
 				// We varies the timing of the job cancellation, we trigger the job cancellation with 10% probability at
 				// each time. Throughout the entire test, we inject the job cancellation at most maxCancelTimes times to

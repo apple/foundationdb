@@ -7353,8 +7353,14 @@ Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 			std::string sstFilePath = bulkLoadFileSetsToLoad[i].second.getDataFileFullPath();
 			KeyRange rangeToLoad = bulkLoadFileSetsToLoad[i].first & keys;
 			ASSERT(!rangeToLoad.empty());
-			co_await tryGetRangeForBulkLoadFromSST(
-			    results, rangeToLoad, sstFilePath, i == bulkLoadFileSetsToLoad.size() - 1);
+			// A failed fetch retries its range. Sampling per key makes success exponentially unlikely for large ranges.
+			const bool lastFile = i == bulkLoadFileSetsToLoad.size() - 1;
+			if (lastFile && g_network->isSimulated() && SERVER_KNOBS->BULKLOAD_SIM_FAILURE_INJECTION &&
+			    deterministicRandom()->random01() < 0.1) {
+				TraceEvent(SevWarnAlways, "TryGetRangeForBulkLoadInjectError");
+				throw operation_failed();
+			}
+			co_await tryGetRangeForBulkLoadFromSST(results, rangeToLoad, sstFilePath, lastFile);
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
