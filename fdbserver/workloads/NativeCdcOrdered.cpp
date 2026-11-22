@@ -332,13 +332,12 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		}
 	}
 
-	Future<CDCProxyInterface> waitForOwners(Database cx,
-	                                        std::vector<CDCStreamId> partitions,
-	                                        Optional<UID> retiredOwner = {}) {
+	Future<std::vector<CDCProxyInterface>> waitForOwners(Database cx,
+	                                                     std::vector<CDCStreamId> partitions,
+	                                                     Optional<UID> retiredOwner = {}) {
 		while (true) {
 			Future<Void> changed = cx->clientInfo->onChange();
-			std::set<UID> owners;
-			Optional<CDCProxyInterface> first;
+			std::vector<CDCProxyInterface> owners;
 			bool complete = true;
 			const auto& info = cx->clientInfo->get();
 			for (const CDCStreamId partition : partitions) {
@@ -356,14 +355,12 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 					complete = false;
 					break;
 				}
-				owners.insert(proxy->id());
-				if (!first.present()) {
-					first = *proxy;
+				if (std::find(owners.begin(), owners.end(), *proxy) == owners.end()) {
+					owners.push_back(*proxy);
 				}
 			}
 			if (complete) {
-				ASSERT_EQ(owners.size(), 2);
-				co_return first.get();
+				co_return owners;
 			}
 			co_await changed;
 		}
@@ -445,7 +442,8 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		ASSERT_EQ(co_await registerNativeCdcOrderedStreamClient(cx, name, ranges, splitPoints), streamId);
 		const std::vector<CDCStreamId> partitions = co_await readPartitions(cx, streamId);
 		phase("WaitForOwners");
-		co_await waitForOwners(cx, partitions);
+		const auto initialOwners = co_await waitForOwners(cx, partitions);
+		ASSERT_EQ(initialOwners.size(), 2);
 		const Key ordinaryName = name.withSuffix("/ordinary"_sr);
 		const CDCStreamId listedOrdinaryId = co_await registerNativeCdcStreamClient(cx, ordinaryName, ranges);
 		const auto listed = co_await listNativeCdcStreamsClient(cx);
@@ -526,8 +524,8 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 
 		if (testOwnerReplacement) {
 			phase("OwnerReplacement");
-			const CDCProxyInterface owner = co_await waitForOwners(cx, partitions);
-			co_await replaceOwner(cx, owner, partitions);
+			const auto owners = co_await waitForOwners(cx, partitions);
+			co_await replaceOwner(cx, owners.front(), partitions);
 			view = checkpointView;
 			observed.clear();
 			co_await consumeThrough(consumer, mixed, &view, &observed, checkpoint.lastConsumedVersion);
