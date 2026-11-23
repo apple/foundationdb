@@ -167,6 +167,9 @@ private:
 
 public:
 	bool logTraceEventMetrics;
+	// The audit trace log (see openAuditTraceFile) only holds events marked with logToAuditFile(), so it skips the
+	// event throttler and doesn't re-log the main log's trackLatest events when it rolls.
+	const bool auditLog;
 
 	void initMetrics() {
 		ASSERT(!isOpen());
@@ -287,9 +290,9 @@ public:
 		}
 	};
 
-	TraceLog()
+	explicit TraceLog(bool auditLog = false)
 	  : formatter(new XmlTraceLogFormatter()), loggedLength(0), bufferLength(0), opened(false), preopenOverflowCount(0),
-	    logTraceEventMetrics(false), issues(new IssuesList), barriers(new BarrierList) {}
+	    logTraceEventMetrics(false), auditLog(auditLog), issues(new IssuesList), barriers(new BarrierList) {}
 
 	bool isOpen() const { return opened; }
 
@@ -468,7 +471,7 @@ public:
 	}
 
 	ThreadFuture<Void> flush() {
-		if (TraceEvent::isNetworkThread()) {
+		if (TraceEvent::isNetworkThread() && !auditLog) {
 			traceEventThrottlerCache->poll();
 		}
 
@@ -491,7 +494,10 @@ public:
 			double time = 0;
 			writer->post(o);
 
-			std::vector<TraceEventFields> events = latestEventCache.getAllUnsafe();
+			std::vector<TraceEventFields> events;
+			if (!auditLog) {
+				events = latestEventCache.getAllUnsafe();
+			}
 			for (int idx = 0; idx < events.size(); idx++) {
 				if (events[idx].size() > 0) {
 					TraceEventFields rolledFields;
@@ -691,6 +697,14 @@ TraceEventFields LatestEventCache::getLatestError() {
 }
 
 static TraceLog g_traceLog;
+// Events marked with logToAuditFile(), in their own files. See openAuditTraceFile(). Only created when an audit trace
+// file is opened (only fdbcli does, and only with audit logging on), so every other process just sees nullptr. Never
+// freed, like the trace writer threads.
+static std::atomic<TraceLog*> g_auditTraceLog{ nullptr };
+
+static TraceLog* auditTraceLog() {
+	return g_auditTraceLog.load(std::memory_order_acquire);
+}
 
 namespace {
 template <bool validate>
@@ -774,18 +788,68 @@ bool validateTraceClockSource(std::string source) {
 	return traceClockSource</*validate*/ true>(source);
 }
 
+static ThreadFuture<Void> flushAuditTraceFile() {
+	TraceLog* audit = auditTraceLog();
+	if (!audit || !audit->isOpen()) {
+		return Void();
+	}
+	return audit->flush();
+}
+
+// Audit trace file hooks, called first thing from the existing flush and close functions below so those stay as they
+// were. Without an audit trace file (every process but fdbcli with audit logging on) each is just a null check.
+static void flushAuditTraceFileIfOpen() {
+	if (TraceLog* audit = auditTraceLog(); audit && audit->isOpen()) {
+		audit->flush();
+	}
+}
+
+static void flushAuditTraceFileBlocking() {
+	// Audit trace files are never opened in simulation, so unlike flushTraceFileVoid there's no simulated case.
+	if (TraceLog* audit = auditTraceLog(); audit && audit->isOpen()) {
+		audit->flush().getBlocking();
+	}
+}
+
+static void closeAuditTraceFile() {
+	if (TraceLog* audit = auditTraceLog()) {
+		audit->close();
+	}
+}
+
 ThreadFuture<Void> flushTraceFile() {
+	flushAuditTraceFileIfOpen();
 	if (!g_traceLog.isOpen())
 		return Void();
 	return g_traceLog.flush();
 }
 
 void flushTraceFileVoid() {
+	flushAuditTraceFileBlocking();
 	if (g_network && g_network->isSimulated())
 		flushTraceFile();
 	else {
 		flushTraceFile().getBlocking();
 	}
+}
+
+static std::string traceFileBaseName(const Optional<NetworkAddress>& na,
+                                     std::string const& baseOfBase,
+                                     std::string const& identifier) {
+	if (na.present()) {
+		std::string ip = na.get().ip.toString();
+		std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
+
+		if (!identifier.empty()) {
+			return format("%s.%s.%s", baseOfBase.c_str(), ip.c_str(), identifier.c_str());
+		}
+		return format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.get().port);
+	}
+	if (!identifier.empty()) {
+		return format("%s.0.0.0.0.%s", baseOfBase.c_str(), identifier.c_str());
+	}
+	// If neither network address nor identifier is provided, use PID for identification
+	return format("%s.0.0.0.0.%d", baseOfBase.c_str(), ::getpid());
 }
 
 void openTraceFile(const Optional<NetworkAddress>& na,
@@ -806,22 +870,7 @@ void openTraceFile(const Optional<NetworkAddress>& na,
 	if (baseOfBase.empty())
 		baseOfBase = "trace";
 
-	std::string baseName;
-	if (na.present()) {
-		std::string ip = na.get().ip.toString();
-		std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
-
-		if (!identifier.empty()) {
-			baseName = format("%s.%s.%s", baseOfBase.c_str(), ip.c_str(), identifier.c_str());
-		} else {
-			baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.get().port);
-		}
-	} else if (!identifier.empty()) {
-		baseName = format("%s.0.0.0.0.%s", baseOfBase.c_str(), identifier.c_str());
-	} else {
-		// If neither network address nor identifier is provided, use PID for identification
-		baseName = format("%s.0.0.0.0.%d", baseOfBase.c_str(), ::getpid());
-	}
+	std::string baseName = traceFileBaseName(na, baseOfBase, identifier);
 
 	if (initializeTraceMetrics) {
 		g_traceLog.initMetrics();
@@ -840,7 +889,59 @@ void openTraceFile(const Optional<NetworkAddress>& na,
 	g_traceBatch.dump();
 }
 
+void openAuditTraceFile(const Optional<NetworkAddress>& na,
+                        uint64_t rollsize,
+                        uint64_t maxLogsSize,
+                        std::string directory,
+                        std::string baseOfBase,
+                        std::string logGroup,
+                        std::string identifier,
+                        std::string tracePartialFileSuffix,
+                        std::string traceFormat) {
+	TraceLog* audit = auditTraceLog();
+	if (audit && audit->isOpen()) {
+		return;
+	}
+	if (!audit) {
+		audit = new TraceLog(/*auditLog*/ true);
+	}
+
+	if (directory.empty()) {
+		directory = ".";
+	}
+
+	if (baseOfBase.empty()) {
+		baseOfBase = "trace";
+	}
+
+	// Same as selectTraceFormatter: json if asked for, xml otherwise.
+	std::transform(traceFormat.begin(), traceFormat.end(), traceFormat.begin(), ::tolower);
+	if (traceFormat == "json") {
+		audit->formatter = Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
+	} else {
+		audit->formatter = Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
+	}
+
+	audit->open(directory,
+	            traceFileBaseName(na, baseOfBase + "_audit", identifier),
+	            logGroup,
+	            format("%lld", time(nullptr)),
+	            rollsize,
+	            maxLogsSize,
+	            na,
+	            tracePartialFileSuffix);
+	// Publish it only once it's open.
+	g_auditTraceLog.store(audit, std::memory_order_release);
+
+	// The recurring flush started by openTraceFile flushes the audit file too. Without a main trace file, start one
+	// just for the audit file.
+	if (!g_traceLog.isOpen()) {
+		uncancellable(recurring(&flushAuditTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
+	}
+}
+
 void closeTraceFile() {
+	closeAuditTraceFile();
 	g_traceLog.close();
 }
 
@@ -909,6 +1010,7 @@ BaseTraceEvent::BaseTraceEvent(BaseTraceEvent&& ev) {
 	trackingKey = ev.trackingKey;
 	type = ev.type;
 	timeIndex = ev.timeIndex;
+	auditFile = ev.auditFile;
 
 	for (int i = 0; i < NUM_MAJOR_LEVELS_OF_EVENTS; i++) {
 		eventCounts[i] = ev.eventCounts[i];
@@ -937,6 +1039,7 @@ BaseTraceEvent& BaseTraceEvent::operator=(BaseTraceEvent&& ev) {
 	trackingKey = ev.trackingKey;
 	type = ev.type;
 	timeIndex = ev.timeIndex;
+	auditFile = ev.auditFile;
 
 	for (int i = 0; i < NUM_MAJOR_LEVELS_OF_EVENTS; i++) {
 		eventCounts[i] = ev.eventCounts[i];
@@ -997,6 +1100,11 @@ TraceEvent::TraceEvent(Severity severity, AuditedEvent auditedEvent, UID id)
 }
 
 TraceEvent::TraceEvent(AuditedEvent auditedEvent, UID id) : TraceEvent(SevInfo, auditedEvent, id) {}
+
+BaseTraceEvent& BaseTraceEvent::logToAuditFile() {
+	auditFile = true;
+	return *this;
+}
 
 void BaseTraceEvent::init(TraceInterval& interval) {
 	init();
@@ -1381,7 +1489,17 @@ void BaseTraceEvent::writeEvent() {
 					auto name = fmt::format("TraceEvent::{}", type);
 					ProcessEvents::trigger(StringRef(name), this, success());
 				}
-				g_traceLog.writeEvent(fields, trackingKey, severity > SevWarnAlways);
+				// auditFile is false for every event outside fdbcli's audit logging, so this doesn't even look at
+				// g_auditTraceLog for them.
+				TraceLog* audit = auditFile ? auditTraceLog() : nullptr;
+				if (audit && audit->isOpen()) [[unlikely]] {
+					// If the main log is open, annotate from it so Machine, LogGroup, Roles and universal fields match
+					// the main file. Otherwise the audit log adds its own Machine and LogGroup.
+					g_traceLog.annotateEvent(fields);
+					audit->writeEvent(fields, "", false);
+				} else {
+					g_traceLog.writeEvent(fields, trackingKey, severity > SevWarnAlways);
+				}
 
 				if (g_traceLog.isOpen()) {
 					// Log Metrics
