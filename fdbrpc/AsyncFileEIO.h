@@ -26,6 +26,7 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <utility>
 
 #include "eio.h"
 #include "flow/flow.h"
@@ -247,7 +248,8 @@ public:
 	// The worker uses state in the dispatch coroutine until it finishes, even if the caller cancels.
 	template <class R>
 	static Future<R> dispatch(std::function<R()> func, ExplicitVoid = {}) {
-		co_return co_await dispatch_impl(Uncancellable(), std::move(func));
+		// A moved-from std::function can retain its captures in the cancelled coroutine's frame.
+		co_return co_await dispatch_impl(Uncancellable(), std::exchange(func, nullptr));
 	}
 
 	~AsyncFileEIO() override { close_impl(Uncancellable(), fd); }
@@ -522,7 +524,7 @@ private:
 	template <class R>
 	static Future<R> dispatch_impl(Uncancellable, std::function<R()> func, ExplicitVoid = {}) {
 		// Coroutine parameters can outlive completion while the Future remains referenced.
-		Dispatch<R> data(std::move(func));
+		Dispatch<R> data(std::exchange(func, nullptr));
 		TaskPriority taskID = g_network->getCurrentTask();
 
 		eio_req* request = eio_custom(
