@@ -3,6 +3,7 @@
 rm -f /usr/local/libexec/{fdbserver,fdbmonitor}
 rm -f /usr/local/bin/{fdbcli,fdbbackup,fdbrestore,fdbdr}
 rm -f /usr/local/lib/libfdb_c.dylib
+rm -f /usr/local/lib/pkgconfig/foundationdb-client.pc
 rm -rf /usr/local/include/foundationdb
 rm -rf /usr/local/foundationdb/backup_agent
 rm -f /usr/local/foundationdb/uninstall-FoundationDB.sh
