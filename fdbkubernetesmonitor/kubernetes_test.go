@@ -21,6 +21,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path"
 	"strconv"
 	"time"
 
@@ -61,6 +63,19 @@ var _ = Describe("Testing FDB Pod client", func() {
 
 		internalCache = &informertest.FakeInformers{}
 		internalCache.Scheme = fakeClient.Scheme()
+
+		Expect(fakeClient.Create(context.Background(), &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      podName,
+				Namespace: namespace,
+			},
+		})).To(Succeed())
+
+		Expect(fakeClient.Create(context.Background(), &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+		})).To(Succeed())
 	})
 
 	When("the kubernetesClient was started", func() {
@@ -83,8 +98,12 @@ var _ = Describe("Testing FDB Pod client", func() {
 			})
 
 			It("should have the metadata for the pod but not the node", func() {
-				Expect(podClient.podMetadata).NotTo(BeNil())
-				Expect(podClient.nodeMetadata).To(BeNil())
+				podMetadata, err := podClient.getPodMetadata(context.Background())
+				Expect(podMetadata).NotTo(BeNil())
+				Expect(err).NotTo(HaveOccurred())
+				nodeMetadata, err := podClient.getNodeMetadata(context.Background())
+				Expect(nodeMetadata).To(BeNil())
+				Expect(err).NotTo(HaveOccurred())
 				Expect(internalCache.InformersByGVK).To(HaveLen(1))
 			})
 		})
@@ -95,8 +114,12 @@ var _ = Describe("Testing FDB Pod client", func() {
 			})
 
 			It("should have the metadata for the pod and node", func() {
-				Expect(podClient.podMetadata).NotTo(BeNil())
-				Expect(podClient.nodeMetadata).NotTo(BeNil())
+				podMetadata, err := podClient.getPodMetadata(context.Background())
+				Expect(podMetadata).NotTo(BeNil())
+				Expect(err).NotTo(HaveOccurred())
+				nodeMetadata, err := podClient.getNodeMetadata(context.Background())
+				Expect(nodeMetadata).NotTo(BeNil())
+				Expect(err).NotTo(HaveOccurred())
 				Expect(internalCache.InformersByGVK).To(HaveLen(2))
 			})
 		})
@@ -131,40 +154,8 @@ var _ = Describe("Testing FDB Pod client", func() {
 					},
 				}
 				var err error
-				fakeInformer, err = internalCache.FakeInformerFor(pod)
+				fakeInformer, err = internalCache.FakeInformerFor(context.Background(), pod)
 				Expect(err).NotTo(HaveOccurred())
-			})
-
-			When("an AddEvent is handled", func() {
-				BeforeEach(func() {
-					fakeInformer.Add(pod)
-				})
-
-				It("should update the pod information", func() {
-					Expect(podClient.podMetadata).NotTo(BeNil())
-					Expect(podClient.podMetadata.Name).To(Equal(podName))
-					Expect(podClient.podMetadata.Namespace).To(Equal(namespace))
-					Expect(podClient.podMetadata.Labels).To(Equal(map[string]string{
-						"testing": "testing",
-					}))
-				})
-			})
-
-			When("an UpdateEvent is handled", func() {
-				BeforeEach(func() {
-					fakeInformer.Update(nil, pod)
-				})
-
-				It("should update the pod information", func() {
-					Expect(podClient.podMetadata).NotTo(BeNil())
-					Expect(podClient.podMetadata.Name).To(Equal(podName))
-					Expect(podClient.podMetadata.Namespace).To(Equal(namespace))
-					Expect(podClient.podMetadata.Labels).To(Equal(map[string]string{
-						"testing": "testing",
-					}))
-
-					Expect(podClient.TimestampFeed).NotTo(Receive())
-				})
 			})
 
 			When("an UpdateEvent is handled that updates the OutdatedConfigMapAnnotation", func() {
@@ -179,13 +170,6 @@ var _ = Describe("Testing FDB Pod client", func() {
 				})
 
 				It("should update the pod information and receive an event", func() {
-					Expect(podClient.podMetadata).NotTo(BeNil())
-					Expect(podClient.podMetadata.Name).To(Equal(podName))
-					Expect(podClient.podMetadata.Namespace).To(Equal(namespace))
-					Expect(podClient.podMetadata.Labels).To(Equal(map[string]string{
-						"testing": "testing",
-					}))
-
 					Expect(podClient.TimestampFeed).To(Receive(&timestamp))
 				})
 			})
@@ -199,84 +183,36 @@ var _ = Describe("Testing FDB Pod client", func() {
 				})
 
 				It("should update the Pod information", func() {
-					Expect(podClient.podMetadata).NotTo(BeNil())
-					Expect(podClient.podMetadata.Name).To(Equal(podName))
-					Expect(podClient.podMetadata.Namespace).To(Equal(namespace))
-					Expect(podClient.podMetadata.Labels).To(Equal(map[string]string{
-						"testing": "testing",
-					}))
-
 					Expect(podClient.TimestampFeed).NotTo(Receive())
 				})
 			})
 
-			When("a DeleteEvent is handled", func() {
+			When("an UpdateEvent is handled that updates the IsolateProcessGroupAnnotation where the value is changed", func() {
 				BeforeEach(func() {
-					fakeInformer.Delete(pod)
+					oldPod := pod.DeepCopy()
+					pod.Annotations = map[string]string{
+						api.IsolateProcessGroupAnnotation: "true",
+					}
+
+					fakeInformer.Update(oldPod, pod)
 				})
 
-				It("should remove the pod information", func() {
-					Expect(podClient.podMetadata).To(BeNil())
-				})
-			})
-		})
-
-		When("events for the node are received", func() {
-			var fakeInformer *controllertest.FakeInformer
-			var node *corev1.Node
-
-			BeforeEach(func() {
-				node = &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      podName,
-						Namespace: namespace,
-						Labels: map[string]string{
-							"testing": "testing",
-						},
-					},
-				}
-				var err error
-				fakeInformer, err = internalCache.FakeInformerFor(node)
-				Expect(err).NotTo(HaveOccurred())
-			})
-
-			When("an AddEvent is handled", func() {
-				BeforeEach(func() {
-					fakeInformer.Add(node)
-				})
-
-				It("should update the node information", func() {
-					Expect(podClient.nodeMetadata).NotTo(BeNil())
-					Expect(podClient.nodeMetadata.Name).To(Equal(podName))
-					Expect(podClient.nodeMetadata.Namespace).To(Equal(namespace))
-					Expect(podClient.nodeMetadata.Labels).To(Equal(map[string]string{
-						"testing": "testing",
-					}))
+				It("should update the Pod information", func() {
+					Expect(podClient.TimestampFeed).To(Receive())
 				})
 			})
 
-			When("an UpdateEvent is handled", func() {
+			When("an UpdateEvent is handled that updates the IsolateProcessGroupAnnotation where the value is not changed", func() {
 				BeforeEach(func() {
-					fakeInformer.Update(nil, node)
+					pod.Annotations = map[string]string{
+						api.IsolateProcessGroupAnnotation: "true",
+					}
+
+					fakeInformer.Update(pod.DeepCopy(), pod)
 				})
 
-				It("should update the node information", func() {
-					Expect(podClient.nodeMetadata).NotTo(BeNil())
-					Expect(podClient.nodeMetadata.Name).To(Equal(podName))
-					Expect(podClient.nodeMetadata.Namespace).To(Equal(namespace))
-					Expect(podClient.nodeMetadata.Labels).To(Equal(map[string]string{
-						"testing": "testing",
-					}))
-				})
-			})
-
-			When("a DeleteEvent is handled", func() {
-				BeforeEach(func() {
-					fakeInformer.Delete(node)
-				})
-
-				It("should remove the node information", func() {
-					Expect(podClient.nodeMetadata).To(BeNil())
+				It("should update the Pod information", func() {
+					Expect(podClient.TimestampFeed).NotTo(Receive())
 				})
 			})
 		})
@@ -296,25 +232,8 @@ var _ = Describe("Testing FDB Pod client", func() {
 			})
 
 			Expect(err).NotTo(HaveOccurred())
-			// We have to set this value here as we haven't received any update yet and the fake implementation is not
-			// passing through the fake client.
-			podClient.podMetadata = &metav1.PartialObjectMetadata{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      podName,
-					Namespace: namespace,
-				},
-			}
-
-			// Make sure to create the Pod in the fake client otherwise it cannot be patched.
-			Expect(fakeClient.Create(context.Background(), &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      podName,
-					Namespace: namespace,
-				},
-			})).NotTo(HaveOccurred())
-
 			// Execute the update annotations.
-			Expect(podClient.updateAnnotations(mon)).NotTo(HaveOccurred())
+			Expect(podClient.updateAnnotations(context.Background(), mon)).NotTo(HaveOccurred())
 		})
 
 		When("no additional env variables are set", func() {
@@ -331,7 +250,32 @@ var _ = Describe("Testing FDB Pod client", func() {
 				Expect(fakeClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: podName}, pod)).NotTo(HaveOccurred())
 
 				Expect(pod.Annotations).To(HaveKeyWithValue(api.CurrentConfigurationAnnotation, ""))
-				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\"}"))
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"STAGED_VERSIONS\":\"\"}"))
+			})
+		})
+
+		When("versions are staged in the shared binary directory", func() {
+			BeforeEach(func() {
+				sharedBinaryDir = GinkgoT().TempDir()
+				for _, version := range []string{"7.3.10", "7.1.51"} {
+					Expect(os.MkdirAll(path.Join(sharedBinaryDir, version), 0700)).To(Succeed())
+					Expect(os.WriteFile(path.Join(sharedBinaryDir, version, "fdbserver"), []byte("fdbserver"), 0700)).To(Succeed())
+				}
+				// A directory without a ready binary is not reported.
+				Expect(os.MkdirAll(path.Join(sharedBinaryDir, "7.4.1"), 0700)).To(Succeed())
+
+				mon = &monitor{
+					activeConfiguration: &api.ProcessConfiguration{
+						BinaryPath: "/usr/bin",
+					},
+				}
+			})
+
+			It("should report the sorted staged versions in the environment annotation", func() {
+				pod := &corev1.Pod{}
+				Expect(fakeClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: podName}, pod)).NotTo(HaveOccurred())
+
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"STAGED_VERSIONS\":\"7.1.51,7.3.10\"}"))
 			})
 		})
 
@@ -356,7 +300,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 				Expect(fakeClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: podName}, pod)).NotTo(HaveOccurred())
 
 				Expect(pod.Annotations).To(HaveKeyWithValue(api.CurrentConfigurationAnnotation, ""))
-				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"TEST\":\"test-value\"}"))
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"STAGED_VERSIONS\":\"\",\"TEST\":\"test-value\"}"))
 			})
 		})
 
@@ -386,7 +330,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 				Expect(fakeClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: podName}, pod)).NotTo(HaveOccurred())
 
 				Expect(pod.Annotations).To(HaveKeyWithValue(api.CurrentConfigurationAnnotation, ""))
-				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"TEST\":\"test-value\"}"))
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"STAGED_VERSIONS\":\"\",\"TEST\":\"test-value\"}"))
 			})
 		})
 	})
