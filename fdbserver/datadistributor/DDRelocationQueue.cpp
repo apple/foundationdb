@@ -3417,6 +3417,40 @@ TEST_CASE("/DataDistribution/DDQueue/ReplacementPreservesPipelineCapacity") {
 	return Void();
 }
 
+TEST_CASE("/DataDistribution/DDQueue/InteriorRequestPreservesQueuedRemainders") {
+	DDQueue self;
+	self.activeRelocations = 0;
+	self.queuedRelocations = 0;
+	self.pendingGateRelocations = 0;
+	self.unhealthyRelocations = 0;
+	self.pipelineFull = makeReference<AsyncVar<bool>>(false);
+	self.rawProcessingUnhealthy = makeReference<AsyncVar<bool>>(false);
+	self.rawProcessingWiggle = makeReference<AsyncVar<bool>>(false);
+	self.fetchSourceLock = makeReference<FlowLock>(0);
+
+	std::set<UID> serversToLaunchFrom;
+	const int priority = SERVER_KNOBS->PRIORITY_TEAM_2_LEFT;
+	RelocateShard parent(KeyRangeRef("a"_sr, "z"_sr), priority, RelocateReason::OTHER, UID(1, 0));
+	self.queueRelocation(parent, serversToLaunchFrom);
+	RelocateData queued = *self.fetchingSourcesQueue.begin();
+	queued.src = { UID(2, 0), UID(3, 0) };
+	queued.completeSources = queued.src;
+	self.completeSourceFetch(queued);
+
+	RelocateShard interior(KeyRangeRef("c"_sr, "m"_sr), priority, RelocateReason::OTHER, UID(4, 0));
+	self.queueRelocation(interior, serversToLaunchFrom);
+	for (auto const& range : { KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("m"_sr, "z"_sr) }) {
+		RelocateData remainder = queued;
+		remainder.keys = range;
+		for (UID source : queued.src) {
+			ASSERT(self.queue.at(source).contains(remainder));
+		}
+	}
+	ASSERT_EQ(self.fetchingSourcesQueue.size(), 1);
+	ASSERT_EQ(self.queuedRelocations, 3);
+	return Void();
+}
+
 TEST_CASE("/DataDistribution/DDQueue/SourceDiscoveryPreservesReadRebalanceCooldown") {
 	DDQueue self;
 	const std::vector<UID> primary{ UID(1, 0), UID(2, 0), UID(3, 0) };
