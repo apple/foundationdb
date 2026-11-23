@@ -1888,7 +1888,7 @@ static Future<Void> connectionIncoming(TransportData* self, Reference<IConnectio
 }
 
 static Future<Void> listenImpl(TransportData* self, NetworkAddress listenAddr, Reference<IListener> listener) {
-	constexpr int maxPendingIncomingConnectionsPerListener = 1000;
+	const int maxPendingConnections = FLOW_KNOBS->MAX_PENDING_INCOMING_CONNECTIONS_PER_LISTENER;
 	ActorCollectionNoErrors
 	    incoming; // Actors monitoring incoming connections that haven't yet been associated with a peer
 	uint64_t connectionCount = 0;
@@ -1898,7 +1898,7 @@ static Future<Void> listenImpl(TransportData* self, NetworkAddress listenAddr, R
 			static SimpleCounter<int64_t>* countIncomingConnectionCreated =
 			    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionCreated");
 			countIncomingConnectionCreated->increment(1);
-			if (conn && incoming.size() >= maxPendingIncomingConnectionsPerListener) {
+			if (conn && maxPendingConnections > 0 && incoming.size() >= maxPendingConnections) {
 				// Close this overflow socket before accepting another, without starting TLS or a reader.
 				conn->close();
 				static SimpleCounter<int64_t>* countIncomingConnectionOverloadRejected =
