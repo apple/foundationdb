@@ -3063,10 +3063,13 @@ Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 			                                     &ServerDBInfo::distributor,
 			                                     self->recruitDistributor.onChange(),
 			                                     SERVER_KNOBS->DD_FAILURE_TIME)) {
-				const auto& distributor = self->db.serverInfo->get().distributor;
+				const auto distributor = self->db.serverInfo->get().distributor;
 				TraceEvent("CCDataDistributorDied", self->id).detail("DDID", distributor.get().id());
 				DataDistributorSingleton(distributor).halt(*self, distributor.get().locality.processId());
-				self->db.clearInterf(ProcessClass::DataDistributorClass);
+				// Local halt delivery can register a replacement before returning.
+				if (self->db.serverInfo->get().distributor == distributor) {
+					self->db.clearInterf(ProcessClass::DataDistributorClass);
+				}
 			}
 		} else {
 			co_await startDataDistributor(self, recruitThrottler.newRecruitment());
@@ -3155,11 +3158,14 @@ Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 			                                     &ServerDBInfo::ratekeeper,
 			                                     self->recruitRatekeeper.onChange(),
 			                                     SERVER_KNOBS->RATEKEEPER_FAILURE_TIME)) {
-				const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+				const auto ratekeeper = self->db.serverInfo->get().ratekeeper;
 				TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
 				RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
-				self->db.clearInterf(ProcessClass::RatekeeperClass);
-				self->updateClusterHealthMonitorInputs();
+				// Local halt delivery can register a replacement before returning.
+				if (self->db.serverInfo->get().ratekeeper == ratekeeper) {
+					self->db.clearInterf(ProcessClass::RatekeeperClass);
+					self->updateClusterHealthMonitorInputs();
+				}
 			}
 		} else {
 			co_await startRatekeeper(self, recruitThrottler.newRecruitment());
@@ -3939,11 +3945,14 @@ WorkerInterface addSingletonTestWorker(ClusterControllerData& data, StringRef pr
 	return worker;
 }
 
+enum class SingletonReplacementTiming { BeforeFailure, DuringHalt };
+
 template <class Interface, class HaltRequest, class Register>
 Future<Void> testSingletonReplacement(Future<Void> (*monitorRole)(ClusterControllerData*),
                                       Optional<Interface> ServerDBInfo::* role,
                                       RequestStream<HaltRequest> Interface::* halt,
-                                      Register registerRole) {
+                                      Register registerRole,
+                                      SingletonReplacementTiming timing) {
 	LocalityData controllerLocality;
 	controllerLocality.set(LocalityData::keyDcId, "primary"_sr);
 	ClusterControllerData data(ClusterControllerFullInterface(),
@@ -3970,14 +3979,29 @@ Future<Void> testSingletonReplacement(Future<Void> (*monitorRole)(ClusterControl
 	ASSERT_EQ(oldWaitOrTimeout.index(), 0);
 	ReplyPromise<Void> oldFailure = std::get<0>(std::move(oldWaitOrTimeout));
 
-	registerRole(&data, newWorker, newSingleton);
-	ASSERT((data.db.serverInfo->get().*role).present());
-	ASSERT((data.db.serverInfo->get().*role).get().id() == newSingleton.id());
-	auto oldHaltOrTimeout = co_await race(oldHalts, delay(2.0));
-	ASSERT_EQ(oldHaltOrTimeout.index(), 0);
-	HaltRequest oldHalt = std::get<0>(std::move(oldHaltOrTimeout));
-	oldHalt.reply.send(Void());
-	oldFailure.sendError(connection_failed());
+	if (timing == SingletonReplacementTiming::BeforeFailure) {
+		auto unrelatedUpdate = data.db.serverInfo->get();
+		unrelatedUpdate.id = UID(3, 2);
+		data.db.serverInfo->set(unrelatedUpdate);
+		co_await delay(0);
+		ASSERT(!oldFailures.isReady());
+
+		registerRole(&data, newWorker, newSingleton);
+		auto oldHaltOrTimeout = co_await race(oldHalts, delay(2.0));
+		ASSERT_EQ(oldHaltOrTimeout.index(), 0);
+		HaltRequest oldHalt = std::get<0>(std::move(oldHaltOrTimeout));
+		oldHalt.reply.send(Void());
+		oldFailure.sendError(connection_failed());
+	} else {
+		Future<Void> registered = map(waitAndForward(oldHalts), [&](HaltRequest req) {
+			registerRole(&data, newWorker, newSingleton);
+			req.reply.send(Void());
+			return Void();
+		});
+		oldFailure.sendError(connection_failed());
+		auto registeredOrTimeout = co_await race(registered, delay(2.0));
+		ASSERT_EQ(registeredOrTimeout.index(), 0);
+	}
 
 	auto newWaitOrTimeout = co_await race(newFailures, delay(2.0));
 	ASSERT_EQ(newWaitOrTimeout.index(), 0);
@@ -3987,24 +4011,42 @@ Future<Void> testSingletonReplacement(Future<Void> (*monitorRole)(ClusterControl
 	monitor.cancel();
 }
 
-TEST_CASE("/fdbserver/clustercontroller/replacedRatekeeperSurvivesPreviousFailure") {
+Future<Void> testRatekeeperReplacement(SingletonReplacementTiming timing) {
 	return testSingletonReplacement(
 	    monitorRatekeeper,
 	    &ServerDBInfo::ratekeeper,
 	    &RatekeeperInterface::haltRatekeeper,
 	    [](ClusterControllerData* data, const WorkerInterface& worker, const RatekeeperInterface& interf) {
 		    processRegisteredSingletons(data, worker, {}, interf, {});
-	    });
+	    },
+	    timing);
 }
 
-TEST_CASE("/fdbserver/clustercontroller/replacedDataDistributorSurvivesPreviousFailure") {
+TEST_CASE("/fdbserver/clustercontroller/replacedRatekeeperSurvivesPreviousFailure") {
+	return testRatekeeperReplacement(SingletonReplacementTiming::BeforeFailure);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/replacedRatekeeperSurvivesInlineHaltRegistration") {
+	return testRatekeeperReplacement(SingletonReplacementTiming::DuringHalt);
+}
+
+Future<Void> testDataDistributorReplacement(SingletonReplacementTiming timing) {
 	return testSingletonReplacement(
 	    monitorDataDistributor,
 	    &ServerDBInfo::distributor,
 	    &DataDistributorInterface::haltDataDistributor,
 	    [](ClusterControllerData* data, const WorkerInterface& worker, const DataDistributorInterface& interf) {
 		    processRegisteredSingletons(data, worker, interf, {}, {});
-	    });
+	    },
+	    timing);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/replacedDataDistributorSurvivesPreviousFailure") {
+	return testDataDistributorReplacement(SingletonReplacementTiming::BeforeFailure);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/replacedDataDistributorSurvivesInlineHaltRegistration") {
+	return testDataDistributorReplacement(SingletonReplacementTiming::DuringHalt);
 }
 
 TEST_CASE("/fdbserver/clustercontroller/replacedConsistencyScanSurvivesPreviousFailure") {
@@ -4014,7 +4056,8 @@ TEST_CASE("/fdbserver/clustercontroller/replacedConsistencyScanSurvivesPreviousF
 	    &ConsistencyScanInterface::haltConsistencyScan,
 	    [](ClusterControllerData* data, const WorkerInterface& worker, const ConsistencyScanInterface& interf) {
 		    processRegisteredSingletons(data, worker, {}, {}, interf);
-	    });
+	    },
+	    SingletonReplacementTiming::BeforeFailure);
 }
 
 TEST_CASE("/fdbserver/clustercontroller/ratekeeperReplacementRefreshesMonitors") {
