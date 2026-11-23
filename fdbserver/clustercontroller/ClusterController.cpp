@@ -3022,6 +3022,29 @@ Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) 
 	}
 }
 
+template <class Interface>
+Future<bool> waitForSingletonFailure(ClusterControllerData* self,
+                                     Optional<Interface> ServerDBInfo::* role,
+                                     Future<Void> recruitChanged,
+                                     double failureTime) {
+	const auto& monitored = (self->db.serverInfo->get().*role).get();
+	const UID monitoredID = monitored.id();
+	Future<Void> infoChanged = self->db.serverInfo->onChange();
+	// Preserve the original failure timeout across unrelated ServerDBInfo updates.
+	Future<Void> failure = waitFailureClient(monitored.waitFailure, failureTime);
+	while (true) {
+		auto event = co_await race(failure, recruitChanged, infoChanged);
+		const auto& current = self->db.serverInfo->get().*role;
+		if (event.index() == 1 || !current.present() || current.get().id() != monitoredID) {
+			co_return false;
+		}
+		if (event.index() == 0) {
+			co_return true;
+		}
+		infoChanged = self->db.serverInfo->onChange();
+	}
+}
+
 Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 	SingletonRecruitThrottler recruitThrottler;
 	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
@@ -3036,10 +3059,10 @@ Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 		    .detail("ExistingDD", ddExist ? self->db.serverInfo->get().distributor.get().id().toString() : "");
 
 		if (self->db.serverInfo->get().distributor.present() && !self->recruitDistributor.get()) {
-			auto res = co_await race(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,
-			                                           SERVER_KNOBS->DD_FAILURE_TIME),
-			                         self->recruitDistributor.onChange());
-			if (res.index() == 0) {
+			if (co_await waitForSingletonFailure(self,
+			                                     &ServerDBInfo::distributor,
+			                                     self->recruitDistributor.onChange(),
+			                                     SERVER_KNOBS->DD_FAILURE_TIME)) {
 				const auto& distributor = self->db.serverInfo->get().distributor;
 				TraceEvent("CCDataDistributorDied", self->id).detail("DDID", distributor.get().id());
 				DataDistributorSingleton(distributor).halt(*self, distributor.get().locality.processId());
@@ -3128,16 +3151,11 @@ Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 
 	while (true) {
 		if (self->db.serverInfo->get().ratekeeper.present() && !self->recruitRatekeeper.get()) {
-			const UID monitoredRatekeeperID = self->db.serverInfo->get().ratekeeper.get().id();
-			auto res = co_await race(waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure,
-			                                           SERVER_KNOBS->RATEKEEPER_FAILURE_TIME),
-			                         self->recruitRatekeeper.onChange(),
-			                         self->db.serverInfo->onChange());
-			if (res.index() == 0) {
+			if (co_await waitForSingletonFailure(self,
+			                                     &ServerDBInfo::ratekeeper,
+			                                     self->recruitRatekeeper.onChange(),
+			                                     SERVER_KNOBS->RATEKEEPER_FAILURE_TIME)) {
 				const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
-				if (!ratekeeper.present() || ratekeeper.get().id() != monitoredRatekeeperID) {
-					continue;
-				}
 				TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
 				RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
 				self->db.clearInterf(ProcessClass::RatekeeperClass);
@@ -3225,10 +3243,10 @@ Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 	TraceEvent("CCMonitorConsistencyScan", self->id).log();
 	while (true) {
 		if (self->db.serverInfo->get().consistencyScan.present() && !self->recruitConsistencyScan.get()) {
-			Future<Void> wfClient = waitFailureClient(self->db.serverInfo->get().consistencyScan.get().waitFailure,
-			                                          SERVER_KNOBS->CONSISTENCYSCAN_FAILURE_TIME);
-			auto res = co_await race(wfClient, self->recruitConsistencyScan.onChange());
-			if (res.index() == 0) {
+			if (co_await waitForSingletonFailure(self,
+			                                     &ServerDBInfo::consistencyScan,
+			                                     self->recruitConsistencyScan.onChange(),
+			                                     SERVER_KNOBS->CONSISTENCYSCAN_FAILURE_TIME)) {
 				TraceEvent("CCMonitorConsistencyScanDied", self->id)
 				    .detail("CKID", self->db.serverInfo->get().consistencyScan.get().id());
 				self->db.clearInterf(ProcessClass::ConsistencyScanClass);
@@ -3921,7 +3939,11 @@ WorkerInterface addSingletonTestWorker(ClusterControllerData& data, StringRef pr
 	return worker;
 }
 
-TEST_CASE("/fdbserver/clustercontroller/replacedRatekeeperSurvivesPreviousFailure") {
+template <class Interface, class HaltRequest, class Register>
+Future<Void> testSingletonReplacement(Future<Void> (*monitorRole)(ClusterControllerData*),
+                                      Optional<Interface> ServerDBInfo::* role,
+                                      RequestStream<HaltRequest> Interface::* halt,
+                                      Register registerRole) {
 	LocalityData controllerLocality;
 	controllerLocality.set(LocalityData::keyDcId, "primary"_sr);
 	ClusterControllerData data(ClusterControllerFullInterface(),
@@ -3929,38 +3951,70 @@ TEST_CASE("/fdbserver/clustercontroller/replacedRatekeeperSurvivesPreviousFailur
 	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
 	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
 	                           makeReference<AsyncVar<Optional<UID>>>());
-	WorkerInterface oldWorker = addSingletonTestWorker(data, "old-ratekeeper"_sr, "primary"_sr);
-	WorkerInterface newWorker = addSingletonTestWorker(data, "new-ratekeeper"_sr, "primary"_sr);
-	RatekeeperInterface oldRatekeeper(oldWorker.locality, UID(1, 1));
-	RatekeeperInterface newRatekeeper(newWorker.locality, UID(1, 2));
-	FutureStream<ReplyPromise<Void>> oldFailures = oldRatekeeper.waitFailure.getFuture();
-	FutureStream<ReplyPromise<Void>> newFailures = newRatekeeper.waitFailure.getFuture();
-	FutureStream<HaltRatekeeperRequest> oldHalts = oldRatekeeper.haltRatekeeper.getFuture();
-	FutureStream<HaltRatekeeperRequest> newHalts = newRatekeeper.haltRatekeeper.getFuture();
+	WorkerInterface oldWorker = addSingletonTestWorker(data, "old-singleton"_sr, "primary"_sr);
+	WorkerInterface newWorker = addSingletonTestWorker(data, "new-singleton"_sr, "primary"_sr);
+	Interface oldSingleton(oldWorker.locality, UID(1, 1));
+	Interface newSingleton(newWorker.locality, UID(1, 2));
+	FutureStream<ReplyPromise<Void>> oldFailures = oldSingleton.waitFailure.getFuture();
+	FutureStream<ReplyPromise<Void>> newFailures = newSingleton.waitFailure.getFuture();
+	auto oldHalts = (oldSingleton.*halt).getFuture();
+	auto newHalts = (newSingleton.*halt).getFuture();
 
 	auto serverInfo = data.db.serverInfo->get();
 	serverInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
 	serverInfo.id = UID(3, 1);
 	data.db.serverInfo->set(serverInfo);
-	data.db.setRatekeeper(oldRatekeeper);
-	Future<Void> monitor = monitorRatekeeper(&data);
+	registerRole(&data, oldWorker, oldSingleton);
+	Future<Void> monitor = monitorRole(&data);
 	auto oldWaitOrTimeout = co_await race(oldFailures, delay(2.0));
 	ASSERT_EQ(oldWaitOrTimeout.index(), 0);
 	ReplyPromise<Void> oldFailure = std::get<0>(std::move(oldWaitOrTimeout));
 
-	processRegisteredSingletons(&data, newWorker, {}, newRatekeeper, {});
-	ASSERT(data.db.serverInfo->get().ratekeeper.get().id() == newRatekeeper.id());
+	registerRole(&data, newWorker, newSingleton);
+	ASSERT((data.db.serverInfo->get().*role).present());
+	ASSERT((data.db.serverInfo->get().*role).get().id() == newSingleton.id());
 	auto oldHaltOrTimeout = co_await race(oldHalts, delay(2.0));
 	ASSERT_EQ(oldHaltOrTimeout.index(), 0);
-	HaltRatekeeperRequest oldHalt = std::get<0>(std::move(oldHaltOrTimeout));
+	HaltRequest oldHalt = std::get<0>(std::move(oldHaltOrTimeout));
 	oldHalt.reply.send(Void());
 	oldFailure.sendError(connection_failed());
 
 	auto newWaitOrTimeout = co_await race(newFailures, delay(2.0));
 	ASSERT_EQ(newWaitOrTimeout.index(), 0);
-	ASSERT(data.db.serverInfo->get().ratekeeper.get().id() == newRatekeeper.id());
+	ASSERT((data.db.serverInfo->get().*role).present());
+	ASSERT((data.db.serverInfo->get().*role).get().id() == newSingleton.id());
 	ASSERT(!newHalts.isReady());
 	monitor.cancel();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/replacedRatekeeperSurvivesPreviousFailure") {
+	return testSingletonReplacement(
+	    monitorRatekeeper,
+	    &ServerDBInfo::ratekeeper,
+	    &RatekeeperInterface::haltRatekeeper,
+	    [](ClusterControllerData* data, const WorkerInterface& worker, const RatekeeperInterface& interf) {
+		    processRegisteredSingletons(data, worker, {}, interf, {});
+	    });
+}
+
+TEST_CASE("/fdbserver/clustercontroller/replacedDataDistributorSurvivesPreviousFailure") {
+	return testSingletonReplacement(
+	    monitorDataDistributor,
+	    &ServerDBInfo::distributor,
+	    &DataDistributorInterface::haltDataDistributor,
+	    [](ClusterControllerData* data, const WorkerInterface& worker, const DataDistributorInterface& interf) {
+		    processRegisteredSingletons(data, worker, interf, {}, {});
+	    });
+}
+
+TEST_CASE("/fdbserver/clustercontroller/replacedConsistencyScanSurvivesPreviousFailure") {
+	return testSingletonReplacement(
+	    monitorConsistencyScan,
+	    &ServerDBInfo::consistencyScan,
+	    &ConsistencyScanInterface::haltConsistencyScan,
+	    [](ClusterControllerData* data, const WorkerInterface& worker, const ConsistencyScanInterface& interf) {
+		    processRegisteredSingletons(data, worker, {}, {}, interf);
+	    });
 }
 
 TEST_CASE("/fdbserver/clustercontroller/ratekeeperReplacementRefreshesMonitors") {
