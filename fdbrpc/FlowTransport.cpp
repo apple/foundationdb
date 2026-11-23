@@ -56,7 +56,6 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
-#include "flow/Util.h"
 #include "flow/WatchFile.h"
 #include "flow/IConnection.h"
 #define XXH_INLINE_ALL
@@ -1829,20 +1828,7 @@ static Future<Void> connectionReader(TransportData* transport,
 	}
 }
 
-struct PendingIncomingConnections : ReferenceCounted<PendingIncomingConnections> {
-	int count = 0;
-};
-
-struct IncomingConnectionPermit {
-	Reference<PendingIncomingConnections> owner;
-	Hold<int> pending;
-};
-
-static Future<Void> connectionIncoming(TransportData* self,
-                                       Reference<IConnection> conn,
-                                       IncomingConnectionPermit permit) {
-	// Release the count before final suspend even if the returned future is still held.
-	auto pendingConnection = std::move(permit);
+static Future<Void> connectionIncoming(TransportData* self, Reference<IConnection> conn) {
 	bool handedOff = false;
 	auto closeIfUnassociated = ScopeExit([&]() {
 		if (!handedOff) {
@@ -1903,7 +1889,6 @@ static Future<Void> connectionIncoming(TransportData* self,
 
 static Future<Void> listenImpl(TransportData* self, NetworkAddress listenAddr, Reference<IListener> listener) {
 	constexpr int maxPendingIncomingConnectionsPerListener = 1000;
-	auto pendingConnections = makeReference<PendingIncomingConnections>();
 	ActorCollectionNoErrors
 	    incoming; // Actors monitoring incoming connections that haven't yet been associated with a peer
 	uint64_t connectionCount = 0;
@@ -1913,7 +1898,7 @@ static Future<Void> listenImpl(TransportData* self, NetworkAddress listenAddr, R
 			static SimpleCounter<int64_t>* countIncomingConnectionCreated =
 			    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionCreated");
 			countIncomingConnectionCreated->increment(1);
-			if (conn && pendingConnections->count >= maxPendingIncomingConnectionsPerListener) {
+			if (conn && incoming.size() >= maxPendingIncomingConnectionsPerListener) {
 				// Close this overflow socket before accepting another, without starting TLS or a reader.
 				conn->close();
 				static SimpleCounter<int64_t>* countIncomingConnectionOverloadRejected =
@@ -1924,8 +1909,7 @@ static Future<Void> listenImpl(TransportData* self, NetworkAddress listenAddr, R
 				    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 				    .detail("FromAddress", conn->getPeerAddress())
 				    .detail("ListenAddress", listenAddr.toString());
-				IncomingConnectionPermit permit{ pendingConnections, Hold<int>(&pendingConnections->count) };
-				incoming.add(connectionIncoming(self, conn, std::move(permit)));
+				incoming.add(connectionIncoming(self, conn));
 			}
 			connectionCount++;
 			if (connectionCount % (FLOW_KNOBS->ACCEPT_BATCH_SIZE) == 0) {
