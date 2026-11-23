@@ -125,6 +125,7 @@ public:
 		TaskPriority taskID = g_network->getCurrentTask();
 		Promise<Void> p;
 		eio_req* r = eio_rename(from.c_str(), to.c_str(), 0, eio_callback, &p);
+		checkRequestAllocation(r);
 		try {
 			co_await p.getFuture();
 		} catch (...) {
@@ -252,6 +253,12 @@ public:
 	~AsyncFileEIO() override { close_impl(Uncancellable(), fd); }
 
 private:
+	static void checkRequestAllocation(const eio_req* request) {
+		if (request == nullptr) {
+			platform::outOfMemory();
+		}
+	}
+
 	static int openParentDirectory(const std::string& filename) {
 		std::string folder = parentDirectory(filename);
 		TraceEvent("FSyncParentDir").detail("Folder", folder).detail("File", filename);
@@ -354,6 +361,7 @@ private:
 	static Future<Void> close_impl(Uncancellable, int fd) {
 		Promise<Void> p;
 		eio_req* r = eio_close(fd, 0, eio_callback, &p);
+		checkRequestAllocation(r);
 		co_await p.getFuture();
 		if (r->result)
 			error("CloseError", fd, r);
@@ -425,6 +433,7 @@ private:
 #ifdef __APPLE__
 		// Neither fsync() nor fdatasync() do the right thing on OS X!
 		eio_req* req = (eio_req*)calloc(1, sizeof *req);
+		checkRequestAllocation(req);
 		req->type = EIO_CUSTOM;
 		req->pri = 0;
 		req->finish = eio_callback;
@@ -435,10 +444,9 @@ private:
 		eio_submit(req);
 		return req;
 #else
-		if (sync_metadata)
-			return eio_fsync(fd, 0, eio_callback, &p);
-		else
-			return eio_fdatasync(fd, 0, eio_callback, &p);
+		eio_req* req = sync_metadata ? eio_fsync(fd, 0, eio_callback, &p) : eio_fdatasync(fd, 0, eio_callback, &p);
+		checkRequestAllocation(req);
+		return req;
 #endif
 	}
 
@@ -541,9 +549,7 @@ private:
 			    return 0;
 		    },
 		    &data);
-		if (request == nullptr) {
-			platform::outOfMemory();
-		}
+		checkRequestAllocation(request);
 		co_await data.done.getFuture();
 		co_await delay(0, taskID);
 		if (data.result.isError())
