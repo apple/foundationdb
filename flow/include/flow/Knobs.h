@@ -156,6 +156,14 @@ public:
 	double BUSY_WAIT_THRESHOLD;
 	double CLIENT_REQUEST_INTERVAL;
 	double SERVER_REQUEST_INTERVAL;
+	// If true, a client does not probe a peer it considers available after losing the connection to it, including
+	// closing it as idle; it reconnects when it next has something to send. Otherwise every client probes every peer
+	// it holds an interface for FAILURE_DETECTION_DELAY after a cluster restart, all at the same moment. Trade-off: a
+	// peer that died is marked failed only when the client next sends to it, after one failed connection attempt.
+	bool CLIENT_SKIP_AVAILABLE_PEER_PROBE;
+	// Seconds. A client probes a peer it considers failed every SERVER_REQUEST_INTERVAL plus a random delay of up to
+	// this much, so that clients do not probe the same restarted servers in lockstep. 0 disables.
+	double CLIENT_FAILED_PEER_PROBE_JITTER;
 
 	int DISABLE_ASSERTS;
 	double QUEUE_MODEL_SMOOTHING_AMOUNT;
@@ -228,12 +236,26 @@ public:
 	double TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT;
 	int TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS;
 	int TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS;
+	// If true, TLS handshakes that time out or whose connection closes do not count toward per-address TLS connection
+	// throttling.
+	bool TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS;
+	// If true, an outgoing TLS connection whose handshake timed out or whose connection closed during the handshake
+	// does not count as a connect failure toward peer health.
+	bool TLS_HANDSHAKE_TIMEOUT_IS_NOT_CONNECT_FAILURE;
+	// If true, an outgoing connection attempt that this process cancelled does not count as a connect failure toward
+	// peer health.
+	bool CANCELLED_CONNECT_IS_NOT_CONNECT_FAILURE;
 	int TLS_CLIENT_HANDSHAKE_THREADS;
 	int TLS_SERVER_HANDSHAKE_THREADS;
 	int TLS_HANDSHAKE_THREAD_STACKSIZE;
 	int TLS_MALLOC_ARENA_MAX;
 	int TLS_HANDSHAKE_LIMIT;
 	bool DISABLE_MAINTHREAD_TLS_HANDSHAKE;
+	// If true, each TLS handshake thread drives many handshakes concurrently on non-blocking sockets, with a
+	// per-handshake deadline, and handshakes never run on the network thread while handshake threads exist;
+	// DISABLE_MAINTHREAD_TLS_HANDSHAKE then has no effect. Because each thread then serves many handshakes, fewer
+	// TLS_SERVER_HANDSHAKE_THREADS may suffice; every busy one competes with the network thread for CPU.
+	bool TLS_HANDSHAKE_NONBLOCKING_WORKERS;
 	int TLS_HANDSHAKE_FLOWLOCK_PRIORITY;
 
 	int NETWORK_TEST_CLIENT_COUNT;
