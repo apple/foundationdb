@@ -126,6 +126,9 @@ public:
 		TaskPriority taskID = g_network->getCurrentTask();
 		Promise<Void> p;
 		eio_req* r = eio_rename(from.c_str(), to.c_str(), 0, eio_callback, &p);
+		if (r == nullptr) {
+			platform::outOfMemory();
+		}
 		try {
 			co_await p.getFuture();
 		} catch (...) {
@@ -356,6 +359,9 @@ private:
 	static Future<Void> close_impl(Uncancellable, int fd) {
 		Promise<Void> p;
 		eio_req* r = eio_close(fd, 0, eio_callback, &p);
+		if (r == nullptr) {
+			platform::outOfMemory();
+		}
 		co_await p.getFuture();
 		if (r->result)
 			error("CloseError", fd, r);
