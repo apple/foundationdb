@@ -962,7 +962,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 	// getSourceServers
 	auto queueMapItr = queueMap.rangeContaining(affectedQueuedItems[0].begin);
 
-	// Put off erasing elements from fetchingSourcesQueue
+	// An interior insertion leaves two remainders. Both must see the original relocation in its queue.
 	std::set<RelocateData, std::greater<RelocateData>> delayDelete;
 	for (int r = 0; r < affectedQueuedItems.size(); ++r, ++queueMapItr) {
 		// ASSERT(queueMapItr->value() == queueMap.rangeContaining(affectedQueuedItems[r].begin)->value());
@@ -1001,8 +1001,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 			for (int i = 0; i < rrs.src.size(); i++) {
 				auto& serverQueue = queue[rrs.src[i]];
 
-				if (serverQueue.erase(rrs) > 0) {
+				if (serverQueue.contains(rrs)) {
 					if (!foundActiveRelocation) {
+						delayDelete.insert(rrs);
 						newData.interval = TraceInterval("QueuedRelocation", rrs.randomId); // inherit the old randomId
 
 						DebugRelocationTraceEvent(newData.interval.begin(), distributorId)
@@ -1032,8 +1033,14 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		}
 	}
 
-	for (const auto& it : delayDelete) {
-		fetchingSourcesQueue.erase(it);
+	for (const auto& original : delayDelete) {
+		if (original.src.empty()) {
+			fetchingSourcesQueue.erase(original);
+		} else {
+			for (UID source : original.src) {
+				queue[source].erase(original);
+			}
+		}
 	}
 	DebugRelocationTraceEvent("ReceivedRelocateShard", distributorId)
 	    .detail("KeyBegin", rd.keys.begin)
@@ -3444,6 +3451,7 @@ TEST_CASE("/DataDistribution/DDQueue/InteriorRequestPreservesQueuedRemainders") 
 		remainder.keys = range;
 		for (UID source : queued.src) {
 			ASSERT(self.queue.at(source).contains(remainder));
+			ASSERT_EQ(self.queue.at(source).size(), 2);
 		}
 	}
 	ASSERT_EQ(self.fetchingSourcesQueue.size(), 1);
