@@ -7606,6 +7606,23 @@ TEST_CASE("/fdbserver/storageserver/selectOwnedBulkLoadFileSets") {
 	return Void();
 }
 
+static Future<Void> clearBulkLoadFolderAfterIngest(Future<Void> ingest, std::string folder, UID serverID) {
+	co_await ready(ingest);
+	clearFileFolder(folder, serverID, /*ignoreError=*/true);
+}
+
+TEST_CASE("/fdbserver/storageserver/bulkLoadFolderSurvivesPendingIngest") {
+	const UID id = deterministicRandom()->randomUniqueID();
+	const std::string dir = abspath("bulk-load-test-" + id.toString());
+	ASSERT(platform::createDirectory(dir));
+	Promise<Void> ingest;
+	Future<Void> cleanup = clearBulkLoadFolderAfterIngest(ingest.getFuture(), dir, id);
+	ASSERT(directoryExists(dir));
+	ingest.send(Void());
+	co_await cleanup;
+	ASSERT(!directoryExists(dir));
+}
+
 Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	TraceInterval interval("FetchKeys");
@@ -7617,6 +7634,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	int priority = dataMovementPriority(shard->reason);
 	UID dataMoveId = shard->getSSBulkLoadMetadata().getDataMoveId();
 	ConductBulkLoad conductBulkLoad = ConductBulkLoad(shard->getSSBulkLoadMetadata().getConductBulkLoad());
+	Future<Void> bulkLoadIngest = Void();
 	std::string bulkLoadLocalDir =
 	    joinPath(joinPath(data->bulkLoadFolder, dataMoveId.toString()), fetchKeysID.toString());
 	std::shared_ptr<BulkLoadFileSetKeyMap> localBulkLoadFileSets;
@@ -7934,7 +7952,8 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// Ingest the SST files.
 					// Measure duration at this level so we capture the inter-thread handoff time.
 					double ingestStartTime = g_network->timer(); // Record start time
-					co_await data->storage.getKeyValueStore()->ingestSSTFiles(ownedBulkLoadFileSets);
+					bulkLoadIngest = data->storage.getKeyValueStore()->ingestSSTFiles(ownedBulkLoadFileSets);
+					co_await bulkLoadIngest;
 					const double ingestDuration = g_network->timer() - ingestStartTime;
 					data->counters.ingestDurationLatencySample->addMeasurement(ingestDuration);
 
@@ -8342,8 +8361,8 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			data->otherError.sendError(e); // Kill the storage server.  Are there any recoverable errors?
 		if (conductBulkLoad) {
 			data->bulkLoadMetrics->removeTask();
-			// Do best effort cleanup
-			clearFileFolder(bulkLoadLocalDir, data->thisServerID, /*ignoreError=*/true);
+			// Cancelling fetchKeys does not recall an ingest already posted to the storage writer.
+			data->actors.add(clearBulkLoadFolderAfterIngest(bulkLoadIngest, bulkLoadLocalDir, data->thisServerID));
 		}
 		throw; // goes nowhere
 	}

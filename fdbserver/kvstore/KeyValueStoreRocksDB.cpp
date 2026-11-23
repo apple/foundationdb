@@ -2235,7 +2235,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			++deletesPerCommit;
 		} else {
 			++counters.deleteRangeReqs;
-			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE &&
+			// A snapshot cannot enumerate keys that a queued ingest has yet to install. A range tombstone
+			// posted to the same writer covers those keys when this batch commits.
+			if (lastIngest.isReady() && SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE &&
 			    !SERVER_KNOBS->ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE && maxDeletes > 0) {
 				++counters.convertedDeleteRangeReqs;
 				rocksdb::ReadOptions readOptions = sharedState->getReadOptions();
@@ -2548,9 +2550,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Void> ingestSSTFiles(std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) override {
 		auto a = new Writer::IngestSSTFilesAction(localFileSets);
-		auto res = a->done.getFuture();
+		lastIngest = a->done.getFuture();
 		writeThread->post(a);
-		return res;
+		return lastIngest;
 	}
 
 	Future<Void> compactRange(KeyRangeRef range) override {
@@ -2573,6 +2575,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> errorFuture;
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
+	Future<Void> lastIngest = Void();
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	// keysSet will store the written keys in the current transaction.
 	// previousCommitKeysSet will store the written keys that are currently in the rocksdb commit path.
@@ -3029,6 +3032,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/IngestSSTFileVisibility") {
 	std::string sstFileFullPath = joinPath(testDir, sstFilename); // Full path for writer
 	rocksdb::SstFileWriter sstWriter(rocksdb::EnvOptions(), kvStore->sharedState->getOptions());
 	ASSERT(sstWriter.Open(sstFileFullPath).ok()); // Use full path here
+	ASSERT(sstWriter.Put("discard_key", "discard_value").ok());
 	ASSERT(sstWriter.Put("test_key", "test_value").ok());
 	ASSERT(sstWriter.Finish().ok());
 
@@ -3050,7 +3054,13 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/IngestSSTFileVisibility") {
 	const KeyRange range = singleKeyRange("test_key"_sr);
 	RangeResult before = co_await kvStore->readRange(range, 10, 1000, {});
 	ASSERT(before.empty());
-	co_await kvStore->ingestSSTFiles(fileSetMap);
+	Future<Void> ingest = kvStore->ingestSSTFiles(fileSetMap);
+	// Model a cancelled bulk load clearing a range before the network thread observes ingest completion.
+	kvStore->clear(KeyRangeRef("discard"_sr, "discard~"_sr), nullptr);
+	ASSERT(kvStore->writeBatch->HasDeleteRange());
+	co_await kvStore->commit(false);
+	co_await ingest;
+	ASSERT(!(co_await kvStore->readValue("discard_key"_sr, Optional<ReadOptions>())).present());
 	RangeResult after = co_await kvStore->readRange(range, 10, 1000, {});
 	ASSERT_EQ(after.size(), 1);
 	ASSERT(after[0].key == "test_key"_sr && after[0].value == "test_value"_sr);
