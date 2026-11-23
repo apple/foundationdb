@@ -31,6 +31,7 @@
 #include "flow/flow.h"
 #include "flow/ThreadHelper.h"
 #include "flow/IAsyncFile.h"
+#include "flow/Platform.h"
 #include "flow/ScopeExit.h"
 #include "flow/TDMetric.h"
 
@@ -516,7 +517,7 @@ private:
 		Dispatch<R> data(std::move(func));
 		TaskPriority taskID = g_network->getCurrentTask();
 
-		eio_custom(
+		eio_req* request = eio_custom(
 		    [](eio_req* req) {
 			    // Runs on the eio thread pool
 			    auto data = reinterpret_cast<Dispatch<R>*>(req->data);
@@ -540,6 +541,9 @@ private:
 			    return 0;
 		    },
 		    &data);
+		if (request == nullptr) {
+			platform::outOfMemory();
+		}
 		co_await data.done.getFuture();
 		co_await delay(0, taskID);
 		if (data.result.isError())
