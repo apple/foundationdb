@@ -96,6 +96,7 @@ Invariant
 - Each subrange always has one manifest file indicating the metadata information of the data, such as Range, Checksum (to be implemented later in a separate PR), and FilePath. 
 - In SS, we dump files at first and then write metadata in the system key space. If any phase is failed, DD will re-do the range. For each time SS writes the folder (locally or in BlobStore), the SS erases the folder at first.
 - A SS handles at most one dump task at a time (the parallelism is protected by the knob ``SS_SERVE_BULKDUMP_PARALLELISM``. With current implementation, this knob is set to 1. However, we leave the flexibility of setting bulkdump parallelism at a SS here).
+- In a multi-region cluster, only the storage servers of the dumping DC upload files (see ``DD_BULKDUMP_USE_REMOTE_REGION``). DD skips a range that has no replica in that DC and retries it on every scheduling round. If the number of skipped ranges does not drop for ``DD_BULKDUMP_NO_TARGET_REPLICA_FAIL_SEC`` seconds, DD marks the skipped ranges as ``Error`` and stops scheduling the job. The ``Error`` metadata is kept so that ``bulkdump status`` and backup can see the failure; clear it with ``bulkdump cancel``, and do so before downgrading to a release that predates the ``Error`` phase, because the older DD crash-loops on it. Setting the knob to 0 disables the failure.
 - Each subrange does not necessarily have a byteSample file and data file which depends on the data size. A SS may be assigned a range but the range is empty.
 
 Failure handling

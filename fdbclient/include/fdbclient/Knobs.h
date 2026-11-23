@@ -239,6 +239,8 @@ public:
 	int RESTORE_DISPATCH_TX_SIZE; // Target bytes for partitioned restore range-task dispatch.
 	int RESTORE_DISPATCH_BATCH_SIZE;
 	int RESTORE_WRITE_TX_SIZE;
+	bool RESTORE_RANGE_READ_BEFORE_CLEAR; // clear a range-file restore span only if it holds keys
+	bool RESTORE_RANGE_DISABLE_RYW; // disable read-your-writes in the range-file restore write transactions
 	int RESTORE_PARTITIONED_BATCH_VERSION_SIZE;
 	int APPLY_MAX_LOCK_BYTES;
 	int APPLY_MIN_LOCK_BYTES;

@@ -248,11 +248,16 @@ Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange j
 // Submit a BulkLoad job: loading data from a remote folder using bulkloading mechanism.
 // There is at most one BulkLoad or one BulkDump job at a time.
 // If there is any existing BulkLoad or BulkDump job, reject the new job.
+// Bulkload commits no mutations, so a backup or DR would never record the loaded data: if one is running, submitted, or
+// covers the range, reject with bulkload_range_under_backup.
 // Set lockAware=true when submitting during database restore (when database is locked).
 Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware = false);
 
 // Return the existing BulkLoad job metadata (if any)
 Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr);
+
+// True if a BulkLoad job is submitted over any part of the range. The transaction must be able to read system keys.
+Future<bool> isRangeUnderBulkLoadJob(Reference<ReadYourWritesTransaction> tr, KeyRange range);
 
 // Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
 // the metadata.
@@ -272,8 +277,13 @@ Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob);
 // Return the existing job metadata
 Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr);
 
-// Get total number of completed tasks within the input range
-Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead);
+// Count the completed and the failed tasks within the input range
+struct BulkDumpTaskCounts {
+	size_t complete = 0;
+	size_t error = 0;
+};
+
+Future<BulkDumpTaskCounts> getBulkDumpTaskCounts(Database cx, KeyRange rangeToRead);
 
 // ==================== BulkDump/BulkLoad Progress Tracking ====================
 
@@ -297,7 +307,8 @@ struct BulkLoadStalledTask {
 	    restartCount(restartCount), lastError(lastError) {}
 };
 
-// Aggregated progress for a BulkDump job
+// Aggregated progress for a BulkDump job. There is no byte total: a range's size is known only once its dump task
+// completes and records a manifest.
 struct BulkDumpProgress {
 	UID jobId;
 	KeyRange jobRange;
@@ -305,27 +316,17 @@ struct BulkDumpProgress {
 	int completeTasks;
 	int runningTasks;
 	int errorTasks;
-	int64_t totalBytes;
 	int64_t completedBytes;
 	double elapsedSeconds;
 	double startTime; // For computing current throughput
-	std::vector<BulkLoadStalledTask> stalledTasks;
 
 	BulkDumpProgress()
-	  : totalTasks(0), completeTasks(0), runningTasks(0), errorTasks(0), totalBytes(0), completedBytes(0),
-	    elapsedSeconds(0), startTime(0) {}
+	  : totalTasks(0), completeTasks(0), runningTasks(0), errorTasks(0), completedBytes(0), elapsedSeconds(0),
+	    startTime(0) {}
 
 	double progressPercent() const { return totalTasks > 0 ? 100.0 * completeTasks / totalTasks : 0; }
 
 	double avgBytesPerSecond() const { return elapsedSeconds > 0 ? completedBytes / elapsedSeconds : 0; }
-
-	Optional<double> etaSeconds() const {
-		double rate = avgBytesPerSecond();
-		if (rate > 0 && completedBytes < totalBytes) {
-			return (totalBytes - completedBytes) / rate;
-		}
-		return {};
-	}
 };
 
 // Aggregated progress for a BulkLoad job

@@ -664,18 +664,7 @@ void CommitBatchContext::checkHotShards() {
 // Check whether the mutation intersects any legal backup ranges
 // If so, it will be clamped to the intersecting range(s) later
 inline bool shouldBackup(MutationRef const& m) {
-	if (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey) {
-		return true;
-	} else if (m.type != MutationRef::Type::ClearRange) {
-		return systemBackupMutationMask().rangeContaining(m.param1).value();
-	} else {
-		for (auto& r : systemBackupMutationMask().intersectingRanges(KeyRangeRef(m.param1, m.param2))) {
-			if (r->value()) {
-				return true;
-			}
-		}
-	}
-	return false;
+	return normalKeys.contains(m.param1) || m.param1 == metadataVersionKey;
 }
 
 // Find the set of logs the batch is sent to. An empty set indicates it cannot be

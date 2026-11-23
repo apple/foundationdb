@@ -39,6 +39,9 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		cases.push_back(case3(cx, "foo3"_sr));
 		cases.push_back(case4(cx, "foo4"_sr));
 		cases.push_back(case5(cx, "foo5"_sr));
+		if (clientId == 0) {
+			cases.push_back(watchTransientValue(cx, "foo6"_sr));
+		}
 		return Void();
 	}
 
@@ -246,6 +249,41 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				err = e;
 			}
 			co_await (tr1.onError(err) && tr2.onError(err));
+		}
+	}
+
+	static Future<Void> watchTransientValue(Database cx, Key key) {
+		Key marker = key.withSuffix("/marker"_sr);
+		ReadYourWritesTransaction first(cx), second(cx);
+		while (true) {
+			Error err;
+			try {
+				first.set(key, "B"_sr);
+				Future<Void> firstB = first.watch(key);
+				Future<Void> secondB = first.watch(key);
+				first.set(marker, "before"_sr);
+				Future<Void> markerChanged = first.watch(marker);
+				co_await first.commit();
+
+				second.set(key, "A"_sr);
+				Future<Void> transient = second.watch(key);
+				second.set(key, "B"_sr);
+				second.set(marker, "after"_sr);
+				co_await transient;
+				co_await second.commit();
+				ASSERT(second.getCommittedVersion() > first.getCommittedVersion());
+
+				// Both watches must survive a commit that changed the marker but left the key at B.
+				co_await markerChanged;
+				ASSERT(!firstB.canGet() && !secondB.canGet());
+
+				co_await setKeyRandomValue(cx, key, Value("C"_sr));
+				co_await (firstB && secondB);
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await (first.onError(err) && second.onError(err));
 		}
 	}
 

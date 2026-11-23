@@ -902,7 +902,8 @@ Future<Reference<IConnection>> proxyConnectImpl(std::string remoteHost,
 	Reference<IConnection> connection = co_await INetworkConnections::net()->connect(proxyHost, proxyService);
 	co_await sendProxyConnectRequest(connection, remoteHost, remoteService);
 	boost::asio::ip::tcp::socket socket = std::move(connection->getSocket());
-	Reference<IConnection> remoteConnection = co_await INetworkConnections::net()->connect(remoteEndpoint, &socket);
+	Reference<IConnection> remoteConnection =
+	    co_await INetworkConnections::net()->connectExternalWithHostname(remoteEndpoint, remoteHost, &socket);
 	co_return remoteConnection;
 }
 

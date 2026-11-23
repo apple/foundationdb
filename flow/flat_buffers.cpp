@@ -41,6 +41,19 @@ void swapWithThreadLocalGlobal(std::vector<int>& writeToOffsets) {
 	gWriteToOffsetsMemory.swap(writeToOffsets);
 }
 
+void flat_buffer_load_failed(const char* reason) {
+	// In simulation a malformed buffer means a writer or the bounds checks are wrong, not that a peer is hostile.
+	ASSERT(!g_network || !g_network->isSimulated());
+	TraceEvent(SevWarnAlways, "SerializationFailed").suppressFor(1.0).detail("Reason", reason);
+	throw serialization_failed();
+}
+
+void flat_buffer_load_fatal(const char* reason) {
+	TraceEvent(SevError, "MalformedObjectBuffer").detail("Reason", reason);
+	flushTraceFileVoid();
+	crashAndDie();
+}
+
 VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
 	if (numMembers == 0) {
 		return VTable{ 4, 4 };
@@ -516,7 +529,7 @@ TEST_CASE("/flow/FlatBuffers/Void") {
 	auto buffer = std::make_unique<uint8_t[]>(msg.size()); // Make a heap allocation of precisely the right size, so
 	                                                       // that asan or valgrind will catch any overflows
 	memcpy(buffer.get(), msg.begin(), msg.size());
-	ObjectReader rd(buffer.get(), Unversioned());
+	ObjectReader rd(StringRef(buffer.get(), msg.size()), Unversioned());
 	Void x;
 	rd.deserialize(x);
 	return Void();
@@ -525,7 +538,7 @@ TEST_CASE("/flow/FlatBuffers/Void") {
 TEST_CASE("/flow/FlatBuffers/EmptyStrings") {
 	int kSize = deterministicRandom()->randomInt(0, 100);
 	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<StringRef>(kSize), Unversioned());
-	ObjectReader rd(msg.begin(), Unversioned());
+	ObjectReader rd(msg, Unversioned());
 	std::vector<StringRef> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
@@ -538,7 +551,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyStrings") {
 TEST_CASE("/flow/FlatBuffers/EmptyVectors") {
 	int kSize = deterministicRandom()->randomInt(0, 100);
 	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<std::vector<Void>>(kSize), Unversioned());
-	ObjectReader rd(msg.begin(), Unversioned());
+	ObjectReader rd(msg, Unversioned());
 	std::vector<std::vector<Void>> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
@@ -551,7 +564,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyVectors") {
 TEST_CASE("/flow/FlatBuffers/EmptyVectorRefs") {
 	int kSize = deterministicRandom()->randomInt(0, 100);
 	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<VectorRef<Void>>(kSize), Unversioned());
-	ObjectReader rd(msg.begin(), Unversioned());
+	ObjectReader rd(msg, Unversioned());
 	std::vector<VectorRef<Void>> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
@@ -565,7 +578,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyPreSerVectorRefs") {
 	int kSize = deterministicRandom()->randomInt(0, 100);
 	Standalone<StringRef> msg =
 	    ObjectWriter::toValue(std::vector<VectorRef<Void, VecSerStrategy::String>>(kSize), Unversioned());
-	ObjectReader rd(msg.begin(), Unversioned());
+	ObjectReader rd(msg, Unversioned());
 	std::vector<VectorRef<Void, VecSerStrategy::String>> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
@@ -579,7 +592,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyUnorderedSet") {
 	int kSize = deterministicRandom()->randomInt(0, 100);
 	Standalone<StringRef> msg =
 	    ObjectWriter::toValue(std::vector<std::unordered_set<Y1, Y1Hasher, Y1Equal>>(kSize), Unversioned());
-	ObjectReader rd(msg.begin(), Unversioned());
+	ObjectReader rd(msg, Unversioned());
 	std::vector<std::unordered_set<Y1, Y1Hasher, Y1Equal>> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
@@ -601,7 +614,7 @@ TEST_CASE("/flow/FlatBuffers/NonEmptyUnorderedSet") {
 	src.push_back(s);
 
 	Standalone<StringRef> msg = ObjectWriter::toValue(src, Unversioned());
-	ObjectReader rd(msg.begin(), Unversioned());
+	ObjectReader rd(msg, Unversioned());
 	std::vector<std::unordered_set<Y1, Y1Hasher, Y1Equal>> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == 1);
@@ -611,6 +624,252 @@ TEST_CASE("/flow/FlatBuffers/NonEmptyUnorderedSet") {
 		y.a = i;
 		ASSERT(xs[0].find(y) != xs[0].end());
 	}
+	return Void();
+}
+
+struct Untrusted {
+	std::string s;
+	std::vector<int64_t> v;
+	Optional<int> o;
+	std::vector<Optional<int>> vo;
+	std::vector<bool> b;
+	std::vector<std::string> strs;
+	template <class Archiver>
+	void serialize(Archiver& ar) {
+		serializer(ar, s, v, o, vo, b, strs);
+	}
+};
+
+constexpr FileIdentifier untrustedFileIdentifier{ 4242 };
+
+// Deserializes |bytes| from a heap allocation of exactly that size, so asan or valgrind catch any read past the end.
+// Returns false if the buffer was rejected with serialization_failed.
+bool tryDeserializeUntrusted(const uint8_t* bytes, int size, Untrusted& out) {
+	auto buffer = std::make_unique<uint8_t[]>(std::max(size, 1));
+	memcpy(buffer.get(), bytes, size);
+	::Arena arena;
+	try {
+		ArenaObjectReader reader(arena, StringRef(buffer.get(), size), AssumeVersion(currentProtocolVersion()));
+		reader.deserialize(untrustedFileIdentifier, out);
+		return true;
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_serialization_failed);
+		return false;
+	}
+}
+
+TEST_CASE("/flow/FlatBuffers/RejectsMalformedBuffers") {
+	if (g_network->isSimulated()) {
+		// Malformed buffers assert in simulation, see detail::flat_buffer_load_failed.
+		return Void();
+	}
+
+	Untrusted src;
+	src.s = "hello world";
+	src.v = { 1, 2, 3, 4, 5 };
+	src.o = 7;
+	src.vo = { Optional<int>(1), Optional<int>(), Optional<int>(3) };
+	src.b = { true, false, true };
+	src.strs = { "abc", "", "defgh" };
+
+	ObjectWriter writer(Unversioned());
+	writer.serialize(untrustedFileIdentifier, src);
+	StringRef good = writer.toStringRef();
+
+	Untrusted dst;
+	ASSERT(tryDeserializeUntrusted(good.begin(), good.size(), dst));
+	ASSERT(dst.s == src.s && dst.v == src.v && dst.o == src.o && dst.vo == src.vo && dst.b == src.b &&
+	       dst.strs == src.strs);
+
+	// A root offset that points far outside the buffer.
+	for (uint32_t rootOffset : { 0x7ffffff0u, 0xffffffffu, (uint32_t)good.size(), (uint32_t)good.size() - 3 }) {
+		std::vector<uint8_t> bad(good.begin(), good.end());
+		memcpy(bad.data(), &rootOffset, sizeof(rootOffset));
+		ASSERT(!tryDeserializeUntrusted(bad.data(), bad.size(), dst));
+	}
+
+	// Every truncation either fails cleanly or only drops bytes that were never read.
+	for (int n = 0; n < good.size(); ++n) {
+		tryDeserializeUntrusted(good.begin(), n, dst);
+	}
+
+	// Overwrite each aligned word with values that are hostile as a length, count, or relative offset.
+	for (uint32_t hostile : { 0u, 1u, 0xffffffffu, 0x7ffffff0u, 0x80000000u, 0xfffffff0u, 0x10000u }) {
+		for (int pos = 0; pos + 4 <= good.size(); pos += 4) {
+			std::vector<uint8_t> bad(good.begin(), good.end());
+			memcpy(bad.data() + pos, &hostile, sizeof(hostile));
+			tryDeserializeUntrusted(bad.data(), bad.size(), dst);
+		}
+	}
+
+	// Random byte damage, including to the vtables.
+	for (int iter = 0; iter < 2000; ++iter) {
+		std::vector<uint8_t> bad(good.begin(), good.end());
+		int flips = deterministicRandom()->randomInt(1, 4);
+		for (int i = 0; i < flips; ++i) {
+			bad[deterministicRandom()->randomInt(0, bad.size())] = deterministicRandom()->randomInt(0, 256);
+		}
+		tryDeserializeUntrusted(bad.data(), bad.size(), dst);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/RejectsHostileStringOffsetAndLength") {
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+
+	Untrusted src;
+	src.s = "hello world";
+	ObjectWriter writer(Unversioned());
+	writer.serialize(untrustedFileIdentifier, src);
+	StringRef good = writer.toStringRef();
+
+	auto read32 = [&](int pos) {
+		uint32_t x;
+		memcpy(&x, good.begin() + pos, sizeof(x));
+		return x;
+	};
+	auto payload = std::search(good.begin(), good.end(), src.s.begin(), src.s.end());
+	ASSERT(payload != good.end());
+	int lengthPos = (payload - good.begin()) - sizeof(uint32_t);
+	ASSERT_EQ(read32(lengthPos), src.s.size());
+
+	// The string field holds a relative offset that lands on the length prefix.
+	int offsetPos = -1;
+	for (int pos = 0; pos + 4 <= lengthPos; pos += 4) {
+		if (pos + read32(pos) == lengthPos) {
+			ASSERT_EQ(offsetPos, -1);
+			offsetPos = pos;
+		}
+	}
+	ASSERT_NE(offsetPos, -1);
+
+	uint32_t sizeToEnd = good.size() - offsetPos;
+	for (uint32_t hostile : { 0x7ffffff0u, 0xffffffffu, sizeToEnd, sizeToEnd + 1 }) {
+		std::vector<uint8_t> bad(good.begin(), good.end());
+		memcpy(bad.data() + offsetPos, &hostile, sizeof(hostile));
+		Untrusted dst;
+		ASSERT(!tryDeserializeUntrusted(bad.data(), bad.size(), dst));
+	}
+
+	uint32_t sizeToEndFromPayload = good.size() - (lengthPos + sizeof(uint32_t));
+	for (uint32_t hostile : { 0x7ffffff0u, 0xffffffffu, sizeToEndFromPayload + 1 }) {
+		std::vector<uint8_t> bad(good.begin(), good.end());
+		memcpy(bad.data() + lengthPos, &hostile, sizeof(hostile));
+		Untrusted dst;
+		ASSERT(!tryDeserializeUntrusted(bad.data(), bad.size(), dst));
+	}
+	return Void();
+}
+
+struct WireBytes {
+	std::vector<uint8_t> v;
+	template <class Archiver>
+	void serialize(Archiver& ar) {
+		serializer(ar, v);
+	}
+};
+
+struct FixedBytes {
+	std::array<uint8_t, 16> a{};
+	uint8_t canary[8192]{};
+	template <class Archiver>
+	void serialize(Archiver& ar) {
+		serializer(ar, a);
+	}
+};
+
+constexpr FileIdentifier arrayFileIdentifier{ 4343 };
+
+TEST_CASE("/flow/FlatBuffers/RejectsArrayLengthMismatch") {
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+	bool allOk = true;
+	// std::array<T, N> and std::vector<T> share a wire format, so a wrong-length vector stands in for a message that
+	// targets a fixed-size array field such as an IPv6 address.
+	for (size_t len : { size_t(15), size_t(17), size_t(4096) }) {
+		WireBytes src;
+		src.v.assign(len, 0xab);
+		ObjectWriter writer(Unversioned());
+		writer.serialize(arrayFileIdentifier, src);
+		Standalone<StringRef> msg(writer.toStringRef());
+		auto dst = std::make_unique<FixedBytes>();
+		bool threw = false;
+		try {
+			::Arena arena;
+			ArenaObjectReader reader(arena, msg, Unversioned());
+			reader.deserialize(arrayFileIdentifier, *dst);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_serialization_failed);
+			threw = true;
+		}
+		size_t clobbered = 0;
+		for (uint8_t b : dst->canary) {
+			clobbered += (b != 0);
+		}
+		allOk = allOk && threw && clobbered == 0;
+	}
+	ASSERT(allOk);
+	WireBytes ok;
+	ok.v.assign(16, 0xcd);
+	ObjectWriter writer(Unversioned());
+	writer.serialize(arrayFileIdentifier, ok);
+	Standalone<StringRef> msg(writer.toStringRef());
+	auto dst = std::make_unique<FixedBytes>();
+	ObjectReader reader(msg, Unversioned());
+	reader.deserialize(arrayFileIdentifier, *dst);
+	for (uint8_t b : dst->a) {
+		ASSERT_EQ(b, 0xcd);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/RejectsWrongFileIdentifier") {
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+	Untrusted src;
+	ObjectWriter writer(Unversioned());
+	writer.serialize(FileIdentifier{ untrustedFileIdentifier + 1 }, src);
+	Standalone<StringRef> msg(writer.toStringRef());
+	Untrusted dst;
+	ASSERT(!tryDeserializeUntrusted(msg.begin(), msg.size(), dst));
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/BoundsChecksKnob") {
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+	Untrusted src;
+	src.s = "hello world";
+	src.v = { 1, 2, 3 };
+	ObjectWriter writer(Unversioned());
+	writer.serialize(untrustedFileIdentifier, src);
+	StringRef good = writer.toStringRef();
+
+	// Presents only the first 8 bytes to the reader while the rest of the buffer stays valid memory.
+	auto decodeTruncated = [&]() {
+		::Arena arena;
+		Untrusted dst;
+		try {
+			ArenaObjectReader reader(arena, StringRef(good.begin(), 8), AssumeVersion(currentProtocolVersion()));
+			reader.deserialize(untrustedFileIdentifier, dst);
+			return dst.s == src.s && dst.v == src.v;
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_serialization_failed);
+			return false;
+		}
+	};
+
+	auto* knobs = const_cast<FlowKnobs*>(FLOW_KNOBS);
+	ASSERT(knobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED);
+	ASSERT(!decodeTruncated());
+	knobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED = false;
+	auto restoreKnob = ScopeExit([&]() { knobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED = true; });
+	ASSERT(decodeTruncated());
 	return Void();
 }
 

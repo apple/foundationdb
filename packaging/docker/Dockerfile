@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM rockylinux/rockylinux:10.2-minimal AS base
+FROM rockylinux/rockylinux:10.3-minimal AS base
 
 # It seems mirrorlist can be less reliable, just use original baseurl for package repo.
 RUN sed -i.bak 's/^#baseurl=/baseurl=/; s/^mirrorlist=/#mirrorlist=/' /etc/yum.repos.d/rocky.repo
@@ -61,7 +61,7 @@ WORKDIR /
 
 # Check that glibc version in base image >= glibc in go-build image (unless CGO_ENABLED=0)
 
-FROM golang:1.25.12-bookworm AS go-build
+FROM golang:1.26.11-bookworm AS go-build
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go

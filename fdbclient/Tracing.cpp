@@ -526,6 +526,14 @@ TEST_CASE("/flow/Tracing/UnsampledSpanSkipsAddress") {
 	return Void();
 };
 
+TEST_CASE("/flow/Tracing/TraceIdValidity") {
+	ASSERT(SpanContext(UID(0, 12345), 1).isValid());
+	ASSERT(SpanContext(UID(1, 0), 1).isValid());
+	ASSERT(!SpanContext(UID(0, 0), 1).isValid());
+	ASSERT(!SpanContext(UID(0, 12345), 0).isValid());
+	return Void();
+}
+
 TEST_CASE("/flow/Tracing/AddLinks") {
 	Span span1("span_with_links"_loc);
 	ASSERT(!span1.context.isSampled());
