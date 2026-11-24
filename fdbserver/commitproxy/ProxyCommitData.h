@@ -423,6 +423,12 @@ struct ProxyCommitData {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 
+	// close() also deletes logAdapter.
+	~ProxyCommitData() {
+		if (txnStateStore)
+			txnStateStore->close();
+	}
+
 	// Build the core-owned view consumed by applyMetadataMutations() without
 	// exposing the full ProxyCommitData type outside commitproxy.
 	ApplyMetadataProxyContext getApplyMetadataProxyContext();
