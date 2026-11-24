@@ -132,6 +132,7 @@ enum {
 	OPT_DUMP_BEGIN,
 	OPT_DUMP_END,
 	OPT_JSON,
+	OPT_BACKUP_STATUS_JSON_V2,
 	OPT_DELETE_DATA,
 	OPT_MIN_CLEANUP_SECONDS,
 	OPT_MUTATION_LOG_TYPE,
@@ -335,6 +336,7 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	BACKUP_MEMORY_OPTIONS,
 	BACKUP_HELP_OPTIONS,
 	{ OPT_JSON, "--json", SO_NONE },
+	{ OPT_BACKUP_STATUS_JSON_V2, "--json-v2", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -855,6 +857,8 @@ static void printBackupUsage(bool devhelp) {
 	printf("\n");
 
 	printf(" ACTION OPTIONS:\n");
+	printf("  --json-v2      For status, emit JSON schema 2 with legacy backup progress and unknown restore points.\n");
+	printf("  --json         For status, emit JSON schema 1 for existing clients.\n");
 	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
 	       "                 FoundationDB cluster. The default is first the value of the\n"
 	       "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
@@ -2090,25 +2094,29 @@ Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, in
 	}
 }
 
-static void printJsonError(std::string errorMessage) {
+static void printJsonError(std::string errorMessage, const char* schemaVersion = "1.0.0") {
 	JsonBuilderObject doc;
-	doc.setKey("SchemaVersion", "1.0.0");
+	doc.setKey("SchemaVersion", schemaVersion);
 	doc.setKey("error", errorMessage);
 	printf("%s\n", doc.getJson().c_str());
 }
 
-Future<Void> statusBackup(Database db, std::string tagName, ShowErrors showErrors, bool json) {
+Future<Void> statusBackup(Database db,
+                          std::string tagName,
+                          ShowErrors showErrors,
+                          bool json,
+                          BackupStatusSchema schema) {
 	try {
 		FileBackupAgent backupAgent;
 
-		std::string statusText =
-		    co_await (json ? backupAgent.getStatusJSON(db, tagName) : backupAgent.getStatus(db, showErrors, tagName));
+		std::string statusText = co_await (json ? backupAgent.getStatusJSON(db, tagName, schema)
+		                                        : backupAgent.getStatus(db, showErrors, tagName));
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
 		if (json)
-			printJsonError(e.what());
+			printJsonError(e.what(), schema == BackupStatusSchema::V1 ? "1.0.0" : "2.0.0");
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -3576,6 +3584,7 @@ int main(int argc, char* argv[]) {
 		std::string restoreClusterFileDest;
 		std::string restoreClusterFileOrig;
 		bool jsonOutput = false;
+		BackupStatusSchema backupStatusSchema = BackupStatusSchema::V1;
 		DeleteData deleteData{ false };
 		Optional<std::string> encryptionKeyFile;
 		int encryptionBlockSize = 0;
@@ -4017,6 +4026,10 @@ int main(int argc, char* argv[]) {
 			case OPT_DUMP_END:
 				dumpEnd = parseVersion(args->OptionArg());
 				break;
+			case OPT_BACKUP_STATUS_JSON_V2:
+				backupStatusSchema = BackupStatusSchema::V2;
+				jsonOutput = true;
+				break;
 			case OPT_JSON:
 				jsonOutput = true;
 				break;
@@ -4307,7 +4320,7 @@ int main(int argc, char* argv[]) {
 			case BackupType::STATUS:
 				if (!initCluster())
 					return FDB_EXIT_ERROR;
-				f = stopAfter(statusBackup(db, tagName, ShowErrors::True, jsonOutput));
+				f = stopAfter(statusBackup(db, tagName, ShowErrors::True, jsonOutput, backupStatusSchema));
 				break;
 
 			case BackupType::ABORT:

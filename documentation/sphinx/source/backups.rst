@@ -393,7 +393,33 @@ The ``status`` subcommand is used to get information on the current status of ba
 
 ::
 
-   user@host$ fdbbackup status [-t <TAG>]
+   user@host$ fdbbackup status [-t <TAG>] [--json | --json-v2]
+
+Text output and ``--json-v2`` use the backup's database records to report restore progress.
+When those records confirm a restore point, schema 2 reports ``Restorable`` as true and gives the version in ``ConfirmedRestorablePoint``.
+For a backup that writes both snapshot formats, this version works with both rangefile and bulkload restore.
+For a logs-only backup, it is a target for incremental restore.
+Status assumes the recorded files are still available together in the restore container. To check a target against the current container, use ``fdbrestore start --dryrun`` with the restore version and mode.
+
+Files can become available before the backup records its progress. If the database cannot confirm a target, schema 2 reports ``RestorePointStatus`` as ``unknown`` and omits ``Restorable`` and ``ConfirmedRestorablePoint``.
+This can happen even after an abort. For example, a snapshot published at version 210 can restore 210 without logs if all its data came from that version. The backup can abort before it records that snapshot in the database.
+For bulk dumps, ``BulkDumpJobRecorded`` tells whether the database has recorded the job ID.
+
+For ordinary logs, ``LogDispatchCursor`` can show the initial dispatch before any log files exist.
+Once the dispatcher records a completed batch covering versions 121 through 200, ``LatestLogEnd`` is 201 (exclusive).
+It stays at 201 until the next dispatch commits, even if the container already has files through version 230.
+For partitioned logs, ``SharedWorkerSavedVersion`` of 301 gives ``SharedWorkerLogEndExclusive`` of 302.
+These worker counters alone cannot establish continuous file coverage for every partition.
+
+A completed range snapshot and ordinary logs covering it can confirm version 200, even after a newer snapshot starts.
+An adopted bulk dump may include data from before mutation capture began. To confirm 200 using logs, status needs recorded bounds showing that capture was active by the oldest batch and the newest batch was at or before 200.
+A validated bulk dump with equal bounds also confirms its own version without logs. Older bulk dumps and range snapshots record only an end version, so their records alone cannot establish a single-version snapshot.
+
+For example, suppose a backup has a range snapshot at 160, a bulk dump spanning 130 through 150, and logs covering those snapshots through 200.
+Both methods can restore 200. A new range snapshot taken entirely at 210 also lets rangefile restore reach 210.
+Status still reports 200 as the confirmed point for both methods.
+
+Existing clients can continue to use ``--json`` for schema 1. Its ``Restorable`` Boolean and ``LatestRestorablePoint`` field retain their historical calculation.
 
 .. program:: fdbbackup delete
 

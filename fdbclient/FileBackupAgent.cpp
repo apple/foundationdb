@@ -3953,6 +3953,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 
 	static struct {
 		static TaskParam<Version> snapshotVersion() { return __FUNCTION__sr; }
+		static TaskParam<Version> snapshotBeginVersion() { return __FUNCTION__sr; }
 		static TaskParam<std::string> bulkDumpJobId() { return __FUNCTION__sr; }
 		static TaskParam<bool> timeoutOccurred() { return __FUNCTION__sr; }
 	} Params;
@@ -4133,6 +4134,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					});
 					SnapshotMetadata metadata = SnapshotMetadata::bulkDump(
 					    bulkDumpJob.getJobId().toString(), bounds.first->version, bounds.second->version, 0);
+					Params.snapshotBeginVersion().set(task, metadata.beginVersion);
 					Params.snapshotVersion().set(task, metadata.endVersion);
 
 					// Write the snapshot file - empty file list since BulkDump uses job manifests, not range files
@@ -4197,6 +4199,9 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 		// This is used by getLatestRestorableVersion() for mode=BOTH to ensure both
 		// rangefile and bulkdump data exist before marking backup as restorable
 		config.bulkDumpSnapshotEndVersion().set(tr, snapshotVersion);
+		if (Params.snapshotBeginVersion().exists(task)) {
+			config.bulkDumpSnapshotBeginVersion().set(tr, Params.snapshotBeginVersion().get(task));
+		}
 
 		// CRITICAL: Set bulkDumpJobId on the backup CONFIG so that status checks
 		// and restore operations can find it. Without this, the backup status shows
@@ -4450,6 +4455,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			for (auto& backupRange : backupRanges) {
 				config.startMutationLogs(tr, backupRange, destUidValue);
 			}
+			config.mutationLogCaptureStart().setVersionstamp(tr, Versionstamp(), 0);
 		}
 
 		// Properties folder is created here to ensure backup container exists because localDirectory doesn't create
@@ -7820,6 +7826,150 @@ StringRef StartFullRestoreTaskFunc::name = "restore_start"_sr;
 REGISTER_TASKFUNC(StartFullRestoreTaskFunc);
 } // namespace fileBackup
 
+// Older backups did not record the commit that enabled ordinary mutation capture.
+static Future<bool> hasLegacyOrdinaryLogBatch(Reference<ReadYourWritesTransaction> tr,
+                                              BackupConfig config,
+                                              Version cursor,
+                                              bool usesRangeSnapshots) {
+	// The initial cursor was sampled before snapshot initialization. A later snapshot can
+	// rotate past the cursor, but the end of the first range snapshot still bounds the start.
+	auto snapshotBegin = co_await config.snapshotBeginVersion().get(tr);
+	if (cursor > snapshotBegin.orDefault(MAX_VERSION)) {
+		co_return true;
+	}
+	if (usesRangeSnapshots) {
+		auto firstEnd = co_await config.firstSnapshotEndVersion().get(tr);
+		if (cursor > firstEnd.orDefault(MAX_VERSION)) {
+			co_return true;
+		}
+	}
+
+	// Submission writes its read version here, before the start task can run. Only a later
+	// ordinary dispatch can advance this backup's cleanup key to the cursor.
+	auto dest = co_await config.destUidValue().get(tr);
+	if (!dest.present()) {
+		co_return false;
+	}
+	auto key = config.getUidAsKey().withPrefix(dest.get()).withPrefix(backupLatestVersionsPrefix);
+	auto cleanup = co_await tr->get(key);
+	co_return cleanup.present() && BinaryReader::fromStringRef<Version>(cleanup.get(), Unversioned()) == cursor;
+}
+
+Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,
+                                                                     EBackupState state,
+                                                                     BackupStatusSchema schema) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	BackupConfig config = *this;
+	auto type = co_await config.mutationLogType().get(tr);
+	auto cursor = co_await config.latestLogEndVersion().get(tr);
+	if (schema == BackupStatusSchema::V1) {
+		co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT),
+			                   cursor,
+			                   co_await config.getLatestRestorableVersion(tr) };
+	}
+
+	LogProgress progress;
+	progress.type = type.orDefault(MutationLogType::DEFAULT);
+	progress.logDispatchCursor = cursor;
+	KeyBackedProperty<bool> requested = config.configSpace.pack("partitionedLogEnabled"_sr);
+	if (type == MutationLogType::PARTITIONED_LOG || type == MutationLogType::RANGE_PARTITIONED_LOG) {
+		// Both worker modes poll the dispatcher independently of the files saved for this backup.
+		progress.sharedWorkerVersion = co_await config.latestBackupWorkerSavedVersion().get(tr);
+	} else if (!type.present() && (co_await requested.getD(tr))) {
+		Optional<Version> worker;
+		bool started;
+		Optional<Value> startedWorkers;
+		co_await (store(worker, config.latestBackupWorkerSavedVersion().get(tr)) &&
+		          store(started, config.allWorkerStarted().getD(tr)) &&
+		          store(startedWorkers, tr->get(config.startedBackupWorkers().key)));
+		bool mayHaveTaggedFiles =
+		    started || worker.present() || startedWorkers.present() || !BackupAgentBase::isRunnable(state);
+		if (!mayHaveTaggedFiles) {
+			// 7.4 published the ID before waiting for each worker to acknowledge it.
+			auto registered = co_await tr->get(backupStartedKey);
+			if (registered.present()) {
+				auto backups = decodeBackupStartedValue(registered.get());
+				mayHaveTaggedFiles = std::any_of(
+				    backups.begin(), backups.end(), [&](const auto& entry) { return entry.first == config.getUid(); });
+			}
+		}
+		if (mayHaveTaggedFiles) {
+			if (started) {
+				auto dest = co_await config.destUidValue().get(tr);
+				auto ranges = co_await config.backupRanges().get(tr);
+				if (dest.present() && ranges.present() && !ranges.get().empty()) {
+					// 8.0 installed ordinary capture rules when it finished an interrupted start.
+					// Those rules survive until the last consumer releases the shared destination.
+					auto ownerKey = config.getUidAsKey().withPrefix(dest.get()).withPrefix(backupLatestVersionsPrefix);
+					auto owner = tr->get(ownerKey);
+					auto capture = tr->getRange(prefixRange(dest.get().withPrefix(logRangesRange.begin)), 1);
+					co_await (success(owner) && success(capture));
+					if (owner.get().present() && capture.get().empty()) {
+						type = MutationLogType::PARTITIONED_LOG;
+					}
+				}
+			}
+			// The shared checkpoint records an inclusive end. It does not record the start of
+			// each partition's files or gaps while workers were disabled.
+			progress.type = type;
+			progress.sharedWorkerVersion = worker;
+		}
+	}
+
+	Optional<Versionstamp> captureStart;
+	int mode;
+	bool logsOnly;
+	co_await (store(captureStart, config.mutationLogCaptureStart().get(tr)) &&
+	          store(mode, config.snapshotMode().getD(tr)) && store(logsOnly, config.incrementalBackupOnly().getD(tr)));
+	auto snapshotMode = static_cast<SnapshotMode>(mode);
+	bool usesRangeSnapshots = !logsOnly && snapshotMode != SnapshotMode::BULKDUMP;
+	Optional<Version> logTarget;
+	// Startup sampled the initial cursor before capture committed. A later ordinary
+	// dispatch confirms that the preceding batch finished writing its files.
+	if (progress.type == MutationLogType::DEFAULT && cursor.present()) {
+		bool batchComplete = captureStart.present()
+		                         ? cursor.get() > captureStart.get().version
+		                         : co_await hasLegacyOrdinaryLogBatch(tr, config, cursor.get(), usesRangeSnapshots);
+		if (batchComplete) {
+			progress.exclusiveLogEnd = cursor;
+			progress.logDispatchCursor.reset();
+			logTarget = cursor.get() - 1;
+		}
+	}
+	if (logsOnly) {
+		progress.restorable = logTarget;
+		co_return progress;
+	}
+
+	// The container can already have newer files. Only report a target confirmed for every requested format.
+	Optional<Version> target = logTarget;
+	if (snapshotMode != SnapshotMode::RANGEFILE) {
+		Optional<Version> oldest, newest;
+		co_await (store(oldest, config.bulkDumpSnapshotBeginVersion().get(tr)) &&
+		          store(newest, config.bulkDumpSnapshotEndVersion().get(tr)));
+		if (!oldest.present() || !newest.present()) {
+			co_return progress;
+		}
+		// An adopted SST can predate capture. Equal bounds still prove its own version without logs.
+		bool logsCoverDump = captureStart.present() && captureStart.get().version <= oldest.get() &&
+		                     logTarget.present() && newest.get() <= logTarget.get();
+		if (!logsCoverDump) {
+			target = oldest == newest ? newest : Optional<Version>();
+		}
+	}
+	if (usesRangeSnapshots && target.present()) {
+		// The first range snapshot stays usable across rotation. Its end alone cannot prove a log-free point.
+		auto firstEnd = co_await config.firstSnapshotEndVersion().get(tr);
+		if (!firstEnd.present() || target.get() < firstEnd.get() || !logTarget.present() ||
+		    target.get() > logTarget.get()) {
+			target.reset();
+		}
+	}
+	progress.restorable = target;
+	co_return progress;
+}
+
 struct LogInfo : public ReferenceCounted<LogInfo> {
 	std::string fileName;
 	Reference<IAsyncFile> logFile;
@@ -8474,14 +8624,17 @@ public:
 		co_return tv;
 	}
 
-	static Future<std::string> getStatusJSON(FileBackupAgent* backupAgent, Database cx, std::string tagName) {
+	static Future<std::string> getStatusJSON(FileBackupAgent* backupAgent,
+	                                         Database cx,
+	                                         std::string tagName,
+	                                         BackupStatusSchema schema) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		while (true) {
 			Error err;
 			try {
 				JsonBuilderObject doc;
-				doc.setKey("SchemaVersion", "1.0.0");
+				doc.setKey("SchemaVersion", schema == BackupStatusSchema::V1 ? "1.0.0" : "2.0.0");
 
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -8511,37 +8664,52 @@ public:
 					statusDoc.setKey("Running", BackupAgentBase::isRunnable(backupState));
 					doc.setKey("Status", statusDoc);
 
-					Future<Void> done = Void();
+					Optional<Version> logEnd;
+					bool snapshotProgress = backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
+					                        backupState == EBackupState::STATE_RUNNING;
 
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						Reference<IBackupContainer> bc;
-						TimestampedVersion latestRestorable;
-						MutationLogType mutationLogType;
-
-						co_await (
-						    store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))) &&
-						    store(bc, config.backupContainer().getOrThrow(tr)) &&
-						    store(mutationLogType,
-						          config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT)));
+						BackupConfig::LogProgress logs;
+						co_await (store(logs, config.getStatusLogProgress(tr, backupState, schema)) &&
+						          store(bc, config.backupContainer().getOrThrow(tr)));
+						logEnd = logs.exclusiveLogEnd;
+						auto restorePoint = co_await getTimestampedVersion(tr, logs.restorable);
 						bc = fileBackup::getBackupContainerWithProxy(bc);
 
-						doc.setKey("Restorable", latestRestorable.present());
+						if (schema == BackupStatusSchema::V2 && !snapshotProgress && logEnd.present()) {
+							auto latestLogEnd = co_await getTimestampedVersion(tr, logEnd);
+							doc.setKey("LatestLogEnd", latestLogEnd.toJSON());
+						}
+						if (logs.sharedWorkerVersion.present()) {
+							doc.setKey("SharedWorkerSavedVersion", logs.sharedWorkerVersion.get());
+							doc.setKey("SharedWorkerLogEndExclusive", logs.sharedWorkerLogEnd());
+						}
+						if (logs.logDispatchCursor.present()) {
+							doc.setKey("LogDispatchCursor", logs.logDispatchCursor.get());
+						}
+						if (schema == BackupStatusSchema::V2 && !restorePoint.present()) {
+							doc.setKey("RestorePointStatus", "unknown");
+						} else {
+							doc.setKey("Restorable", restorePoint.present());
+						}
 
-						if (latestRestorable.present()) {
-							JsonBuilderObject o = latestRestorable.toJSON();
+						if (restorePoint.present()) {
+							JsonBuilderObject o = restorePoint.toJSON();
 							if (backupState != EBackupState::STATE_COMPLETED) {
 								o.setKey("LagSeconds",
-								         (recentReadVersion - latestRestorable.version.get()) /
+								         (recentReadVersion - restorePoint.version.get()) /
 								             CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 							}
-							doc.setKey("LatestRestorablePoint", o);
+							doc.setKey(schema == BackupStatusSchema::V1 ? "LatestRestorablePoint"
+							                                            : "ConfirmedRestorablePoint",
+							           o);
 						}
 						doc.setKey("DestinationURL", bc->getURL());
-						doc.setKey("MutationLogType", mutationLogTypeToString(mutationLogType));
+						doc.setKey("MutationLogType", logs.typeName());
 					}
 
-					if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
-					    backupState == EBackupState::STATE_RUNNING) {
+					if (snapshotProgress) {
 						int64_t snapshotInterval{ 0 };
 						int64_t logBytesWritten{ 0 };
 						int64_t rangeBytesWritten{ 0 };
@@ -8561,7 +8729,7 @@ public:
 						    store(snapshotBegin, getTimestampedVersion(tr, config.snapshotBeginVersion().get(tr))) &&
 						    store(snapshotTargetEnd,
 						          getTimestampedVersion(tr, config.snapshotTargetEndVersion().get(tr))) &&
-						    store(latestLogEnd, getTimestampedVersion(tr, config.latestLogEndVersion().get(tr))) &&
+						    store(latestLogEnd, getTimestampedVersion(tr, logEnd)) &&
 						    store(latestSnapshotEnd,
 						          getTimestampedVersion(tr, config.latestSnapshotEndVersion().get(tr))) &&
 						    store(snapshotLastDispatch,
@@ -8630,9 +8798,9 @@ public:
 					}
 					doc.setKey("SnapshotMode", snapshotModeText);
 
-					// Check if backup is BulkLoad compatible
 					Optional<std::string> bulkDumpJobIdOpt = co_await config.bulkDumpJobId().get(tr);
-					doc.setKey("BulkLoadCompatible", bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty());
+					doc.setKey(schema == BackupStatusSchema::V1 ? "BulkLoadCompatible" : "BulkDumpJobRecorded",
+					           bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty());
 
 					// If using bulkdump mode, get bulkdump progress
 					if (snapshotModeValue == 1 || snapshotModeValue == 2) {
@@ -8713,12 +8881,12 @@ public:
 				} else {
 					std::string backupStatus(BackupAgentBase::getStateText(backupState));
 					Reference<IBackupContainer> bc;
-					Optional<Version> latestRestorableVersion;
+					BackupConfig::LogProgress logs;
 					Version recentReadVersion{ 0 };
-
-					co_await (store(latestRestorableVersion, config.getLatestRestorableVersion(tr)) &&
+					co_await (store(logs, config.getStatusLogProgress(tr, backupState)) &&
 					          store(bc, config.backupContainer().getOrThrow(tr)) &&
 					          store(recentReadVersion, tr->getReadVersion()));
+					auto confirmedRestorePoint = logs.restorable;
 					bc = fileBackup::getBackupContainerWithProxy(bc);
 
 					bool snapshotProgress = false;
@@ -8733,14 +8901,15 @@ public:
 						snapshotProgress = true;
 						break;
 					case EBackupState::STATE_RUNNING_DIFFERENTIAL:
-						statusText += "The backup on tag `" + tagName + "' is restorable but continuing to " +
+						statusText += "The backup on tag `" + tagName +
+						              (confirmedRestorePoint.present() ? "' is restorable but continuing to "
+						                                               : "' is continuing to ") +
 						              bc->getURL() + ".\n";
 						snapshotProgress = true;
 						break;
 					case EBackupState::STATE_COMPLETED:
-						statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() +
-						              " completed at version " + format("%lld", latestRestorableVersion.orDefault(-1)) +
-						              ".\n";
+						statusText +=
+						    "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " completed.\n";
 						break;
 					default:
 						statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " " +
@@ -8773,28 +8942,38 @@ public:
 					}
 					statusText += format("Snapshot Mode: %s\n", snapshotModeText.c_str());
 
-					MutationLogType mutationLogType =
-					    co_await config.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
-					statusText += format("Mutation Log Type: %s\n", mutationLogTypeToString(mutationLogType).c_str());
-
-					// Check if backup is BulkLoad compatible (has bulkdump_data/).
-					// In rangefile mode no bulkdump task ever runs, so the answer is
-					// always "no" and the line carries no information — skip it.
-					if (snapshotModeValue != 0) {
-						Optional<std::string> bulkDumpJobIdOpt = co_await config.bulkDumpJobId().get(tr);
-						bool bulkLoadCompatible = bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty();
-						statusText += format("BulkLoad Compatible: %s\n", bulkLoadCompatible ? "yes" : "no");
+					statusText += format("Mutation Log Type: %s\n", logs.typeName().c_str());
+					if (logs.sharedWorkerVersion.present()) {
+						statusText += format("Shared backup worker saved version: %lld (exclusive end %lld)\n",
+						                     logs.sharedWorkerVersion.get(),
+						                     logs.sharedWorkerLogEnd());
+					}
+					if (logs.logDispatchCursor.present()) {
+						statusText += format("Log dispatch cursor: %lld\n", logs.logDispatchCursor.get());
+					}
+					if (!snapshotProgress && logs.exclusiveLogEnd.present()) {
+						statusText += format("Log end version (exclusive): %lld\n", logs.exclusiveLogEnd.get());
+					}
+					if (confirmedRestorePoint.present()) {
+						statusText += format("Confirmed restore point: %lld\n", confirmedRestorePoint.get());
+					} else {
+						statusText += "Confirmed restore point: unknown from backup metadata.\n";
 					}
 
 					bool showBulkDump = (snapshotModeValue == 1 || snapshotModeValue == 2);
 					bool showRangeFile = (snapshotModeValue == 0 || snapshotModeValue == 2);
+					if (showBulkDump) {
+						auto jobId = co_await config.bulkDumpJobId().get(tr);
+						bool jobRecorded = jobId.present() && !jobId.get().empty();
+						statusText += format("Bulk dump job recorded: %s\n", jobRecorded ? "yes" : "no");
+					}
 
 					if (snapshotProgress) {
 						int64_t snapshotInterval{ 0 };
 						Version snapshotBeginVersion{ 0 };
 						Version snapshotTargetEndVersion{ 0 };
 						Optional<Version> latestSnapshotEndVersion;
-						Optional<Version> latestLogEndVersion;
+						Optional<Version> latestLogEndVersion = logs.exclusiveLogEnd;
 						Optional<int64_t> logBytesWritten;
 						Optional<int64_t> rangeBytesWritten;
 						Optional<int64_t> latestSnapshotEndVersionTimestamp;
@@ -8808,7 +8987,6 @@ public:
 						          store(snapshotInterval, config.snapshotIntervalSeconds().getOrThrow(tr)) &&
 						          store(logBytesWritten, config.logBytesWritten().get(tr)) &&
 						          store(rangeBytesWritten, config.rangeBytesWritten().get(tr)) &&
-						          store(latestLogEndVersion, config.latestLogEndVersion().get(tr)) &&
 						          store(latestSnapshotEndVersion, config.latestSnapshotEndVersion().get(tr)) &&
 						          store(stopWhenDone, config.stopWhenDone().getOrThrow(tr)));
 
@@ -8869,7 +9047,7 @@ public:
 						statusText += format("\nMutation Logs:\n");
 						statusText += format(" Bytes written: %s\n",
 						                     formatBytesHumanReadable(logBytesWritten.orDefault(0)).c_str());
-						statusText += format(" Last complete version: %s (%s)\n",
+						statusText += format(" Log end version (exclusive): %s (%s)\n",
 						                     versionToString(latestLogEndVersion).c_str(),
 						                     timeStampToString(latestLogEndVersionTimestamp).c_str());
 
@@ -8892,9 +9070,9 @@ public:
 							        .c_str(),
 							    e.second.first.c_str());
 
-							// If error version is at or more recent than the latest restorable version then it
+							// If error version is at or more recent than the confirmed restore point then it
 							// could be inhibiting progress
-							if (v >= latestRestorableVersion.orDefault(0)) {
+							if (v >= confirmedRestorePoint.orDefault(0)) {
 								recentErrors += msg;
 							} else {
 								pastErrors += msg;
@@ -8902,10 +9080,10 @@ public:
 						}
 
 						if (!recentErrors.empty()) {
-							if (latestRestorableVersion.present()) {
+							if (confirmedRestorePoint.present()) {
 								statusText +=
-								    format("Recent Errors (since latest restorable point %s ago)\n",
-								           secondsToTimeFormat((recentReadVersion - latestRestorableVersion.get()) /
+								    format("Recent Errors (since confirmed restore point %s ago)\n",
+								           secondsToTimeFormat((recentReadVersion - confirmedRestorePoint.get()) /
 								                               CLIENT_KNOBS->CORE_VERSIONSPERSECOND)
 								               .c_str()) +
 								    recentErrors;
@@ -9508,8 +9686,8 @@ Future<std::string> FileBackupAgent::getStatus(Database cx, ShowErrors showError
 	return FileBackupAgentImpl::getStatus(this, cx, showErrors, tagName);
 }
 
-Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagName) {
-	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName);
+Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagName, BackupStatusSchema schema) {
+	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName, schema);
 }
 
 Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr,

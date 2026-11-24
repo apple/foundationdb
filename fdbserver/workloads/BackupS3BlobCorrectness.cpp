@@ -957,6 +957,24 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				if (lastBackupContainer) {
 					co_await waitForRestorable(lastBackupContainer, 150);
 
+					if (performValidation && snapshotMode == static_cast<int>(SnapshotMode::BOTH) &&
+					    !stopDifferentialAfter && mutationLogType == static_cast<int>(MutationLogType::DEFAULT)) {
+						BackupConfig config(logUid);
+						auto job = co_await config.bulkDumpJobId().getOrThrow(cx.getReference());
+						auto batches = co_await BackupContainerFileSystem::readBulkDumpRanges(lastBackupContainer, job);
+						auto bounds =
+						    std::minmax_element(batches.begin(), batches.end(), [](const auto& a, const auto& b) {
+							    return a.version < b.version;
+						    });
+						auto oldest = co_await config.bulkDumpSnapshotBeginVersion().getOrThrow(cx.getReference());
+						auto newest = co_await config.bulkDumpSnapshotEndVersion().getOrThrow(cx.getReference());
+						auto snapshotStart = co_await config.snapshotBeginVersion().getOrThrow(cx.getReference());
+						auto captureStart = co_await config.mutationLogCaptureStart().getOrThrow(cx.getReference());
+						ASSERT(oldest == bounds.first->version && newest == bounds.second->version);
+						// This one-time backup samples the first snapshot start before its capture rules commit.
+						ASSERT(snapshotStart < captureStart.version);
+					}
+
 					// Other backups' validation restores read the live data this restore is about to overwrite.
 					co_await RestoreValidationGate::waitUntilNonePending();
 
