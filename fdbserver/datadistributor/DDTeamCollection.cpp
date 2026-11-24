@@ -997,12 +997,10 @@ public:
 	// Track a team and issue RelocateShards when the level of degradation changes
 	// A badTeam can be unhealthy or just a redundantTeam removed by machineTeamRemover() or serverTeamRemover()
 	static Future<Void> teamTracker(DDTeamCollection* self,
-	                                Reference<TCTeamInfo> trackedTeam,
+	                                Reference<TCTeamInfo> team,
 	                                IsBadTeam badTeam,
 	                                IsRedundantTeam redundantTeam,
 	                                double checkTeamDelay) {
-		// The team keeps its tracker future after cancellation.
-		auto team = std::move(trackedTeam);
 		int lastServersLeft = team->size();
 		bool lastAnyUndesired = false;
 		bool lastAnyWigglingServer = false;
@@ -7858,18 +7856,6 @@ public:
 		ASSERT(!collection->teams.front()->isHealthy());
 		ASSERT_EQ(collection->teams.front()->getPriority(), SERVER_KNOBS->PRIORITY_TEAM_2_LEFT);
 	}
-
-	static void TeamTracker_ReleasesRemovedTeam() {
-		auto policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
-		auto collection = testTeamCollection(3, policy, 3);
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
-		ASSERT_EQ(collection->teams.size(), 1);
-		auto team = collection->teams.front();
-		ASSERT(collection->removeTeam(team));
-		ASSERT(team->tracker.isError());
-		ASSERT_EQ(team->tracker.getError().code(), error_code_actor_cancelled);
-		ASSERT(team->isSoleOwner());
-	}
 };
 
 TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
@@ -8043,9 +8029,4 @@ TEST_CASE("/DataDistribution/TeamTracker/RetriesMergedShardForUndesiredServer") 
 
 TEST_CASE("/DataDistribution/TeamTracker/RechecksHealthyZone") {
 	co_await DDTeamCollectionUnitTest::TeamTracker_RechecksHealthyZone();
-}
-
-TEST_CASE("/DataDistribution/TeamTracker/ReleasesRemovedTeam") {
-	DDTeamCollectionUnitTest::TeamTracker_ReleasesRemovedTeam();
-	return Void();
 }
