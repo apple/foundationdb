@@ -708,11 +708,6 @@ class ArenaReader : public _Reader<ArenaReader> {
 public:
 	const uint8_t* arenaRead(int bytes) { return (const uint8_t*)readBytes(bytes); }
 
-	const void* peekBytes(int bytes) const {
-		ASSERT(begin + bytes <= end);
-		return begin;
-	}
-
 	StringRef arenaReadAll() const { return StringRef(reinterpret_cast<const uint8_t*>(begin), end - begin); }
 
 	template <class VersionOptions>

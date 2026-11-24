@@ -70,6 +70,12 @@ TEST_CASE("flow/serialize/RejectsInvalidReadLengths") {
 		ASSERT_EQ(reader.remainingBytes(), 1);
 		for (int length : { -1, 2, std::numeric_limits<int>::max() }) {
 			try {
+				reader.peekBytes(length);
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT_EQ(e.code(), error_code_serialization_failed);
+			}
+			try {
 				reader.arenaRead(length);
 				ASSERT(false);
 			} catch (Error& e) {
@@ -77,6 +83,7 @@ TEST_CASE("flow/serialize/RejectsInvalidReadLengths") {
 			}
 			ASSERT_EQ(reader.remainingBytes(), 1);
 		}
+		ASSERT_EQ(*static_cast<const uint8_t*>(reader.peekBytes(1)), 42);
 		uint8_t last;
 		reader >> last;
 		ASSERT_EQ(last, 42);
