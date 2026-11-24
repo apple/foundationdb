@@ -72,6 +72,20 @@ class RestartTestPolicyTest(unittest.TestCase):
     def test_unversioned_restarts(self):
         self.assert_selection("same_version", "7.4.3", ("new", "new"))
 
+    def test_explicit_relative_old_binary(self):
+        with patch.object(
+            TestRunner.subprocess,
+            "check_output",
+            return_value=b"FoundationDB (v7.3.69)",
+        ) as check_output:
+            policy = TestRunner.RestartTestPolicy(
+                "/source/tests/restarting/from_7.3.0/Restart-1.toml",
+                "./bin/fdbserver",
+                "new",
+            )
+        self.assertEqual(Path(policy.first_binary()), Path.cwd() / "bin" / "fdbserver")
+        check_output.assert_called_once_with([policy.first_binary(), "--version"])
+
     def test_no_old_binary(self):
         policy = TestRunner.RestartTestPolicy(
             "/source/tests/restarting/from_7.3.0_until_7.4.0/Restart-1.toml",
