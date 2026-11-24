@@ -46,7 +46,7 @@ type Snapshot struct {
 //
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
-func (s Snapshot) ReadTransact(f func(ReadTransaction) (interface{}, error)) (r interface{}, err error) {
+func (s Snapshot) ReadTransact(f func(ReadTransaction) (any, error)) (r any, err error) {
 	defer panicToError(&err)
 
 	r, err = f(s)

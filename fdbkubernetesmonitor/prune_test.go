@@ -349,15 +349,13 @@ var _ = Describe("Testing the running binaries", func() {
 		It("should keep the annotations of all updates", func() {
 			keys := make([]string, 0, 20)
 			var wg sync.WaitGroup
-			for i := 0; i < 20; i++ {
+			for i := range 20 {
 				key := "foundationdb.org/test-" + strconv.Itoa(i)
 				keys = append(keys, key)
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					defer GinkgoRecover()
 					Expect(podClient.updateAnnotationsOnPod(context.Background(), map[string]string{key: "value"})).To(Succeed())
-				}()
+				})
 			}
 			wg.Wait()
 

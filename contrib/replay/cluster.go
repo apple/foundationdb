@@ -194,7 +194,7 @@ func BuildClusterState(events []TraceEvent) *ClusterState {
 				// Parse comma-separated list of LogRouter IDs
 				// Format: "fe567807fe9a2aa3f2ada4c5b58afa9c, 8b4de5474b14b0f05356203f4c4c5034, ..."
 				var ids []string
-				for _, id := range strings.Split(logRouterIds, ",") {
+				for id := range strings.SplitSeq(logRouterIds, ",") {
 					id = strings.TrimSpace(id)
 					if id != "" {
 						// Extract just the first 16 chars (the actual ID, not the full UID)
@@ -330,7 +330,7 @@ func (cs *ClusterState) GetWorkersByDC() map[string][]*Worker {
 
 	// Sort workers within each DC by machine address for consistent ordering
 	for _, workers := range dcMap {
-		for i := 0; i < len(workers); i++ {
+		for i := range workers {
 			for j := i + 1; j < len(workers); j++ {
 				if workers[i].Machine > workers[j].Machine {
 					workers[i], workers[j] = workers[j], workers[i]
