@@ -122,6 +122,9 @@ inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/managemen
 Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
 Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                         std::map<std::string, StorageServerInterface>* interfaces);
+Future<Void> getActiveLogAddresses(Reference<IDatabase> db,
+                                   std::set<NetworkAddress>* logAddresses,
+                                   int* unknownInterfaceLogCount);
 
 // Set by --audit-log or the FDB_CLI_AUDIT_LOG_ENABLE environment variable. Audit events are written to their own
 // trace_audit.* files (see openAuditTraceFile), in the FDB_CLI_AUDIT_LOG_ENABLE value if it's set (like
