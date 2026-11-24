@@ -189,7 +189,8 @@ private:
 	std::unordered_map<UID, ServiceList> registered_services_;
 
 	// Underlying gRPC server. `nullptr` when there server is not running/stopped.
-	std::unique_ptr<grpc::Server> server_;
+	// Shared so a pool task can keep it alive without referencing this GrpcServer.
+	std::shared_ptr<grpc::Server> server_;
 
 	// Provides credentials that are passed to gRPC. In case of TLS, it is expected
 	// to be kept updated by its owner.
