@@ -898,6 +898,12 @@ public:
 
 	KeyBackedProperty<Reference<IBackupContainer>> backupContainer() { return configSpace.pack(__FUNCTION__sr); }
 
+	// A URL edit can separate files that belong to the same backup. Older clients did not record edits.
+	KeyBackedProperty<bool> backupURLChanged() { return configSpace.pack(__FUNCTION__sr); }
+	void changeBackupContainer(Reference<ReadYourWritesTransaction> tr,
+	                           const Reference<IBackupContainer>& previous,
+	                           const Reference<IBackupContainer>& next);
+
 	// Set to true when all backup workers for saving mutation logs have been started.
 	KeyBackedProperty<bool> allWorkerStarted() { return configSpace.pack(__FUNCTION__sr); }
 
@@ -955,6 +961,7 @@ public:
 		bool restorePointUnknown = false;
 		Optional<Version> sharedWorkerVersion = {};
 		Optional<Version> logDispatchCursor = {};
+		bool destinationURLChanged = false;
 		Version sharedWorkerLogEnd() const { return sharedWorkerVersion.get() + 1; }
 		std::string typeName() const { return type.present() ? mutationLogTypeToString(type.get()) : "unknown"; }
 	};

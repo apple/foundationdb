@@ -345,6 +345,30 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 	auto v1 = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING, BackupStatusSchema::V1);
 	ASSERT(v1.exclusiveLogEnd == 150 && !v1.restorePointUnknown && !v1.restorable.present());
 
+	// A log-copy task starting after modify -d writes to the new URL. The original
+	// snapshot and first log file stay in the old directory.
+	auto moved = IBackupContainer::openContainer(url + "-moved", {}, {}, 0);
+	co_await moved->create();
+	config.changeBackupContainer(tr, container, moved);
+	auto movedLog = co_await moved->writeLogFile(150, 170, 1024);
+	co_await movedLog->finish();
+	config.latestLogEndVersion().set(tr, 170);
+	ASSERT(!(co_await container->getRestoreSet(169)).present());
+	ASSERT(!(co_await moved->getRestoreSet(169)).present());
+	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING_DIFFERENTIAL);
+	ASSERT(logs.destinationURLChanged && logs.restorePointUnknown && !logs.restorable.present());
+	ASSERT(logs.exclusiveLogEnd == 170);
+	v1 = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING_DIFFERENTIAL, BackupStatusSchema::V1);
+	ASSERT(v1.restorable == 169 && !v1.destinationURLChanged);
+	config.changeBackupContainer(tr, moved, container);
+	ASSERT(co_await config.backupURLChanged().getD(tr));
+	co_await moved->deleteContainer();
+
+	// An older record has no URL history. Its target assumes the files are together.
+	config.backupURLChanged().clear(tr);
+	auto sameDirectory = IBackupContainer::openContainer(url + "/", {}, {}, 0);
+	config.changeBackupContainer(tr, container, sameDirectory);
+	ASSERT(!(co_await config.backupURLChanged().getD(tr)));
 	// The final dispatch can stop before updating the consumer version. Completion clears it.
 	auto next = co_await container->writeLogFile(150, 170, 1024);
 	co_await next->finish();
@@ -404,10 +428,21 @@ TEST_CASE("/backup/status/independentSnapshots") {
 	logs = co_await status(EBackupState::STATE_ABORTED);
 	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorePointUnknown && !logs.restorable.present());
 
-	// The range writer finishes first in BOTH. The bulk job has not published anything.
-	config.snapshotMode().set(tr, static_cast<int>(SnapshotMode::BOTH));
+	// A completed one-time range snapshot retains its map. Its only file restores at
+	// 155 without logs. The same file did not establish publication before completion.
+	config.stopWhenDone().set(tr, true);
 	config.firstSnapshotEndVersion().set(tr, 155);
 	config.latestSnapshotEndVersion().set(tr, 155);
+	logs = co_await status(EBackupState::STATE_COMPLETED);
+	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorable == 155 && !logs.restorePointUnknown);
+	config.latestLogEndVersion().clear(tr);
+	logs = co_await status(EBackupState::STATE_COMPLETED);
+	ASSERT(!logs.exclusiveLogEnd.present() && logs.restorable == 155 && !logs.restorePointUnknown);
+
+	// The same range snapshot cannot confirm a common target while BOTH awaits bulk.
+	config.latestLogEndVersion().set(tr, 150);
+	config.stopWhenDone().set(tr, false);
+	config.snapshotMode().set(tr, static_cast<int>(SnapshotMode::BOTH));
 	logs = co_await status();
 	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorePointUnknown && !logs.restorable.present());
 	ASSERT((co_await container->getRestoreSet(155, filter)).present());
@@ -415,18 +450,33 @@ TEST_CASE("/backup/status/independentSnapshots") {
 	co_await next->finish();
 	config.latestLogEndVersion().set(tr, 170);
 	logs = co_await status();
-	ASSERT(logs.exclusiveLogEnd == 170 && logs.restorable == 169 && !logs.restorePointUnknown);
+	ASSERT(logs.exclusiveLogEnd == 170 && logs.restorePointUnknown && !logs.restorable.present());
 	ASSERT((co_await container->getRestoreSet(169, filter)).present());
 	auto v1 = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING, BackupStatusSchema::V1);
 	ASSERT(!v1.restorable.present() && !v1.restorePointUnknown);
 
+	// The range writer can rotate and publish a second snapshot while bulk is still pending.
+	auto laterRange = co_await container->writeRangeFile(180, 0, 190, 1024);
+	co_await laterRange->finish();
+	files = { laterRange->getFileName() };
+	co_await container->writeKeyspaceSnapshotFile(files, ranges, 0, IncludeKeyRangeMap::True);
+	ASSERT((co_await container->getRestoreSet(190, filter)).present());
+	config.latestSnapshotEndVersion().set(tr, 190);
+	config.snapshotRangeFileMap().clear(tr);
+	config.snapshotBeginVersion().set(tr, 200);
 	config.mutationLogType().clear(tr);
 	logs = co_await status();
-	ASSERT(logs.exclusiveLogEnd == 170 && logs.restorable == 169 && !logs.restorePointUnknown);
-	// After rotation the shared end of an older BOTH writer can look like a range marker.
-	config.snapshotBeginVersion().set(tr, 180);
-	logs = co_await status();
 	ASSERT(logs.exclusiveLogEnd == 170 && logs.restorePointUnknown && !logs.restorable.present());
+
+	// A partial map for a newer RANGEFILE snapshot does not prove its manifest is published.
+	auto pending = co_await container->writeRangeFile(200, 0, 210, 1024);
+	co_await pending->finish();
+	config.snapshotMode().set(tr, static_cast<int>(SnapshotMode::RANGEFILE));
+	config.snapshotRangeFileMap().set(tr, "z"_sr, { "a"_sr, 210, pending->getFileName(), pending->size() });
+	config.latestLogEndVersion().clear(tr);
+	logs = co_await status(EBackupState::STATE_ABORTED);
+	ASSERT(logs.restorePointUnknown && !logs.restorable.present());
+	ASSERT(!(co_await container->getRestoreSet(210, filter)).present());
 	co_await container->deleteContainer();
 
 	// The bulk writer publishes its single-version manifest with the job ID and no range files.
@@ -467,15 +517,24 @@ TEST_CASE("/backup/status/independentSnapshots") {
 
 	// A subsequent range snapshot has its own end. The earlier bulk marker cannot supply
 	// the missing logs for a multiversion range snapshot.
-	auto early = co_await bulk->writeRangeFile(125, 0, 135, 1024);
-	auto late = co_await bulk->writeRangeFile(125, 1, 155, 1024);
+	auto left = co_await bulk->writeRangeFile(125, 0, 155, 1024);
+	auto right = co_await bulk->writeRangeFile(125, 1, 135, 1024);
 	auto bulkLogs = co_await bulk->writeLogFile(121, 150, 1024);
-	co_await (early->finish() && late->finish() && bulkLogs->finish());
-	files = { early->getFileName(), late->getFileName() };
+	co_await (left->finish() && right->finish() && bulkLogs->finish());
+	files = { left->getFileName(), right->getFileName() };
 	ranges = { { "a"_sr, "m"_sr }, { "m"_sr, "z"_sr } };
 	co_await bulk->writeKeyspaceSnapshotFile(files, ranges, 0, IncludeKeyRangeMap::True);
 	config.firstSnapshotEndVersion().set(tr, 155);
 	config.latestSnapshotEndVersion().set(tr, 155);
+	// Reading only the first row would mistake this multiversion RANGEFILE snapshot for a
+	// single-version snapshot at 155. The log ends at 150.
+	config.snapshotMode().set(tr, static_cast<int>(SnapshotMode::RANGEFILE));
+	config.snapshotRangeFileMap().set(tr, "m"_sr, { "a"_sr, 155, left->getFileName(), left->size() });
+	config.snapshotRangeFileMap().set(tr, "z"_sr, { "m"_sr, 135, right->getFileName(), right->size() });
+	logs = co_await status();
+	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorePointUnknown && !logs.restorable.present());
+	config.snapshotRangeFileMap().clear(tr);
+	config.snapshotMode().set(tr, static_cast<int>(SnapshotMode::BOTH));
 	config.snapshotBeginVersion().set(tr, 160);
 	logs = co_await status();
 	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorePointUnknown && !logs.restorable.present());
@@ -487,7 +546,7 @@ TEST_CASE("/backup/status/independentSnapshots") {
 	ASSERT(set.present() && set.get().ranges.size() == 2 && set.get().logs.size() == 2);
 	config.latestLogEndVersion().set(tr, 170);
 	logs = co_await status();
-	ASSERT(logs.exclusiveLogEnd == 170 && logs.restorable == 169 && !logs.restorePointUnknown);
+	ASSERT(logs.exclusiveLogEnd == 170 && logs.restorePointUnknown && !logs.restorable.present());
 	co_await bulk->deleteContainer();
 }
 

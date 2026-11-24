@@ -856,7 +856,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("\n");
 
 	printf(" ACTION OPTIONS:\n");
-	printf("  --json-v2      For status, emit JSON schema 2 with legacy backup progress and unknown restore points.\n");
+	printf("  --json-v2      For status, emit JSON schema 2 with log progress and confirmed restore points.\n");
 	printf("  --json         For status, emit JSON schema 1 for existing clients.\n");
 	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
 	       "                 FoundationDB cluster. The default is first the value of the\n"
@@ -2870,7 +2870,7 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 					        e.what());
 					throw backup_error();
 				}
-				config.backupContainer().set(tr, bc);
+				config.changeBackupContainer(tr, prevContainer, bc);
 				co_await bc->writeEncryptionMetadata(bc->getEncryptionBlockSize());
 			} else if (options.encryptionKeyFile.present()) {
 				fprintf(stdout,

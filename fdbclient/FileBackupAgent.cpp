@@ -63,6 +63,7 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -6935,6 +6936,19 @@ static KeyBackedBinaryValue<Version> mutationLogConsumerVersion(BackupConfig& co
 	return config.getUidAsKey().withPrefix(destination).withPrefix(backupLatestVersionsPrefix);
 }
 
+void BackupConfig::changeBackupContainer(Reference<ReadYourWritesTransaction> tr,
+                                         const Reference<IBackupContainer>& previous,
+                                         const Reference<IBackupContainer>& next) {
+	auto location = [](std::string_view url) {
+		// LocalDirectory ignores trailing path separators. Blobstore parameters can select a bucket or prefix.
+		return url.starts_with("file://") ? url.substr(0, url.find_last_not_of("/\\") + 1) : url;
+	};
+	if (location(previous->getURL()) != location(next->getURL())) {
+		backupURLChanged().set(tr, true);
+	}
+	backupContainer().set(tr, next);
+}
+
 Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,
                                                                      EBackupState state,
                                                                      BackupStatusSchema schema) {
@@ -6948,11 +6962,12 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 		auto cursor = co_await dispatch;
 		co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT), cursor, restorable };
 	}
+	auto urlChanged = config.backupURLChanged().getD(tr);
 	if (type == MutationLogType::PARTITIONED_LOG || type == MutationLogType::RANGE_PARTITIONED_LOG) {
 		// Both worker modes poll the dispatcher independently of the files saved for this backup.
 		auto worker = co_await config.latestBackupWorkerSavedVersion().get(tr);
 		auto cursor = co_await dispatch;
-		co_return LogProgress{ type, {}, {}, true, worker, cursor };
+		co_return LogProgress{ type, {}, {}, true, worker, cursor, co_await urlChanged };
 	}
 	KeyBackedProperty<bool> requested = config.configSpace.pack("partitionedLogEnabled"_sr);
 	if (!type.present() && (co_await requested.getD(tr))) {
@@ -6991,7 +7006,7 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 			// The shared checkpoint records an inclusive end. It does not record the start of
 			// each partition's files or gaps while workers were disabled.
 			auto cursor = co_await dispatch;
-			co_return LogProgress{ type, {}, {}, true, worker, cursor };
+			co_return LogProgress{ type, {}, {}, true, worker, cursor, co_await urlChanged };
 		}
 	}
 	auto cursor = co_await dispatch;
@@ -7020,6 +7035,13 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 		}
 	}
 
+	if (co_await urlChanged) {
+		// File-copy tasks may already hold the previous container when the URL changes.
+		logs.destinationURLChanged = true;
+		logs.restorePointUnknown = true;
+		co_return logs;
+	}
+
 	if (co_await config.incrementalBackupOnly().getD(tr)) {
 		if (logs.exclusiveLogEnd.present()) {
 			logs.restorable = logs.exclusiveLogEnd.get() - 1;
@@ -7030,25 +7052,25 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 	}
 
 	auto mode = static_cast<SnapshotMode>(co_await config.snapshotMode().getD(tr));
-	// Older BOTH writers could put the bulk version in firstEnd. The separate bulk marker
-	// identifies the newer writer. A firstEnd after the snapshot start must also be a range
-	// version, since the bulk writer records the backup start, even for an adopted job.
-	bool rangeMarker = mode == SnapshotMode::RANGEFILE ||
-	                   (mode == SnapshotMode::BOTH &&
-	                    (bulkEnd.present() || (firstEnd.present() && start.present() && firstEnd.get() > start.get())));
-	if (rangeMarker && firstEnd.present() && logs.exclusiveLogEnd.present() &&
-	    logs.exclusiveLogEnd.get() > firstEnd.get()) {
+	if (mode != SnapshotMode::RANGEFILE) {
+		// BOTH needs one target for both restore methods. A bulk marker records the backup
+		// start, which cannot establish the versions read by the individual SST batches.
+		logs.restorePointUnknown = state != EBackupState::STATE_SUBMITTED;
+	} else if (firstEnd.present() && logs.exclusiveLogEnd.present() && logs.exclusiveLogEnd.get() > firstEnd.get()) {
 		logs.restorable = logs.exclusiveLogEnd.get() - 1;
 	} else if (state != EBackupState::STATE_SUBMITTED) {
-		// A range marker omits the oldest file version. A bulk marker records the backup start,
-		// not the versions read by each SST batch. Neither alone proves an exact restore point.
-		logs.restorePointUnknown = mode != SnapshotMode::RANGEFILE || firstEnd.present();
-		if (!logs.restorePointUnknown) {
-			// The manifest is published from this map before firstEnd commits. Abort retains the
-			// map, and rotation clears it in the same transaction that records completion.
-			auto files = co_await config.snapshotRangeFileMap().getRange(tr, {}, {}, 1);
-			logs.restorePointUnknown = !files.results.empty();
+		auto files = co_await config.snapshotRangeFileMap().getRange(tr, {}, {}, 2);
+		if (firstEnd.present() && start.present() && files.results.size() == 1 && !files.more) {
+			// A one-time snapshot retains its file map after publication. One file proves
+			// equal version bounds if the completion marker belongs to this snapshot.
+			Version version = files.results.front().second.version;
+			auto latestEnd = co_await config.latestSnapshotEndVersion().get(tr);
+			if (latestEnd == version && start.get() <= version) {
+				logs.restorable = version;
+			}
 		}
+		// A manifest can be published before its completion marker commits.
+		logs.restorePointUnknown = !logs.restorable.present() && (firstEnd.present() || !files.results.empty());
 	}
 	co_return logs;
 }
@@ -7674,7 +7696,7 @@ public:
 						co_await (store(logs, config.getStatusLogProgress(tr, backupState, schema)) &&
 						          store(bc, config.backupContainer().getOrThrow(tr)));
 						logEnd = logs.exclusiveLogEnd;
-						auto latestRestorable = co_await getTimestampedVersion(tr, logs.restorable);
+						auto restorePoint = co_await getTimestampedVersion(tr, logs.restorable);
 						bc = fileBackup::getBackupContainerWithProxy(bc);
 
 						if (logs.sharedWorkerVersion.present()) {
@@ -7684,24 +7706,29 @@ public:
 						if (logs.logDispatchCursor.present()) {
 							doc.setKey("LogDispatchCursor", logs.logDispatchCursor.get());
 						}
+						if (logs.destinationURLChanged) {
+							doc.setKey("DestinationURLChanged", true);
+						}
 						if (logs.restorePointUnknown) {
 							doc.setKey("RestorePointStatus", "unknown");
 						} else {
-							doc.setKey("Restorable", latestRestorable.present());
+							doc.setKey("Restorable", restorePoint.present());
 						}
 
 						if (schema == BackupStatusSchema::V2 && !showSnapshotProgress && logEnd.present()) {
 							auto latestLogEnd = co_await getTimestampedVersion(tr, logEnd);
 							doc.setKey("LatestLogEnd", latestLogEnd.toJSON());
 						}
-						if (latestRestorable.present()) {
-							JsonBuilderObject o = latestRestorable.toJSON();
+						if (restorePoint.present()) {
+							JsonBuilderObject o = restorePoint.toJSON();
 							if (backupState != EBackupState::STATE_COMPLETED) {
 								o.setKey("LagSeconds",
-								         (recentReadVersion - latestRestorable.version.get()) /
+								         (recentReadVersion - restorePoint.version.get()) /
 								             CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 							}
-							doc.setKey("LatestRestorablePoint", o);
+							doc.setKey(schema == BackupStatusSchema::V1 ? "LatestRestorablePoint"
+							                                            : "ConfirmedRestorablePoint",
+							           o);
 						}
 						doc.setKey("DestinationURL", bc->getURL());
 						if (schema == BackupStatusSchema::V2) {
@@ -7800,11 +7827,9 @@ public:
 
 					Optional<std::string> bulkDumpJobIdOpt = co_await config.bulkDumpJobId().get(tr);
 					bool hasBulkJobId = bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty();
-					if (schema == BackupStatusSchema::V1) {
-						doc.setKey("BulkLoadCompatible", hasBulkJobId);
-					} else if (snapshotModeValue == static_cast<int>(SnapshotMode::RANGEFILE)) {
-						doc.setKey("BulkLoadCompatible", false);
-					} else if (hasBulkJobId) {
+					doc.setKey(schema == BackupStatusSchema::V1 ? "BulkLoadCompatible" : "BulkDumpJobRecorded",
+					           hasBulkJobId);
+					if (schema == BackupStatusSchema::V2 && hasBulkJobId) {
 						doc.setKey("BulkDumpJobId", bulkDumpJobIdOpt.get());
 					}
 
@@ -7913,7 +7938,7 @@ public:
 					co_await (store(logs, config.getStatusLogProgress(tr, backupState)) &&
 					          store(bc, config.backupContainer().getOrThrow(tr)) &&
 					          store(recentReadVersion, tr->getReadVersion()));
-					auto latestRestorableVersion = logs.restorable;
+					auto confirmedRestorePoint = logs.restorable;
 					bc = fileBackup::getBackupContainerWithProxy(bc);
 
 					bool snapshotProgress = false;
@@ -7928,18 +7953,12 @@ public:
 						snapshotProgress = true;
 						break;
 					case EBackupState::STATE_RUNNING_DIFFERENTIAL:
-						statusText += "The backup on tag `" + tagName +
-						              (latestRestorableVersion.present() ? "' is restorable but continuing to "
-						                                                 : "' is continuing to ") +
-						              bc->getURL() + ".\n";
+						statusText += "The backup on tag `" + tagName + "' is continuing to " + bc->getURL() + ".\n";
 						snapshotProgress = true;
 						break;
 					case EBackupState::STATE_COMPLETED:
-						statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " completed";
-						if (latestRestorableVersion.present()) {
-							statusText += format(" at version %lld", latestRestorableVersion.get());
-						}
-						statusText += ".\n";
+						statusText +=
+						    "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " completed.\n";
 						break;
 					default:
 						statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " " +
@@ -7981,12 +8000,16 @@ public:
 					if (logs.logDispatchCursor.present()) {
 						statusText += format("Log dispatch cursor: %lld\n", logs.logDispatchCursor.get());
 					}
-					if (logs.restorePointUnknown) {
-						statusText += "Latest restore point: unknown from backup metadata.\n";
-					} else if (latestRestorableVersion.present()) {
-						statusText += format("Latest restore point: %lld\n", latestRestorableVersion.get());
+					if (logs.destinationURLChanged) {
+						statusText += "Confirmed restore point: unknown after a backup URL change.\n";
+					} else if (logs.restorePointUnknown) {
+						statusText += "Confirmed restore point: unknown from backup metadata.\n";
+					} else if (confirmedRestorePoint.present()) {
+						statusText += format(
+						    "Confirmed restore point: %lld (assuming the recorded files are available together).\n",
+						    confirmedRestorePoint.get());
 					} else {
-						statusText += "Latest restore point: none.\n";
+						statusText += "Confirmed restore point: none.\n";
 					}
 					if (!snapshotProgress && logs.exclusiveLogEnd.present()) {
 						statusText += format("Log end version (exclusive): %lld\n", logs.exclusiveLogEnd.get());
@@ -8125,9 +8148,9 @@ public:
 							        .c_str(),
 							    e.second.first.c_str());
 
-							// If error version is at or more recent than the latest restorable version then it
+							// If error version is at or more recent than the confirmed restore point then it
 							// could be inhibiting progress
-							if (v >= latestRestorableVersion.orDefault(0)) {
+							if (v >= confirmedRestorePoint.orDefault(0)) {
 								recentErrors += msg;
 							} else {
 								pastErrors += msg;
@@ -8135,10 +8158,10 @@ public:
 						}
 
 						if (!recentErrors.empty()) {
-							if (latestRestorableVersion.present()) {
+							if (confirmedRestorePoint.present()) {
 								statusText +=
-								    format("Recent Errors (since latest restorable point %s ago)\n",
-								           secondsToTimeFormat((recentReadVersion - latestRestorableVersion.get()) /
+								    format("Recent Errors (since confirmed restore point %s ago)\n",
+								           secondsToTimeFormat((recentReadVersion - confirmedRestorePoint.get()) /
 								                               CLIENT_KNOBS->CORE_VERSIONSPERSECOND)
 								               .c_str()) +
 								    recentErrors;
