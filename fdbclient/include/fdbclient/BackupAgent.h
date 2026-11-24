@@ -989,8 +989,8 @@ public:
 	struct LogProgress {
 		Optional<MutationLogType> type;
 		Optional<Version> exclusiveLogEnd;
+		// In schema 2 this is a confirmed target for the requested backup formats. Absence means unknown.
 		Optional<Version> restorable;
-		bool restorePointUnknown = false;
 		Optional<Version> sharedWorkerVersion = {};
 		Optional<Version> logDispatchCursor = {};
 		Version sharedWorkerLogEnd() const { return sharedWorkerVersion.get() + 1; }

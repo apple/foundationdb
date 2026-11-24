@@ -106,10 +106,10 @@ function backup {
   fi
 }
 
-# Check that 'fdbbackup status' reports the mutation log type the backup was started with.
+# Check the backup's log type and restore point in both status schemas.
 # $1 The build directory
 # $2 The scratch directory
-function check_status_mutation_log_type {
+function check_backup_status {
   local local_build_dir="${1}"
   local scratch_dir="${2}"
   local expected="default"
@@ -134,13 +134,29 @@ function check_status_mutation_log_type {
     err "fdbbackup status --json failed: ${json_output}"
     return 1
   fi
-  local json_type
-  if ! json_type=$(jq -r '.MutationLogType' <<< "${json_output}"); then
-    err "Failed to parse status --json output: ${json_output}"
+  if ! jq -e --arg expected "${expected}" '
+    .SchemaVersion == "1.0.0" and .MutationLogType == $expected and
+    (.Restorable | type == "boolean") and (has("ConfirmedRestorablePoint") | not)
+  ' <<< "${json_output}" >/dev/null; then
+    err "Unexpected schema 1 backup status: ${json_output}"
     return 1
   fi
-  if [[ "${json_type}" != "${expected}" ]]; then
-    err "Expected MutationLogType '${expected}' in status --json, got '${json_type}'"
+
+  if ! json_output=$("${local_build_dir}"/bin/fdbbackup status --json-v2 -t "${TAG}" \
+      -C "${scratch_dir}/loopback_cluster/fdb.cluster" --log --logdir="${scratch_dir}"); then
+    err "fdbbackup status --json-v2 failed: ${json_output}"
+    return 1
+  fi
+  if ! jq -e --arg expected "${expected}" '
+    .SchemaVersion == "2.0.0" and .MutationLogType == $expected and
+    (has("LatestRestorablePoint") | not) and
+    (if $expected == "default" then
+       .Restorable == true and (.ConfirmedRestorablePoint.Version | type == "number")
+     else
+       .RestorePointStatus == "unknown" and (has("Restorable") or has("ConfirmedRestorablePoint") | not)
+     end)
+  ' <<< "${json_output}" >/dev/null; then
+    err "Unexpected schema 2 backup status: ${json_output}"
     return 1
   fi
 }
@@ -259,9 +275,9 @@ function test_dir_backup_and_restore {
     err "Failed backup"
     return 1
   fi
-  log "Check status mutation log type"
-  if ! check_status_mutation_log_type "${local_build_dir}" "${scratch_dir}"; then
-    err "Failed status mutation log type check"
+  log "Check backup status"
+  if ! check_backup_status "${local_build_dir}" "${scratch_dir}"; then
+    err "Failed backup status check"
     return 1
   fi
 
