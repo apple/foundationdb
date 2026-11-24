@@ -405,6 +405,9 @@ For ordinary logs, the first dispatch sets the starting version before it copies
 For example, a logs-only backup that starts at version 121 can complete with an empty container.
 Text output and schema 2 show this initial cursor and report the restore point as unknown.
 Once the dispatcher advances after copying a log batch, its new cursor is the exclusive end of that batch.
+A batch covering versions 121 through 200 has an exclusive end of 201, even if the next range snapshot begins at 220.
+If an adopted bulk dump includes data from version 100, restoring version 200 also requires logs starting at or before 100.
+Status reports the confirmed log end separately. It reports the restore point as unknown if it cannot establish that mutation capture was active by the oldest bulk-dump batch.
 
 Existing clients can continue to use ``--json`` for schema 1. Its ``Restorable`` Boolean and version fields retain their historical metadata-based calculation.
 

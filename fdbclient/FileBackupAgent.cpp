@@ -3953,6 +3953,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 
 	static struct {
 		static TaskParam<Version> snapshotVersion() { return __FUNCTION__sr; }
+		static TaskParam<Version> snapshotBeginVersion() { return __FUNCTION__sr; }
 		static TaskParam<std::string> bulkDumpJobId() { return __FUNCTION__sr; }
 		static TaskParam<bool> timeoutOccurred() { return __FUNCTION__sr; }
 	} Params;
@@ -4133,6 +4134,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					});
 					SnapshotMetadata metadata = SnapshotMetadata::bulkDump(
 					    bulkDumpJob.getJobId().toString(), bounds.first->version, bounds.second->version, 0);
+					Params.snapshotBeginVersion().set(task, metadata.beginVersion);
 					Params.snapshotVersion().set(task, metadata.endVersion);
 
 					// Write the snapshot file - empty file list since BulkDump uses job manifests, not range files
@@ -4197,6 +4199,9 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 		// This is used by getLatestRestorableVersion() for mode=BOTH to ensure both
 		// rangefile and bulkdump data exist before marking backup as restorable
 		config.bulkDumpSnapshotEndVersion().set(tr, snapshotVersion);
+		if (Params.snapshotBeginVersion().exists(task)) {
+			config.bulkDumpSnapshotBeginVersion().set(tr, Params.snapshotBeginVersion().get(task));
+		}
 
 		// CRITICAL: Set bulkDumpJobId on the backup CONFIG so that status checks
 		// and restore operations can find it. Without this, the backup status shows
@@ -4450,6 +4455,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			for (auto& backupRange : backupRanges) {
 				config.startMutationLogs(tr, backupRange, destUidValue);
 			}
+			config.mutationLogCaptureStart().setVersionstamp(tr, Versionstamp(), 0);
 		}
 
 		// Properties folder is created here to ensure backup container exists because localDirectory doesn't create
@@ -7820,6 +7826,35 @@ StringRef StartFullRestoreTaskFunc::name = "restore_start"_sr;
 REGISTER_TASKFUNC(StartFullRestoreTaskFunc);
 } // namespace fileBackup
 
+// Older backups did not record the commit that enabled ordinary mutation capture.
+static Future<bool> hasLegacyOrdinaryLogBatch(Reference<ReadYourWritesTransaction> tr,
+                                              BackupConfig config,
+                                              Version cursor,
+                                              bool usesRangeSnapshots) {
+	// The initial cursor was sampled before snapshot initialization. A later snapshot can
+	// rotate past the cursor, but the end of the first range snapshot still bounds the start.
+	auto snapshotBegin = co_await config.snapshotBeginVersion().get(tr);
+	if (cursor > snapshotBegin.orDefault(MAX_VERSION)) {
+		co_return true;
+	}
+	if (usesRangeSnapshots) {
+		auto firstEnd = co_await config.firstSnapshotEndVersion().get(tr);
+		if (cursor > firstEnd.orDefault(MAX_VERSION)) {
+			co_return true;
+		}
+	}
+
+	// Submission writes its read version here, before the start task can run. Only a later
+	// ordinary dispatch can advance this backup's cleanup key to the cursor.
+	auto dest = co_await config.destUidValue().get(tr);
+	if (!dest.present()) {
+		co_return false;
+	}
+	auto key = config.getUidAsKey().withPrefix(dest.get()).withPrefix(backupLatestVersionsPrefix);
+	auto cleanup = co_await tr->get(key);
+	co_return cleanup.present() && BinaryReader::fromStringRef<Version>(cleanup.get(), Unversioned()) == cursor;
+}
+
 Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,
                                                                      EBackupState state,
                                                                      BackupStatusSchema schema) {
@@ -7876,28 +7911,39 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 			co_return LogProgress{ type, {}, {}, true, worker, cursor };
 		}
 	}
-	auto restorable = config.getLatestRestorableVersion(tr);
 	auto cursor = co_await dispatch;
-	if (schema == BackupStatusSchema::V2 && cursor.present()) {
-		// Startup samples the first cursor before initializing the snapshot, even for logs-only backups.
-		// Every later ordinary cursor waits for the preceding batch of log files to finish.
-		auto snapshotBegin = co_await config.snapshotBeginVersion().get(tr);
-		if (cursor.get() <= snapshotBegin.orDefault(MAX_VERSION)) {
-			// A new range snapshot can move snapshotBegin past a completed log batch. The first completed
-			// range snapshot still bounds the initial cursor. A bulk dump can reuse an older job.
-			auto firstEnd = config.firstSnapshotEndVersion().get(tr);
-			auto mode = config.snapshotMode().getD(tr);
-			auto logsOnly = config.incrementalBackupOnly().getD(tr);
-			co_await (success(firstEnd) && success(mode) && success(logsOnly));
-			auto snapshotMode = static_cast<SnapshotMode>(mode.get());
-			bool usesRangeSnapshots =
-			    !logsOnly.get() && (snapshotMode == SnapshotMode::RANGEFILE || snapshotMode == SnapshotMode::BOTH);
-			if (!usesRangeSnapshots || cursor.get() <= firstEnd.get().orDefault(MAX_VERSION)) {
-				co_return LogProgress{ MutationLogType::DEFAULT, {}, {}, true, {}, cursor };
-			}
+	auto restorable = co_await config.getLatestRestorableVersion(tr);
+	LogProgress progress{ type.orDefault(MutationLogType::DEFAULT), cursor, restorable };
+	if (schema == BackupStatusSchema::V1 || !cursor.present()) {
+		co_return progress;
+	}
+
+	Optional<Versionstamp> captureStart;
+	int mode;
+	bool logsOnly;
+	co_await (store(captureStart, config.mutationLogCaptureStart().get(tr)) &&
+	          store(mode, config.snapshotMode().getD(tr)) && store(logsOnly, config.incrementalBackupOnly().getD(tr)));
+	auto snapshotMode = static_cast<SnapshotMode>(mode);
+	bool usesRangeSnapshots =
+	    !logsOnly && (snapshotMode == SnapshotMode::RANGEFILE || snapshotMode == SnapshotMode::BOTH);
+	// Startup sampled the initial cursor before capture committed. The first dispatch reads
+	// after that commit and chooses a strictly later version for the end of its file batch.
+	bool batchComplete = captureStart.present()
+	                         ? cursor.get() > captureStart.get().version
+	                         : co_await hasLegacyOrdinaryLogBatch(tr, config, cursor.get(), usesRangeSnapshots);
+	if (!batchComplete) {
+		co_return LogProgress{ MutationLogType::DEFAULT, {}, {}, true, {}, cursor };
+	}
+	if (restorable.present() && !logsOnly &&
+	    (snapshotMode == SnapshotMode::BULKDUMP || snapshotMode == SnapshotMode::BOTH)) {
+		// An adopted dump may predate capture, even if its oldest batch lies inside the first named log file.
+		auto oldestBatch = co_await config.bulkDumpSnapshotBeginVersion().get(tr);
+		if (!captureStart.present() || !oldestBatch.present() || oldestBatch.get() < captureStart.get().version) {
+			progress.restorable.reset();
+			progress.restorePointUnknown = true;
 		}
 	}
-	co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT), cursor, co_await restorable };
+	co_return progress;
 }
 
 struct LogInfo : public ReferenceCounted<LogInfo> {
@@ -8605,6 +8651,11 @@ public:
 						auto latestRestorable = co_await getTimestampedVersion(tr, logs.restorable);
 						bc = fileBackup::getBackupContainerWithProxy(bc);
 
+						if (schema == BackupStatusSchema::V2 && backupState == EBackupState::STATE_COMPLETED &&
+						    logEnd.present()) {
+							auto latestLogEnd = co_await getTimestampedVersion(tr, logEnd);
+							doc.setKey("LatestLogEnd", latestLogEnd.toJSON());
+						}
 						if (logs.sharedWorkerVersion.present()) {
 							doc.setKey("SharedWorkerSavedVersion", logs.sharedWorkerVersion.get());
 							doc.setKey("SharedWorkerLogEndExclusive", logs.sharedWorkerLogEnd());
@@ -8876,6 +8927,9 @@ public:
 					}
 					if (logs.logDispatchCursor.present()) {
 						statusText += format("Log dispatch cursor: %lld\n", logs.logDispatchCursor.get());
+					}
+					if (backupState == EBackupState::STATE_COMPLETED && logs.exclusiveLogEnd.present()) {
+						statusText += format("Log end version (exclusive): %lld\n", logs.exclusiveLogEnd.get());
 					}
 					if (logs.restorePointUnknown) {
 						statusText += "Latest restore point: unknown from backup metadata.\n";

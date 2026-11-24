@@ -969,6 +969,12 @@ public:
 	// Used for mode=BOTH to track that BulkDump data is available
 	KeyBackedProperty<Version> bulkDumpSnapshotEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
+	// Oldest batch in the completed bulk dump. A restore needs continuous logs from this version.
+	KeyBackedProperty<Version> bulkDumpSnapshotBeginVersion() { return configSpace.pack(__FUNCTION__sr); }
+
+	// Commit that installed ordinary mutation capture for this backup.
+	KeyBackedBinaryValue<Versionstamp> mutationLogCaptureStart() { return configSpace.pack(__FUNCTION__sr); }
+
 	// Latest version for which all prior versions have had their log copy tasks completed
 	KeyBackedProperty<Version> latestLogEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
