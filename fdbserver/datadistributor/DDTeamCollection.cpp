@@ -2007,6 +2007,8 @@ public:
 					    .detail("ServerID", interf.id())
 					    .detail("Status", status->toString());
 				}
+			} else if (!status->isFailed) {
+				status->readabilityEndpoint = endpoint;
 			}
 
 			if (!interf.isTss()) {
@@ -2050,16 +2052,12 @@ public:
 				                                        SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME,
 				                                        TaskPriority::DataDistribution);
 			}
-			// Relocation keeps its previous state across a restart. Before using that state for a
-			// range sample, require a failure or recovery signal for the current interface.
-			Future<Void> confirmCurrentStatus = Never();
-			if (!inHealthyZone && !status->readabilityEndpoint.isValid() && !healthChanged.isReady()) {
-				confirmCurrentStatus =
-				    status->isFailed ? waitFailureClientStrict(interf.waitFailure,
-				                                               SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME,
-				                                               TaskPriority::DataDistribution)
-				                     : IFailureMonitor::failureMonitor().onStateEqual(interf.waitFailure.getEndpoint(),
-				                                                                      FailureStatus(false));
+			// Relocation can carry a failure across a restart. Confirm it for this endpoint.
+			Future<Void> confirmFailure = Never();
+			if (status->isFailed && !status->readabilityEndpoint.isValid() && !healthChanged.isReady()) {
+				confirmFailure = waitFailureClientStrict(interf.waitFailure,
+				                                         SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME,
+				                                         TaskPriority::DataDistribution);
 			}
 			// Avoid starting a removal transaction when the earlier health-change branch is ready.
 			auto res = co_await race(healthChanged,
@@ -2067,7 +2065,7 @@ public:
 			                             ? self->waitForAllDataRemoved(interf.id(), addedVersion)
 			                             : Future<Void>(Never()),
 			                         self->healthyZone.onChange(),
-			                         confirmCurrentStatus);
+			                         confirmFailure);
 			if (res.index() == 0) {
 				status->readabilityEndpoint = endpoint;
 				status->isFailed = !status->isFailed;
@@ -4708,6 +4706,12 @@ void DDTeamCollection::setServerStatus(UID id, ServerStatus status) {
 		const bool changed = !previous.initialized || previous.isFailed != status.isFailed ||
 		                     previous.readabilityEndpoint != status.readabilityEndpoint;
 		status.readabilityChangedAt = changed ? now() : previous.readabilityChangedAt;
+		if (changed) {
+			auto server = server_info.find(id);
+			if (server != server_info.end()) {
+				server->second->resetStorageMetricsEvidence();
+			}
+		}
 	}
 	if (previous.initialized && !previous.isFailed &&
 	    (status.isFailed || previous.readabilityEndpoint != status.readabilityEndpoint)) {
@@ -4753,10 +4757,19 @@ Future<int> DDTeamCollection::sampleRemoteOnlyShardAvailability(double delaySeco
 					    collection->isFailureMasked(status.locality)) {
 						continue;
 					}
-					if (!status.isFailed && source->isAcceptingRequests()) {
+					const auto server = collection->server_info.find(source->id());
+					if (server == collection->server_info.end() ||
+					    server->second->getLastKnownInterface().getValue.getEndpoint() != status.readabilityEndpoint) {
+						continue;
+					}
+					if (status.isFailed) {
+						knownFailed |=
+						    IFailureMonitor::failureMonitor().getState(source->waitFailure.getEndpoint()).isFailed();
+					} else if (source->isAcceptingRequests() &&
+					           server->second->hasStorageMetricsEvidenceBefore(lookupStart,
+					                                                        shardsAffectedByTeamFailure)) {
 						co_return shardsAffectedByTeamFailure->recordRemoteOnlyAvailability(verifiedEnd, 0);
 					}
-					knownFailed |= status.isFailed;
 				}
 			}
 			allFailed &= knownFailed;
@@ -6581,8 +6594,16 @@ Future<Void> DDTeamCollection::printSnapshotTeamsInfo(Reference<DDTeamCollection
 }
 
 // Synthetic base endpoint for an instance of a fixture storage server.
-static Endpoint testStorageEndpoint(UID id, int incarnation = 1) {
-	return Endpoint({ NetworkAddress(IPAddress(0x01010101), id.first()) }, UID(id.first(), incarnation));
+static Endpoint testStorageEndpoint(UID id) {
+	return Endpoint({ NetworkAddress(IPAddress(0x01010101), id.first()) }, UID(id.first(), 1));
+}
+
+// Reconstruct the method endpoints from the base token, as a real registration read does.
+static StorageServerInterface testStorageRegistration(UID id) {
+	StorageServerInterface interf(id);
+	interf.getValue = PublicRequestStream<GetValueRequest>(testStorageEndpoint(id));
+	interf.startAcceptingRequests();
+	return decodeServerListValue(serverListValue(interf));
 }
 
 class DDTeamCollectionTestTxnProcessor final : public DDTxnProcessor {
@@ -6612,10 +6633,7 @@ public:
 					if (it != registrations.end()) {
 						registered.push_back(it->second);
 					} else {
-						StorageServerInterface interf(id);
-						interf.getValue = PublicRequestStream<GetValueRequest>(testStorageEndpoint(id));
-						interf.startAcceptingRequests();
-						registered.emplace_back(std::move(interf));
+						registered.emplace_back(testStorageRegistration(id));
 					}
 				}
 				auto reply = tag(releaseLookup, registered);
@@ -6716,6 +6734,58 @@ public:
 		return testTeamCollection(teamSize, policy, processCount, shardsAffectedByTeamFailure);
 	}
 
+	// Supply stable observations for tests of assignment lookup and sweep ordering.
+	struct TestStorageStatuses {
+		std::map<NetworkAddress, FailureStatus> saved;
+		void set(DDTeamCollection* collection, UID id, ServerStatus status) {
+			auto interf = testStorageRegistration(id);
+			auto address = interf.address();
+			auto& monitor = IFailureMonitor::failureMonitor();
+			saved.try_emplace(address, monitor.getState(address));
+			monitor.setStatus(address, FailureStatus(status.isFailed));
+
+			auto& server = collection->server_info[id];
+			if (!server.isValid()) {
+				server = makeReference<TCServerInfo>(
+				    interf, collection, ProcessClass(), true, collection->storageServerSet);
+			} else {
+				interf.locality = server->getLastKnownInterface().locality;
+				server->updateLastKnown(interf, server->getLastKnownClass());
+			}
+			status.readabilityEndpoint = interf.getValue.getEndpoint();
+			collection->setServerStatus(id, status);
+			if (!status.isFailed) {
+				server->storageMetricsConfirmedAt = now();
+				server->storageMetricsDisconnected = Never();
+			}
+		}
+
+		~TestStorageStatuses() {
+			for (const auto& [address, status] : saved) {
+				IFailureMonitor::failureMonitor().setStatus(address, status);
+			}
+		}
+	};
+
+	// Keep all methods on one worker and give each role instance its own endpoint tokens.
+	static StorageServerInterface localStorageRole(TCServerInfo* server) {
+		StorageServerInterface interf(server->getId());
+		interf.locality = server->getLastKnownInterface().locality;
+		interf.initEndpoints();
+		interf.startAcceptingRequests();
+		return interf;
+	}
+
+	static Future<Void> replyToStorageMetrics(TCServerInfo* server) {
+		auto requests = server->getLastKnownInterface().getStorageMetrics.getFuture();
+		auto poll = server->updateServerMetrics();
+		auto request = co_await requests;
+		GetStorageMetricsReply reply;
+		reply.lastUpdate = now();
+		request.reply.send(reply);
+		co_await poll;
+	}
+
 	static Future<Void> RemoteOnlyShardAvailabilityDuringMaintenance() {
 		auto shards = makeReference<ShardsAffectedByTeamFailure>();
 		auto primary = testTeamCollection(1, makeReference<PolicyOne>(), 0, shards);
@@ -6734,8 +6804,12 @@ public:
 
 		const KeyRange range = KeyRangeRef("a"_sr, "z"_sr);
 		const UID owner(1, 0), other(2, 0);
+		TestStorageStatuses statuses;
+		statuses.set(remote.getPtr(), other, remote->server_status.get(other));
 		auto server = remote->server_info.at(owner);
-		const auto& interf = server->getLastKnownInterface();
+		auto interf = localStorageRole(server.getPtr());
+		server->updateLastKnown(interf, ProcessClass());
+		processor->registrations[owner] = interf;
 		auto failureRequests = interf.waitFailure.getFuture();
 		ServerStatus status(IsFailed::True, IsUndesired::False, IsWiggling::False, interf.locality);
 		status.readabilityEndpoint = interf.getValue.getEndpoint();
@@ -6757,6 +6831,7 @@ public:
 		ASSERT(!status.isFailed); // Maintenance suppresses relocation of the failed owner.
 		ASSERT(!failureRequests.isReady());
 		ASSERT_EQ(co_await sample(), -1);
+		monitor.setStatus(address, FailureStatus(false)); // The worker is up while its storage role restarts.
 
 		processor->locations = { { range, { owner, other } } };
 		ASSERT_EQ(co_await sample(), 0);
@@ -6766,18 +6841,69 @@ public:
 		remote->healthyZone.set(ignoreSSFailuresZoneString);
 		ASSERT_EQ(co_await sample(), -1);
 
-		processor->registrations.clear();
+		processor->registrations[owner] = interf;
 		processor->locations = { { range, { owner } } };
 		ASSERT_EQ(co_await sample(), -1); // The tracker still has the old maintenance setting.
+		auto metricsRequests = interf.getStorageMetrics.getFuture();
+		auto stalePoll = server->updateServerMetrics();
+		auto staleRequest = co_await metricsRequests;
 		remote->healthyZone.set(Optional<Key>());
-		ASSERT(!remote->server_status.get(owner).readabilityEndpoint.isValid());
-		auto statusChanged = remote->server_status.onChange(owner);
+		// The old registration still accepts requests. Only its worker has answered.
+		ASSERT_EQ(co_await sample(), -1);
+		GetStorageMetricsReply reply;
+		reply.lastUpdate = now();
+		staleRequest.reply.send(reply);
+		co_await stalePoll;
+		ASSERT_EQ(co_await sample(), -1); // The request predates the end of maintenance.
+
+		auto sampleAcrossMetricsReply = [&]() -> Future<int> {
+			Promise<Void> release;
+			processor->releaseLookup = release.getFuture();
+			auto lookupStarted = processor->lookupStarted.onTrigger();
+			auto pending = sample();
+			co_await lookupStarted;
+			co_await replyToStorageMetrics(server.getPtr());
+			release.send(Void());
+			co_return co_await pending;
+		};
+		ASSERT_EQ(co_await sampleAcrossMetricsReply(), -1); // The first role reply arrived during the lookup.
+		ASSERT_EQ(co_await sampleAcrossMetricsReply(), 0); // The earlier reply stayed valid through the next poll.
+
+		// Observe the worker disconnect during a read, before the relocation delay can expire.
+		Promise<Void> release;
+		processor->releaseLookup = release.getFuture();
+		auto lookupStarted = processor->lookupStarted.onTrigger();
+		auto pending = sample();
+		co_await lookupStarted;
+		monitor.setStatus(address, FailureStatus(true));
+		release.send(Void());
+		ASSERT_EQ(co_await pending, -1);
 		monitor.setStatus(address, FailureStatus(false));
-		co_await timeout(statusChanged, 5.0);
-		ASSERT(remote->server_status.get(owner).readabilityEndpoint.isValid());
-		co_await delay(0); // Let the tracker finish publishing before cancelling it.
-		tracker.cancel();
+		ASSERT_EQ(co_await sample(), -1); // The worker returned. The role has yet to answer again.
+		co_await replyToStorageMetrics(server.getPtr());
 		ASSERT_EQ(co_await sample(), 0);
+
+		// Both ranges are readable until the first owner's metrics endpoint disappears during the second read.
+		const KeyRange secondRange = KeyRangeRef("za"_sr, "zz"_sr);
+		shards->trackRemoteOnlyRange(secondRange);
+		processor->locations.emplace_back(secondRange, std::vector<UID>{ other });
+		processor->registrations.erase(other);
+		ASSERT_EQ(co_await sample(), -1);
+		ASSERT_EQ(co_await sample(), 0);
+		ASSERT_EQ(co_await sample(), 0);
+		ASSERT_EQ(processor->lookups.back(), range);
+
+		Promise<Void> finishSecond;
+		processor->releaseLookup = finishSecond.getFuture();
+		lookupStarted = processor->lookupStarted.onTrigger();
+		auto secondSample = sample();
+		co_await lookupStarted;
+		ASSERT_EQ(processor->lookups.back(), secondRange);
+		monitor.endpointNotFound(interf.getStorageMetrics.getEndpoint());
+		ASSERT(monitor.getState(address).isAvailable());
+		co_await delay(0, TaskPriority::FlushTrace); // Deliver the endpoint failure before the metadata reply.
+		finishSecond.send(Void());
+		ASSERT_EQ(co_await secondSample, -1);
 		ASSERT(!remote->readyToStart.isReady());
 		ASSERT(!run.isReady());
 	}
@@ -6828,6 +6954,7 @@ public:
 		const KeyRange prefix = KeyRangeRef(left.begin, "g"_sr);
 		const KeyRange suffix = KeyRangeRef(prefix.end, left.end);
 		const KeyRange right = KeyRangeRef("p"_sr, "z"_sr);
+		TestStorageStatuses statuses;
 		const ServerStatus live(LocalityData{});
 		const ServerStatus failed(IsFailed::True, IsUndesired::False, IsWiggling::False, LocalityData{});
 		auto sample = [&]() { return primary->sampleRemoteOnlyShardAvailability(0); };
@@ -6837,9 +6964,10 @@ public:
 		ASSERT(processor->lookups.empty());
 
 		shards->trackRemoteOnlyRange(left);
-		setTestServerStatus(remote.get(), oldRemote, live);
-		setTestServerStatus(remote.get(), newRemote, failed);
-		setTestServerStatus(primary.get(), partialPrimary, failed);
+		statuses.set(primary.get(), primaryServer, live);
+		statuses.set(remote.get(), oldRemote, live);
+		statuses.set(remote.get(), newRemote, failed);
+		statuses.set(primary.get(), partialPrimary, failed);
 		processor->locations = { { left, { oldRemote } } };
 		ASSERT_EQ(co_await sample(), 0);
 
@@ -6851,7 +6979,7 @@ public:
 		remote->initialFailureReactionDelay = Never();
 		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::False), -1);
 		ASSERT_EQ(co_await sample(), 1);
-		setTestServerStatus(primary.get(), partialPrimary, live);
+		statuses.set(primary.get(), partialPrimary, live);
 		ASSERT_EQ(co_await sample(), 0);
 
 		// A full repair is readable. A later assignment can still lose every source.
@@ -6893,13 +7021,14 @@ public:
 		collection->db = processor;
 		const KeyRange repaired = KeyRangeRef("a"_sr, "b"_sr), other = KeyRangeRef("c"_sr, "d"_sr);
 		const UID oldOwner(1, 0), newOwner(2, 0), otherOwner(3, 0);
+		TestStorageStatuses statuses;
 		const ServerStatus live(LocalityData{});
 		const ServerStatus failed(IsFailed::True, IsUndesired::False, IsWiggling::False, LocalityData{});
 		shards->trackRemoteOnlyRange(repaired);
 		shards->trackRemoteOnlyRange(other);
-		setTestServerStatus(collection.get(), oldOwner, live);
-		setTestServerStatus(collection.get(), newOwner, live);
-		setTestServerStatus(collection.get(), otherOwner, failed);
+		statuses.set(collection.get(), oldOwner, live);
+		statuses.set(collection.get(), newOwner, live);
+		statuses.set(collection.get(), otherOwner, failed);
 		processor->locations = { { repaired, { oldOwner } }, { other, { otherOwner } } };
 
 		Promise<Void> release;
@@ -6909,13 +7038,13 @@ public:
 		co_await lookupStarted;
 		// The repair commits before the old owner fails. The pending reply still names the old owner.
 		processor->locations.front().second = { newOwner };
-		setTestServerStatus(collection.get(), oldOwner, failed);
+		statuses.set(collection.get(), oldOwner, failed);
 		release.send(Void());
 		ASSERT_EQ(co_await sample, -1);
 		ASSERT_EQ(co_await collection->sampleRemoteOnlyShardAvailability(0), 1);
 		ASSERT_EQ(processor->lookups.back(), other);
 
-		setTestServerStatus(collection.get(), otherOwner, live);
+		statuses.set(collection.get(), otherOwner, live);
 		ASSERT_EQ(co_await collection->sampleRemoteOnlyShardAvailability(0), -1);
 		ASSERT_EQ(co_await collection->sampleRemoteOnlyShardAvailability(0), 0);
 		ASSERT_EQ(processor->lookups.back(), repaired);
@@ -6933,7 +7062,16 @@ public:
 		auto sample = [&]() { return collection->sampleRemoteOnlyShardAvailability(0); };
 		auto server = collection->server_info.at(owner);
 		collection->server_and_tss_info[owner] = server;
+		auto oldInterface = localStorageRole(server.getPtr());
+		server->updateLastKnown(oldInterface, ProcessClass());
+		processor->registrations[owner] = oldInterface;
+		auto& monitor = IFailureMonitor::failureMonitor();
+		auto address = oldInterface.address();
+		auto previous = monitor.getState(address);
+		ScopeExit restoreStatus([&]() { monitor.setStatus(address, previous); });
+		monitor.setStatus(address, FailureStatus(true));
 		ServerStatus status = collection->server_status.get(owner);
+		status.readabilityEndpoint = oldInterface.getValue.getEndpoint();
 		status.isFailed = true;
 		collection->setServerStatus(owner, status);
 		ASSERT_EQ(co_await sample(), 1);
@@ -6945,14 +7083,17 @@ public:
 		               TaskPriority::DataDistributionLaunch);
 		ASSERT(processor->isServerListFetchActive(0));
 		// The new instance uses the same ID and address, but a different endpoint token.
-		StorageServerInterface replacement(owner);
-		replacement.getValue = PublicRequestStream<GetValueRequest>(testStorageEndpoint(owner, 2));
-		replacement.locality = server->getLastKnownInterface().locality;
-		replacement.startAcceptingRequests();
+		auto replacement = localStorageRole(server.getPtr());
+		ASSERT_EQ(replacement.address(), oldInterface.address());
 		processor->registrations[owner] = replacement;
 		ASSERT_EQ(co_await sample(), -1); // The old endpoint's failure cannot prove outage.
+		monitor.setStatus(address, FailureStatus(false));
 		status.isFailed = false;
 		collection->setServerStatus(owner, status);
+		co_await replyToStorageMetrics(server.getPtr());
+		processor->registrations[owner] = oldInterface;
+		ASSERT_EQ(co_await sample(), 0);
+		processor->registrations[owner] = replacement;
 		ASSERT_EQ(co_await sample(), -1); // Its health cannot prove readability either.
 
 		// Deliver the poll while another probe is reading the replacement registration.
@@ -6969,10 +7110,6 @@ public:
 		auto [newInterface, newClass] = co_await interfaceChanged;
 		server->updateLastKnown(newInterface, newClass);
 
-		auto& monitor = IFailureMonitor::failureMonitor();
-		auto address = newInterface.waitFailure.getEndpoint().getPrimaryAddress();
-		auto previous = monitor.getState(address);
-		ScopeExit restoreStatus([&]() { monitor.setStatus(address, previous); });
 		monitor.setStatus(address, FailureStatus(true));
 		auto failureRequests = newInterface.waitFailure.getFuture();
 		status.isFailed = true; // Relocation still carries the old failure into the new tracker.
@@ -6981,7 +7118,9 @@ public:
 		auto statusChanged = collection->server_status.onChange(owner);
 		monitor.setStatus(address, FailureStatus(false));
 		co_await timeout(statusChanged, 5.0);
-		ASSERT(!status.isFailed && status.readabilityEndpoint == replacement.getValue.getEndpoint());
+		ASSERT(!status.isFailed); // The worker is available for relocation.
+		co_await delay(0); // Let the failure tracker finish publishing before the role answers.
+		co_await replyToStorageMetrics(server.getPtr());
 		release.send(Void());
 		ASSERT_EQ(co_await pending, -1); // The new endpoint became known after the lookup began.
 
@@ -6992,6 +7131,13 @@ public:
 		processor->registrations[owner] = replacement;
 		ASSERT_EQ(co_await sample(), 0);
 		processor->registrations[owner].reset();
+		ASSERT_EQ(co_await sample(), -1);
+		processor->registrations[owner] = replacement;
+		ASSERT_EQ(co_await sample(), 0);
+		// The worker is still available, but the monitor has learned that its read endpoint is missing.
+		monitor.endpointNotFound(replacement.getValue.getEndpoint());
+		ASSERT(monitor.getState(address).isAvailable());
+		ASSERT(monitor.getState(replacement.getValue.getEndpoint()).isFailed());
 		ASSERT_EQ(co_await sample(), -1);
 	}
 

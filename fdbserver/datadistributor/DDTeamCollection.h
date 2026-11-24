@@ -147,7 +147,8 @@ class ServerStatus {
 public:
 	bool isWiggling;
 	bool isFailed;
-	// Base endpoint for which the failure tracker observed isFailed. Invalid during maintenance or handoff.
+	// Unmasked base endpoint. A failed endpoint needs a strict failure observation. A live
+	// endpoint needs a separate storage metrics reply before the range sampler can use it.
 	Endpoint readabilityEndpoint;
 	bool isUndesired;
 	bool isWrongConfiguration;

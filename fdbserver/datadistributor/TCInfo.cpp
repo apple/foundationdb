@@ -25,11 +25,32 @@
 #include "flow/CoroUtils.h"
 
 class TCServerInfoImpl {
+	static Future<ErrorOr<GetStorageMetricsReply>> getStorageMetrics(TCServerInfo* server,
+	                                                                 const StorageServerInterface& ssi) {
+		// Bind evidence to the request. An interface change or maintenance can race its reply.
+		const auto epoch = server->storageMetricsEpoch;
+		const Endpoint endpoint = ssi.getValue.getEndpoint();
+		auto disconnected = server->storageMetricsDisconnected.isReady()
+		                        ? IFailureMonitor::failureMonitor().onDisconnectOrFailure(ssi.waitFailure.getEndpoint())
+		                        : Future<Void>(Void());
+		auto reply = co_await ssi.getStorageMetrics.tryGetReply(GetStorageMetricsRequest(),
+		                                                       TaskPriority::DataDistributionLaunch);
+		if (reply.present() && epoch == server->storageMetricsEpoch &&
+		    endpoint == server->lastKnownInterface.getValue.getEndpoint() && !disconnected.isReady() &&
+		    server->storageMetricsDisconnected.isReady()) {
+			// Keep the first reply time while the connection is continuous, even if a poll
+			// finishes during an assignment lookup.
+			server->storageMetricsConfirmedAt = now();
+			server->storageMetricsDisconnected = std::move(disconnected);
+			server->rangeSourceDisconnected = Future<Void>();
+		}
+		co_return reply;
+	}
+
 public:
 	static Future<Void> updateServerMetrics(TCServerInfo* server) {
 		StorageServerInterface ssi = server->lastKnownInterface;
-		Future<ErrorOr<GetStorageMetricsReply>> metricsRequest =
-		    ssi.getStorageMetrics.tryGetReply(GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch);
+		auto metricsRequest = getStorageMetrics(server, ssi);
 		Future<Void> resetRequest = Never();
 		Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged(server->onInterfaceChanged);
 		Future<Void> serverRemoved(server->onRemoved);
@@ -64,8 +85,7 @@ public:
 					                                                              FailureStatus(false));
 				} else {
 					resetRequest = Never();
-					metricsRequest = ssi.getStorageMetrics.tryGetReply(GetStorageMetricsRequest(),
-					                                                   TaskPriority::DataDistributionLaunch);
+					metricsRequest = getStorageMetrics(server, ssi);
 				}
 			}
 		}
@@ -175,6 +195,32 @@ Future<Void> TCServerInfo::updateServerMetrics() {
 
 Future<Void> TCServerInfo::updateServerMetrics(Reference<TCServerInfo> server) {
 	return TCServerInfoImpl::updateServerMetrics(server);
+}
+
+bool TCServerInfo::hasStorageMetricsEvidenceBefore(double lookupStart,
+                                                   Reference<ShardsAffectedByTeamFailure> const& shards) {
+	if (storageMetricsDisconnected.isReady() || storageMetricsConfirmedAt >= lookupStart) {
+		return false;
+	}
+	// The monitor can know about a failure before its disconnect notification is delivered.
+	auto& monitor = IFailureMonitor::failureMonitor();
+	if (monitor.getState(lastKnownInterface.waitFailure.getEndpoint()).isFailed() ||
+	    monitor.getState(lastKnownInterface.getValue.getEndpoint()).isFailed() ||
+	    monitor.getState(lastKnownInterface.getStorageMetrics.getEndpoint()).isFailed()) {
+		if (rangeSourceDisconnected.isValid()) {
+			shards->invalidateRemoteOnlyAvailability();
+		}
+		resetStorageMetricsEvidence();
+		return false;
+	}
+	if (!rangeSourceDisconnected.isValid()) {
+		// Subsequent intervals must not finish a readable sweep using this source after it disconnects.
+		auto readFailed = monitor.onDisconnectOrFailure(lastKnownInterface.getValue.getEndpoint());
+		auto metricsFailed = monitor.onDisconnectOrFailure(lastKnownInterface.getStorageMetrics.getEndpoint());
+		rangeSourceDisconnected = trigger([shards]() { shards->invalidateRemoteOnlyAvailability(); },
+		                                  storageMetricsDisconnected || readFailed || metricsFailed);
+	}
+	return !rangeSourceDisconnected.isReady();
 }
 
 Future<Void> TCServerInfo::serverMetricsPolling(Reference<IDDTxnProcessor> txnProcessor) {
