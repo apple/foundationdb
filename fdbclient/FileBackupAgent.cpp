@@ -2164,6 +2164,14 @@ struct BackupTaskFuncBase : TaskFuncBase {
 	virtual std::string toString(Reference<Task> task) const { return ""; }
 };
 
+// Snapshot tasks record the begin version of the snapshot they work on, and a restart replaces the snapshot with one
+// that begins later. A task whose snapshot was replaced must add nothing to the current one, but must still set its
+// done future, since the snapshot chain and backupFinished wait on it. Tasks created by agents that predate restarts
+// carry no begin version and are not checked.
+static bool snapshotReplaced(TaskParam<Version> taskSnapshotBegin, Reference<Task> task, Version currentBegin) {
+	return taskSnapshotBegin.exists(task) && taskSnapshotBegin.get(task) != currentBegin;
+}
+
 static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<ReadYourWritesTransaction> tr,
                                                               Key beginKey,
                                                               Key endKey,
@@ -2191,6 +2199,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		static TaskParam<Key> beginKey() { return __FUNCTION__sr; }
 		static TaskParam<Key> endKey() { return __FUNCTION__sr; }
 		static TaskParam<bool> addBackupRangeTasks() { return __FUNCTION__sr; }
+		static TaskParam<Version> snapshotBeginVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	std::string toString(Reference<Task> task) const override {
@@ -2257,6 +2266,12 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				usedFile = false;
+
+				// Reading the begin version conflicts with a restart, so the file is either cleared from the map by
+				// the restart or kept out of it here.
+				Future<Version> snapshotBeginVersionFuture =
+				    backup.snapshotBeginVersion().getD(tr, Snapshot::False, invalidVersion);
 
 				// Update the start key of the task so if this transaction completes but the task then fails
 				// when it is restarted it will continue where this execution left off.
@@ -2264,17 +2279,22 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 				// Save and extend the task with the new begin parameter
 				Version newTimeout = co_await taskBucket->extendTimeout(tr, task, UpdateParams::True);
+				Version snapshotBeginVersion = co_await snapshotBeginVersionFuture;
 
-				// Update the range bytes written in the backup config
-				backup.rangeBytesWritten().atomicOp(tr, file->size(), MutationRef::AddValue);
-				backup.snapshotRangeFileCount().atomicOp(tr, 1, MutationRef::AddValue);
+				if (snapshotReplaced(Params.snapshotBeginVersion(), task, snapshotBeginVersion)) {
+					CODE_PROBE(true, "Backup range file finished after its snapshot was restarted");
+				} else {
+					// Update the range bytes written in the backup config
+					backup.rangeBytesWritten().atomicOp(tr, file->size(), MutationRef::AddValue);
+					backup.snapshotRangeFileCount().atomicOp(tr, 1, MutationRef::AddValue);
 
-				// See if there is already a file for this key which has an earlier begin, update the map if not.
-				Optional<BackupConfig::RangeSlice> s = co_await backup.snapshotRangeFileMap().get(tr, range.end);
-				if (!s.present() || s.get().begin >= range.begin) {
-					backup.snapshotRangeFileMap().set(
-					    tr, range.end, { range.begin, version, file->getFileName(), file->size() });
-					usedFile = true;
+					// See if there is already a file for this key which has an earlier begin, update the map if not.
+					Optional<BackupConfig::RangeSlice> s = co_await backup.snapshotRangeFileMap().get(tr, range.end);
+					if (!s.present() || s.get().begin >= range.begin) {
+						backup.snapshotRangeFileMap().set(
+						    tr, range.end, { range.begin, version, file->getFileName(), file->size() });
+						usedFile = true;
+					}
 				}
 
 				co_await tr->commit();
@@ -2296,6 +2316,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 	                           Key begin,
 	                           Key end,
 	                           TaskCompletionKey completionKey,
+	                           Optional<Version> snapshotBeginVersion,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>(),
 	                           Version scheduledVersion = invalidVersion) {
 		Key key = co_await addBackupTask(
@@ -2310,6 +2331,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 			    Params.beginKey().set(task, begin);
 			    Params.endKey().set(task, end);
 			    Params.addBackupRangeTasks().set(task, false);
+			    if (snapshotBeginVersion.present())
+				    Params.snapshotBeginVersion().set(task, snapshotBeginVersion.get());
 			    if (scheduledVersion != invalidVersion)
 				    ReservedTaskParams::scheduledVersion().set(task, scheduledVersion);
 		    },
@@ -2324,6 +2347,11 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		auto lock = makeReference<FlowLock>(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 
 		co_await checkTaskVersion(cx, task, BackupRangeTaskFunc::name, BackupRangeTaskFunc::version);
+
+		// Gives a snapshot restart a chance to land before the task's first file
+		if (buggify()) {
+			co_await delay(deterministicRandom()->random01() * 5.0);
+		}
 
 		Key beginKey = Params.beginKey().get(task);
 		Key endKey = Params.endKey().get(task);
@@ -2407,6 +2435,11 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 					co_await rangeFile->finish();
 
+					// Gives a snapshot restart a chance to land while the file is open
+					if (buggify()) {
+						co_await delay(deterministicRandom()->random01() * 5.0);
+					}
+
 					bool usedFile = co_await finishRangeFile(
 					    outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion);
 					TraceEvent("FileBackupWroteRangeFile")
@@ -2454,6 +2487,18 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 					co_await tr->onError(err);
 				}
 
+				if (snapshotReplaced(Params.snapshotBeginVersion(), task, snapshotBeginVersion)) {
+					CODE_PROBE(true, "Backup range task stopped by a snapshot restart");
+					TraceEvent("FileBackupRangeSnapshotReplaced")
+					    .suppressFor(60)
+					    .detail("BackupUID", backup.getUid())
+					    .detail("TaskSnapshotBeginVersion", Params.snapshotBeginVersion().get(task))
+					    .detail("SnapshotBeginVersion", snapshotBeginVersion)
+					    .detail("BeginKey", beginKey.printable())
+					    .detail("EndKey", endKey.printable());
+					co_return;
+				}
+
 				Reference<IBackupFile> f =
 				    co_await bc->writeRangeFile(snapshotBeginVersion, snapshotRangeFileCount, outVersion, blockSize);
 				outFile = f;
@@ -2487,11 +2532,22 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		Standalone<VectorRef<KeyRef>> keys =
 		    co_await getBlockOfShards(tr, nextKey, endKey, CLIENT_KNOBS->BACKUP_SHARD_TASK_LIMIT);
 
+		Optional<Version> snapshotBeginVersion;
+		if (Params.snapshotBeginVersion().exists(task)) {
+			snapshotBeginVersion = Params.snapshotBeginVersion().get(task);
+		}
+
 		std::vector<Future<Key>> addTaskVector;
 		for (const auto& splitKey : keys) {
 			if (nextKey != splitKey) {
-				addTaskVector.push_back(addTask(
-				    tr, taskBucket, task, task->getPriority(), nextKey, splitKey, TaskCompletionKey::joinWith(onDone)));
+				addTaskVector.push_back(addTask(tr,
+				                                taskBucket,
+				                                task,
+				                                task->getPriority(),
+				                                nextKey,
+				                                splitKey,
+				                                TaskCompletionKey::joinWith(onDone),
+				                                snapshotBeginVersion));
 				TraceEvent("FileBackupRangeSplit")
 				    .suppressFor(60)
 				    .detail("BackupUID", BackupConfig(task).getUid())
@@ -2514,6 +2570,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 			                 nextKey,
 			                 endKey,
 			                 TaskCompletionKey::joinWith(onDone),
+			                 snapshotBeginVersion,
 			                 Reference<TaskFuture>(),
 			                 task->getPriority());
 		}
@@ -2558,6 +2615,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		static TaskParam<bool> snapshotFinished() { return __FUNCTION__sr; }
 		// Set by Execute, used by Finish
 		static TaskParam<Version> nextDispatchVersion() { return __FUNCTION__sr; }
+		// Set by Execute, used by Finish
+		static TaskParam<Version> snapshotBeginVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	StringRef getName() const override { return name; };
@@ -2710,6 +2769,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 			}
 			co_await tr->onError(err);
 		}
+
+		Params.snapshotBeginVersion().set(task, snapshotBeginVersion);
 
 		// Read all dispatched ranges
 		std::vector<std::pair<Key, bool>> dispatchBoundaries;
@@ -2921,9 +2982,15 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 		// Track whether we dispatched any tasks in this iteration
 		bool dispatchedInThisIteration = false;
+		bool snapshotRestarted = false;
+
+		// Gives a snapshot restart a chance to land between reading the snapshot and dispatching for it
+		if (buggify()) {
+			co_await delay(deterministicRandom()->random01() * 5.0);
+		}
 
 		// Dispatch random shards to catch up to the expected progress
-		while (countShardsToDispatch > 0) {
+		while (countShardsToDispatch > 0 && !snapshotRestarted) {
 			// First select ranges to add
 			std::vector<KeyRange> rangesToAdd;
 
@@ -2978,8 +3045,23 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 						endReads.push_back(config.snapshotRangeDispatchMap().get(tr, range.end));
 					}
 
-					co_await (store(snapshotBatchSize.get(), config.snapshotBatchSize().getOrThrow(tr)) &&
-					          waitForAll(beginReads) && waitForAll(endReads) && taskBucket->keepRunning(tr, task));
+					Version currentBeginVersion{ 0 };
+					Optional<int64_t> currentBatchSize;
+					co_await (store(currentBeginVersion, config.snapshotBeginVersion().getOrThrow(tr)) &&
+					          store(currentBatchSize, config.snapshotBatchSize().get(tr)) && waitForAll(beginReads) &&
+					          waitForAll(endReads) && taskBucket->keepRunning(tr, task));
+
+					// A restart cleared the dispatch map and the batch keys, so the ranges selected above belong to the
+					// dropped snapshot. Its replacement is dispatched by the next dispatch task.
+					if (currentBeginVersion != snapshotBeginVersion) {
+						CODE_PROBE(true, "Backup snapshot dispatch stopped by a snapshot restart");
+						snapshotRestarted = true;
+						break;
+					}
+					if (!currentBatchSize.present()) {
+						throw key_not_found();
+					}
+					snapshotBatchSize = currentBatchSize;
 
 					// Snapshot batch size should be either oldBatchSize or newBatchSize. If new, this transaction
 					// is already done.
@@ -3036,6 +3118,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 							                                         range.begin,
 							                                         range.end,
 							                                         TaskCompletionKey::joinWith(snapshotBatchFuture),
+							                                         snapshotBeginVersion,
 							                                         Reference<TaskFuture>(),
 							                                         scheduledVersion)));
 
@@ -3067,7 +3150,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		// Only finish if all shards are done AND we didn't dispatch any tasks this iteration.
 		// This prevents the bug where we mark snapshot finished immediately after dispatching
 		// the last batch of tasks, before they actually complete.
-		if (countShardsNotDone == 0 && !dispatchedInThisIteration) {
+		if (countShardsNotDone == 0 && !dispatchedInThisIteration && !snapshotRestarted) {
 			TraceEvent("FileBackupSnapshotDispatchFinished")
 			    .detail("BackupUID", config.getUid())
 			    .detail("AllShards", countAllShards)
@@ -3092,6 +3175,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 	                                           Reference<TaskBucket> taskBucket,
 	                                           Reference<Task> parentTask,
 	                                           TaskCompletionKey completionKey,
+	                                           Version snapshotBeginVersion,
 	                                           Reference<TaskFuture> waitFor = Reference<TaskFuture>());
 
 	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -3099,16 +3183,38 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 	                            Reference<FutureBucket> futureBucket,
 	                            Reference<Task> task) {
 		BackupConfig config(task);
+		Reference<TaskFuture> snapshotFinishedFuture = task->getDoneFuture(futureBucket);
 
 		// Get the batch future and dispatch done keys, then clear them.
-		Key snapshotBatchFutureKey;
-		Key snapshotBatchDispatchDoneKey;
+		Version snapshotBeginVersion{ 0 };
+		Optional<Key> snapshotBatchFutureKey;
+		Optional<Key> snapshotBatchDispatchDoneKey;
 
-		co_await (store(snapshotBatchFutureKey, config.snapshotBatchFuture().getOrThrow(tr)) &&
-		          store(snapshotBatchDispatchDoneKey, config.snapshotBatchDispatchDoneKey().getOrThrow(tr)));
+		co_await (store(snapshotBeginVersion, config.snapshotBeginVersion().getOrThrow(tr)) &&
+		          store(snapshotBatchFutureKey, config.snapshotBatchFuture().get(tr)) &&
+		          store(snapshotBatchDispatchDoneKey, config.snapshotBatchDispatchDoneKey().get(tr)));
 
-		Reference<TaskFuture> snapshotBatchFuture = futureBucket->unpack(snapshotBatchFutureKey);
-		Reference<TaskFuture> snapshotBatchDispatchDoneFuture = futureBucket->unpack(snapshotBatchDispatchDoneKey);
+		// The snapshot this execution dispatched for was restarted. The restart cleared the batch keys and released
+		// the batch future, so pass the chain's done key to a dispatch task for the new snapshot, which needn't wait
+		// for the dropped snapshot's range tasks.
+		if (snapshotReplaced(Params.snapshotBeginVersion(), task, snapshotBeginVersion)) {
+			CODE_PROBE(true, "Backup snapshot dispatch finished after its snapshot was restarted");
+			TraceEvent("FileBackupSnapshotDispatchReplaced")
+			    .detail("BackupUID", config.getUid())
+			    .detail("TaskSnapshotBeginVersion", Params.snapshotBeginVersion().get(task))
+			    .detail("SnapshotBeginVersion", snapshotBeginVersion);
+			co_await addTask(tr, taskBucket, task, 1, TaskCompletionKey::signal(snapshotFinishedFuture));
+			co_await taskBucket->finish(tr, task);
+			co_return;
+		}
+
+		if (!snapshotBatchFutureKey.present() || !snapshotBatchDispatchDoneKey.present()) {
+			throw key_not_found();
+		}
+
+		Reference<TaskFuture> snapshotBatchFuture = futureBucket->unpack(snapshotBatchFutureKey.get());
+		Reference<TaskFuture> snapshotBatchDispatchDoneFuture =
+		    futureBucket->unpack(snapshotBatchDispatchDoneKey.get());
 		config.snapshotBatchFuture().clear(tr);
 		config.snapshotBatchDispatchDoneKey().clear(tr);
 		config.snapshotBatchSize().clear(tr);
@@ -3116,8 +3222,6 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		// Update shardsBehind here again in case the execute phase did not actually have to create any shard tasks
 		config.snapshotDispatchLastShardsBehind().set(tr, Params.shardsBehind().getOrDefault(task, 0));
 		config.snapshotDispatchLastVersion().set(tr, tr->getReadVersion().get());
-
-		Reference<TaskFuture> snapshotFinishedFuture = task->getDoneFuture(futureBucket);
 
 		bool snapshotFinished = Params.snapshotFinished().getOrDefault(task, false);
 		TraceEvent("FileBackupSnapshotDispatchFinish")
@@ -3131,8 +3235,12 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		// key, passed to the current task, is also passed on.
 		if (snapshotFinished) {
 			TraceEvent("FileBackupSnapshotDispatchAddingManifestTask").detail("BackupUID", config.getUid());
-			co_await addSnapshotManifestTask(
-			    tr, taskBucket, task, TaskCompletionKey::signal(snapshotFinishedFuture), snapshotBatchFuture);
+			co_await addSnapshotManifestTask(tr,
+			                                 taskBucket,
+			                                 task,
+			                                 TaskCompletionKey::signal(snapshotFinishedFuture),
+			                                 snapshotBeginVersion,
+			                                 snapshotBatchFuture);
 		} else {
 			co_await addTask(tr,
 			                 taskBucket,
@@ -3733,6 +3841,9 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 	static struct {
 		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
 		static TaskParam<int64_t> totalBytes() { return __FUNCTION__sr; }
+		static TaskParam<Version> snapshotBeginVersion() { return __FUNCTION__sr; }
+		// Set by Execute, used by Finish
+		static TaskParam<bool> manifestWritten() { return __FUNCTION__sr; }
 	} Params;
 
 	static Future<Void> _execute(Database cx,
@@ -3749,6 +3860,12 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 		std::map<Key, BackupConfig::RangeSlice> localmap;
 		Key startKey;
 		int batchSize = buggify() ? 1 : 1000000;
+		Version snapshotBeginVersion{ 0 };
+
+		// Gives a snapshot restart a chance to land after the snapshot's last range file, before its manifest
+		if (buggify()) {
+			co_await delay(deterministicRandom()->random01() * 5.0);
+		}
 
 		while (true) {
 			Error err;
@@ -3756,7 +3873,13 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				co_await taskBucket->keepRunning(tr, task);
+				// The map is read in several transactions, and a restart between two of them would clear it, so
+				// each one checks that the snapshot is still the one this task was created for.
+				co_await (taskBucket->keepRunning(tr, task) &&
+				          store(snapshotBeginVersion, config.snapshotBeginVersion().getOrThrow(tr)));
+				if (snapshotReplaced(Params.snapshotBeginVersion(), task, snapshotBeginVersion)) {
+					break;
+				}
 
 				if (!bc) {
 					// Backup container must be present if we're still here
@@ -3781,6 +3904,15 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 				err = e;
 			}
 			co_await tr->onError(err);
+		}
+
+		if (snapshotReplaced(Params.snapshotBeginVersion(), task, snapshotBeginVersion)) {
+			CODE_PROBE(true, "Backup snapshot manifest skipped after its snapshot was restarted");
+			TraceEvent("FileBackupSnapshotManifestReplaced")
+			    .detail("BackupUID", config.getUid())
+			    .detail("TaskSnapshotBeginVersion", Params.snapshotBeginVersion().get(task))
+			    .detail("SnapshotBeginVersion", snapshotBeginVersion);
+			co_return;
 		}
 
 		std::vector<std::string> files;
@@ -3838,6 +3970,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 
 		// Avoid keyRange filtering optimization for 'manifest' files
 		co_await bc->writeKeyspaceSnapshotFile(files, beginEndKeys, totalBytes, IncludeKeyRangeMap::True);
+		Params.manifestWritten().set(task, true);
 
 		TraceEvent(SevInfo, "FileBackupWroteSnapshotManifest")
 		    .detail("BackupUID", config.getUid())
@@ -3857,38 +3990,67 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 
 		BackupConfig config(task);
 
-		// Set the latest snapshot end version, which was set during the execute phase
-		config.latestSnapshotEndVersion().set(tr, Params.endVersion().get(task));
+		// Execute skips the manifest only if the snapshot was restarted, so the snapshot is complete if it was written,
+		// even if a restart has since replaced it.
+		bool manifestWritten = Params.manifestWritten().getOrDefault(task, false);
+		if (manifestWritten) {
+			// Set the latest snapshot end version, which was set during the execute phase
+			config.latestSnapshotEndVersion().set(tr, Params.endVersion().get(task));
+		}
 
 		bool stopWhenDone{ false };
 		EBackupState backupState;
 		Optional<Version> restorableVersion;
 		Optional<Version> firstSnapshotEndVersion;
 		Optional<std::string> tag;
+		Version snapshotBeginVersion{ 0 };
 
+		// Reading the begin version also orders this transaction with a restart, whose snapshot initNewSnapshot()
+		// below would otherwise overwrite.
 		co_await (store(stopWhenDone, config.stopWhenDone().getOrThrow(tr)) &&
 		          store(backupState, config.stateEnum().getOrThrow(tr)) &&
 		          store(restorableVersion, config.getLatestRestorableVersion(tr)) &&
 		          store(firstSnapshotEndVersion, config.firstSnapshotEndVersion().get(tr)) &&
-		          store(tag, config.tag().get(tr)));
+		          store(tag, config.tag().get(tr)) &&
+		          store(snapshotBeginVersion, config.snapshotBeginVersion().getOrThrow(tr)));
 
-		// If restorable, update the last restorable version for this tag
-		if (restorableVersion.present() && tag.present()) {
-			FileBackupAgent().setLastRestorable(tr, StringRef(tag.get()), restorableVersion.get());
+		if (manifestWritten) {
+			// If restorable, update the last restorable version for this tag
+			if (restorableVersion.present() && tag.present()) {
+				FileBackupAgent().setLastRestorable(tr, StringRef(tag.get()), restorableVersion.get());
+			}
+
+			// Always set firstSnapshotEndVersion if not already set
+			// This is required for getLatestRestorableVersion() to work correctly
+			if (!firstSnapshotEndVersion.present()) {
+				config.firstSnapshotEndVersion().set(tr, Params.endVersion().get(task));
+			}
+
+			// If the backup is restorable and the state isn't differential the set state to differential
+			if (restorableVersion.present() && backupState != EBackupState::STATE_RUNNING_DIFFERENTIAL)
+				config.stateEnum().set(tr, EBackupState::STATE_RUNNING_DIFFERENTIAL);
 		}
 
-		// Always set firstSnapshotEndVersion if not already set
-		// This is required for getLatestRestorableVersion() to work correctly
-		if (!firstSnapshotEndVersion.present()) {
-			config.firstSnapshotEndVersion().set(tr, Params.endVersion().get(task));
-		}
+		Reference<TaskFuture> snapshotDoneFuture = task->getDoneFuture(futureBucket);
 
-		// If the backup is restorable and the state isn't differential the set state to differential
-		if (restorableVersion.present() && backupState != EBackupState::STATE_RUNNING_DIFFERENTIAL)
-			config.stateEnum().set(tr, EBackupState::STATE_RUNNING_DIFFERENTIAL);
+		// A restart already started the next snapshot. Pass the chain's done key on to it even if a stop was requested,
+		// since the backup may not be restorable without it.
+		if (snapshotReplaced(Params.snapshotBeginVersion(), task, snapshotBeginVersion)) {
+			CODE_PROBE(manifestWritten, "Backup snapshot restarted between writing its manifest and finishing");
+			CODE_PROBE(!manifestWritten, "Backup snapshot restarted before its manifest was written");
+			TraceEvent("FileBackupSnapshotManifestFinishReplaced")
+			    .detail("BackupUID", config.getUid())
+			    .detail("TaskSnapshotBeginVersion", Params.snapshotBeginVersion().get(task))
+			    .detail("SnapshotBeginVersion", snapshotBeginVersion)
+			    .detail("ManifestWritten", manifestWritten)
+			    .detail("StopWhenDone", stopWhenDone);
+			co_await BackupSnapshotDispatchTask::addTask(
+			    tr, taskBucket, task, 1, TaskCompletionKey::signal(snapshotDoneFuture));
+			co_await taskBucket->finish(tr, task);
+			co_return;
+		}
 
 		// Unless we are to stop, start the next snapshot using the default interval
-		Reference<TaskFuture> snapshotDoneFuture = task->getDoneFuture(futureBucket);
 		if (!stopWhenDone) {
 			co_await (config.initNewSnapshot(tr) &&
 			          success(BackupSnapshotDispatchTask::addTask(
@@ -3906,16 +4068,18 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 	                           Reference<TaskBucket> taskBucket,
 	                           Reference<Task> parentTask,
 	                           TaskCompletionKey completionKey,
+	                           Version snapshotBeginVersion,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-		Key key = co_await addBackupTask(BackupSnapshotManifest::name,
-		                                 BackupSnapshotManifest::version,
-		                                 tr,
-		                                 taskBucket,
-		                                 completionKey,
-		                                 BackupConfig(parentTask),
-		                                 waitFor,
-		                                 NOP_SETUP_TASK_FN,
-		                                 1);
+		Key key = co_await addBackupTask(
+		    BackupSnapshotManifest::name,
+		    BackupSnapshotManifest::version,
+		    tr,
+		    taskBucket,
+		    completionKey,
+		    BackupConfig(parentTask),
+		    waitFor,
+		    [=](Reference<Task> task) { Params.snapshotBeginVersion().set(task, snapshotBeginVersion); },
+		    1);
 		co_return key;
 	}
 
@@ -3941,8 +4105,9 @@ Future<Key> BackupSnapshotDispatchTask::addSnapshotManifestTask(Reference<ReadYo
                                                                 Reference<TaskBucket> taskBucket,
                                                                 Reference<Task> parentTask,
                                                                 TaskCompletionKey completionKey,
+                                                                Version snapshotBeginVersion,
                                                                 Reference<TaskFuture> waitFor) {
-	return BackupSnapshotManifest::addTask(tr, taskBucket, parentTask, completionKey, waitFor);
+	return BackupSnapshotManifest::addTask(tr, taskBucket, parentTask, completionKey, snapshotBeginVersion, waitFor);
 }
 
 // BulkDumpTaskFunc: Creates BulkDump snapshots during backup
@@ -8362,6 +8527,76 @@ public:
 		co_return;
 	}
 
+	static Future<Version> restartSnapshot(FileBackupAgent* backupAgent,
+	                                       Reference<ReadYourWritesTransaction> tr,
+	                                       Key tagName,
+	                                       Optional<int64_t> intervalSeconds) {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+		if (intervalSeconds.present() && intervalSeconds.get() < 0) {
+			throw invalid_option_value();
+		}
+
+		KeyBackedTag tag = makeBackupTag(tagName.toString());
+		UidAndAbortedFlagT current = co_await tag.getOrThrow(tr, Snapshot::False, backup_unneeded());
+		if (current.second) {
+			throw backup_unneeded();
+		}
+
+		BackupConfig config(current.first);
+		EBackupState state{ EBackupState::STATE_NEVERRAN };
+		bool stopWhenDone{ false };
+		int snapshotMode{ 0 };
+		bool incrementalBackupOnly{ false };
+		Optional<int64_t> initialSnapshotIntervalSeconds;
+		Optional<Version> oldBeginVersion;
+		Optional<Key> snapshotBatchDispatchDoneKey;
+		co_await (store(state, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
+		          store(stopWhenDone, config.stopWhenDone().getD(tr, Snapshot::False, false)) &&
+		          store(snapshotMode, config.snapshotMode().getD(tr, Snapshot::False, 0)) &&
+		          store(incrementalBackupOnly, config.incrementalBackupOnly().getD(tr, Snapshot::False, false)) &&
+		          store(initialSnapshotIntervalSeconds, config.initialSnapshotIntervalSeconds().get(tr)) &&
+		          store(oldBeginVersion, config.snapshotBeginVersion().get(tr)) &&
+		          store(snapshotBatchDispatchDoneKey, config.snapshotBatchDispatchDoneKey().get(tr)));
+
+		if (state != EBackupState::STATE_RUNNING && state != EBackupState::STATE_RUNNING_DIFFERENTIAL) {
+			throw backup_unneeded();
+		}
+		Optional<std::string> refusal =
+		    FileBackupAgent::restartSnapshotRefusal(state, stopWhenDone, snapshotMode, incrementalBackupOnly);
+		if (refusal.present()) {
+			TraceEvent(SevWarn, "FBA_RestartSnapshotRefused")
+			    .detail("TagName", tag.tagName)
+			    .detail("BackupUID", config.getUid())
+			    .detail("Reason", refusal.get());
+			throw backup_error();
+		}
+
+		// A dispatch task in mid-run joined its range tasks to the batch future, which also waits for this key.
+		// initNewSnapshot() clears the key, so set it now to let the dropped batch's future fire once its range tasks
+		// stop. Nothing waits on that future: the dispatch task, when it finishes, moves on to the new snapshot.
+		if (snapshotBatchDispatchDoneKey.present()) {
+			co_await backupAgent->futureBucket->unpack(snapshotBatchDispatchDoneKey.get())
+			    ->set(tr, backupAgent->taskBucket);
+		}
+
+		int64_t interval =
+		    intervalSeconds.present() ? intervalSeconds.get() : initialSnapshotIntervalSeconds.orDefault(0);
+		co_await config.initNewSnapshot(tr, interval);
+		Version newBeginVersion = co_await tr->getReadVersion();
+
+		TraceEvent("FileBackupSnapshotRestarted")
+		    .detail("TagName", tag.tagName)
+		    .detail("BackupUID", config.getUid())
+		    .detail("OldBeginVersion", oldBeginVersion.orDefault(invalidVersion))
+		    .detail("NewBeginVersion", newBeginVersion)
+		    .detail("TargetEndVersion", newBeginVersion + interval * CLIENT_KNOBS->CORE_VERSIONSPERSECOND)
+		    .detail("IntervalSeconds", interval);
+
+		co_return newBeginVersion;
+	}
+
 	static Future<Void> abortBackup(FileBackupAgent* backupAgent,
 	                                Reference<ReadYourWritesTransaction> tr,
 	                                std::string tagName) {
@@ -9496,6 +9731,32 @@ Future<Void> FileBackupAgent::abortBackup(Reference<ReadYourWritesTransaction> t
 	return FileBackupAgentImpl::abortBackup(this, tr, tagName);
 }
 
+Optional<std::string> FileBackupAgent::restartSnapshotRefusal(EBackupState state,
+                                                              bool stopWhenDone,
+                                                              int snapshotMode,
+                                                              bool incrementalBackupOnly) {
+	if (state != EBackupState::STATE_RUNNING && state != EBackupState::STATE_RUNNING_DIFFERENTIAL) {
+		return fmt::format("the backup is not running: it {}", BackupAgentBase::getStateText(state));
+	}
+	if (stopWhenDone) {
+		return std::string("the backup stops once restorable (it was discontinued, or started without -z)");
+	}
+	if (incrementalBackupOnly) {
+		return std::string("the backup is incremental-only and takes no snapshots");
+	}
+	// Only the rangefile and both modes run the range-file snapshot chain; a bulkdump snapshot is taken once, at start.
+	if (snapshotMode != 0 && snapshotMode != 2) {
+		return std::string("the backup takes only bulkdump snapshots");
+	}
+	return {};
+}
+
+Future<Version> FileBackupAgent::restartSnapshot(Reference<ReadYourWritesTransaction> tr,
+                                                 Key tagName,
+                                                 Optional<int64_t> intervalSeconds) {
+	return FileBackupAgentImpl::restartSnapshot(this, tr, tagName, intervalSeconds);
+}
+
 Future<Void> FileBackupAgent::checkAndDisableBackupWorkers(Database cx) {
 	return FileBackupAgentImpl::checkAndDisableBackupWorkers(cx);
 }
@@ -9575,6 +9836,32 @@ TEST_CASE("/backup/restore/bulkLoadRestoreRefusal") {
 	const std::vector<KeyRange> disjoint = { KeyRangeRef("a"_sr, "b"_sr), KeyRangeRef("c"_sr, "d"_sr) };
 	ASSERT(refusal(adjacent, Key(), Key(), full, noKey, bulkload).empty());
 	ASSERT(refusal(disjoint, Key(), Key(), full, noKey, bulkload).starts_with("--mode bulkload"));
+
+	return Void();
+}
+
+TEST_CASE("/backup/restartSnapshotRefusal") {
+	auto refusal = [](EBackupState state, bool stopWhenDone, int snapshotMode, bool incrementalBackupOnly) {
+		return FileBackupAgent::restartSnapshotRefusal(state, stopWhenDone, snapshotMode, incrementalBackupOnly)
+		    .orDefault("");
+	};
+	const auto running = EBackupState::STATE_RUNNING, differential = EBackupState::STATE_RUNNING_DIFFERENTIAL;
+	const int rangefile = 0, bulkdump = 1, both = 2;
+
+	ASSERT(refusal(running, false, rangefile, false).empty());
+	ASSERT(refusal(differential, false, rangefile, false).empty());
+	ASSERT(refusal(differential, false, both, false).empty());
+
+	for (auto state : { EBackupState::STATE_SUBMITTED,
+	                    EBackupState::STATE_COMPLETED,
+	                    EBackupState::STATE_ABORTED,
+	                    EBackupState::STATE_PARTIALLY_ABORTED,
+	                    EBackupState::STATE_NEVERRAN }) {
+		ASSERT(refusal(state, false, rangefile, false).starts_with("the backup is not running"));
+	}
+	ASSERT(refusal(differential, true, rangefile, false).starts_with("the backup stops once restorable"));
+	ASSERT(refusal(running, false, rangefile, true) == "the backup is incremental-only and takes no snapshots");
+	ASSERT(refusal(differential, false, bulkdump, false) == "the backup takes only bulkdump snapshots");
 
 	return Void();
 }

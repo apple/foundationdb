@@ -332,7 +332,7 @@ The ``modify`` subcommand is used to modify parameters of a running backup.  All
 
 ::
 
-   user@host$ fdbbackup modify [-t <TAG>] [-d <BACKUP_URL>] [-s <DURATION>] [--active-snapshot-interval <DURATION>] [--verify-uid <UID>]
+   user@host$ fdbbackup modify [-t <TAG>] [-d <BACKUP_URL>] [-s <DURATION>] [--active-snapshot-interval <DURATION>] [--restart-snapshot] [--verify-uid <UID>]
 
 ``-d <BACKUP_URL>``
   Sets a new Backup URL for the backup to write to.  This is most likely to be used to change only URL parameters or account information.  However, it can also be used to start writing to a new destination mid-backup.  The new old location will cease gaining any additional restorability, while the new location will not be restorable until a new snapshot begins and completes.  Full restorability would be regained, however, if the contents of the two destinations were to be combined by the user.  The new location cannot be one that a backup on another tag is running at.
@@ -341,7 +341,10 @@ The ``modify`` subcommand is used to modify parameters of a running backup.  All
   Sets a new duration for backup snapshots, in seconds.
 
 ``--active-snapshot-interval <DURATION>``  
-  Sets new duration for the backup's currently active snapshot, in seconds, relative to the start of the snapshot.
+  Sets new duration for the backup's currently active snapshot, in seconds, relative to the start of the snapshot.  With ``--restart-snapshot``, sets the duration of the new snapshot instead.
+
+``--restart-snapshot``
+  Drops the backup's in-progress snapshot and starts a new one right away.  A snapshot is restorable only if the mutation logs have no gap between its begin and end, so a gap makes the in-progress snapshot unrestorable.  After a restart, the backup can again restore to versions after the gap once the new snapshot completes, instead of after the rest of the in-progress snapshot plus one full snapshot interval.  The new snapshot starts at the backup's next snapshot dispatch, within about 10 minutes, and runs over ``--active-snapshot-interval`` if given, and otherwise over the backup's initial snapshot interval (0 by default, meaning as fast as possible).  Later snapshots use the regular snapshot interval.  The range files already written for the dropped snapshot stay in the backup until ``expire`` removes them.  Only a running backup that takes range file snapshots can be restarted: not one that stops once restorable (discontinued, or started without ``-z``), an ``--incremental`` backup, or one started with ``--mode bulkdump``.  Run it only once every backup agent runs a version that supports it, and has for a few minutes.  Snapshot tasks that an older agent runs, or created before the upgrade, ignore the restart: the new snapshot can then begin before the gap, or snapshots can stop until the backup is aborted and started again.
 
 ``--verify-uid <UID>``
   Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction which sets the new backup parameters (if the UID matches).

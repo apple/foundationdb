@@ -307,6 +307,224 @@ inline Future<std::vector<KeyRange>> readBackupRanges(Database cx, UID backupUid
 	return BackupConfig(backupUid).backupRanges().getOrThrow(cx.getReference());
 }
 
+// A committed snapshot restart.
+struct SnapshotRestart {
+	UID backupUid;
+	Version newBeginVersion = invalidVersion;
+	Version commitVersion = invalidVersion;
+};
+
+// A point in a snapshot that a restart can aim at.
+enum class SnapshotPhase {
+	// A dispatch task is in mid-run, so its range tasks are likely in flight too.
+	Dispatching,
+	// Every backup range has a range file, so the last dispatch or the manifest task is next.
+	RangeFilesDone,
+};
+
+// True if the range file map of `config` covers every backup range.
+inline Future<bool> rangeFilesCoverBackup(Reference<ReadYourWritesTransaction> tr, BackupConfig config) {
+	std::vector<KeyRange> backupRanges = co_await config.backupRanges().getD(tr);
+	BackupConfig::RangeFileMapT::RangeResultType files =
+	    co_await config.snapshotRangeFileMap().getRange(tr, {}, {}, CLIENT_KNOBS->TOO_MANY);
+	if (backupRanges.empty() || files.more) {
+		co_return false;
+	}
+	std::vector<KeyRange> covered;
+	covered.reserve(files.results.size());
+	for (const auto& [end, slice] : files.results) {
+		covered.push_back(KeyRangeRef(slice.begin, end));
+	}
+	std::sort(covered.begin(), covered.end(), [](KeyRange const& a, KeyRange const& b) { return a.begin < b.begin; });
+	for (const auto& range : backupRanges) {
+		Key reached = range.begin;
+		for (const auto& c : covered) {
+			if (c.begin <= reached && c.end > reached) {
+				reached = c.end;
+			}
+		}
+		if (reached < range.end) {
+			co_return false;
+		}
+	}
+	co_return true;
+}
+
+// Waits up to `timeout` seconds for the snapshot of backup `tag` to reach `phase`.
+inline Future<Void> waitForSnapshotPhase(Database cx, Key tag, SnapshotPhase phase, double timeout) {
+	double start = now();
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
+	while (now() - start < timeout) {
+		Error err;
+		try {
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<UidAndAbortedFlagT> uidFlag = co_await makeBackupTag(tag.toString()).get(tr);
+			if (uidFlag.present()) {
+				BackupConfig config(uidFlag.get().first);
+				bool reached = false;
+				if (phase == SnapshotPhase::Dispatching) {
+					Optional<Key> batchFuture = co_await config.snapshotBatchFuture().get(tr);
+					reached = batchFuture.present();
+				} else {
+					reached = co_await rangeFilesCoverBackup(tr, config);
+				}
+				if (reached) {
+					co_return;
+				}
+			}
+			co_await delay(deterministicRandom()->random01() * 0.5);
+			continue;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr->onError(err);
+	}
+}
+
+// Restarts the snapshot of backup `tag` up to `count` times, each after a random delay of up to `maxDelay` seconds,
+// sometimes back to back or aimed at a SnapshotPhase, and returns the restarts that committed. Waits for the backup
+// to start, and stops once it refuses: it has finished, was aborted, or is being discontinued.
+inline Future<std::vector<SnapshotRestart>> restartSnapshots(Database cx,
+                                                             FileBackupAgent* agent,
+                                                             Key tag,
+                                                             int count,
+                                                             double maxDelay,
+                                                             std::string eventPrefix) {
+	std::vector<SnapshotRestart> restarts;
+	for (int i = 0; i < count;) {
+		co_await delay(deterministicRandom()->coinflip() ? deterministicRandom()->random01() * maxDelay
+		                                                 : deterministicRandom()->random01());
+		int aim = deterministicRandom()->randomInt(0, 3);
+		if (aim == 1) {
+			co_await waitForSnapshotPhase(cx, tag, SnapshotPhase::Dispatching, maxDelay);
+		} else if (aim == 2) {
+			co_await waitForSnapshotPhase(cx, tag, SnapshotPhase::RangeFilesDone, maxDelay);
+		}
+		Optional<int64_t> intervalSeconds;
+		if (deterministicRandom()->coinflip()) {
+			intervalSeconds = deterministicRandom()->coinflip() ? 0 : deterministicRandom()->randomInt(1, 30);
+		}
+
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
+		EBackupState state = EBackupState::STATE_NEVERRAN;
+		while (true) {
+			Error err;
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<UidAndAbortedFlagT> uidFlag = co_await makeBackupTag(tag.toString()).get(tr);
+				if (uidFlag.present()) {
+					state = co_await BackupConfig(uidFlag.get().first)
+					            .stateEnum()
+					            .getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN);
+				}
+				Version newBeginVersion = co_await agent->restartSnapshot(tr, tag, intervalSeconds);
+				co_await tr->commit();
+				restarts.push_back({ uidFlag.get().first, newBeginVersion, tr->getCommittedVersion() });
+				TraceEvent((eventPrefix + "RestartedSnapshot").c_str())
+				    .detail("Tag", tag)
+				    .detail("BackupUID", restarts.back().backupUid)
+				    .detail("NewBeginVersion", newBeginVersion)
+				    .detail("CommitVersion", restarts.back().commitVersion)
+				    .detail("IntervalSeconds", intervalSeconds);
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.code() == error_code_backup_unneeded || err.code() == error_code_backup_error) {
+				TraceEvent((eventPrefix + "RestartSnapshotRefused").c_str())
+				    .error(err)
+				    .detail("Tag", tag)
+				    .detail("State", BackupAgentBase::getStateText(state));
+				// Until the backup starts, it has no snapshot to restart.
+				if (state == EBackupState::STATE_SUBMITTED) {
+					break;
+				}
+				co_return restarts;
+			}
+			co_await tr->onError(err);
+		}
+		if (state != EBackupState::STATE_SUBMITTED) {
+			++i;
+		}
+	}
+	co_return restarts;
+}
+
+// Waits until backup `restart.backupUid` completes a snapshot that began after `restart`, or stops running. A
+// replaced snapshot chain that stalls would otherwise go unnoticed, since a restorable backup discontinues at once.
+inline Future<Void> waitForSnapshotAfterRestart(Database cx,
+                                                SnapshotRestart restart,
+                                                double timeout,
+                                                std::string eventPrefix) {
+	BackupConfig config(restart.backupUid);
+	double start = now();
+	while (true) {
+		EBackupState state = EBackupState::STATE_NEVERRAN;
+		Optional<Version> latestSnapshotEndVersion;
+		co_await runRYWTransaction(cx, [&](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			return store(state, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
+			       store(latestSnapshotEndVersion, config.latestSnapshotEndVersion().get(tr));
+		});
+		bool running = state == EBackupState::STATE_RUNNING || state == EBackupState::STATE_RUNNING_DIFFERENTIAL;
+		if (!running || latestSnapshotEndVersion.orDefault(invalidVersion) > restart.commitVersion) {
+			TraceEvent((eventPrefix + "SnapshotAfterRestartDone").c_str())
+			    .detail("BackupUID", restart.backupUid)
+			    .detail("State", BackupAgentBase::getStateText(state))
+			    .detail("LatestSnapshotEndVersion", latestSnapshotEndVersion)
+			    .detail("RestartCommitVersion", restart.commitVersion)
+			    .detail("Seconds", now() - start);
+			co_return;
+		}
+		if (now() - start > timeout) {
+			TraceEvent(SevError, (eventPrefix + "SnapshotAfterRestartStalled").c_str())
+			    .detail("BackupUID", restart.backupUid)
+			    .detail("LatestSnapshotEndVersion", latestSnapshotEndVersion)
+			    .detail("RestartCommitVersion", restart.commitVersion)
+			    .detail("Seconds", now() - start);
+			co_return;
+		}
+		co_await delay(1.0);
+	}
+}
+
+// Every snapshot of backup `backupUid` completed after a restart must begin at or after the restart's new snapshot:
+// a range file left from the dropped snapshot would pull the begin version back. Old snapshots end before the
+// restart commits, since their manifest task reads the range file map before it. Returns false, and traces a
+// SevError, for each snapshot that breaks this.
+inline bool checkSnapshotsAfterRestarts(BackupDescription const& desc,
+                                        UID backupUid,
+                                        std::vector<SnapshotRestart> const& restarts,
+                                        std::string const& eventPrefix) {
+	bool ok = true;
+	for (const auto& restart : restarts) {
+		if (restart.backupUid != backupUid) {
+			continue;
+		}
+		for (const auto& snapshot : desc.snapshots) {
+			if (snapshot.isBulkDump() || snapshot.endVersion <= restart.commitVersion) {
+				continue;
+			}
+			CODE_PROBE(true, "Backup snapshot checked against an earlier snapshot restart");
+			if (snapshot.beginVersion < restart.newBeginVersion) {
+				TraceEvent(SevError, (eventPrefix + "SnapshotBeginsBeforeRestart").c_str())
+				    .detail("BackupUID", backupUid)
+				    .detail("Snapshot", snapshot.fileName)
+				    .detail("SnapshotBeginVersion", snapshot.beginVersion)
+				    .detail("SnapshotEndVersion", snapshot.endVersion)
+				    .detail("RestartNewBeginVersion", restart.newBeginVersion)
+				    .detail("RestartCommitVersion", restart.commitVersion);
+				ok = false;
+			}
+		}
+	}
+	return ok;
+}
+
 } // namespace BackupSteps
 
 #endif
