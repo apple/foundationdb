@@ -153,7 +153,7 @@ class DDTeamCollectionImpl {
 					start = now();
 				}
 			} catch (Error& e) {
-				TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId).detail("Error", e.what());
+				TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId).error(e);
 			}
 		}
 	}
@@ -3515,7 +3515,8 @@ public:
 			// Update server's storeType, especially when it was created
 			co_await server->updateStoreType();
 			if (server->getStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
-			    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			    !self->configuration.shardMetadataFormatIsEncoded().orDefault(
+			        SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
 				TraceEvent(SevError, "PhysicalShardNotEnabledForShardedRocks", self->getDistributorId())
 				    .detail("StorageServer", server->getId());
 				throw internal_error();
@@ -3682,6 +3683,11 @@ public:
 						}
 					}
 
+					int highestPrimaryTeamPriority = self->getHighestTeamPriority(IsPrimary::True);
+					int highestRemoteTeamPriority = self->getHighestTeamPriority(IsPrimary::False);
+					int highestTeamPriority = highestPrimaryTeamPriority < 0 || highestRemoteTeamPriority < 0
+					                              ? -1
+					                              : std::max(highestPrimaryTeamPriority, highestRemoteTeamPriority);
 					TraceEvent("TotalDataInFlight", self->distributorId)
 					    .detail("Primary", self->primary)
 					    .detail("TotalBytes", self->getDebugTotalDataInFlight())
@@ -3690,6 +3696,9 @@ public:
 					    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 					    .detail("ZeroHealthy", self->zeroOptimalTeams.get())
 					    .detail("HighestPriority", highestPriority)
+					    .detail("HighestTeamPriority", highestTeamPriority)
+					    .detail("HighestPrimaryTeamPriority", highestPrimaryTeamPriority)
+					    .detail("HighestRemoteTeamPriority", highestRemoteTeamPriority)
 					    .trackLatest(self->primary ? "TotalDataInFlight"
 					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest
 					                                                             // lifetime is controlled by
@@ -4638,6 +4647,39 @@ void DDTeamCollection::resetLocalitySet() {
 	}
 }
 
+int DDTeamCollection::getHighestTeamPriority(IsPrimary primaryRegion) const {
+	if (teamCollections.empty()) {
+		return -1;
+	}
+	int highestPriority = 0;
+	bool foundRegion = false;
+	for (const auto* collection : teamCollections) {
+		if (collection == nullptr) {
+			return -1;
+		}
+		if (collection->primary != primaryRegion) {
+			continue;
+		}
+		foundRegion = true;
+		if (!collection->initialFailureReactionDelay.isReady()) {
+			return -1;
+		}
+		// Team health is independent of relocation admission and completion. Keep counting degraded teams
+		// until their trackers are retired.
+		int collectionPriority = -1;
+		for (const auto& [priority, count] : collection->priority_teams) {
+			if (count > 0) {
+				collectionPriority = std::max(collectionPriority, priority);
+			}
+		}
+		if (collectionPriority < 0) {
+			return -1;
+		}
+		highestPriority = std::max(highestPriority, collectionPriority);
+	}
+	return foundRegion || (!primaryRegion && configuration.usableRegions <= 1) ? highestPriority : -1;
+}
+
 bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>>& team, int amount) const {
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
 	if (amount == -1) {
@@ -5337,7 +5379,7 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 	for (auto& [_, machine] : machine_info) {
 		if (machine->serversOnMachine.empty()) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
-			    .detail("Machine", machine->machineID.toString())
+			    .detail("MachineID", machine->machineID.toString())
 			    .detail("NumServersOnMachine", 0);
 			continue;
 		}
@@ -5348,7 +5390,7 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 		auto& locality = representativeServer->getLastKnownInterface().locality;
 		if (!isValidLocality(configuration.storagePolicy, locality)) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
-			    .detail("Machine", machine->machineID.toString())
+			    .detail("MachineID", machine->machineID.toString())
 			    .detail("InvalidLocality", locality.toString());
 			continue;
 		}
@@ -6543,6 +6585,37 @@ public:
 	                                                            int processCount) {
 		auto shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 		return testTeamCollection(teamSize, policy, processCount, shardsAffectedByTeamFailure);
+	}
+
+	static void HighestTeamPriorityByRegion() {
+		auto primary = testTeamCollection(1, makeReference<PolicyOne>(), 0);
+		auto remote = testTeamCollection(1, makeReference<PolicyOne>(), 0);
+		primary->configuration.usableRegions = 2;
+		remote->primary = false;
+		primary->teamCollections = { primary.get(), remote.get() };
+		remote->teamCollections = primary->teamCollections;
+		primary->initialFailureReactionDelay = Future<Void>(Void());
+		remote->initialFailureReactionDelay = Future<Void>(Void());
+		primary->priority_teams = { { SERVER_KNOBS->PRIORITY_TEAM_HEALTHY, 1 } };
+		remote->priority_teams = { { SERVER_KNOBS->PRIORITY_TEAM_0_LEFT, 1 } };
+
+		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::True), SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
+		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::False), SERVER_KNOBS->PRIORITY_TEAM_0_LEFT);
+
+		std::swap(primary->primary, remote->primary);
+		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::True), SERVER_KNOBS->PRIORITY_TEAM_0_LEFT);
+		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::False), SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
+		std::swap(primary->primary, remote->primary);
+
+		remote->initialFailureReactionDelay = Never();
+		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::True), SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
+		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::False), -1);
+
+		primary->teamCollections = { primary.get() };
+		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::False), -1);
+		primary->configuration.usableRegions = 1;
+		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::False), 0);
+		primary->teamCollections.clear();
 	}
 
 	static std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
@@ -7846,6 +7919,11 @@ TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
 
 TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
 	DDTeamCollectionUnitTest::AddAllTeams_withLimit();
+	co_return;
+}
+
+TEST_CASE("/DataDistribution/HighestTeamPriorityByRegion") {
+	DDTeamCollectionUnitTest::HighestTeamPriorityByRegion();
 	co_return;
 }
 

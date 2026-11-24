@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "flow/Trace.h"
 
@@ -134,6 +135,15 @@ std::string_view StorageReplicationFactor::getName() const {
 
 Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
                                                    TrackCodeProbes trackCodeProbes) {
+	auto teamEventsAndErrors = co_await workerEventProvider->getLatestDataDistributorEvents("TotalDataInFlight");
+	if (!teamEventsAndErrors.present()) {
+		co_return Level::METRICS_MISSING;
+	}
+	WorkerEvents teamEvents = filterEmptyEvents(teamEventsAndErrors.get().first);
+	if (teamEvents.empty()) {
+		co_return Level::METRICS_MISSING;
+	}
+
 	auto eventsAndErrors = co_await workerEventProvider->getLatestDataDistributorEvents("MovingData");
 	if (!eventsAndErrors.present()) {
 		co_return Level::METRICS_MISSING;
@@ -146,9 +156,29 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 	}
 
 	try {
+		// MovingData counts scheduled relocations, which can disappear or be admitted long after a
+		// failure. Use live team summaries for replication severity instead.
+		int64_t highestPrimaryTeamPriority = 0;
+		int64_t highestRemoteTeamPriority = 0;
+		bool teamMetricsMissing = false;
+		for (auto const& [address, traceEvent] : teamEvents) {
+			std::string value;
+			bool hasPrimaryPriority = traceEvent.tryGetValue("HighestPrimaryTeamPriority", value);
+			bool hasRemotePriority = traceEvent.tryGetValue("HighestRemoteTeamPriority", value);
+			if (hasPrimaryPriority != hasRemotePriority) {
+				co_return Level::METRICS_MISSING;
+			}
+			// An older DD cannot identify the affected region. Retain its conservative combined score.
+			int64_t primaryPriority =
+			    traceEvent.getInt64(hasPrimaryPriority ? "HighestPrimaryTeamPriority" : "HighestTeamPriority");
+			int64_t remotePriority = hasRemotePriority ? traceEvent.getInt64("HighestRemoteTeamPriority") : 0;
+			teamMetricsMissing = teamMetricsMissing || primaryPriority < 0 || remotePriority < 0;
+			highestPrimaryTeamPriority = std::max(highestPrimaryTeamPriority, primaryPriority);
+			highestRemoteTeamPriority = std::max(highestRemoteTeamPriority, remotePriority);
+		}
+		int64_t highestTeamPriority = std::max(highestPrimaryTeamPriority, highestRemoteTeamPriority);
+
 		int64_t queuedOrInFlightRepairMoves = 0;
-		int64_t zeroReplicaTeams = 0;
-		int64_t oneReplicaTeams = 0;
 		for (auto const& [address, traceEvent] : filteredEvents) {
 			(void)address;
 			int64_t inQueue = traceEvent.getInt64("InQueue");
@@ -158,24 +188,29 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 			int64_t priorityTeam1Left = traceEvent.getInt64("PriorityTeam1Left");
 			int64_t priorityTeam0Left = traceEvent.getInt64("PriorityTeam0Left");
 
-			zeroReplicaTeams += priorityTeam0Left;
-			oneReplicaTeams += priorityTeam1Left;
 			if (inQueue > 0 || inFlight > 0) {
 				queuedOrInFlightRepairMoves +=
 				    priorityTeamUnhealthy + priorityTeam2Left + priorityTeam1Left + priorityTeam0Left;
 			}
 		}
 
-		if (zeroReplicaTeams > 0) {
+		// A known primary outage takes precedence over missing remote team health.
+		if (highestPrimaryTeamPriority >= SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
 			CODE_PROBE(trackCodeProbes, "ClusterHealth StorageReplicationFactor returns OUTAGE");
 			co_return Level::OUTAGE;
 		}
-		if (oneReplicaTeams > 0 && workerEventProvider->shouldTreatStorageTeamOneReplicaLeftAsCritical()) {
+		if (teamMetricsMissing) {
+			co_return Level::METRICS_MISSING;
+		}
+		// Remote replica loss requires intervention without implying that primary data is unavailable.
+		if (highestRemoteTeamPriority >= SERVER_KNOBS->PRIORITY_TEAM_0_LEFT ||
+		    (highestTeamPriority >= SERVER_KNOBS->PRIORITY_TEAM_1_LEFT &&
+		     workerEventProvider->shouldTreatStorageTeamOneReplicaLeftAsCritical())) {
 			CODE_PROBE(trackCodeProbes,
 			           "ClusterHealth StorageReplicationFactor returns CRITICAL_INTERVENTION_REQUIRED");
 			co_return Level::CRITICAL_INTERVENTION_REQUIRED;
 		}
-		if (queuedOrInFlightRepairMoves > 0) {
+		if (highestTeamPriority >= SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || queuedOrInFlightRepairMoves > 0) {
 			CODE_PROBE(trackCodeProbes, "ClusterHealth StorageReplicationFactor returns SELF_HEALING");
 			co_return Level::SELF_HEALING;
 		}

@@ -1,0 +1,25 @@
+[configuration]
+config = 'single commit_proxies=1 grv_proxies=2'
+singleRegion = true
+datacenters = 1
+machineCount = 12
+statelessProcessClassesPerDC = 3
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 8
+native_cdc_tag_balancing_enabled = false
+
+[[test]]
+testTitle = 'NativeCdcOrdered'
+useDB = true
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+timeout = 240
+
+    [[test.workload]]
+    testName = 'NativeCdcOrdered'
+    testOwnerReplacement = true
+    operationTimeout = 180.0

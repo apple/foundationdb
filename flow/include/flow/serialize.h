@@ -799,7 +799,8 @@ private:
 	void readVersion(VersionOptions vo) {
 		vo.read(*this);
 		if (m_protocolVersion.hasObjectSerializerFlag()) {
-			objectReader = ObjectReader(reinterpret_cast<const uint8_t*>(begin), AssumeVersion(m_protocolVersion));
+			objectReader = ObjectReader(StringRef(reinterpret_cast<const uint8_t*>(begin), end - begin),
+			                            AssumeVersion(m_protocolVersion));
 		}
 	}
 };

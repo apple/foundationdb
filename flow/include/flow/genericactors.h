@@ -775,7 +775,7 @@ Future<Void> asyncDeserialize(Reference<AsyncVar<Standalone<StringRef>>> input,
                               Reference<AsyncVar<Optional<T>>> output) {
 	while (true) {
 		if (!input->get().empty()) {
-			ObjectReader reader(input->get().begin(), IncludeVersion());
+			ObjectReader reader(input->get(), IncludeVersion());
 			T res;
 			reader.deserialize(res);
 			output->set(res);
@@ -1616,7 +1616,7 @@ Future<T> reportErrorsExcept(Future<T> in,
 		T t = co_await in;
 		co_return t;
 	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled && (!pExceptErrors || !pExceptErrors->count(e.code())))
+		if (e.code() != error_code_actor_cancelled && (!pExceptErrors || !pExceptErrors->contains(e.code())))
 			TraceEvent(SevError, context, id).error(e);
 		throw;
 	}
@@ -2027,7 +2027,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 		FlowLock* lock;
 		int64_t remaining;
 		Releaser() : lock(0), remaining(0) {}
-		explicit(false) Releaser(FlowLock& lock, int64_t amount = 1) : lock(&lock), remaining(amount) {}
+		explicit Releaser(FlowLock& lock, int64_t amount = 1) : lock(&lock), remaining(amount) {}
 		Releaser(Releaser&& r) noexcept : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
 		void operator=(Releaser&& r) {
 			if (remaining)
@@ -2316,16 +2316,22 @@ struct YieldedFutureActor final : SAV<Void>,
 		} else {
 			// We hit this case when and only when the delay() created by a previous doYield() fires.  Then we want to
 			// get at least one task done, regardless of what check_yield() would say.
+			ASSERT(int16_t(in_error_state.code()) == SET_ERROR_CODE);
 			finish();
 		}
 	}
 	void a_callback_error(ActorCallback<YieldedFutureActor, 1, Void>*, Error const& err) {
-		ASSERT(int16_t(in_error_state.code()) == UNSET_ERROR_CODE);
-		in_error_state = err;
-		if (check_yield())
-			doYield();
-		else
+		if (int16_t(in_error_state.code()) == UNSET_ERROR_CODE) {
+			in_error_state = err;
+			if (check_yield())
+				doYield();
+			else
+				finish();
+		} else {
+			// The delayed error created by a previous doYield() fired.
+			ASSERT(int16_t(in_error_state.code()) > SET_ERROR_CODE);
 			finish();
+		}
 	}
 	void finish() {
 		ActorCallback<YieldedFutureActor, 1, Void>::remove();
@@ -2349,8 +2355,13 @@ struct YieldedFutureActor final : SAV<Void>,
 		source->unwait();
 
 		// Link all the callbacks, including this one, into the ring of a delay future so that after a short time they
-		// will be fired again
-		delay(0, g_network->getCurrentTask()).addCallbackChainAndClear(static_cast<CB1*>(this));
+		// will be fired again. Only this callback has seen the source's outcome, so an error must be re-delivered as an
+		// error; a plain delay would wake the others with success.
+		TaskPriority taskID = g_network->getCurrentTask();
+		Future<Void> refire = int16_t(in_error_state.code()) == SET_ERROR_CODE
+		                          ? delay(0, taskID)
+		                          : tagError<Void>(delay(0, taskID), in_error_state);
+		refire.addCallbackChainAndClear(static_cast<CB1*>(this));
 	}
 };
 
@@ -2372,25 +2383,42 @@ public:
 		return yieldedFuture(item.change.getFuture());
 	}
 
-	static Future<Void> destroyOnCancelYield(YieldedAsyncMap* self, K key, Future<Void> change) {
+	// Every RPC reply races one of these (FailureMonitor::onStateChanged) and cancels it when the reply wins, so
+	// cancellation destroys the frame instead of throwing; EraseOnCancel does the cleanup a catch block cannot.
+	static Future<Void> destroyOnCancelYield(YieldedAsyncMap* self, K key, Future<Void> change, NoThrowOnCancel = {}) {
+		struct EraseOnCancel {
+			YieldedAsyncMap* self;
+			K const& key;
+			Future<Void>& change;
+			Future<Void>& yielded;
+			bool armed = true;
+			~EraseOnCancel() {
+				if (!armed) {
+					return;
+				}
+				yielded = Future<Void>();
+				if (!self->destructing && change.getFutureReferenceCount() == 1 &&
+				    change.getPromiseReferenceCount() == 1) {
+					if (EXPENSIVE_VALIDATION) {
+						auto& p = self->items[key];
+						ASSERT_ABORT(p.change.getFuture() == change);
+					}
+					self->items.erase(key);
+				}
+			}
+		};
+
 		Future<Void> yielded = yieldedFuture(change);
+		EraseOnCancel eraseOnCancel{ self, key, change, yielded };
 		try {
 			co_await yielded;
-			yielded = Future<Void>();
-			change = Future<Void>();
 		} catch (Error& e) {
-			yielded = Future<Void>();
-			if (e.code() == error_code_actor_cancelled && !self->destructing && change.getFutureReferenceCount() == 1 &&
-			    change.getPromiseReferenceCount() == 1) {
-				if (EXPENSIVE_VALIDATION) {
-					auto& p = self->items[key];
-					ASSERT(p.change.getFuture() == change);
-				}
-				self->items.erase(key);
+			if (e.code() != error_code_actor_cancelled) {
+				eraseOnCancel.armed = false;
 			}
-			change = Future<Void>();
 			throw;
 		}
+		eraseOnCancel.armed = false;
 	}
 };
 
@@ -2402,9 +2430,9 @@ public:
 	AndFuture& operator=(AndFuture const& f) = default;
 	AndFuture& operator=(AndFuture&& f) noexcept = default;
 
-	explicit(false) AndFuture(Future<Void> const& f) : futureCount(1), futures{ f } {}
+	explicit AndFuture(Future<Void> const& f) : futureCount(1), futures{ f } {}
 
-	explicit(false) AndFuture(Error const& e) : futureCount(1), futures{ Future<Void>(e) } {}
+	explicit AndFuture(Error const& e) : futureCount(1), futures{ Future<Void>(e) } {}
 
 	operator Future<Void>() { return getFuture(); }
 

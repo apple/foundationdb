@@ -103,6 +103,7 @@ def test_fdbbackup(build_dir):
     check(
         "--initial-snapshot-interval DURATION" in run_command(start_command, ["--help"])
     )
+    check("--tagname TAGNAME" in run_command(start_command, ["--help"]))
 
 
 if __name__ == "__main__":

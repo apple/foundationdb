@@ -48,7 +48,7 @@ static Future<Void> writeRangeWithByte(Reference<IAsyncFile> f, int64_t offset, 
 }
 
 TEST_CASE("/fileio/zero") {
-	std::string filename = "/tmp/__ZEROJUNK__";
+	std::string filename = joinPath(params.getDataDir(), "__ZEROJUNK__");
 	Reference<IAsyncFile> f = co_await IAsyncFileSystem::filesystem()->open(
 	    filename, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0);
 
@@ -77,7 +77,7 @@ TEST_CASE("/fileio/zero") {
 TEST_CASE("/fileio/incrementalDelete") {
 	// about 5GB
 	int64_t fileSize = 5e9;
-	std::string filename = "/tmp/__JUNK__";
+	std::string filename = joinPath(params.getDataDir(), "__JUNK__");
 	Reference<IAsyncFile> f = co_await IAsyncFileSystem::filesystem()->open(
 	    filename, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0);
 	co_await f->sync();
@@ -90,8 +90,10 @@ TEST_CASE("/fileio/incrementalDelete") {
 TEST_CASE("/fileio/rename") {
 	// create a file
 	int64_t fileSize = 100e6;
-	std::string filename = "/tmp/__JUNK__." + deterministicRandom()->randomUniqueID().toString();
-	std::string renamedFile = "/tmp/__RENAMED_JUNK__." + deterministicRandom()->randomUniqueID().toString();
+	std::string filename =
+	    joinPath(params.getDataDir(), "__JUNK__." + deterministicRandom()->randomUniqueID().toString());
+	std::string renamedFile =
+	    joinPath(params.getDataDir(), "__RENAMED_JUNK__." + deterministicRandom()->randomUniqueID().toString());
 	std::unique_ptr<char[]> data(new char[4096]);
 	std::unique_ptr<char[]> readData(new char[4096]);
 	Reference<IAsyncFile> f = co_await IAsyncFileSystem::filesystem()->open(
@@ -117,12 +119,13 @@ TEST_CASE("/fileio/rename") {
 	// verify rename happened
 	bool renamedExists = false;
 	auto bName = basename(renamedFile);
-	auto files = platform::listFiles("/tmp/");
+	auto obName = basename(filename);
+	auto files = platform::listFiles(params.getDataDir());
 	for (const auto& file : files) {
 		if (file == bName) {
 			renamedExists = true;
 		}
-		ASSERT(file != filename);
+		ASSERT(file != obName);
 	}
 	ASSERT(renamedExists);
 
@@ -139,7 +142,7 @@ TEST_CASE("/fileio/rename") {
 
 // Truncating to extend size should zero the new data
 TEST_CASE("/fileio/truncateAndRead") {
-	std::string filename = "/tmp/__JUNK__";
+	std::string filename = joinPath(params.getDataDir(), "__JUNK__");
 	Reference<IAsyncFile> f = co_await IAsyncFileSystem::filesystem()->open(
 	    filename, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0);
 	std::array<char, 4096> data;

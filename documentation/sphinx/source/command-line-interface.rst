@@ -25,6 +25,42 @@ You can invoke ``fdbcli`` at the command line simply by typing it. For example::
 
 This will result in ``fdbcli`` connecting to the :ref:`default cluster file <default-cluster-file>` (``/etc/foundationdb/fdb.cluster`` for Linux.) You can also specify a cluster file as an argument to ``fdbcli`` using the ``-C`` option. For further information, see :ref:`specifying-a-cluster-file`.
 
+.. _cli-audit-logging:
+
+Audit logging
+=============
+
+``fdbcli`` can log every key returned by ``get``, ``getrange``, ``getrangekeys`` and ``getall`` as an ``FdbCliAudit`` trace event. Audit events go to their own ``trace_audit.*`` trace files, separate from the regular ``trace.*`` files. Audit logging is turned on and pointed at a directory the same way tracing is, but separately:
+
+.. list-table::
+   :header-rows: 1
+
+   * -
+     - Tracing
+     - Audit logging
+   * - Turn on
+     - ``--log``
+     - ``--audit-log``
+   * - Directory
+     - ``--log-dir PATH``
+     - ``--audit-log-dir PATH``
+   * - Environment variable (set = on, value = directory)
+     - ``FDB_NETWORK_OPTION_TRACE_ENABLE``
+     - ``FDB_CLI_AUDIT_LOG_ENABLE``
+
+Audit logging doesn't require tracing. The audit directory is the ``FDB_CLI_AUDIT_LOG_ENABLE`` value if it's set, otherwise ``--audit-log-dir``. If that's empty, audit files go next to the trace files if tracing is on, otherwise in the current directory. Like ``FDB_NETWORK_OPTION_TRACE_ENABLE`` over ``--log-dir``, the environment variable wins over ``--audit-log-dir``, even when it's set to an empty value. ``--trace-format``, ``--log-group`` and the ``FDB_NETWORK_OPTION_TRACE_*`` environment variables (roll size, max logs size, file identifier, partial file suffix) apply to audit files too. Audit files roll and get deleted on their own size budget.
+
+``--audit-log-values none|system|all`` picks which returned values are logged. The default is ``system``: only values of system keys (``\xff`` prefix). Keys are always logged.
+
+Each ``FdbCliAudit`` event has ``Command``, ``AuditID`` (the same for every key returned by one command), ``Cluster`` (the cluster file's description), ``IPAddress`` (the client's IP), ``Key``, ``Value`` (per ``--audit-log-values``) and ``StorageServer`` (``getall`` only), plus the usual ``Machine`` and ``LogGroup``. Missing keys, empty ranges and failed reads log nothing.
+
+So reads can't silently go unaudited:
+
+* ``--audit-log-dir`` without ``--audit-log`` or ``FDB_CLI_AUDIT_LOG_ENABLE`` is an error (unlike ``--log-dir`` without ``--log``, which is ignored).
+* If the audit directory doesn't exist or isn't writable, ``fdbcli`` aborts before running any command. ``FDB_CLI_AUDIT_LOG_ENABLE=1`` means a directory named ``1``.
+
+For now, ``fdbcli`` is the only process that writes audit trace files. Other processes and clients using ``libfdb_c`` through the C API or a language binding have no way to turn them on.
+
 Commands within ``fdbcli``
 ==========================
 
@@ -134,7 +170,7 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>] [perpetual_storage_wiggle_engine=<ENGINE>] [storage_migration_type={disabled|aggressive|gradual}]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>] [perpetual_storage_wiggle_engine=<ENGINE>] [storage_migration_type={disabled|aggressive|gradual}] [shard_metadata_format={original|encoded}] [shard_metadata_migration={enabled|disabled}]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
 
@@ -201,6 +237,170 @@ The default is ``disabled``, which means changing the storage engine will not be
 ``aggressive`` tries to replace as many storages as it can at once, and will recruit a new storage server on the same process as the old one. This will be faster, but can potentially hit degraded performance or OOM with two storages on the same process. The main benefit over ``gradual`` is that this doesn't need to take one storage out of rotation, so it works for small or development clusters that have the same number of storage processes as the replication factor. Note that ``aggressive`` is not exclusive to running the perpetual wiggle.
 ``disabled`` means that if the storage engine is changed, fdb will not move the cluster over to the new storage engine. This will disable the perpetual wiggle from rewriting storage files.
 
+shard metadata format and migration
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Two related configuration options that control migration of the cluster's
+shard-location metadata (``\xff/keyServers/`` and ``\xff/serverKeys/``)
+between the legacy tag-based encoding and the newer UID+dataMoveId
+encoding introduced with ``SHARD_ENCODE_LOCATION_METADATA``. The pair
+mirrors the ``storage_engine`` + ``storage_migration_type`` pattern.
+
+``shard_metadata_format={original|encoded}`` — target encoding
+Data Distributor should converge existing metadata entries toward. When
+unset, DD falls back to the legacy ``SHARD_ENCODE_LOCATION_METADATA``
+knob (``true → encoded``, ``false → original``).
+
+``shard_metadata_migration={enabled|disabled}`` — whether DD actively
+runs a rewrite pass at init to converge existing entries to
+``shard_metadata_format``. Default is unset (equivalent to
+``disabled``); DD does nothing at init in either direction and entries
+drain via natural DD moves or a manual storage wiggle (unbounded
+timescale). Enable per-event when a bounded-time migration is needed.
+
+These options are how you drive a shard-metadata migration. If you never
+set them, DD falls back to the ``SHARD_ENCODE_LOCATION_METADATA`` knob for
+its target format and runs no active rewrite. See "Do I need to migrate?"
+below for the decision.
+
+Do I need to migrate?
+~~~~~~~~~~~~~~~~~~~~~
+
+**No, unless you plan to downgrade the FDB binary.** After rolling the
+target to old format (``configure shard_metadata_format=original``, or —
+with the config unset — the legacy ``SHARD_ENCODE_LOCATION_METADATA=false``
+knob), the cluster keeps running normally: DD writes old-format for every
+new shard move, existing new-format entries linger, ``audit_storage
+metadata_encoding`` reports ``MIGRATION IN PROGRESS`` indefinitely.
+This mixed state is fully functional. The current binary understands
+both formats.
+
+The one thing you *cannot* do while entries are in mixed state is
+downgrade to an older FDB binary. Old binaries cannot parse
+new-format ``serverKeys`` entries and will misbehave. To make
+downgrade safe, all new-format entries must be rewritten to old
+format — reflected in ``audit_storage metadata_encoding`` returning
+``ROLLBACK COMPLETE — safe to downgrade binary``.
+
+Three ways to reach ``ROLLBACK COMPLETE``:
+
+**A. Do nothing beyond setting the target.** Rely on natural DD moves
+over time. Every shard move rewrites its metadata in the current
+(now old) format. Eventually every entry drains. **Timeframe is
+unbounded** and depends on workload — could be days or weeks on a
+quiescent cluster; hours on a busy one. If you don't have a specific
+downgrade deadline, this is the least effort.
+
+**B. Active rewrite (this PR's fast path).** Set the two configure
+options plus toggle DD. Bounded, but the time scales with cluster size —
+the serverKeys drain runs serially per storage server: minutes on typical
+clusters, potentially hours on a very large (250k-shard) cluster (these
+are estimates). Progress is observable (see the Rollback flow below).
+
+**C. Storage wiggle.** Enable ``perpetual_storage_wiggle=1``. Every
+SS gets rotated, forcing every shard to move at least once. Slow
+(hours to days depending on data size and wiggle throttling) but
+proven — no new code paths involved. Recommended when the active
+rewrite is too aggressive for your safety envelope.
+
+Rollback flow (drain new-format entries to old; bounded, but the time
+scales with cluster size — the serverKeys drain runs serially per storage
+server, so minutes on typical clusters and potentially hours on a very
+large 250k-shard cluster; these are estimates). This is driven purely by
+configuration — no knob change and no process restart. DD's effective
+target comes from ``shard_metadata_format``; the
+``SHARD_ENCODE_LOCATION_METADATA`` knob is only a fallback consulted when
+the config is unset, so the knob is not touched here:
+
+.. code-block:: console
+
+    # 1. Set the target to original and enable migration (single
+    #    fdbcli command). No knob flip, no rolling restart.
+    fdbcli> configure shard_metadata_format=original shard_metadata_migration=enabled
+
+    # 2. The configure triggers a recovery, so the re-elected DD picks
+    #    up the new target automatically. To expedite (optional), force a
+    #    DD re-election — a few seconds, not a process restart:
+    fdbcli> datadistribution off
+    fdbcli> datadistribution on
+
+    # 3. Watch progress. DD emits DDShardEncodeRewriteBegin, per-SS
+    #    DDShardEncodeRollbackPhase3SSStart/SSDone, and
+    #    DDShardEncodeRewriteComplete (Phase3Rewrites/Phase3Passes/
+    #    Phase3ElapsedSec) trace events. You can also poll:
+    fdbcli> audit_storage metadata_encoding
+    #    (new-format counts trend to zero) and
+    fdbcli> location_metadata physicalshards
+    #    (physical shards trend to zero)
+    # ... poll until "ROLLBACK COMPLETE — safe to downgrade binary" ...
+
+    # 4. Optionally leave migration enabled (steady-state cost is
+    #    one key read per DD init) or disable it:
+    fdbcli> configure shard_metadata_migration=disabled
+
+Downgrading the binary afterward: an older (pre-config) binary cannot
+read ``shard_metadata_format`` and decides encoding solely from the
+``SHARD_ENCODE_LOCATION_METADATA`` knob. A binary downgrade is therefore
+safe only once ``ROLLBACK COMPLETE`` is reached **and** the
+downgrade-target binary is deployed with
+``SHARD_ENCODE_LOCATION_METADATA=false`` in its knob config. A downgrade
+is itself a redeploy/restart, so you set the knob on the target binary at
+that moment — no live knob change on the running cluster is needed. If you
+skip it, the old binary boots with ``knob=true`` and resumes new-format
+writes, re-corrupting the metadata the rollback just drained.
+
+Large teams after a config-only rollback (known limitation): per-range
+replication (``DD_MAX_SHARDS_ON_LARGE_TEAMS``) is mutually exclusive with
+shard-encoded metadata and still reads the ``SHARD_ENCODE_LOCATION_METADATA``
+knob directly, not ``shard_metadata_format``. Consequences: after a
+config-only rollback (knob still true) it stays disabled even once
+``ROLLBACK COMPLETE`` is reached; and a contradictory
+``SHARD_ENCODE_LOCATION_METADATA=false`` flip while
+``shard_metadata_format=encoded`` would wrongly enable it on encoded
+metadata. Gating it on ``shard_metadata_format`` instead would be worse
+(the config flips instantly while metadata drains asynchronously, enabling
+it mid-rollback while encoded entries still exist), so it is left on the
+knob; impact is low, since large teams is rarely used. Rule: once you set
+``shard_metadata_format``, do not move the knob except as part of a
+downgrade. To re-enable large teams on a rolled-back cluster, redeploy with
+``SHARD_ENCODE_LOCATION_METADATA=false`` (the same knob=false deploy a binary
+downgrade requires).
+
+Re-forward flow (after a rollback), also config-driven (no knob flip):
+
+.. code-block:: console
+
+    # 1. Set the target back to encoded and (re-)enable migration:
+    fdbcli> configure shard_metadata_format=encoded shard_metadata_migration=enabled
+
+    # 2. Force DD to re-init to pick up the new configuration (optional;
+    #    the configure already triggers a recovery):
+    fdbcli> datadistribution off
+    fdbcli> datadistribution on
+
+    # 3. The re-elected DD clears any stale rollback-complete
+    #    sentinel. Old-format entries drain via natural DD moves;
+    #    new-format entries appear as DD writes new moves.
+    #    `FORWARD COMPLETE` converges over the natural-move
+    #    timescale (unbounded) rather than in a bounded post-flip
+    #    window. New-format code paths accept old-format entries,
+    #    so mixed state is safe throughout.
+    fdbcli> audit_storage metadata_encoding
+
+Minimum recipe: if ``shard_metadata_format`` is left unset, DD falls
+back to reading the ``SHARD_ENCODE_LOCATION_METADATA`` knob directly
+for the target format. You can therefore skip setting the format
+and just enable migration; DD infers direction from the knob:
+
+.. code-block:: console
+
+    fdbcli> configure shard_metadata_migration=enabled
+    fdbcli> datadistribution off ; datadistribution on
+
+For more details including the safety and observability story, see
+the ``design/shard-encode-location-metadata.md`` design document in
+the source tree.
+
 consistencyscan
 ----------------
 
@@ -243,7 +443,7 @@ coordinators
 
 The ``coordinators`` command is used to change cluster coordinators or description. Its syntax is ``coordinators auto|<ADDRESS...> [description=<DESC>]``.
 
-Addresses may be specified as a list of IP:port pairs (such as ``coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000``). If addresses are specified, the coordinators will be set to them. An ``fdbserver`` process must be running on each of the specified addresses.
+Addresses may be specified as a list of IP:port or hostname:port pairs (such as ``coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000`` or ``coordinators fdb1.example.com:4000 fdb2.example.com:4000 fdb3.example.com:4000``). Hostnames are saved in the cluster file as hostnames (but ``coordinators auto`` picks coordinators by IP address), and each one must resolve when you run the command. Running ``coordinators`` with no arguments shows the resolved IP addresses. If addresses are specified, the coordinators will be set to them. An ``fdbserver`` process must be running on each of the specified addresses.
 
 If ``auto`` is specified, coordinator addresses will be chosen automatically to support the configured redundancy level. Processes with class coordinator will be prioritized. (If the current set of coordinators are healthy and already support the configured redundancy level, nothing will be changed.)
 
@@ -480,6 +680,33 @@ heap
 ``profile heap <PROCESS>``
 
 Enables heap profiling for the specified process.
+
+rangeconfig
+-----------
+
+The ``rangeconfig`` command shows or changes the configuration options of key ranges. These options are hints to data distribution. They do not change the shard map directly.
+
+Use it to give a key range more replicas than the rest of the database, for example a small range that is read heavily or needs extra durability, or to keep two ranges on different storage teams. A range with a replication factor above the cluster's replication level is placed on a larger storage team, and data distribution does not merge shards across the boundaries of a configured range. The ``DD_MAX_SHARDS_ON_LARGE_TEAMS`` knob limits how many shards can be placed on larger teams.
+
+``rangeconfig show [includeDefault]``
+
+Prints the range configuration as JSON. Ranges with no configured options are not shown, unless ``includeDefault`` is given.
+
+``rangeconfig update <BEGINKEY> <ENDKEY> [OPTION...]``
+
+Applies the given options to the key range from ``BEGINKEY`` to ``ENDKEY``. Options that are not given keep their current setting for the range.
+
+``rangeconfig set <BEGINKEY> <ENDKEY> [OPTION...]``
+
+Makes the key range have exactly the given configuration. Options that are not given are unset for the range.
+
+The options are:
+
+* ``default`` resets the range to have no options set. Used with ``set``, it clears all options for the range. Used with ``update``, it changes nothing, because ``update`` keeps the existing values.
+* ``replication <N>`` sets the replication factor for the range. A factor lower than the cluster's replication level is treated as the cluster's replication level.
+* ``teamID <N>`` indicates that shards in ranges with different team IDs should be assigned to different storage teams. Shards with the same team ID can share a storage team, but nothing enforces this.
+
+``rangeconfig`` requires the end key to be greater than the begin key.
 
 reset
 -----

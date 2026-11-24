@@ -1016,7 +1016,12 @@ const LogMessageVersion& MergedPeekCursor::version() const {
 }
 
 Version MergedPeekCursor::getMinKnownCommittedVersion() const {
-	return serverCursors[currentCursor]->getMinKnownCommittedVersion();
+	// A committed-version certificate is global, even when its replica has no next tagged message.
+	Version minKnownCommittedVersion = 0;
+	for (const auto& cursor : serverCursors) {
+		minKnownCommittedVersion = std::max(minKnownCommittedVersion, cursor->getMinKnownCommittedVersion());
+	}
+	return minKnownCommittedVersion;
 }
 
 Version MergedPeekCursor::getMaxKnownVersion() const {
@@ -1386,7 +1391,14 @@ const LogMessageVersion& SetPeekCursor::version() const {
 }
 
 Version SetPeekCursor::getMinKnownCommittedVersion() const {
-	return serverCursors[currentSet][currentCursor]->getMinKnownCommittedVersion();
+	// Empty replies can certify progress independently of the current payload source.
+	Version minKnownCommittedVersion = 0;
+	for (const auto& cursors : serverCursors) {
+		for (const auto& cursor : cursors) {
+			minKnownCommittedVersion = std::max(minKnownCommittedVersion, cursor->getMinKnownCommittedVersion());
+		}
+	}
+	return minKnownCommittedVersion;
 }
 
 Version SetPeekCursor::getMaxKnownVersion() const {
@@ -1662,6 +1674,97 @@ TEST_CASE("/NativeCDC/ReplayPeekReplyAccounting") {
 	for (const auto& cursor : threeServers) {
 		ASSERT_EQ(cursor->replyByteLimit, 4096);
 	}
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/MergedPeekEmptyCommittedFrontier") {
+	auto makeServerCursor = []() {
+		return makeReference<ServerPeekCursor>(
+		    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), Tag(tagLocalityCDC, 0), 0, 1000, false, false);
+	};
+	std::vector<Reference<ServerPeekCursor>> servers{ makeServerCursor(), makeServerCursor() };
+	auto merged = makeReference<MergedPeekCursor>(
+	    servers, LogMessageVersion(0), 1, 2, Optional<LogMessageVersion>(), Reference<LogSet>(), 0);
+	ASSERT_EQ(merged->getMinKnownCommittedVersion(), 0);
+
+	TLogPeekReply reply;
+	reply.end = 101;
+	reply.maxKnownVersion = 500;
+	reply.minKnownCommittedVersion = 100;
+	updateCursorWithReply(servers[1].getPtr(), reply);
+	merged->calcHasMessage();
+	ASSERT(!merged->hasMessage());
+	ASSERT_EQ(merged->version().version, 101);
+	ASSERT_EQ(merged->currentCursor, 0);
+	ASSERT_EQ(servers[0]->getMinKnownCommittedVersion(), 0);
+	ASSERT_EQ(merged->getMaxKnownVersion(), 500);
+	ASSERT_EQ(merged->getMinKnownCommittedVersion(), 100);
+
+	// Another replica's stronger certificate does not advance the tagged read frontier.
+	reply.end = 151;
+	reply.maxKnownVersion = 800;
+	reply.minKnownCommittedVersion = 150;
+	updateCursorWithReply(servers[0].getPtr(), reply);
+	merged->calcHasMessage();
+	ASSERT(!merged->hasMessage());
+	ASSERT_EQ(merged->version().version, 101);
+	ASSERT_EQ(merged->currentCursor, 0);
+	ASSERT_EQ(merged->getMaxKnownVersion(), 800);
+	ASSERT_EQ(merged->getMinKnownCommittedVersion(), 150);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/SetPeekEmptyCommittedFrontier") {
+	std::vector<Reference<LogSet>> logSets;
+	std::vector<std::vector<Reference<ServerPeekCursor>>> servers(2);
+	for (int i = 0; i < servers.size(); ++i) {
+		auto logSet = makeReference<LogSet>();
+		logSet->logServers.resize(2);
+		logSet->tLogReplicationFactor = 1;
+		logSet->tLogPolicy = makeReference<PolicyOne>();
+		logSet->tLogLocalities.resize(2);
+		logSet->updateLocalitySet(logSet->tLogLocalities);
+		logSets.push_back(logSet);
+		for (int j = 0; j < 2; ++j) {
+			servers[i].push_back(
+			    makeReference<ServerPeekCursor>(Reference<AsyncVar<OptionalInterface<TLogInterface>>>(),
+			                                    Tag(tagLocalityCDC, 0),
+			                                    0,
+			                                    1000,
+			                                    false,
+			                                    false));
+		}
+	}
+	auto merged =
+	    makeReference<SetPeekCursor>(logSets, servers, LogMessageVersion(0), 0, 1, Optional<LogMessageVersion>(), true);
+	ASSERT_EQ(merged->getMinKnownCommittedVersion(), 0);
+
+	TLogPeekReply reply;
+	reply.end = 101;
+	reply.maxKnownVersion = 500;
+	reply.minKnownCommittedVersion = 100;
+	updateCursorWithReply(servers[0][1].getPtr(), reply);
+	merged->calcHasMessage();
+	ASSERT(!merged->hasMessage());
+	ASSERT_EQ(merged->version().version, 101);
+	ASSERT_EQ(merged->currentSet, 0);
+	ASSERT_EQ(merged->currentCursor, 0);
+	ASSERT_EQ(servers[0][0]->getMinKnownCommittedVersion(), 0);
+	ASSERT_EQ(merged->getMaxKnownVersion(), 500);
+	ASSERT_EQ(merged->getMinKnownCommittedVersion(), 100);
+
+	// A fallback set can know more is committed without changing the selected set's read frontier.
+	reply.end = 201;
+	reply.maxKnownVersion = 800;
+	reply.minKnownCommittedVersion = 200;
+	updateCursorWithReply(servers[1][1].getPtr(), reply);
+	merged->calcHasMessage();
+	ASSERT(!merged->hasMessage());
+	ASSERT_EQ(merged->version().version, 101);
+	ASSERT_EQ(merged->currentSet, 0);
+	ASSERT_EQ(merged->currentCursor, 0);
+	ASSERT_EQ(merged->getMaxKnownVersion(), 800);
+	ASSERT_EQ(merged->getMinKnownCommittedVersion(), 200);
 	return Void();
 }
 

@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/BulkLoading.h"
@@ -184,6 +185,24 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 				return out;
 			}
 			out[p + key] = format("%d", type);
+		}
+
+		if (key == DatabaseConfiguration::SHARD_METADATA_FORMAT_KEY) {
+			if (value != DatabaseConfiguration::SHARD_METADATA_FORMAT_ORIGINAL &&
+			    value != DatabaseConfiguration::SHARD_METADATA_FORMAT_ENCODED) {
+				printf("Error: shard_metadata_format must be `original' or `encoded'.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
+
+		if (key == DatabaseConfiguration::SHARD_METADATA_MIGRATION_KEY) {
+			if (value != DatabaseConfiguration::SHARD_METADATA_MIGRATION_ENABLED &&
+			    value != DatabaseConfiguration::SHARD_METADATA_MIGRATION_DISABLED) {
+				printf("Error: shard_metadata_migration must be `enabled' or `disabled'.\n");
+				return out;
+			}
+			out[p + key] = value;
 		}
 
 		if (key == "exclude") {
@@ -808,24 +827,20 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	return result;
 }
 
-Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
-	Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-	Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
-
-	co_await (success(processClasses) && success(processData));
-	ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
-	ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
+std::vector<ProcessData> ManagementAPI::decodeWorkers(const RangeResult& processClasses,
+                                                      const RangeResult& processData) {
+	ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
+	ASSERT(!processData.more && processData.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
-	for (int i = 0; i < processClasses.get().size(); i++) {
-		id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
-		    decodeProcessClassValue(processClasses.get()[i].value);
+	for (int i = 0; i < processClasses.size(); i++) {
+		id_class[decodeProcessClassKey(processClasses[i].key)] = decodeProcessClassValue(processClasses[i].value);
 	}
 
 	std::vector<ProcessData> results;
 
-	for (int i = 0; i < processData.get().size(); i++) {
-		ProcessData data = decodeWorkerListValue(processData.get()[i].value);
+	for (int i = 0; i < processData.size(); i++) {
+		ProcessData data = decodeWorkerListValue(processData[i].value);
 		ProcessClass processClass = id_class[data.locality.processId()];
 
 		if (processClass.classSource() == ProcessClass::DBSource ||
@@ -836,7 +851,15 @@ Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
 			results.push_back(data);
 	}
 
-	co_return results;
+	return results;
+}
+
+Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
+	Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+	Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+
+	co_await (success(processClasses) && success(processData));
+	co_return ManagementAPI::decodeWorkers(processClasses.get(), processData.get());
 }
 
 Future<std::vector<ProcessData>> getWorkers(Database cx) {
@@ -1033,19 +1056,7 @@ Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	ClientCoordinators coord(makeReference<ClusterConnectionMemoryRecord>(*conn));
 
-	leaderServers.reserve(coord.clientLeaderServers.size());
-	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-		if (coord.clientLeaderServers[i].hostname.present()) {
-			leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
-			                                                  coord.clientLeaderServers[i].hostname.get(),
-			                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
-			                                                  TaskPriority::CoordinationReply));
-		} else {
-			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
-			                                           GetLeaderRequest(coord.clusterKey, UID()),
-			                                           TaskPriority::CoordinationReply));
-		}
-	}
+	leaderServers = coord.getLeaderReplies();
 
 	auto leaderServersResult = co_await timeout(waitForAll(leaderServers), 5.0);
 	if (!leaderServersResult.present()) {
@@ -1081,12 +1092,11 @@ Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> ch
 			std::vector<NetworkAddress> oldCoordinators = co_await oldClusterConnectionString.tryResolveHostnames();
 			CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 			if (desiredCoordinators.empty()) {
-				std::vector<NetworkAddress> _desiredCoordinators = co_await change->getDesiredCoordinators(
+				desiredCoordinators = co_await change->getDesiredCoordinators(
 				    &tr,
 				    oldCoordinators,
 				    makeReference<ClusterConnectionMemoryRecord>(oldClusterConnectionString),
 				    result);
-				desiredCoordinators = _desiredCoordinators;
 			}
 
 			if (result == CoordinatorsResult::NOT_ENOUGH_MACHINES && notEnoughMachineResults < 1) {
@@ -1239,20 +1249,7 @@ struct AutoQuorumChange final : IQuorumChange {
 
 		// Check availability
 		ClientCoordinators coord(ccr);
-		std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-		leaderServers.reserve(coord.clientLeaderServers.size());
-		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-			if (coord.clientLeaderServers[i].hostname.present()) {
-				leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
-				                                                  coord.clientLeaderServers[i].hostname.get(),
-				                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
-				                                                  TaskPriority::CoordinationReply));
-			} else {
-				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
-				                                           GetLeaderRequest(coord.clusterKey, UID()),
-				                                           TaskPriority::CoordinationReply));
-			}
-		}
+		std::vector<Future<Optional<LeaderInfo>>> leaderServers = coord.getLeaderReplies();
 		Optional<std::vector<Optional<LeaderInfo>>> results =
 		    co_await timeout(getAll(leaderServers), CLIENT_KNOBS->IS_ACCEPTABLE_DELAY);
 		if (!results.present()) {
@@ -1282,8 +1279,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		std::vector<AddressExclusion> excl = co_await getAllExcludedServers(tr);
 		std::set<AddressExclusion> excluded(excl.begin(), excl.end());
 
-		std::vector<ProcessData> _workers = co_await getWorkers(tr);
-		std::vector<ProcessData> workers = _workers;
+		std::vector<ProcessData> workers = co_await getWorkers(tr);
 
 		std::map<NetworkAddress, LocalityData> addr_locality;
 		for (const auto& w : workers)
@@ -1430,6 +1426,7 @@ Future<std::vector<std::string>> getManagementApiSpecialKeyValues(Reference<IDat
                                                                   const char* errorEvent) {
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
+		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		Error err;
 		try {
 			ThreadFuture<RangeResult> resultFuture = tr->getRange(range, CLIENT_KNOBS->TOO_MANY);
@@ -2320,7 +2317,8 @@ Future<Void> timeKeeperSetDisable(Database cx) {
 	}
 }
 
-Future<Void> lockDatabase(Transaction* tr, UID id) {
+template <class TransactionHandle>
+static Future<Void> lockDatabaseImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
@@ -2340,24 +2338,12 @@ Future<Void> lockDatabase(Transaction* tr, UID id) {
 	tr->addWriteConflictRange(normalKeys);
 }
 
+Future<Void> lockDatabase(Transaction* tr, UID id) {
+	return lockDatabaseImpl(tr, id);
+}
+
 Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = co_await tr->get(databaseLockedKey);
-
-	if (val.present()) {
-		if (BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
-			co_return;
-		} else {
-			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
-			throw database_locked();
-		}
-	}
-
-	tr->atomicOp(databaseLockedKey,
-	             BinaryWriter::toValue(id, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
-	             MutationRef::SetVersionstampedValue);
-	tr->addWriteConflictRange(normalKeys);
+	return lockDatabaseImpl(std::move(tr), id);
 }
 
 Future<Void> lockDatabase(Database cx, UID id) {
@@ -2380,7 +2366,8 @@ Future<Void> lockDatabase(Database cx, UID id) {
 	}
 }
 
-Future<Void> unlockDatabase(Transaction* tr, UID id) {
+template <class TransactionHandle>
+static Future<Void> unlockDatabaseImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
@@ -2396,20 +2383,12 @@ Future<Void> unlockDatabase(Transaction* tr, UID id) {
 	tr->clear(singleKeyRange(databaseLockedKey));
 }
 
+Future<Void> unlockDatabase(Transaction* tr, UID id) {
+	return unlockDatabaseImpl(tr, id);
+}
+
 Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = co_await tr->get(databaseLockedKey);
-
-	if (!val.present())
-		co_return;
-
-	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
-		throw database_locked();
-	}
-
-	tr->clear(singleKeyRange(databaseLockedKey));
+	return unlockDatabaseImpl(std::move(tr), id);
 }
 
 Future<Void> unlockDatabase(Database cx, UID id) {
@@ -2429,7 +2408,8 @@ Future<Void> unlockDatabase(Database cx, UID id) {
 	}
 }
 
-Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
+template <class TransactionHandle>
+static Future<Void> checkDatabaseLockImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
@@ -2440,15 +2420,12 @@ Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
 	}
 }
 
-Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = co_await tr->get(databaseLockedKey);
+Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
+	return checkDatabaseLockImpl(tr, id);
+}
 
-	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
-		throw database_locked();
-	}
+Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) {
+	return checkDatabaseLockImpl(std::move(tr), id);
 }
 
 Future<Void> advanceVersion(Database cx, Version v) {
@@ -2521,6 +2498,105 @@ Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
 	}
 
 	co_return auditId;
+}
+
+namespace {
+// Errors from triggering an audit that come from the cluster controller changing or the data distributor not being
+// able to start it yet.
+bool isTransientAuditTriggerError(const Error& e) {
+	switch (e.code()) {
+	case error_code_timed_out:
+	case error_code_audit_storage_failed:
+	case error_code_broken_promise:
+	case error_code_request_maybe_delivered:
+		return true;
+	default:
+		return false;
+	}
+}
+} // namespace
+
+Future<AuditStorageState> auditStorageAndWait(Database cx,
+                                              KeyRange range,
+                                              AuditType type,
+                                              KeyValueStoreType engineType,
+                                              AuditWaitOptions options) {
+	UID auditId;
+	for (int attempt = 1;; ++attempt) {
+		Error err;
+		try {
+			UID id = co_await timeoutError(
+			    auditStorage(cx->getConnectionRecord(), range, type, engineType, options.roundTripTimeoutSeconds),
+			    options.roundTripTimeoutSeconds);
+			auditId = id;
+			break;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (!isTransientAuditTriggerError(err) || attempt >= options.maxScheduleAttempts) {
+			throw err;
+		}
+		TraceEvent(SevWarn, "AuditStorageAndWaitTriggerRetry")
+		    .error(err)
+		    .detail("Context", options.traceContext)
+		    .detail("AuditType", type)
+		    .detail("Range", range)
+		    .detail("Attempt", attempt);
+		co_await delay(std::min(10.0, 2.0 * attempt));
+	}
+
+	const double startTime = now();
+	double lastReportTime = startTime;
+	TraceEvent("AuditStorageAndWaitScheduled")
+	    .detail("Context", options.traceContext)
+	    .detail("AuditType", type)
+	    .detail("AuditID", auditId)
+	    .detail("Range", range);
+	while (true) {
+		co_await delay(options.pollIntervalSeconds);
+		if (now() - startTime > options.maxWaitSeconds) {
+			TraceEvent(SevError, "AuditStorageAndWaitTimeout")
+			    .detail("Context", options.traceContext)
+			    .detail("AuditType", type)
+			    .detail("AuditID", auditId)
+			    .detail("Range", range);
+			throw timed_out();
+		}
+
+		std::vector<AuditStorageState> states;
+		Error err;
+		try {
+			std::vector<AuditStorageState> result =
+			    co_await timeoutError(getAuditStates(cx, type, /*newFirst=*/true), options.roundTripTimeoutSeconds);
+			states = result;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			if (!isTransientAuditStateReadError(err)) {
+				throw err;
+			}
+			continue;
+		}
+		bool found = false;
+		for (const auto& state : states) {
+			if (state.id == auditId) {
+				found = true;
+				if (state.getPhase() != AuditPhase::Running) {
+					co_return state;
+				}
+			}
+		}
+		if (now() - lastReportTime >= 10.0) {
+			TraceEvent("AuditStorageAndWaitProgress")
+			    .detail("Context", options.traceContext)
+			    .detail("AuditType", type)
+			    .detail("AuditID", auditId)
+			    .detail("AuditFound", found)
+			    .detail("ElapsedTime", now() - startTime);
+			lastReportTime = now();
+		}
+	}
 }
 
 Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
@@ -2835,23 +2911,31 @@ Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId) {
 }
 
 Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr) {
-	RangeResult rangeResult;
-	// At most one job at a time, so looking at the first returned range is sufficient
-	rangeResult = co_await krmGetRanges(tr, bulkLoadJobPrefix, normalKeys);
-	if (rangeResult.empty()) {
-		co_return Optional<BulkLoadJobState>();
-	}
-	for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
-		if (rangeResult[i].value.empty()) {
-			continue;
+	Key beginKey = normalKeys.begin;
+	while (beginKey < normalKeys.end) {
+		RangeResult rangeResult = co_await krmGetRanges(tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, normalKeys.end));
+		for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
+			if (!jobState.isValid()) {
+				continue;
+			}
+			co_return jobState;
 		}
-		BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
-		if (!jobState.isValid()) {
-			continue;
+		// A page ends early at a row or byte limit; its last key is where the next page resumes.
+		if (rangeResult.size() < 2) {
+			break;
 		}
-		co_return jobState;
+		beginKey = rangeResult.back().key;
 	}
 	co_return Optional<BulkLoadJobState>();
+}
+
+Future<bool> isRangeUnderBulkLoadJob(Reference<ReadYourWritesTransaction> tr, KeyRange range) {
+	Optional<BulkLoadJobState> job = co_await getSubmittedBulkLoadJob(&tr->getTransaction());
+	co_return job.present() && job.get().getJobRange().intersects(range);
 }
 
 Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
@@ -2963,6 +3047,54 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 				throw bulkload_task_failed();
 			}
 			ASSERT(!jobState.getJobRange().empty());
+			// Bulkload ingests storage-engine files without committing mutations, so a backup or DR logging the
+			// range would record any earlier clear of it but never the loaded data.
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			RangeResult logRanges = co_await tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!logRanges.more && logRanges.size() < CLIENT_KNOBS->TOO_MANY);
+			std::set<UID> loggingUids;
+			for (const auto& kv : logRanges) {
+				Key logEnd = logRangesDecodeValue(kv.value);
+				UID logUid;
+				KeyRange logRange = KeyRangeRef(logRangesDecodeKey(kv.key, &logUid), logEnd);
+				loggingUids.insert(logUid);
+				if (logRange.intersects(jobState.getJobRange())) {
+					TraceEvent(SevWarnAlways, "SubmitBulkLoadJobFailed")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("Reason", "Job range is covered by a running backup or DR")
+					    .detail("LogRange", logRange)
+					    .detail("SubmitJob", jobState.toString());
+					throw bulkload_range_under_backup();
+				}
+			}
+			// Partitioned-log backups are written by backup workers from the TLogs, which bulkload also bypasses.
+			Optional<Value> backupStarted = co_await tr.get(backupStartedKey);
+			if (backupStarted.present() && !decodeBackupStartedValue(backupStarted.get()).empty()) {
+				TraceEvent(SevWarnAlways, "SubmitBulkLoadJobFailed")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "A partitioned-log backup is running")
+				    .detail("SubmitJob", jobState.toString());
+				throw bulkload_range_under_backup();
+			}
+			// A backup or DR writes backupLatestVersions before it registers its log range (a file backup at submit, a
+			// DR when its start task runs), and its range is unknown until then, so refuse for the whole window.
+			RangeResult submittedBackups =
+			    co_await tr.getRange(prefixRange(backupLatestVersionsPrefix), CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!submittedBackups.more && submittedBackups.size() < CLIENT_KNOBS->TOO_MANY);
+			for (const auto& kv : submittedBackups) {
+				UID destUid = BinaryReader::fromStringRef<UID>(
+				    kv.key.removePrefix(backupLatestVersionsPrefix).substr(0, sizeof(UID)), Unversioned());
+				if (!loggingUids.contains(destUid)) {
+					TraceEvent(SevWarnAlways, "SubmitBulkLoadJobFailed")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("Reason", "A submitted backup or DR has not yet registered its log range")
+					    .detail("SubmitJob", jobState.toString());
+					throw bulkload_range_under_backup();
+				}
+			}
 			// Init the map of task states
 			co_await krmSetRange(
 			    &tr, bulkLoadTaskPrefix, jobState.getJobRange(), bulkLoadTaskStateValue(BulkLoadTaskState()));
@@ -2987,41 +3119,20 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 }
 
 Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockAware) {
-	RangeResult rangeResult;
 	Transaction tr(cx);
-	Key beginKey = normalKeys.begin;
-	Key endKey = normalKeys.end;
-	while (beginKey < endKey) {
+	while (true) {
 		Error err;
 		try {
 			if (lockAware) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			}
-			rangeResult.clear();
-			rangeResult = co_await krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey));
-			if (rangeResult.empty()) {
-				break;
-			}
-			for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; i++) {
-				if (rangeResult[i].value.empty()) {
-					continue;
-				}
-				BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
-				if (!jobState.isValid()) {
-					continue;
-				}
-				// If a job is fully completed, the metadata should be removed from bulkLoadJobKeys
-				// The metadata is added to bulkload history.
-				co_return jobState;
-			}
-			beginKey = rangeResult.back().key;
-			continue;
+			// If a job is fully completed, the metadata is removed from bulkLoadJobKeys and added to bulkload history.
+			co_return co_await getSubmittedBulkLoadJob(&tr);
 		} catch (Error& e) {
 			err = e;
 		}
 		co_await tr.onError(err);
 	}
-	co_return Optional<BulkLoadJobState>();
 }
 
 Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange jobRange) {
@@ -3318,7 +3429,7 @@ Future<Optional<BulkDumpOwnerInfo>> getBulkOwner(Database cx, UID jobId, bool is
 				co_return Optional<BulkDumpOwnerInfo>();
 			}
 			BulkDumpOwnerInfo info;
-			ObjectReader reader(value.get().begin(), IncludeVersion());
+			ObjectReader reader(value.get(), IncludeVersion());
 			reader.deserialize(info);
 			co_return info;
 		} catch (Error& e) {
@@ -3347,12 +3458,12 @@ Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId) {
 	co_return result;
 }
 
-Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {
+Future<BulkDumpTaskCounts> getBulkDumpTaskCounts(Database cx, KeyRange rangeToRead) {
 	Transaction tr(cx);
 	Key readBegin = rangeToRead.begin;
 	Key readEnd = rangeToRead.end;
 	RangeResult rangeResult;
-	size_t completeTaskCount = 0;
+	BulkDumpTaskCounts counts;
 	while (readBegin < readEnd) {
 		int retryCount = 0;
 		while (true) {
@@ -3386,12 +3497,14 @@ Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {
 			}
 			BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
 			if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
-				completeTaskCount++;
+				counts.complete++;
+			} else if (bulkDumpState.getPhase() == BulkDumpPhase::Error) {
+				counts.error++;
 			}
 		}
 		readBegin = rangeResult.back().key;
 	}
-	co_return completeTaskCount;
+	co_return counts;
 }
 
 Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
@@ -3472,9 +3585,9 @@ Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
 				progress.completedBytes += taskState.getManifest().getTotalBytes();
 			} else if (taskState.getPhase() == BulkDumpPhase::Submitted) {
 				progress.runningTasks++;
+			} else if (taskState.getPhase() == BulkDumpPhase::Error) {
+				progress.errorTasks++;
 			}
-
-			progress.totalBytes += taskState.getManifest().getTotalBytes();
 		}
 		readBegin = rangeResult.back().key;
 	}

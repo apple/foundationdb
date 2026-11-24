@@ -28,6 +28,7 @@
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/mocks3/MockS3Server.h"
 #include "fdbserver/mocks3/MockS3ServerChaos.h"
+#include "BackupSteps.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
@@ -52,6 +53,14 @@ struct BulkDumping : TestWorkload {
 	double delayRate = 0.1;
 	double corruptionRate = 0.01;
 	double maxDelay = 2.0;
+
+	// Options to skip portions of the workload.
+	bool targetFullKeyspace = false;
+	bool runDump = true;
+	bool runLoad = true;
+	bool generateInitialData = true;
+	std::string sourceJobId = "";
+	bool checkBackupGuard = false;
 
 	// Timeout configuration
 	double jobCompletionTimeout = 1800.0; // Timeout for waiting on bulk dump/load job completion
@@ -78,6 +87,13 @@ struct BulkDumping : TestWorkload {
 	        static_cast<BulkLoadTransportMethod>(getOption(options, "bulkLoadTransportMethod"_sr, 1))),
 	    jobRoot(getOption(options, "jobRoot"_sr, ""_sr).toString()) {
 		maxCancelTimes = 0; // TODO(BulkLoad): allow to cancel job when job ID randomly generated.
+
+		targetFullKeyspace = getOption(options, "targetFullKeyspace"_sr, false);
+		runDump = getOption(options, "runDump"_sr, true);
+		runLoad = getOption(options, "runLoad"_sr, true);
+		generateInitialData = getOption(options, "generateInitialData"_sr, true);
+		sourceJobId = getOption(options, "sourceJobId"_sr, ""_sr).toString();
+		checkBackupGuard = getOption(options, "checkBackupGuard"_sr, false);
 
 		// Initialize chaos options
 		enableChaos = getOption(options, "enableChaos"_sr, false);
@@ -339,6 +355,7 @@ struct BulkDumping : TestWorkload {
 					    .detail("JobRange", jobRange);
 					co_return std::vector<BulkLoadTaskState>();
 				}
+
 				co_await delay(10.0);
 				continue;
 			}
@@ -469,6 +486,25 @@ struct BulkDumping : TestWorkload {
 		if (clientId != 0) {
 			co_return;
 		}
+		TraceEvent("BulkDumpingWorkLoad")
+		    .detail("Phase", "Starting")
+		    .detail("RunDump", runDump)
+		    .detail("RunLoad", runLoad)
+		    .detail("JobID", sourceJobId)
+		    .detail("JobRoot", jobRoot);
+
+		KeyRange bulkDumpJobRange =
+		    (targetFullKeyspace || deterministicRandom()->coinflip()) ? normalKeys : getRandomRange(this, normalKeys);
+
+		std::map<Key, Value> kvs;
+		if (generateInitialData) {
+			kvs = generateOrderedKVS(this, normalKeys, 1000);
+			co_await setKeys(cx, kvs);
+		}
+
+		// We should either be running a dump and using that Job ID, or skipping the dump and running a pre-provided job
+		// ID.
+		ASSERT(sourceJobId.empty() == runDump);
 
 		// Cleanup any leftover state from previous test iterations BEFORE starting work
 		// This ensures we start clean even if a previous iteration timed out or crashed
@@ -484,19 +520,26 @@ struct BulkDumping : TestWorkload {
 			disableConnectionFailures("BulkDumping");
 		}
 
-		KeyRange bulkDumpJobRange = deterministicRandom()->coinflip() ? normalKeys : getRandomRange(this, normalKeys);
-
-		bool bulkDumpRangeContainBulkLoadRange = true; // Will set to false if the bulk load job range is not
-		// contained in the bulk dump job range. In this case, the bulk load job will be failed fast with error.
-		// So, when set to false, skip the processCheck() in the end of the workload.
-		// Also, check bulkload job history to ensure the job is failed with the expected error.
-
-		std::map<Key, Value> kvs = generateOrderedKVS(this, normalKeys, 1000);
-		co_await setKeys(cx, kvs);
-
 		// BulkLoad uses range lock
 		co_await registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad);
 
+		BulkDumpState bulkDumpJob;
+
+		if (runDump) {
+			bulkDumpJob = co_await _runDump(cx, bulkDumpJobRange);
+		} else {
+			std::string dumpFolder = jobRoot.empty() ? simulationBulkDumpFolder : jobRoot;
+			Optional<UID> jobId = sourceJobId.empty() ? Optional<UID>() : Optional<UID>(UID::fromString(sourceJobId));
+			bulkDumpJob =
+			    BulkDumpState(bulkDumpJobRange, BulkLoadType::SST, bulkLoadTransportMethod, dumpFolder, jobId);
+		}
+
+		if (runLoad) {
+			co_await _runLoad(cx, bulkDumpJob, bulkDumpJobRange, kvs);
+		}
+	}
+
+	Future<BulkDumpState> _runDump(Database const& cx, KeyRangeRef bulkDumpJobRange) {
 		std::vector<RangeLockOwner> lockOwners = co_await getAllRangeLockOwners(cx);
 		ASSERT(lockOwners.size() == 1 && lockOwners[0].getOwnerUniqueId() == rangeLockNameForBulkLoad);
 
@@ -519,15 +562,100 @@ struct BulkDumping : TestWorkload {
 		    .detail("Phase", "Dump Job Submitted")
 		    .detail("TransportMethod", convertBulkLoadTransportMethodToString(bulkLoadTransportMethod))
 		    .detail("JobRoot", dumpFolder)
+		    .detail("JobId", bulkDumpJob.getJobId().toString())
 		    .detail("Job", bulkDumpJob.toString());
 
 		// Wait until the dump job completes
 		co_await waitUntilDumpJobComplete(this, cx);
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Dump Job Complete").detail("Job", bulkDumpJob.toString());
 
+		co_return bulkDumpJob;
+	}
+
+	static Future<Void> waitForLogRanges(Database cx, bool present) {
+		while ((co_await BackupSteps::firstKeyIn(cx, logRangesRange)).present() != present) {
+			co_await delay(1.0);
+		}
+	}
+
+	static Future<Void> expectRejected(Future<Void> attempt, int errorCode, std::string phase) {
+		bool rejected = false;
+		try {
+			co_await attempt;
+		} catch (Error& e) {
+			if (e.code() != errorCode) {
+				throw;
+			}
+			rejected = true;
+		}
+		if (!rejected) {
+			TraceEvent(SevError, "BulkDumpingWorkLoadBackupGuardMissed").detail("Phase", phase);
+			throw operation_failed();
+		}
+		TraceEvent("BulkDumpingWorkLoad")
+		    .detail("Phase", "Backup Guard Checked")
+		    .detail("Check", phase)
+		    .detail("Rejected", rejected);
+	}
+
+	// While a backup is registered, submitBulkLoadJob must fail with bulkload_range_under_backup, both once its log
+	// range is registered and while its start task has not yet run; once it is aborted the job must be accepted
+	// again. Conversely, while a job is live, submitBackup must fail with backup_range_under_bulkload.
+	Future<Void> checkBackupBlocksLoad(Database cx, BulkDumpState bulkDumpJob) {
+		FileBackupAgent backupAgent;
+		BulkLoadJobState job = createBulkLoadJob(
+		    bulkDumpJob.getJobId(), bulkDumpJob.getJobRange(), bulkDumpJob.getJobRoot(), bulkLoadTransportMethod);
+		// Only the backup's mutation-log registration matters here: keep the snapshot slow and the backup running
+		// (StopWhenDone::False) so the log range stays registered until it is aborted below.
+		constexpr int slowSnapshotSeconds = 100000;
+		BackupSteps::SubmitSpec spec;
+		spec.backupDir = "file://simfdb/backups/"_sr;
+		spec.tag = "bulkload_backup_guard"_sr;
+		spec.ranges.push_back_deep(spec.ranges.arena(), normalKeys);
+		spec.initSnapshotInterval = slowSnapshotSeconds;
+		spec.snapshotInterval = slowSnapshotSeconds;
+		spec.stopWhenDone = StopWhenDone::False;
+		auto submitBackup = [&]() {
+			return BackupSteps::submitBackup(cx, &backupAgent, BackupSteps::BackupVersion::V1, spec);
+		};
+		auto submitLoad = [&]() { return timeoutError(submitBulkLoadJob(cx, job), jobSubmitTimeout); };
+
+		// Paused agents leave the start task unrun: the backup is submitted but has registered no log range.
+		co_await backupAgent.changePause(cx, true);
+		co_await submitBackup();
+		co_await expectRejected(submitLoad(), error_code_bulkload_range_under_backup, "SubmittedNotStarted");
+		co_await backupAgent.abortBackup(cx, spec.tag.toString());
+		co_await backupAgent.changePause(cx, false);
+
+		co_await submitBackup();
+		// The mutation-log range is registered by the backup's first task, not by submitBackup.
+		co_await waitForLogRanges(cx, true);
+		co_await expectRejected(submitLoad(), error_code_bulkload_range_under_backup, "LogRangeRegistered");
+		co_await backupAgent.abortBackup(cx, spec.tag.toString());
+		co_await waitForLogRanges(cx, false);
+
+		// The bulkload mode is still off, so DD does not dispatch the job and it stays live.
+		co_await submitLoad();
+		co_await expectRejected(submitBackup(), error_code_backup_range_under_bulkload, "BackupDuringLoad");
+		co_await cancelBulkLoadJob(cx, job.getJobId());
+	}
+
+	Future<Void> _runLoad(Database const& cx,
+	                      BulkDumpState bulkDumpJob,
+	                      KeyRangeRef bulkDumpJobRange,
+	                      std::map<Key, Value> kvs) {
+		bool bulkDumpRangeContainBulkLoadRange = true; // Will set to false if the bulk load job range is not
+		// contained in the bulk dump job range. In this case, the bulk load job will be failed fast with error.
+		// So, when set to false, skip the processCheck() in the end of the workload.
+		// Also, check bulkload job history to ensure the job is failed with the expected error.
+
 		// Clear database
 		co_await clearDatabase(cx);
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Clear DB").detail("Job", bulkDumpJob.toString());
+
+		if (checkBackupGuard) {
+			co_await checkBackupBlocksLoad(cx, bulkDumpJob);
+		}
 
 		// Submit a bulk load job
 		int oldBulkLoadMode = 0;
@@ -549,7 +677,7 @@ struct BulkDumping : TestWorkload {
 			bool hasError = false;
 			int oldCancelTimes = cancelTimes;
 			KeyRange bulkLoadJobRange =
-			    deterministicRandom()->coinflip()
+			    (deterministicRandom()->coinflip() || targetFullKeyspace)
 			        ? bulkDumpJob.getJobRange()
 			        : getRandomRange(this, deterministicRandom()->coinflip() ? normalKeys : bulkDumpJobRange);
 			UID dataSourceId = bulkDumpJob.getJobId();
@@ -588,17 +716,19 @@ struct BulkDumping : TestWorkload {
 			    .detail("BulkLoadJobRoot", dataSourceRoot)
 			    .detail("BulkLoadTransportMethod", bulkLoadJob.getTransportMethod());
 
-			// Check the loaded data in DB is same as the data in DB before dumping
-			std::map<Key, Value> newKvs = co_await getAllKVSFromDB(cx);
-			if (bulkDumpJobRange.contains(bulkLoadJobRange)) {
-				processCheck(this, kvs, newKvs, bulkLoadJobRange, bulkDumpJobRange, errorRanges);
-				bulkDumpRangeContainBulkLoadRange = true;
-			} else {
-				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoad")
-				    .detail("Phase", "SkippedCheck")
-				    .detail("BulkDumpJobRange", bulkDumpJobRange)
-				    .detail("BulkLoadJobRange", bulkLoadJobRange);
-				bulkDumpRangeContainBulkLoadRange = false;
+			if (generateInitialData) {
+				// Check the loaded data in DB is same as the data in DB before dumping
+				std::map<Key, Value> newKvs = co_await getAllKVSFromDB(cx);
+				if (bulkDumpJobRange.contains(bulkLoadJobRange)) {
+					processCheck(this, kvs, newKvs, bulkLoadJobRange, bulkDumpJobRange, errorRanges);
+					bulkDumpRangeContainBulkLoadRange = true;
+				} else {
+					TraceEvent(SevWarnAlways, "BulkDumpingWorkLoad")
+					    .detail("Phase", "SkippedCheck")
+					    .detail("BulkDumpJobRange", bulkDumpJobRange)
+					    .detail("BulkLoadJobRange", bulkLoadJobRange);
+					bulkDumpRangeContainBulkLoadRange = false;
+				}
 			}
 
 			// Acknowledge any error task of the job

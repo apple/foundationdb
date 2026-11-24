@@ -1972,7 +1972,60 @@ TEST_CASE("fdb_database_get_server_protocol") {
 	fdb_future_destroy(protocolFuture);
 }
 
-TEST_CASE("CDC C binding end-to-end") {
+TEST_CASE("CDC C binding rejects invalid registration ranges") {
+	const uint8_t name[] = "invalid-cdc-stream";
+	const uint8_t begin[] = "a";
+	const uint8_t end[] = "b";
+	FDBKeyRange range{ begin, 1, end, 1 };
+	auto checkInvalid = [&](uint8_t const* nameInput, int nameLength, FDBKeyRange const* ranges, int rangeCount) {
+		FDBFuture* future = fdb_database_register_cdc_stream(db, nameInput, nameLength, ranges, rangeCount);
+		REQUIRE(future != nullptr);
+		fdb_check(fdb_future_block_until_ready(future));
+		CHECK(fdb_future_get_error(future) == 2000); // client_invalid_operation
+		fdb_future_destroy(future);
+	};
+
+	checkInvalid(name, sizeof(name) - 1, &range, -1);
+	checkInvalid(name, sizeof(name) - 1, &range, 0);
+	checkInvalid(name, sizeof(name) - 1, &range, 1025);
+	checkInvalid(name, sizeof(name) - 1, nullptr, 1);
+	checkInvalid(nullptr, 1, &range, 1);
+	checkInvalid(name, -1, &range, 1);
+	checkInvalid(name, 0, &range, 1);
+	for (FDBKeyRange invalid : { FDBKeyRange{ begin, -1, end, 1 },
+	                             FDBKeyRange{ begin, 1, end, -1 },
+	                             FDBKeyRange{ nullptr, 1, end, 1 },
+	                             FDBKeyRange{ begin, 1, nullptr, 1 },
+	                             FDBKeyRange{ begin, 1, begin, 1 },
+	                             FDBKeyRange{ end, 1, begin, 1 } }) {
+		checkInvalid(name, sizeof(name) - 1, &invalid, 1);
+	}
+}
+
+TEST_CASE("CDC C binding rejects invalid ordered registration boundaries") {
+	const uint8_t name[] = "invalid-ordered-cdc-stream";
+	const uint8_t begin[] = "a";
+	const uint8_t end[] = "z";
+	const uint8_t split[] = "m";
+	FDBKeyRange range{ begin, 1, end, 1 };
+	FDBKey point{ split, 1 };
+	auto checkInvalid = [&](FDBKey const* points, int count) {
+		FDBFuture* future =
+		    fdb_database_register_cdc_ordered_stream(db, name, sizeof(name) - 1, &range, 1, points, count);
+		REQUIRE(future != nullptr);
+		fdb_check(fdb_future_block_until_ready(future));
+		CHECK(fdb_future_get_error(future) == 2000); // client_invalid_operation
+		fdb_future_destroy(future);
+	};
+	checkInvalid(&point, -1);
+	checkInvalid(&point, 64);
+	checkInvalid(nullptr, 1);
+	for (FDBKey invalid : { FDBKey{ split, -1 }, FDBKey{ nullptr, 1 } }) {
+		checkInvalid(&invalid, 1);
+	}
+}
+
+void testCdcEndToEnd(bool ordered) {
 	using FuturePtr = std::unique_ptr<FDBFuture, decltype(&fdb_future_destroy)>;
 	using ConsumerPtr = std::unique_ptr<FDBCdcConsumer, decltype(&fdb_cdc_consumer_destroy)>;
 
@@ -2073,10 +2126,13 @@ TEST_CASE("CDC C binding end-to-end") {
 	};
 
 	const std::string streamName = key("cdc-stream");
-	const std::string rangeBegin = key("cdc-data/");
+	const std::string rangeBegin = key("cdc-data/a/");
 	const std::string rangeEnd = strinc_str(rangeBegin);
+	const std::string secondRangeBegin = key("cdc-data/c/");
+	const std::string secondRangeEnd = strinc_str(secondRangeBegin);
 	const std::string firstKey = rangeBegin + "first";
-	const std::string secondKey = rangeBegin + "second";
+	const std::string secondKey = secondRangeBegin + "second";
+	const std::string gapKey = key("cdc-data/b/gap");
 	const std::string outsideKey = key("outside-cdc-range");
 	const std::string firstValue = "first-value";
 	const std::string secondValue = "second-value";
@@ -2088,18 +2144,42 @@ TEST_CASE("CDC C binding end-to-end") {
 	std::string nameInput = streamName;
 	std::string beginInput = rangeBegin;
 	std::string endInput = rangeEnd;
+	std::string secondBeginInput = secondRangeBegin;
+	std::string secondEndInput = secondRangeEnd;
+	std::vector<FDBKeyRange> rangesInput{ { reinterpret_cast<uint8_t const*>(secondBeginInput.data()),
+		                                    static_cast<int>(secondBeginInput.size()),
+		                                    reinterpret_cast<uint8_t const*>(secondEndInput.data()),
+		                                    static_cast<int>(secondEndInput.size()) },
+		                                  { reinterpret_cast<uint8_t const*>(beginInput.data()),
+		                                    static_cast<int>(beginInput.size()),
+		                                    reinterpret_cast<uint8_t const*>(endInput.data()),
+		                                    static_cast<int>(endInput.size()) } };
+	// Repeated intervals must not duplicate delivered mutations.
+	rangesInput.push_back(rangesInput.back());
+	std::string splitInput = secondRangeBegin;
+	FDBKey splitPoint{ reinterpret_cast<uint8_t const*>(splitInput.data()), static_cast<int>(splitInput.size()) };
 	auto registerFuture =
-	    ownFuture(fdb_database_register_cdc_stream(db,
-	                                               reinterpret_cast<uint8_t const*>(nameInput.data()),
-	                                               nameInput.size(),
-	                                               reinterpret_cast<uint8_t const*>(beginInput.data()),
-	                                               beginInput.size(),
-	                                               reinterpret_cast<uint8_t const*>(endInput.data()),
-	                                               endInput.size()));
+	    ownFuture(ordered ? fdb_database_register_cdc_ordered_stream(db,
+	                                                                 reinterpret_cast<uint8_t const*>(nameInput.data()),
+	                                                                 nameInput.size(),
+	                                                                 rangesInput.data(),
+	                                                                 rangesInput.size(),
+	                                                                 &splitPoint,
+	                                                                 1)
+	                      : fdb_database_register_cdc_stream(db,
+	                                                         reinterpret_cast<uint8_t const*>(nameInput.data()),
+	                                                         nameInput.size(),
+	                                                         rangesInput.data(),
+	                                                         rangesInput.size()));
 	REQUIRE(registerFuture != nullptr);
+	std::fill(splitInput.begin(), splitInput.end(), 'x');
+	splitPoint = FDBKey{ nullptr, -1 };
 	std::fill(nameInput.begin(), nameInput.end(), 'x');
 	std::fill(beginInput.begin(), beginInput.end(), 'x');
 	std::fill(endInput.begin(), endInput.end(), 'x');
+	std::fill(secondBeginInput.begin(), secondBeginInput.end(), 'x');
+	std::fill(secondEndInput.begin(), secondEndInput.end(), 'x');
+	std::fill(rangesInput.begin(), rangesInput.end(), FDBKeyRange{ nullptr, -1, nullptr, -1 });
 	waitForSuccess(registerFuture.get());
 
 	uint64_t streamId = 0;
@@ -2119,10 +2199,16 @@ TEST_CASE("CDC C binding end-to-end") {
 		}
 		foundStream = true;
 		CHECK(streams[i].stream_id == streamId);
-		CHECK(std::string(reinterpret_cast<char const*>(streams[i].key_range.begin_key),
-		                  streams[i].key_range.begin_key_length) == rangeBegin);
-		CHECK(std::string(reinterpret_cast<char const*>(streams[i].key_range.end_key),
-		                  streams[i].key_range.end_key_length) == rangeEnd);
+		REQUIRE(streams[i].range_count == 2);
+		REQUIRE(streams[i].ranges != nullptr);
+		CHECK(std::string(reinterpret_cast<char const*>(streams[i].ranges[0].begin_key),
+		                  streams[i].ranges[0].begin_key_length) == rangeBegin);
+		CHECK(std::string(reinterpret_cast<char const*>(streams[i].ranges[0].end_key),
+		                  streams[i].ranges[0].end_key_length) == rangeEnd);
+		CHECK(std::string(reinterpret_cast<char const*>(streams[i].ranges[1].begin_key),
+		                  streams[i].ranges[1].begin_key_length) == secondRangeBegin);
+		CHECK(std::string(reinterpret_cast<char const*>(streams[i].ranges[1].end_key),
+		                  streams[i].ranges[1].end_key_length) == secondRangeEnd);
 		CHECK(streams[i].min_version >= 0);
 	}
 	REQUIRE(foundStream);
@@ -2145,8 +2231,10 @@ TEST_CASE("CDC C binding end-to-end") {
 	CHECK(positionStreamId == streamId);
 	CHECK(positionVersion == -1);
 
-	const int64_t setVersion =
-	    commitSetValues({ { firstKey, firstValue }, { secondKey, secondValue }, { outsideKey, "outside-value" } });
+	const int64_t setVersion = commitSetValues({ { firstKey, firstValue },
+	                                             { secondKey, secondValue },
+	                                             { gapKey, "gap-value" },
+	                                             { outsideKey, "outside-value" } });
 	auto setReply = consumeThroughVersion(consumer.get(), setVersion);
 	CHECK(setReply.version == setVersion);
 	CHECK(setReply.lastConsumedVersion >= setVersion);
@@ -2181,14 +2269,20 @@ TEST_CASE("CDC C binding end-to-end") {
 	CHECK(positionStreamId == streamId);
 	CHECK(positionVersion == setReply.lastConsumedVersion);
 
-	const std::string clearEnd = strinc_str(firstKey);
+	const std::string clearEnd = strinc_str(secondKey);
 	const int64_t clearVersion = commitClearRange(firstKey, clearEnd);
 	auto clearReply = consumeThroughVersion(resumedConsumer.get(), clearVersion);
 	CHECK(clearReply.version == clearVersion);
-	REQUIRE(clearReply.mutations.size() == 1);
-	CHECK(clearReply.mutations[0].type == FDB_CDC_MUTATION_TYPE_CLEAR_RANGE);
-	CHECK(clearReply.mutations[0].param1 == firstKey);
-	CHECK(clearReply.mutations[0].param2 == clearEnd);
+	REQUIRE(clearReply.mutations.size() == 2);
+	std::map<std::string, std::string> expectedClears{ { firstKey, rangeEnd }, { secondRangeBegin, clearEnd } };
+	for (auto const& mutation : clearReply.mutations) {
+		CHECK(mutation.type == FDB_CDC_MUTATION_TYPE_CLEAR_RANGE);
+		auto expected = expectedClears.find(mutation.param1);
+		REQUIRE(expected != expectedClears.end());
+		CHECK(mutation.param2 == expected->second);
+		expectedClears.erase(expected);
+	}
+	CHECK(expectedClears.empty());
 
 	auto resumedAcknowledgeFuture = ownFuture(fdb_cdc_consumer_acknowledge(resumedConsumer.get()));
 	REQUIRE(resumedAcknowledgeFuture != nullptr);
@@ -2209,6 +2303,14 @@ TEST_CASE("CDC C binding end-to-end") {
 	for (int i = 0; i < streamCount; ++i) {
 		CHECK(extractString(streams[i].name) != streamName);
 	}
+}
+
+TEST_CASE("CDC C binding end-to-end") {
+	testCdcEndToEnd(false);
+}
+
+TEST_CASE("CDC C binding ordered aggregate end-to-end") {
+	testCdcEndToEnd(true);
 }
 
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
@@ -2424,6 +2526,39 @@ TEST_CASE("special-key-space valid transaction ID") {
 	CHECK(transaction_id.second() > 0);
 }
 
+TEST_CASE("special-key-space error message after a rejected clear") {
+	fdb::Transaction tr(db);
+	while (true) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+		tr.clear("\xff\xff/configuration/process/class_type/1.2.3.4:1");
+		auto commit = tr.commit();
+		const fdb_error_t err = wait_future(commit);
+		if (err != error_code_cluster_version_changed) {
+			REQUIRE(err == error_code_special_keys_api_failure);
+			break;
+		}
+		auto retry = tr.on_error(err);
+		REQUIRE(wait_future(retry) == 0);
+	}
+
+	auto diagnostic = tr.get("\xff\xff/error_message", false);
+	REQUIRE(wait_future(diagnostic) == 0);
+	fdb_bool_t present;
+	const uint8_t* value;
+	int length;
+	REQUIRE(diagnostic.get(&present, &value, &length) == 0);
+	REQUIRE(present);
+	rapidjson::Document error;
+	error.Parse(reinterpret_cast<const char*>(value), length);
+	REQUIRE(error.IsObject());
+	REQUIRE(error.HasMember("command"));
+	REQUIRE(error["command"].IsString());
+	CHECK(std::string_view(error["command"].GetString()) == "setclass");
+
+	auto read = tr.get(key("foo"), false);
+	CHECK(wait_future(read) == error_code_special_keys_api_failure);
+}
+
 TEST_CASE("special-key-space custom transaction ID") {
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
@@ -2481,6 +2616,81 @@ TEST_CASE("special-key-space set transaction ID after write") {
 	}
 }
 
+static void wait_for_client_connection() {
+	// The external client may still be connecting. Keep the retrying read in a separate
+	// transaction so tracing options can be set before any reads in the test transaction.
+	get_value(key(""), /* snapshot */ true, {});
+}
+
+TEST_CASE("special-key-space decimal transaction ID") {
+	wait_for_client_connection();
+	fdb::Transaction tr(db);
+	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+	constexpr std::string_view idKey = "\xff\xff/tracing/transaction_id";
+	tr.set(idKey, "12345");
+	auto result = tr.get(idKey, false);
+	REQUIRE(wait_future(result) == 0);
+	fdb_bool_t present;
+	const uint8_t* value;
+	int length;
+	fdb_check(result.get(&present, &value, &length));
+	REQUIRE(present);
+	CHECK(std::string(reinterpret_cast<const char*>(value), length) == UID(0, 12345).toString());
+	auto commit = tr.commit();
+	CHECK(wait_future(commit) == 0);
+}
+
+TEST_CASE("special-key-space invalid tracing and maintenance values") {
+	wait_for_client_connection();
+	fdb::Transaction tr(db);
+	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+	std::string_view expectedDetail;
+	SUBCASE("invalid tracing ID") {
+		constexpr std::string_view idKey = "\xff\xff/tracing/transaction_id";
+		expectedDetail = "transaction_id";
+		SUBCASE("out-of-range decimal transaction ID") {
+			tr.set(idKey, "18446744073709551616");
+		}
+		SUBCASE("non-hexadecimal digit in transaction ID") {
+			tr.set(idKey, "0000000000000001000000000000000g");
+		}
+		SUBCASE("zero decimal transaction ID") {
+			tr.set(idKey, "0");
+		}
+		SUBCASE("zero hexadecimal transaction ID") {
+			tr.set(idKey, "00000000000000000000000000000000");
+		}
+	}
+	SUBCASE("invalid maintenance duration") {
+		constexpr std::string_view zoneKey = "\xff\xff/management/maintenance/zone1";
+		expectedDetail = "duration";
+		SUBCASE("non-numeric maintenance duration") {
+			tr.set(zoneKey, "abc");
+		}
+		SUBCASE("non-finite maintenance duration") {
+			tr.set(zoneKey, "nan");
+		}
+		SUBCASE("maintenance duration exceeds the version range") {
+			tr.set(zoneKey, "1e30");
+		}
+	}
+	auto commit = tr.commit();
+	REQUIRE(wait_future(commit) == error_code_special_keys_api_failure);
+	auto message = tr.get("\xff\xff/error_message", false);
+	REQUIRE(wait_future(message) == 0);
+	fdb_bool_t present;
+	const uint8_t* value;
+	int length;
+	fdb_check(message.get(&present, &value, &length));
+	REQUIRE(present);
+	rapidjson::Document diagnostic;
+	diagnostic.Parse(reinterpret_cast<const char*>(value), length);
+	REQUIRE(diagnostic.IsObject());
+	REQUIRE(diagnostic.HasMember("message"));
+	REQUIRE(diagnostic["message"].IsString());
+	CHECK(std::string_view(diagnostic["message"].GetString()).find(expectedDetail) != std::string_view::npos);
+}
+
 TEST_CASE("special-key-space disable tracing") {
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
@@ -2506,6 +2716,22 @@ TEST_CASE("special-key-space disable tracing") {
 		CHECK(token == 0);
 		break;
 	}
+}
+
+TEST_CASE("special-key-space tracing options after a management read") {
+	fdb::Transaction tr(db);
+	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+	auto lock = tr.get("\xff\xff/management/db_locked", false);
+	REQUIRE(wait_future(lock) == 0);
+
+	SUBCASE("token") {
+		tr.set("\xff\xff/tracing/token", "false");
+	}
+	SUBCASE("transaction ID") {
+		tr.set("\xff\xff/tracing/transaction_id", UID(1, 2).toString());
+	}
+	auto commit = tr.commit();
+	CHECK(wait_future(commit) == error_code_special_keys_api_failure);
 }
 
 TEST_CASE("special-key-space tracing get range") {

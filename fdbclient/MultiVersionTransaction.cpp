@@ -44,6 +44,8 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 
+#include <atomic>
+
 #ifdef __unixish__
 #include <fcntl.h>
 #endif // __unixish__
@@ -399,9 +401,13 @@ NativeCdcStreamInfo copyNativeCdcStreamInfo(FdbCApi::FDBNativeCdcStreamInfo cons
 	NativeCdcStreamInfo result;
 	result.name = Key(StringRef(source.name.key, source.name.keyLength));
 	result.streamId = source.streamId;
-	result.keys = KeyRange(
-	    KeyRangeRef(KeyRef(static_cast<const uint8_t*>(source.keyRange.beginKey), source.keyRange.beginKeyLength),
-	                KeyRef(static_cast<const uint8_t*>(source.keyRange.endKey), source.keyRange.endKeyLength)));
+	result.ranges.reserve(source.rangeCount);
+	for (int i = 0; i < source.rangeCount; ++i) {
+		auto const& range = source.ranges[i];
+		result.ranges.emplace_back(
+		    KeyRangeRef(KeyRef(static_cast<const uint8_t*>(range.beginKey), range.beginKeyLength),
+		                KeyRef(static_cast<const uint8_t*>(range.endKey), range.endKeyLength)));
+	}
 	result.minVersion = source.minVersion;
 	return result;
 }
@@ -555,13 +561,51 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
-ThreadFuture<CDCStreamId> DLDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
+ThreadFuture<CDCStreamId> DLDatabase::registerNativeCdcStream(const KeyRef& name, const std::vector<KeyRange>& ranges) {
 	if (!api->databaseRegisterNativeCdcStream) {
 		return unsupported_operation();
 	}
+	if (ranges.empty() || ranges.size() > NATIVE_CDC_MAX_RANGES) {
+		return client_invalid_operation();
+	}
 
-	FdbCApi::FDBFuture* f = api->databaseRegisterNativeCdcStream(
-	    db, name.begin(), name.size(), keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size());
+	std::vector<FdbCApi::FDBKeyRange> cRanges;
+	cRanges.reserve(ranges.size());
+	for (auto const& range : ranges) {
+		cRanges.push_back({ range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size() });
+	}
+	FdbCApi::FDBFuture* f =
+	    api->databaseRegisterNativeCdcStream(db, name.begin(), name.size(), cRanges.data(), cRanges.size());
+	return toThreadFuture<CDCStreamId>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		uint64_t streamId;
+		FdbCApi::fdb_error_t error = api->futureGetUInt64(f, &streamId);
+		ASSERT(!error);
+		return streamId;
+	});
+}
+
+ThreadFuture<CDCStreamId> DLDatabase::registerNativeCdcOrderedStream(const KeyRef& name,
+                                                                     const std::vector<KeyRange>& ranges,
+                                                                     const std::vector<Key>& splitPoints) {
+	if (!api->databaseRegisterNativeCdcOrderedStream) {
+		return unsupported_operation();
+	}
+	if (ranges.empty() || ranges.size() > NATIVE_CDC_MAX_RANGES ||
+	    splitPoints.size() >= NATIVE_CDC_MAX_ORDERED_PARTITIONS) {
+		return client_invalid_operation();
+	}
+	std::vector<FdbCApi::FDBKeyRange> cRanges;
+	cRanges.reserve(ranges.size());
+	for (auto const& range : ranges) {
+		cRanges.push_back({ range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size() });
+	}
+	std::vector<FdbCApi::FDBKey> cSplitPoints;
+	cSplitPoints.reserve(splitPoints.size());
+	for (auto const& splitPoint : splitPoints) {
+		cSplitPoints.push_back({ splitPoint.begin(), splitPoint.size() });
+	}
+	FdbCApi::FDBFuture* f = api->databaseRegisterNativeCdcOrderedStream(
+	    db, name.begin(), name.size(), cRanges.data(), cRanges.size(), cSplitPoints.data(), cSplitPoints.size());
 	return toThreadFuture<CDCStreamId>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		uint64_t streamId;
 		FdbCApi::fdb_error_t error = api->futureGetUInt64(f, &streamId);
@@ -782,6 +826,8 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_register_cdc_stream",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
+	loadClientFunction(
+	    &api->databaseRegisterNativeCdcOrderedStream, lib, fdbCPath, "fdb_database_register_cdc_ordered_stream", false);
 	loadClientFunction(&api->databaseRemoveNativeCdcStream,
 	                   lib,
 	                   fdbCPath,
@@ -1656,8 +1702,15 @@ ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, co
 	return executeOperation(&IDatabase::createSnapshot, uid, snapshot_command);
 }
 
-ThreadFuture<CDCStreamId> MultiVersionDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
-	return executeOperation(&IDatabase::registerNativeCdcStream, name, keys);
+ThreadFuture<CDCStreamId> MultiVersionDatabase::registerNativeCdcStream(const KeyRef& name,
+                                                                        const std::vector<KeyRange>& ranges) {
+	return executeOperation(&IDatabase::registerNativeCdcStream, name, ranges);
+}
+
+ThreadFuture<CDCStreamId> MultiVersionDatabase::registerNativeCdcOrderedStream(const KeyRef& name,
+                                                                               const std::vector<KeyRange>& ranges,
+                                                                               const std::vector<Key>& splitPoints) {
+	return executeOperation(&IDatabase::registerNativeCdcOrderedStream, name, ranges, splitPoints);
 }
 
 ThreadFuture<Void> MultiVersionDatabase::removeNativeCdcStream(const KeyRef& name) {
@@ -2995,7 +3048,7 @@ TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing") {
 	return Void();
 }
 
-class ValidateFuture final : public ThreadCallback {
+class ValidateFuture final : public ThreadCallback, public ThreadSafeReferenceCounted<ValidateFuture> {
 public:
 	ValidateFuture(ThreadFuture<int> f, ErrorOr<int> expectedValue, std::set<int> legalErrors)
 	  : f(f), expectedValue(expectedValue), legalErrors(legalErrors) {}
@@ -3003,20 +3056,31 @@ public:
 	bool canFire(int notMadeActive) const override { return true; }
 
 	void fire(const Void& unused, int& userParam) override {
-		ASSERT(!f.isError() && !expectedValue.isError() && f.get() == expectedValue.get());
-		delete this;
+		int value = f.get();
+		ASSERT(!expectedValue.isError());
+		ASSERT_EQ(value, expectedValue.get());
+		valueRead = true;
+		delref();
 	}
 
 	void error(const Error& e, int& userParam) override {
 		ASSERT(legalErrors.contains(e.code()) ||
 		       (f.isError() && expectedValue.isError() && f.getError().code() == expectedValue.getError().code()));
-		delete this;
+		delref();
+	}
+
+	void releaseValidatedValue() {
+		// The release thread may consume the value reference acquired by fire() only after it checks the result.
+		if (valueRead.exchange(false)) {
+			f.getPtr()->releaseMemory();
+		}
 	}
 
 private:
 	ThreadFuture<int> f;
 	ErrorOr<int> expectedValue;
 	std::set<int> legalErrors;
+	std::atomic<bool> valueRead{ false };
 };
 
 struct FutureInfo {
@@ -3031,9 +3095,12 @@ struct FutureInfo {
 	FutureInfo(ThreadFuture<int> future, ErrorOr<int> expectedValue, std::set<int> legalErrors = std::set<int>())
 	  : future(future), expectedValue(expectedValue), legalErrors(legalErrors) {}
 
-	void validate() {
+	Reference<ValidateFuture> validate() {
 		int userParam;
-		future.callOrSetAsCallback(new ValidateFuture(future, expectedValue, legalErrors), userParam, 0);
+		auto validator = makeReference<ValidateFuture>(future, expectedValue, legalErrors);
+		validator->addref(); // The callback owns this reference until fire() or error() returns.
+		future.callOrSetAsCallback(validator.getPtr(), userParam, 0);
+		return validator;
 	}
 
 	ThreadFuture<int> future;
@@ -3082,15 +3149,10 @@ THREAD_FUNC setAbort(void* arg) {
 }
 
 THREAD_FUNC releaseMem(void* arg) {
+	Reference<ValidateFuture> validator(static_cast<ValidateFuture*>(arg));
 	threadSleep(0.1 * deterministicRandom()->random01());
 	try {
-		// Must get for releaseMemory to work
-		((ThreadSingleAssignmentVar<int>*)arg)->get();
-	} catch (Error&) {
-		// Swallow
-	}
-	try {
-		((ThreadSingleAssignmentVar<int>*)arg)->releaseMemory();
+		validator->releaseValidatedValue();
 	} catch (Error& e) {
 		printf("Caught error in releaseMem: %s\n", e.name());
 		ASSERT(false);
@@ -3183,13 +3245,14 @@ THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 				}
 
 				tf.legalErrors.insert(error_code_operation_cancelled);
-				tf.validate();
+				auto validator = tf.validate();
 
 				auto tfp = tf.future.extractPtr();
 
 				if (deterministicRandom()->coinflip()) {
 					if (deterministicRandom()->coinflip()) {
-						threads.push_back(g_network->startThread(releaseMem, tfp, 0, "fdb-release-mem"));
+						threads.push_back(
+						    g_network->startThread(releaseMem, validator.extractPtr(), 0, "fdb-release-mem"));
 					}
 					threads.push_back(g_network->startThread(cancel, tfp, 0, "fdb-cancel"));
 					undestroyed.push_back((ThreadSingleAssignmentVar<int>*)tfp);
@@ -3362,6 +3425,29 @@ TEST_CASE("fdbclient/multiversionclient/MapSingleAssignmentVar") {
 	}
 
 	waitThread(thread);
+}
+
+TEST_CASE("fdbclient/multiversionclient/MapSingleAssignmentVar/releaseValidatedValue") {
+	ThreadFuture<int> source{ Never() };
+	auto future = mapThreadFuture<int, int>(source, [](ErrorOr<int> result) -> ErrorOr<int> {
+		ASSERT(result.isError());
+		ASSERT_EQ(result.getError().code(), error_code_operation_cancelled);
+		return 42;
+	});
+	FutureInfo mapped(future, 42);
+	auto validator = mapped.validate();
+	validator->releaseValidatedValue();
+
+	auto toCancel = mapped.future;
+	toCancel.cancel();
+	ASSERT_EQ(mapped.future.getPtr()->getErrorCode(), error_code_success);
+	validator->releaseValidatedValue();
+	ASSERT_EQ(mapped.future.getPtr()->getErrorCode(), error_code_future_released);
+
+	FutureInfo failed(ThreadFuture<int>{ operation_cancelled() }, operation_cancelled());
+	failed.validate()->releaseValidatedValue();
+	ASSERT_EQ(failed.future.getError().code(), error_code_operation_cancelled);
+	return Void();
 }
 
 struct FlatMapTest {

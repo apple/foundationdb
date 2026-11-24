@@ -37,8 +37,7 @@ class ProtocolVersion implements Comparable<ProtocolVersion> {
 			protocolVersionSevenOne,
 			protocolVersionSevenThree,
 			protocolVersionSevenFour,
-			protocolVersionEightZero,
-	);
+			protocolVersionEightZero);
 
 	private static final long compatibleProtocolVersionMask = 0xFFFFFFFFFFFF0000L;
 	private final long protocolVersion;

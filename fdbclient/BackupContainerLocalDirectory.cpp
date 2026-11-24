@@ -24,6 +24,7 @@
 #include "flow/IAsyncFile.h"
 #include "flow/FaultInjection.h"
 #include "flow/Platform.h"
+#include "flow/UnitTest.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
@@ -123,6 +124,19 @@ static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(std::str
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::listFiles");
 
 	co_return results;
+}
+
+// Names passed to the file operations below are relative to the container directory and are joined onto it with
+// joinPath(), which does not resolve "..".  Reject any name that could resolve outside the container and, unless
+// allowContainerRoot, any name that resolves to the container directory itself.
+void validatePathInContainer(const std::string& path, const std::string& containerPath, bool allowContainerRoot) {
+	if (relativePathIsContained(path) && (allowContainerRoot || cleanPath(path) != ".")) {
+		return;
+	}
+	TraceEvent(SevWarnAlways, "BackupContainerLocalDirectoryInvalidPath")
+	    .detail("Path", path)
+	    .detail("ContainerPath", containerPath);
+	throw backup_invalid_info();
 }
 
 } // namespace
@@ -232,6 +246,7 @@ Future<bool> BackupContainerLocalDirectory::exists() {
 }
 
 Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std::string& path) {
+	validatePathInContainer(path, m_path, /*allowContainerRoot=*/false);
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED;
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::readFile");
 	// Simulation does not properly handle opening the same file from multiple machines using a shared filesystem,
@@ -259,11 +274,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(fullPath, flags, 0644);
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		int encBlockSize = encryptionBlockSize;
-		f = map(f, [encBlockSize](Reference<IAsyncFile> r) {
-			return Reference<IAsyncFile>(
-			    makeReference<AsyncFileEncrypted>(r, AsyncFileEncrypted::Mode::READ_ONLY, encBlockSize));
-		});
+		f = encryptedFile(f, AsyncFileEncrypted::Mode::READ_ONLY);
 	}
 
 	if (g_network->isSimulated()) {
@@ -293,6 +304,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 }
 
 Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const std::string& path) {
+	validatePathInContainer(path, m_path, /*allowContainerRoot=*/false);
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::writeFile");
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
 	            IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
@@ -302,11 +314,7 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		int encBlockSize = encryptionBlockSize;
-		f = map(f, [encBlockSize](Reference<IAsyncFile> r) {
-			return Reference<IAsyncFile>(
-			    makeReference<AsyncFileEncrypted>(r, AsyncFileEncrypted::Mode::APPEND_ONLY, encBlockSize));
-		});
+		f = encryptedFile(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
 	}
 	return map(f, [=](Reference<IAsyncFile> file) -> Reference<IBackupFile> {
 		return makeReference<BackupFile>(path, file, fullPath);
@@ -318,6 +326,7 @@ Future<Void> BackupContainerLocalDirectory::writeEntireFile(const std::string& p
 }
 
 Future<Void> BackupContainerLocalDirectory::deleteFile(const std::string& path) {
+	validatePathInContainer(path, m_path, /*allowContainerRoot=*/false);
 	::deleteFile(joinPath(m_path, path));
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::deleteFile");
 	return Void();
@@ -326,6 +335,7 @@ Future<Void> BackupContainerLocalDirectory::deleteFile(const std::string& path) 
 Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerLocalDirectory::listFiles(
     const std::string& path,
     std::function<bool(std::string const&)>) {
+	validatePathInContainer(path, m_path, /*allowContainerRoot=*/true);
 	return listFiles_impl(path, m_path);
 }
 
@@ -343,4 +353,40 @@ Future<Void> BackupContainerLocalDirectory::deleteContainer(int* pNumDeleted) {
 
 		return Void();
 	});
+}
+
+std::string BackupContainerLocalDirectory::getLocation() const {
+	return "file://" + m_path;
+}
+
+TEST_CASE("/backup/containers/localdir/rejectsEscapingPaths") {
+	// Nothing is read or written: every name below is rejected before the container directory is touched.
+	auto bc = makeReference<BackupContainerLocalDirectory>(
+	    "file:///nonexistent-fdb-backup-container-test", Optional<std::string>(), 0);
+
+	auto expectRejected = [](std::function<void()> op) {
+		try {
+			op();
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_backup_invalid_info);
+			return;
+		}
+		ASSERT(false);
+	};
+
+	for (const char* path : { "../x", "a/../../x", "/etc/passwd" }) {
+		expectRejected([&] { (void)bc->readFile(path); });
+		expectRejected([&] { (void)bc->writeFile(path); });
+		expectRejected([&] { (void)bc->deleteFile(path); });
+		expectRejected([&] { (void)bc->listFiles(path, nullptr); });
+	}
+
+	// Names that resolve to the container directory itself are only allowed for listing.
+	for (const char* path : { "", ".", "a/.." }) {
+		expectRejected([&] { (void)bc->readFile(path); });
+		expectRejected([&] { (void)bc->writeFile(path); });
+		expectRejected([&] { (void)bc->deleteFile(path); });
+	}
+
+	return Void();
 }

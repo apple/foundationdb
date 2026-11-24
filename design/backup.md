@@ -111,6 +111,13 @@ Even though, in the above description logging mutations is shown as continuous t
 With the above backup scenario, we could restore to any version from c to d or g to h. No other versions are
    restorable.
 
+   The end of the restorable range (d, h) is the version up to which the differential log has actually been copied, not
+   necessarily the time the backup was discontinued. Discontinuing a backup that is already restorable cancels its
+   remaining tasks and marks it completed immediately (`FileBackupAgent::discontinueBackup`), so mutation logs that have
+   not been copied yet are not part of the backup. To make a backup cover everything up to a version v (for example, to
+   compare a restore with the live data after writes have stopped), wait until the backup's maximum restorable version
+   is at least v before discontinuing it.
+
 #### Continuous Backup
 
 Instead of going through the pain of monitoring for backup becoming too large and restarting backup, we could just

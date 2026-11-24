@@ -23,6 +23,21 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/UnitTest.h"
 
+namespace {
+
+struct LegacyCDCProxyInterface {
+	constexpr static FileIdentifier file_identifier = CDCProxyInterface::file_identifier;
+	Optional<Key> processId;
+	PublicRequestStream<CDCConsumeRequest> consume;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, processId, consume);
+	}
+};
+
+} // namespace
+
 TEST_CASE("/NativeCDC/InternalInterfaceFlatBufferRoundTrip") {
 	const NetworkAddress workerAddress(IPAddress(0x01020304), 4500);
 	const NetworkAddress cdcAddress(IPAddress(0x05060708), 4501);
@@ -39,6 +54,7 @@ TEST_CASE("/NativeCDC/InternalInterfaceFlatBufferRoundTrip") {
 
 	CDCProxyInterface cdcProxy;
 	cdcProxy.consume = PublicRequestStream<CDCConsumeRequest>(Endpoint({ cdcAddress }, UID(5, 6)));
+	cdcProxy.supportsOrderedStreams = true;
 
 	RegisterMasterRequest request;
 	request.id = UID(7, 8);
@@ -53,7 +69,47 @@ TEST_CASE("/NativeCDC/InternalInterfaceFlatBufferRoundTrip") {
 	ASSERT_EQ(decodedRequest.id, request.id);
 	ASSERT_EQ(decodedRequest.cdcProxies.size(), 1);
 	ASSERT_EQ(decodedRequest.cdcProxies.front().id(), cdcProxy.id());
+	ASSERT(decodedRequest.cdcProxies.front().supportsOrderedStreams);
+	ASSERT_EQ(decodedRequest.cdcProxies.front().registerOrderedStream.getEndpoint().token,
+	          cdcProxy.consume.getEndpoint().getAdjustedEndpoint(9).token);
 
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/OrderedInterfaceCompatibility") {
+	const NetworkAddress address(IPAddress(0x05060708), 4501);
+	LegacyCDCProxyInterface legacy;
+	legacy.processId = Key("cdc-proxy"_sr);
+	legacy.consume = PublicRequestStream<CDCConsumeRequest>(Endpoint({ address }, UID(5, 6)));
+	const auto oldBytes = ObjectWriter::toValue(legacy, Unversioned());
+	const auto decoded = ObjectReader::fromStringRef<CDCProxyInterface>(oldBytes, Unversioned());
+	ASSERT(!decoded.supportsOrderedStreams);
+	ASSERT_EQ(decoded.processId, legacy.processId);
+	ASSERT_EQ(decoded.consume.getEndpoint().token, legacy.consume.getEndpoint().token);
+	const std::vector<Endpoint> endpoints{ decoded.registerStream.getEndpoint(),
+		                                   decoded.removeStream.getEndpoint(),
+		                                   decoded.ack.getEndpoint(),
+		                                   decoded.waitFailure.getEndpoint(),
+		                                   decoded.haltForTesting.getEndpoint(),
+		                                   decoded.getBufferStatusForTesting.getEndpoint(),
+		                                   decoded.setPopsPausedForTesting.getEndpoint(),
+		                                   decoded.getStatus.getEndpoint() };
+	for (int i = 0; i < endpoints.size(); ++i) {
+		ASSERT_EQ(endpoints[i].token, legacy.consume.getEndpoint().getAdjustedEndpoint(i + 1).token);
+		ASSERT_EQ(endpoints[i].getPrimaryAddress(), address);
+	}
+
+	CDCProxyInterface current = decoded;
+	current.supportsOrderedStreams = true;
+	const auto newBytes = ObjectWriter::toValue(current, Unversioned());
+	const auto decodedLegacy = ObjectReader::fromStringRef<LegacyCDCProxyInterface>(newBytes, Unversioned());
+	ASSERT_EQ(decodedLegacy.processId, legacy.processId);
+	ASSERT_EQ(decodedLegacy.consume.getEndpoint().token, legacy.consume.getEndpoint().token);
+	const auto decodedCurrent = ObjectReader::fromStringRef<CDCProxyInterface>(newBytes, Unversioned());
+	ASSERT(decodedCurrent.supportsOrderedStreams);
+	ASSERT_EQ(decodedCurrent.registerOrderedStream.getEndpoint().token,
+	          legacy.consume.getEndpoint().getAdjustedEndpoint(9).token);
+	ASSERT_EQ(decodedCurrent.registerOrderedStream.getEndpoint().getPrimaryAddress(), address);
 	return Void();
 }
 

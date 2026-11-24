@@ -173,7 +173,7 @@ struct MetricBatch {
 	MetricBatch() = default;
 
 	explicit MetricBatch(FDBScope* in) {
-		assert(in != nullptr);
+		ASSERT(in != nullptr);
 		scope.inserts = std::move(in->inserts);
 		scope.appends = std::move(in->appends);
 		scope.updates = std::move(in->updates);

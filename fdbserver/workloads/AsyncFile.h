@@ -67,7 +67,7 @@ struct AsyncFileWorkload : TestWorkload {
 
 	std::string path;
 
-	explicit(false) AsyncFileWorkload(WorkloadContext const&);
+	explicit AsyncFileWorkload(WorkloadContext const&);
 	~AsyncFileWorkload() override = default;
 
 	// Allocates a buffer of a given size.  If necessary, the buffer will be aligned to 4K

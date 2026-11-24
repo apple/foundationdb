@@ -69,7 +69,7 @@ struct LogfileTracer : ITracer {
 		for (const auto& event : span.events) {
 			TraceEvent(SevInfo, "TracingSpanEvent", span.context.traceID)
 			    .detail("Name", event.name)
-			    .detail("Time", event.time);
+			    .detail("SpanEventTime", event.time);
 			for (const auto& [key, value] : event.attributes) {
 				TraceEvent(SevInfo, "TracingSpanEventAttribute", span.context.traceID)
 				    .detail("Key", key)
@@ -525,6 +525,14 @@ TEST_CASE("/flow/Tracing/UnsampledSpanSkipsAddress") {
 	ASSERT_EQ(linked.attributes[1].key, "address"_sr);
 	return Void();
 };
+
+TEST_CASE("/flow/Tracing/TraceIdValidity") {
+	ASSERT(SpanContext(UID(0, 12345), 1).isValid());
+	ASSERT(SpanContext(UID(1, 0), 1).isValid());
+	ASSERT(!SpanContext(UID(0, 0), 1).isValid());
+	ASSERT(!SpanContext(UID(0, 12345), 0).isValid());
+	return Void();
+}
 
 TEST_CASE("/flow/Tracing/AddLinks") {
 	Span span1("span_with_links"_loc);

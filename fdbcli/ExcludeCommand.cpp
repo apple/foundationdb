@@ -193,8 +193,7 @@ Future<Void> checkForCoordinators(Reference<IDatabase> db, std::set<AddressExclu
 	}
 
 	for (const auto& c : coordinatorList) {
-		if (exclusions.find(AddressExclusion(c.ip, c.port)) != exclusions.end() ||
-		    exclusions.find(AddressExclusion(c.ip)) != exclusions.end()) {
+		if (exclusions.contains(AddressExclusion(c.ip, c.port)) || exclusions.contains(AddressExclusion(c.ip))) {
 			fprintf(stderr, "WARNING: %s is a coordinator!\n", c.toString().c_str());
 			foundCoordinator = true;
 		}
@@ -341,14 +340,12 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 		std::set<AddressExclusion> absentExclusions;
 		for (const auto& addr : exclusionSet) {
 			auto worker = workerPorts.find(addr.ip);
-			if (worker == workerPorts.end())
-				absentExclusions.insert(addr);
-			else if (addr.port > 0 && !worker->second.contains(addr.port))
+			if (worker == workerPorts.end() || (addr.port > 0 && !worker->second.contains(addr.port)))
 				absentExclusions.insert(addr);
 		}
 
 		for (const auto& exclusion : exclusionSet) {
-			if (absentExclusions.find(exclusion) != absentExclusions.end()) {
+			if (absentExclusions.contains(exclusion)) {
 				if (exclusion.port == 0) {
 					fprintf(stderr,
 					        "  %s(Whole machine)  ---- WARNING: Missing from cluster!Be sure that you excluded the "

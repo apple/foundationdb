@@ -41,7 +41,7 @@ struct ResolutionBalancer {
 	std::vector<ResolverInterface> resolvers;
 	AsyncTrigger triggerResolution;
 
-	explicit(false) ResolutionBalancer(Version* version) : pVersion(version) {}
+	explicit ResolutionBalancer(Version* version) : pVersion(version) {}
 
 	Future<Void> resolutionBalancing();
 

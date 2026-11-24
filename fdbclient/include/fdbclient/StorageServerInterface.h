@@ -88,6 +88,7 @@ struct UpdateCommitCostRequest {
 
 struct StorageServerInterface {
 	constexpr static FileIdentifier file_identifier = 15302073;
+	constexpr static int kNumAdjustedEndpoints = 26;
 	enum { BUSY_ALLOWED = 0, BUSY_FORCE = 1, BUSY_LOCAL = 2 };
 
 	enum { LocationAwareLoadBalance = 1 };
@@ -143,6 +144,17 @@ public:
 	UID id() const { return uniqueID; }
 	bool isAcceptingRequests() const { return acceptingRequests; }
 	void startAcceptingRequests() { acceptingRequests = true; }
+
+	std::vector<UID> getEndpointTokens() const {
+		// Token at index 0 is the base `getValue` endpoint; adjusted endpoints start at 1.
+		std::vector<UID> tokens;
+		tokens.reserve(kNumAdjustedEndpoints + 1);
+		tokens.push_back(getValue.getEndpoint().token);
+		for (int i = 1; i <= kNumAdjustedEndpoints; ++i) {
+			tokens.push_back(getValue.getEndpoint().getAdjustedEndpoint(i).token);
+		}
+		return tokens;
+	}
 	void stopAcceptingRequests() { acceptingRequests = false; }
 	bool isTss() const { return tssPairID.present(); }
 	std::string toString() const { return id().shortString(); }
@@ -160,6 +172,10 @@ public:
 
 		if (Ar::isDeserializing) {
 			initEndpointsFromGetValue();
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && g_network && g_network->global(INetwork::enFlowTransport)) {
+				FlowTransport::transport().interfaceTracker.created(
+				    getValue.getEndpoint().getPrimaryAddress(), "SS", getEndpointTokens());
+			}
 		}
 	}
 	bool operator==(StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }

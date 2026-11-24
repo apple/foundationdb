@@ -22,6 +22,8 @@
 #ifndef FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
 #define FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
 
+#include <memory>
+
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/DataDistributorInterface.h"
@@ -162,7 +164,7 @@ struct GetMetricsRequest {
 	KeyRange keys;
 	Promise<StorageMetrics> reply;
 	GetMetricsRequest() = default;
-	explicit(false) GetMetricsRequest(KeyRange const& keys) : keys(keys) {}
+	explicit GetMetricsRequest(KeyRange const& keys) : keys(keys) {}
 };
 
 struct GetTopKMetricsReply {
@@ -188,10 +190,10 @@ public:
 	double maxReadLoadPerKSecond = 0, minReadLoadPerKSecond = 0; // all returned shards won't exceed this read load
 
 	GetTopKMetricsRequest() = default;
-	explicit(false) GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
-	                                      int topK = 1,
-	                                      double maxReadLoadPerKSecond = std::numeric_limits<double>::max(),
-	                                      double minReadLoadPerKSecond = 0)
+	explicit GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
+	                               int topK = 1,
+	                               double maxReadLoadPerKSecond = std::numeric_limits<double>::max(),
+	                               double minReadLoadPerKSecond = 0)
 	  : topK(topK), keys(keys), maxReadLoadPerKSecond(maxReadLoadPerKSecond),
 	    minReadLoadPerKSecond(minReadLoadPerKSecond) {
 		ASSERT_GE(topK, 1);
@@ -252,7 +254,7 @@ FDB_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
 	PhysicalShardCollection() : lastTransitionStartTime(now()), requireTransition(false) {}
-	explicit(false) PhysicalShardCollection(Reference<IDDTxnProcessor> db)
+	explicit PhysicalShardCollection(Reference<IDDTxnProcessor> db)
 	  : txnProcessor(db), lastTransitionStartTime(now()), requireTransition(false) {}
 
 	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
@@ -583,7 +585,35 @@ struct DDBulkLoadEngineTask {
 	DDBulkLoadEngineTask() = default;
 
 	DDBulkLoadEngineTask(BulkLoadTaskState coreState, Version commitVersion, Promise<BulkLoadAck> completeAck)
-	  : coreState(coreState), commitVersion(commitVersion), completeAck(completeAck) {}
+	  : coreState(coreState), commitVersion(commitVersion), completeAck(completeAck) {
+		// Replacement relocators share the placement budget only when an early split can preserve all data.
+		// For an indivisible task, exhausting the budget marks the task failed.
+		const auto range = coreState.getRange();
+		for (const auto& manifest : coreState.getManifests()) {
+			const auto boundary = manifest.getBeginKey();
+			if (range.begin < boundary && boundary < range.end) {
+				placementMisses = std::make_shared<int>(0);
+				break;
+			}
+		}
+	}
+
+	bool recordPlacementMiss(int relocatorMisses) {
+		constexpr int limit = 50;
+		if (!placementMisses) {
+			return relocatorMisses == limit;
+		}
+		if (*placementMisses == limit) {
+			return false;
+		}
+		return ++*placementMisses == limit;
+	}
+
+	void recordPlacementSuccess() {
+		if (placementMisses) {
+			*placementMisses = 0;
+		}
+	}
 
 	bool operator==(const DDBulkLoadEngineTask& rhs) const {
 		return coreState == rhs.coreState && commitVersion == rhs.commitVersion;
@@ -592,10 +622,13 @@ struct DDBulkLoadEngineTask {
 	std::string toString() const {
 		return coreState.toString() + ", [CommitVersion]: " + std::to_string(commitVersion);
 	}
+
+private:
+	std::shared_ptr<int> placementMisses;
 };
 
-inline bool bulkLoadIsEnabled(int bulkLoadModeValue) {
-	return SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && bulkLoadModeValue == 1;
+inline bool bulkLoadIsEnabled(int bulkLoadModeValue, bool shardEncodeLocationMetadata) {
+	return shardEncodeLocationMetadata && bulkLoadModeValue == 1;
 }
 
 inline bool bulkDumpIsEnabled(int bulkDumpModeValue) {
@@ -604,7 +637,7 @@ inline bool bulkDumpIsEnabled(int bulkDumpModeValue) {
 
 class BulkLoadTaskCollection : public ReferenceCounted<BulkLoadTaskCollection> {
 public:
-	explicit(false) BulkLoadTaskCollection(UID ddId) : ddId(ddId) {
+	explicit BulkLoadTaskCollection(UID ddId) : ddId(ddId) {
 		bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadEngineTask>());
 	}
 

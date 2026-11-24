@@ -59,7 +59,6 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/NetworkTest.h"
 #include "fdbserver/kvstore/KVFileUtils.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
@@ -130,7 +129,7 @@ enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_TLOG_SPILL_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
 	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_RESEED_TIME, OPT_KEY, OPT_MEMLIMIT, OPT_VMEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
-	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
+	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_TLOG_SPILL_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_PROXY, OPT_DEPRECATED_CONFIG_PATH, OPT_DEPRECATED_USE_TEST_CONFIG_DB, OPT_DEPRECATED_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_IP_TRUSTED_MASK,
@@ -214,7 +213,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_KNOB,                  "--knob-",                     SO_REQ_SEP },
 	{ OPT_UNITTESTPARAM,         "--test-",                     SO_REQ_SEP },
 	{ OPT_LOCALITY,              "--locality-",                 SO_REQ_SEP },
-	{ OPT_TESTSERVERS,           "--testservers",               SO_REQ_SEP },
 	{ OPT_TEST_ON_SERVERS,       "--testonservers",             SO_NONE },
 	{ OPT_METRICSCONNFILE,       "--metrics-cluster",           SO_REQ_SEP },
 	{ OPT_METRICSPREFIX,         "--metrics-prefix",            SO_REQ_SEP },
@@ -608,7 +606,7 @@ static void printUsage(const char* name, bool devhelp) {
 		printf("  --build-flags  Print build information and exit.\n");
 		printOptionUsage("-r ROLE, --role ROLE",
 		                 " Server role (valid options are fdbd, test, multitest,"
-		                 " simulation, networktestclient, networktestserver, restore"
+		                 " simulation, restore"
 		                 " consistencycheck, consistencycheckurgent, kvfileintegritycheck, kvfilegeneratesums, "
 		                 "kvfiledump, mocks3server, unittests)."
 		                 " The default is `fdbd'.");
@@ -648,9 +646,6 @@ static void printUsage(const char* name, bool devhelp) {
 		                 " the given threshold. fdbserver needs to be compiled with"
 		                 " USE_GPERFTOOLS flag in order to use this feature.");
 #endif
-		printOptionUsage("--testservers ADDRESSES",
-		                 " The addresses of networktestservers"
-		                 " specified as ADDRESS:PORT,ADDRESS:PORT...");
 		printOptionUsage("--testonservers", " Testers are recruited on servers.");
 		printOptionUsage("--metrics-cluster CONNFILE",
 		                 " The cluster file designating where this process will"
@@ -944,8 +939,6 @@ enum class ServerRole {
 	KVFileDump,
 	MockS3Server,
 	MultiTester,
-	NetworkTestClient,
-	NetworkTestServer,
 	Restore,
 	SearchMutations,
 	Simulation,
@@ -972,7 +965,6 @@ struct CLIOptions {
 
 	const char* testFile = "tests/default.txt";
 	std::string kvFile;
-	std::string testServersStr;
 	std::string whitelistBinPaths;
 
 	std::vector<std::string> publicAddressStrs, listenAddressStrs, grpcAddressStrs;
@@ -1227,10 +1219,6 @@ private:
 					role = ServerRole::VersionedMapTest;
 				else if (!strcmp(sRole, "createtemplatedb"))
 					role = ServerRole::CreateTemplateDatabase;
-				else if (!strcmp(sRole, "networktestclient"))
-					role = ServerRole::NetworkTestClient;
-				else if (!strcmp(sRole, "networktestserver"))
-					role = ServerRole::NetworkTestServer;
 				else if (!strcmp(sRole, "kvfileintegritycheck"))
 					role = ServerRole::KVFileIntegrityCheck;
 				else if (!strcmp(sRole, "kvfilegeneratesums"))
@@ -1547,9 +1535,6 @@ private:
 			case OPT_CRASHONERROR:
 				g_crashOnError = true;
 				break;
-			case OPT_TESTSERVERS:
-				testServersStr = args.OptionArg();
-				break;
 			case OPT_TEST_ON_SERVERS:
 				testOnServers = true;
 				break;
@@ -1778,12 +1763,6 @@ private:
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (role == ServerRole::NetworkTestClient && testServersStr.empty()) {
-			fprintf(stderr, "ERROR: please specify --testservers\n");
-			printHelpTeaser(argv[0]);
-			flushAndExit(FDB_EXIT_ERROR);
-		}
-
 		if (role == ServerRole::ChangeClusterKey) {
 			bool error = false;
 			if (newClusterKey.empty()) {
@@ -1985,8 +1964,7 @@ int main(int argc, char* argv[]) {
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);
 
-			const bool expectsPublicAddress =
-			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::MockS3Server);
+			const bool expectsPublicAddress = (role == ServerRole::FDBD || role == ServerRole::MockS3Server);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public-address option is required\n");
@@ -2382,12 +2360,6 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == ServerRole::CreateTemplateDatabase) {
 			createTemplateDatabase();
-		} else if (role == ServerRole::NetworkTestClient) {
-			f = stopAfter(networkTestClient(opts.testServersStr));
-			g_network->run();
-		} else if (role == ServerRole::NetworkTestServer) {
-			f = stopAfter(networkTestServer());
-			g_network->run();
 		} else if (role == ServerRole::KVFileIntegrityCheck) {
 			f = stopAfter(KVFileCheck(opts.kvFile, true));
 			g_network->run();

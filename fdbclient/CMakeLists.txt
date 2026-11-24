@@ -44,6 +44,26 @@ add_custom_target(fdboptions ALL
           ${FDBOPTIONS_GEN_CPP}
           fdboptions_c)
 
+# Builds without a C# toolchain fall back to vexillographer.py, so it must
+# generate the same output as the C# vexillographer.
+if(VEXILLOGRAPHER_USES_CSHARP AND Python3_EXECUTABLE)
+  set(vexillographer_parity_langs c cpp)
+  foreach(lang python ruby java)
+    string(TOUPPER ${lang} lang_upper)
+    if(WITH_${lang_upper}_BINDING)
+      list(APPEND vexillographer_parity_langs ${lang})
+    endif()
+  endforeach()
+  string(REPLACE ";" "," vexillographer_parity_langs "${vexillographer_parity_langs}")
+  add_test(NAME vexillographer_python_parity
+    COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/vexillographer/test_python_parity.py
+      ${CMAKE_CURRENT_SOURCE_DIR}/vexillographer/fdb.options
+      ${vexillographer_parity_langs}
+      -- ${VEXILLOGRAPHER_COMMAND})
+  set_tests_properties(vexillographer_python_parity PROPERTIES LABELS vexillographer TIMEOUT 120)
+endif()
+
 ################################################################################
 # Build information
 ################################################################################
@@ -83,7 +103,6 @@ target_include_directories(s3client PRIVATE
     "${CMAKE_BINARY_DIR}/fdbrpc/include"
     "${CMAKE_SOURCE_DIR}/contrib/md5/include"
     "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
-    "/opt/boost_1_86_0_clang/include"
 )
 
 target_link_libraries(s3client PRIVATE

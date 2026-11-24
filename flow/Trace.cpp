@@ -40,6 +40,7 @@
 #include "flow/TDMetric.h"
 #include "MetricSample.h"
 #include "flow/network.h"
+#include "flow/UnitTest.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -166,6 +167,9 @@ private:
 
 public:
 	bool logTraceEventMetrics;
+	// The audit trace log (see openAuditTraceFile) only holds events marked with logToAuditFile(), so it skips the
+	// event throttler and doesn't re-log the main log's trackLatest events when it rolls.
+	const bool auditLog;
 
 	void initMetrics() {
 		ASSERT(!isOpen());
@@ -286,9 +290,9 @@ public:
 		}
 	};
 
-	TraceLog()
+	explicit TraceLog(bool auditLog = false)
 	  : formatter(new XmlTraceLogFormatter()), loggedLength(0), bufferLength(0), opened(false), preopenOverflowCount(0),
-	    logTraceEventMetrics(false), issues(new IssuesList), barriers(new BarrierList) {}
+	    logTraceEventMetrics(false), auditLog(auditLog), issues(new IssuesList), barriers(new BarrierList) {}
 
 	bool isOpen() const { return opened; }
 
@@ -313,7 +317,7 @@ public:
 		                  processName.c_str(),
 		                  timestamp.c_str(),
 		                  deterministicRandom()->randomAlphaNumeric(6).c_str());
-		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(
+		logWriter = makeReference<FileTraceLogWriter>(
 		    directory,
 		    processName,
 		    basename,
@@ -321,7 +325,7 @@ public:
 		    tracePartialFileSuffix,
 		    maxLogsSize,
 		    [this]() { barriers->triggerAll(); },
-		    issues));
+		    issues);
 
 		if (g_network->isSimulated())
 			writer = makeReference<DummyThreadPool>();
@@ -382,13 +386,28 @@ public:
 		fields.setAnnotated();
 	}
 
-	void writeEvent(TraceEventFields fields, std::string trackLatestKey, bool trackError) {
+	void writeEvent(TraceEventFields fields, std::string trackLatestKey, bool trackError, bool logLine = true) {
 		MutexHolder hold(mutex);
 
 		annotateEvent(fields);
 
 		if (!trackLatestKey.empty()) {
 			fields.addField("TrackLatestType", "Original");
+		}
+
+		// latestEventCache is a snapshot of the most recent fields for a key (used by status/introspection),
+		// independent of whether this particular line ends up written to the trace log. Update it before any of
+		// the log-buffering logic below, so a dropped/overflowed/never-logged (logLine=false) line never leaves
+		// the cache stale.
+		if (trackError) {
+			latestEventCache.setLatestError(fields);
+		}
+		if (!trackLatestKey.empty()) {
+			latestEventCache.set(trackLatestKey, fields);
+		}
+
+		if (!logLine) {
+			return;
 		}
 
 		if (!isOpen() &&
@@ -418,13 +437,6 @@ public:
 			if (++tracedLines > FLOW_KNOBS->MAX_TRACE_LINES && failedLineOverflow == 0) {
 				failedLineOverflow = 1; // we only want to do this once
 			}
-		}
-
-		if (trackError) {
-			latestEventCache.setLatestError(fields);
-		}
-		if (!trackLatestKey.empty()) {
-			latestEventCache.set(trackLatestKey, fields);
 		}
 	}
 
@@ -459,7 +471,7 @@ public:
 	}
 
 	ThreadFuture<Void> flush() {
-		if (TraceEvent::isNetworkThread()) {
+		if (TraceEvent::isNetworkThread() && !auditLog) {
 			traceEventThrottlerCache->poll();
 		}
 
@@ -482,7 +494,10 @@ public:
 			double time = 0;
 			writer->post(o);
 
-			std::vector<TraceEventFields> events = latestEventCache.getAllUnsafe();
+			std::vector<TraceEventFields> events;
+			if (!auditLog) {
+				events = latestEventCache.getAllUnsafe();
+			}
 			for (int idx = 0; idx < events.size(); idx++) {
 				if (events[idx].size() > 0) {
 					TraceEventFields rolledFields;
@@ -682,6 +697,14 @@ TraceEventFields LatestEventCache::getLatestError() {
 }
 
 static TraceLog g_traceLog;
+// Events marked with logToAuditFile(), in their own files. See openAuditTraceFile(). Only created when an audit trace
+// file is opened (only fdbcli does, and only with audit logging on), so every other process just sees nullptr. Never
+// freed, like the trace writer threads.
+static std::atomic<TraceLog*> g_auditTraceLog{ nullptr };
+
+static TraceLog* auditTraceLog() {
+	return g_auditTraceLog.load(std::memory_order_acquire);
+}
 
 namespace {
 template <bool validate>
@@ -765,18 +788,68 @@ bool validateTraceClockSource(std::string source) {
 	return traceClockSource</*validate*/ true>(source);
 }
 
+static ThreadFuture<Void> flushAuditTraceFile() {
+	TraceLog* audit = auditTraceLog();
+	if (!audit || !audit->isOpen()) {
+		return Void();
+	}
+	return audit->flush();
+}
+
+// Audit trace file hooks, called first thing from the existing flush and close functions below so those stay as they
+// were. Without an audit trace file (every process but fdbcli with audit logging on) each is just a null check.
+static void flushAuditTraceFileIfOpen() {
+	if (TraceLog* audit = auditTraceLog(); audit && audit->isOpen()) {
+		audit->flush();
+	}
+}
+
+static void flushAuditTraceFileBlocking() {
+	// Audit trace files are never opened in simulation, so unlike flushTraceFileVoid there's no simulated case.
+	if (TraceLog* audit = auditTraceLog(); audit && audit->isOpen()) {
+		audit->flush().getBlocking();
+	}
+}
+
+static void closeAuditTraceFile() {
+	if (TraceLog* audit = auditTraceLog()) {
+		audit->close();
+	}
+}
+
 ThreadFuture<Void> flushTraceFile() {
+	flushAuditTraceFileIfOpen();
 	if (!g_traceLog.isOpen())
 		return Void();
 	return g_traceLog.flush();
 }
 
 void flushTraceFileVoid() {
+	flushAuditTraceFileBlocking();
 	if (g_network && g_network->isSimulated())
 		flushTraceFile();
 	else {
 		flushTraceFile().getBlocking();
 	}
+}
+
+static std::string traceFileBaseName(const Optional<NetworkAddress>& na,
+                                     std::string const& baseOfBase,
+                                     std::string const& identifier) {
+	if (na.present()) {
+		std::string ip = na.get().ip.toString();
+		std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
+
+		if (!identifier.empty()) {
+			return format("%s.%s.%s", baseOfBase.c_str(), ip.c_str(), identifier.c_str());
+		}
+		return format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.get().port);
+	}
+	if (!identifier.empty()) {
+		return format("%s.0.0.0.0.%s", baseOfBase.c_str(), identifier.c_str());
+	}
+	// If neither network address nor identifier is provided, use PID for identification
+	return format("%s.0.0.0.0.%d", baseOfBase.c_str(), ::getpid());
 }
 
 void openTraceFile(const Optional<NetworkAddress>& na,
@@ -797,22 +870,7 @@ void openTraceFile(const Optional<NetworkAddress>& na,
 	if (baseOfBase.empty())
 		baseOfBase = "trace";
 
-	std::string baseName;
-	if (na.present()) {
-		std::string ip = na.get().ip.toString();
-		std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
-
-		if (!identifier.empty()) {
-			baseName = format("%s.%s.%s", baseOfBase.c_str(), ip.c_str(), identifier.c_str());
-		} else {
-			baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.get().port);
-		}
-	} else if (!identifier.empty()) {
-		baseName = format("%s.0.0.0.0.%s", baseOfBase.c_str(), identifier.c_str());
-	} else {
-		// If neither network address nor identifier is provided, use PID for identification
-		baseName = format("%s.0.0.0.0.%d", baseOfBase.c_str(), ::getpid());
-	}
+	std::string baseName = traceFileBaseName(na, baseOfBase, identifier);
 
 	if (initializeTraceMetrics) {
 		g_traceLog.initMetrics();
@@ -831,7 +889,59 @@ void openTraceFile(const Optional<NetworkAddress>& na,
 	g_traceBatch.dump();
 }
 
+void openAuditTraceFile(const Optional<NetworkAddress>& na,
+                        uint64_t rollsize,
+                        uint64_t maxLogsSize,
+                        std::string directory,
+                        std::string baseOfBase,
+                        std::string logGroup,
+                        std::string identifier,
+                        std::string tracePartialFileSuffix,
+                        std::string traceFormat) {
+	TraceLog* audit = auditTraceLog();
+	if (audit && audit->isOpen()) {
+		return;
+	}
+	if (!audit) {
+		audit = new TraceLog(/*auditLog*/ true);
+	}
+
+	if (directory.empty()) {
+		directory = ".";
+	}
+
+	if (baseOfBase.empty()) {
+		baseOfBase = "trace";
+	}
+
+	// Same as selectTraceFormatter: json if asked for, xml otherwise.
+	std::transform(traceFormat.begin(), traceFormat.end(), traceFormat.begin(), ::tolower);
+	if (traceFormat == "json") {
+		audit->formatter = Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
+	} else {
+		audit->formatter = Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
+	}
+
+	audit->open(directory,
+	            traceFileBaseName(na, baseOfBase + "_audit", identifier),
+	            logGroup,
+	            format("%lld", time(nullptr)),
+	            rollsize,
+	            maxLogsSize,
+	            na,
+	            tracePartialFileSuffix);
+	// Publish it only once it's open.
+	g_auditTraceLog.store(audit, std::memory_order_release);
+
+	// The recurring flush started by openTraceFile flushes the audit file too. Without a main trace file, start one
+	// just for the audit file.
+	if (!g_traceLog.isOpen()) {
+		uncancellable(recurring(&flushAuditTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
+	}
+}
+
 void closeTraceFile() {
+	closeAuditTraceFile();
 	g_traceLog.close();
 }
 
@@ -900,6 +1010,7 @@ BaseTraceEvent::BaseTraceEvent(BaseTraceEvent&& ev) {
 	trackingKey = ev.trackingKey;
 	type = ev.type;
 	timeIndex = ev.timeIndex;
+	auditFile = ev.auditFile;
 
 	for (int i = 0; i < NUM_MAJOR_LEVELS_OF_EVENTS; i++) {
 		eventCounts[i] = ev.eventCounts[i];
@@ -928,6 +1039,7 @@ BaseTraceEvent& BaseTraceEvent::operator=(BaseTraceEvent&& ev) {
 	trackingKey = ev.trackingKey;
 	type = ev.type;
 	timeIndex = ev.timeIndex;
+	auditFile = ev.auditFile;
 
 	for (int i = 0; i < NUM_MAJOR_LEVELS_OF_EVENTS; i++) {
 		eventCounts[i] = ev.eventCounts[i];
@@ -989,6 +1101,11 @@ TraceEvent::TraceEvent(Severity severity, AuditedEvent auditedEvent, UID id)
 
 TraceEvent::TraceEvent(AuditedEvent auditedEvent, UID id) : TraceEvent(SevInfo, auditedEvent, id) {}
 
+BaseTraceEvent& BaseTraceEvent::logToAuditFile() {
+	auditFile = true;
+	return *this;
+}
+
 void BaseTraceEvent::init(TraceInterval& interval) {
 	init();
 	switch (interval.count++) {
@@ -1032,7 +1149,14 @@ BaseTraceEvent::State BaseTraceEvent::init() {
 		}
 	}
 
-	if (enabled) {
+	// trackLatest() can promote an otherwise suppressFor'd/throttled event to TRACKED, but must not
+	// override severity filtering -- that's what keeps hot, low-severity events cheap.
+	bool belowMinSeverity = g_network && severity < FLOW_KNOBS->MIN_TRACE_SEVERITY;
+	if (!trackingKey.empty() && !belowMinSeverity) {
+		enabled.promoteToTrackedIfDisabled();
+	}
+
+	if (enabled.capturesDetails()) {
 		//    fprintf(stderr, "[%s:%d](%s) [%p] enabled tmpEventMetric [%s]\n", __FILE_NAME__, __LINE__, __FUNCTION__,
 		//            this, type);
 		tmpEventMetric = std::make_unique<DynamicEventMetric>(MetricNameRef());
@@ -1119,7 +1243,7 @@ BaseTraceEvent& TraceEvent::error(class Error const& error) {
 
 BaseTraceEvent& BaseTraceEvent::detailImpl(std::string&& key, std::string&& value, bool writeEventMetricField) {
 	init();
-	if (enabled) {
+	if (enabled.capturesDetails()) {
 		++g_allocation_tracing_disabled;
 		if (maxFieldLength >= 0 && value.size() > maxFieldLength) {
 			value = value.substr(0, maxFieldLength) + "...";
@@ -1161,7 +1285,7 @@ void BaseTraceEvent::setField(const char* key, const std::string& value) {
 }
 
 BaseTraceEvent& BaseTraceEvent::detailf(std::string key, const char* valueFormat, ...) {
-	if (enabled) {
+	if (enabled.capturesDetails()) {
 		va_list args;
 		va_start(args, valueFormat);
 		std::string value;
@@ -1175,7 +1299,7 @@ BaseTraceEvent& BaseTraceEvent::detailf(std::string key, const char* valueFormat
 }
 
 BaseTraceEvent& BaseTraceEvent::log(const char* valueFormat, ...) {
-	if (enabled) {
+	if (enabled.capturesDetails()) {
 		va_list args;
 		va_start(args, valueFormat);
 		std::string value;
@@ -1190,7 +1314,7 @@ BaseTraceEvent& BaseTraceEvent::log(const char* valueFormat, ...) {
 }
 
 BaseTraceEvent& BaseTraceEvent::detailfNoMetric(std::string&& key, const char* valueFormat, ...) {
-	if (enabled) {
+	if (enabled.capturesDetails()) {
 		va_list args;
 		va_start(args, valueFormat);
 		std::string value;
@@ -1365,7 +1489,17 @@ void BaseTraceEvent::writeEvent() {
 					auto name = fmt::format("TraceEvent::{}", type);
 					ProcessEvents::trigger(StringRef(name), this, success());
 				}
-				g_traceLog.writeEvent(fields, trackingKey, severity > SevWarnAlways);
+				// auditFile is false for every event outside fdbcli's audit logging, so this doesn't even look at
+				// g_auditTraceLog for them.
+				TraceLog* audit = auditFile ? auditTraceLog() : nullptr;
+				if (audit && audit->isOpen()) [[unlikely]] {
+					// If the main log is open, annotate from it so Machine, LogGroup, Roles and universal fields match
+					// the main file. Otherwise the audit log adds its own Machine and LogGroup.
+					g_traceLog.annotateEvent(fields);
+					audit->writeEvent(fields, "", false);
+				} else {
+					g_traceLog.writeEvent(fields, trackingKey, severity > SevWarnAlways);
+				}
 
 				if (g_traceLog.isOpen()) {
 					// Log Metrics
@@ -1382,6 +1516,17 @@ void BaseTraceEvent::writeEvent() {
 						g_traceLog.logMetrics(severity, type, id, event_ts);
 					}
 				}
+			} else if (enabled.capturesDetails()) {
+				// TRACKED: fields were captured (trackLatest() was called before our first detail()), but this
+				// event must never be written to the trace log or counted toward any log-volume accounting --
+				// only latestEventCache gets updated.
+				double time = TraceEvent::getCurrentTime();
+				fields.mutate(timeIndex).second = format("%.6f", time);
+				if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
+					fields.mutate(timeIndex + 1).second = TraceEvent::printRealTime(time);
+				}
+				setThreadId();
+				g_traceLog.writeEvent(fields, trackingKey, /*trackError=*/false, /*logLine=*/false);
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "TraceEventLoggingError").errorUnsuppressed(e);
@@ -1831,3 +1976,107 @@ std::string traceableStringToString(const char* value, size_t S) {
 // correct outcome
 static_assert("InvalidToken"_audit, "Either AuditedEvent has a bug or whitelisting for this event type has changed");
 static_assert(!"nvalidToken"_audit, "AuditedEvent has a bug");
+
+TEST_CASE("/flow/Trace/trackLatestBypassesSuppression") {
+	// trackLatest() called before the first detail() should still get its fields into
+	// latestEventCache even if the event itself ends up fully suppressed -- this is the guarantee
+	// BaseTraceEvent::State::TRACKED exists to provide.
+	//
+	// suppressFor()'s suppression decision only runs if isNetworkThread() -- true for every real
+	// production trace event (always run from within g_network->run()'s scheduler), but this test
+	// body executes synchronously before main() ever reaches g_network->run() (UnitTestRunner's
+	// own runTests() actor runs synchronously up to its first real co_await), so it isn't true yet
+	// on this thread unless we say so explicitly.
+	TraceEvent::setNetworkThread();
+
+	std::string type = "UnitTestTrackLatestBypass_" + deterministicRandom()->randomUniqueID().toString();
+	std::string key = "UnitTestTrackLatestBypassKey_" + deterministicRandom()->randomUniqueID().toString();
+
+	// First event of this type establishes suppression for the next 1000s; it is itself unsuppressed.
+	TraceEvent(SevInfo, type.c_str()).suppressFor(1000.0).detail("Iteration", 0);
+
+	// Second event of the same type, within the suppression window, would normally be fully
+	// disabled (its detail() calls would be no-ops) -- but trackLatest() is called first here.
+	// Called as separate statements, not chained, because trackLatest() returns BaseTraceEvent&,
+	// which narrows away TraceEvent::suppressFor() for any call chained after it. The nested scope
+	// makes ev's destructor (which actually writes the event) run before we check the cache below.
+	{
+		TraceEvent ev(SevInfo, type.c_str());
+		ev.trackLatest(key);
+		ev.suppressFor(1000.0);
+		// Sanity check the premise: this event must actually be suppressed for the rest of the
+		// test to mean anything.
+		ASSERT(!ev.isEnabled());
+		ev.detail("Iteration", 1);
+	}
+
+	TraceEventFields const& latest = latestEventCache.get(key);
+	ASSERT(latest.size() > 0);
+	ASSERT_EQ(latest.getInt64("Iteration"), 1);
+	ASSERT(latest.getValue("Type") == type);
+
+	return Void();
+}
+
+TEST_CASE("/flow/Trace/trackLatestAfterDetailStaysNoopWhenSuppressed") {
+	// Calling trackLatest() after detail() -- the convention used everywhere else in the codebase
+	// today -- must behave exactly as before: if the event ends up suppressed, nothing reaches
+	// latestEventCache, regardless of trackLatest() having been called.
+	TraceEvent::setNetworkThread();
+
+	std::string type = "UnitTestTrackLatestNoop_" + deterministicRandom()->randomUniqueID().toString();
+	std::string key = "UnitTestTrackLatestNoopKey_" + deterministicRandom()->randomUniqueID().toString();
+
+	TraceEvent(SevInfo, type.c_str()).suppressFor(1000.0).detail("Iteration", 0);
+
+	{
+		TraceEvent ev(SevInfo, type.c_str());
+		ev.suppressFor(1000.0);
+		// Sanity check the premise: this second same-type event, within the suppression window
+		// established above, must actually be suppressed before we can test what happens next.
+		ASSERT(!ev.isEnabled());
+		ev.detail("Iteration", 1);
+		ev.trackLatest(key);
+	}
+
+	TraceEventFields const& latest = latestEventCache.get(key);
+	ASSERT_EQ(latest.size(), 0);
+
+	return Void();
+}
+
+TEST_CASE("/flow/Trace/trackLatestFirstStillWorksWhenNotSuppressed") {
+	// trackLatest() called first must not change behavior for an event that wouldn't have been
+	// suppressed anyway -- promoteToTrackedIfDisabled() only ever touches an already-DISABLED state.
+	TraceEvent::setNetworkThread();
+
+	std::string type = "UnitTestTrackLatestNormal_" + deterministicRandom()->randomUniqueID().toString();
+	std::string key = "UnitTestTrackLatestNormalKey_" + deterministicRandom()->randomUniqueID().toString();
+
+	TraceEvent(SevInfo, type.c_str()).trackLatest(key).detail("Iteration", 0);
+
+	TraceEventFields const& latest = latestEventCache.get(key);
+	ASSERT(latest.size() > 0);
+	ASSERT_EQ(latest.getInt64("Iteration"), 0);
+
+	return Void();
+}
+
+TEST_CASE("/flow/Trace/trackLatestDoesNotBypassSeverityFiltering") {
+	// Severity filtering must stay in effect even with trackLatest() called first. Compute a
+	// severity below MIN_TRACE_SEVERITY rather than hardcoding SevDebug, which isn't below it in
+	// simulation.
+	TraceEvent::setNetworkThread();
+
+	Severity belowMinSeverity = static_cast<Severity>(FLOW_KNOBS->MIN_TRACE_SEVERITY - 1);
+
+	std::string type = "UnitTestTrackLatestSeverity_" + deterministicRandom()->randomUniqueID().toString();
+	std::string key = "UnitTestTrackLatestSeverityKey_" + deterministicRandom()->randomUniqueID().toString();
+
+	TraceEvent(belowMinSeverity, type.c_str()).trackLatest(key).detail("Iteration", 0);
+
+	TraceEventFields const& latest = latestEventCache.get(key);
+	ASSERT_EQ(latest.size(), 0);
+
+	return Void();
+}

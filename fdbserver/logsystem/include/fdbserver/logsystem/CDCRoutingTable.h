@@ -23,6 +23,7 @@
 #include <set>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -32,20 +33,20 @@ class IKeyValueStore;
 // Active CDC write routing reconstructed from durable stream and tag-history metadata.
 class CDCRoutingTable : NonCopyable {
 	struct StreamState {
-		Optional<KeyRange> keys;
+		std::vector<KeyRange> ranges;
 		Optional<std::pair<Version, Tag>> tag;
 	};
 
 	std::unordered_map<CDCStreamId, StreamState> streams;
 	KeyRangeMap<std::set<Tag>> tagsByRange;
 
-	void updateRange(CDCStreamId streamId, KeyRangeRef const& keys);
+	void updateRanges(CDCStreamId streamId, std::vector<KeyRange> const& ranges);
 	bool updateTag(CDCStreamId streamId, Version version, Tag tag);
 	void rebuildRanges();
 
 public:
 	CDCRoutingTable();
-	void setRange(CDCStreamId streamId, KeyRangeRef const& keys);
+	void setRanges(CDCStreamId streamId, std::vector<KeyRange> const& ranges);
 	void setTag(CDCStreamId streamId, Version version, Tag tag);
 	void reload(IKeyValueStore* txnStateStore);
 	bool empty() const { return streams.empty(); }

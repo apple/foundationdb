@@ -18,22 +18,10 @@
  * limitations under the License.
  */
 
-#include "boost/asio/buffer.hpp"
-#include "boost/asio/ip/address.hpp"
-#include "boost/system/system_error.hpp"
-#include "flow/Arena.h"
-#include "flow/Knobs.h"
-#include "flow/Platform.h"
-#include "flow/SimpleCounter.h"
-#include "flow/Trace.h"
-#include "flow/swift.h"
-#include "flow/swift_concurrency_hooks.h"
 #include <algorithm>
 #include <memory>
 #include <string_view>
-#ifndef BOOST_SYSTEM_NO_LIB
-#define BOOST_SYSTEM_NO_LIB
-#endif
+
 #ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #endif
@@ -41,10 +29,21 @@
 #define BOOST_REGEX_NO_LIB
 #endif
 #include <boost/asio.hpp>
-#include "boost/asio/ssl.hpp"
+#include <boost/asio/ssl.hpp>
+#include <boost/asio/buffer.hpp>
+#include <boost/asio/ip/address.hpp>
+#include <boost/system/system_error.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/range.hpp>
 #include <boost/algorithm/string/join.hpp>
+
+#include "flow/Arena.h"
+#include "flow/Knobs.h"
+#include "flow/Platform.h"
+#include "flow/SimpleCounter.h"
+#include "flow/Trace.h"
+#include "flow/swift.h"
+#include "flow/swift_concurrency_hooks.h"
 #include "flow/network.h"
 #include "flow/IThreadPool.h"
 
@@ -66,6 +65,7 @@
 #include "flow/ScopeExit.h"
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
+#include "flow/TLSHandshakeWorker.h"
 
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
@@ -154,7 +154,8 @@ public:
 	Future<Reference<IConnection>> connect(NetworkAddress toAddr, tcp::socket* existingSocket = nullptr) override;
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override;
 	Future<Reference<IConnection>> connectExternalWithHostname(NetworkAddress toAddr,
-	                                                           const std::string& hostname) override;
+	                                                           const std::string& hostname,
+	                                                           tcp::socket* existingSocket = nullptr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
 	// The mock DNS methods should only be used in simulation.
@@ -218,7 +219,7 @@ public:
 
 	flowGlobalType global(int id) const override { return (globals.size() > id) ? globals[id] : nullptr; }
 	void setGlobal(size_t id, flowGlobalType v) override {
-		ASSERT(id < globals.size());
+		ASSERT_LT(id, globals.size());
 		globals[id] = v;
 	}
 
@@ -241,6 +242,8 @@ public:
 	ASIOReactor reactor;
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
 	Reference<IThreadPool> sslHandshakerPool;
+	// Non-blocking handshake workers; when present, they run every TLS handshake.
+	std::vector<TLSHandshakeWorker*> sslHandshakeWorkers;
 	int sslHandshakerThreadsStarted;
 	int sslPoolHandshakesInProgress;
 	TLSConfig tlsConfig;
@@ -378,6 +381,7 @@ class BindPromise {
 	std::variant<const char*, AuditedEvent> errContext;
 	UID errID;
 	NetworkAddress peerAddr;
+	boost::system::error_code* errorOut = nullptr;
 
 public:
 	BindPromise(const char* errContext, UID errID, NetworkAddress peerAddr)
@@ -386,15 +390,21 @@ public:
 	  : errContext(auditedEvent), errID(errID), peerAddr(peerAddr) {}
 	BindPromise(BindPromise const& r) = default;
 	BindPromise(BindPromise&& r) noexcept
-	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
+	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr), errorOut(r.errorOut) {}
 
 	Future<Void> getFuture() const { return p.getFuture(); }
 
 	NetworkAddress getPeerAddr() const { return peerAddr; }
 
+	// `*out` receives the error, if any, before the future is set. `out` must outlive the operation.
+	void setErrorOut(boost::system::error_code* out) { errorOut = out; }
+
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
 		try {
 			if (error) {
+				if (errorOut) {
+					*errorOut = error;
+				}
 				// Log the error...
 				{
 					std::optional<TraceEvent> traceEvent;
@@ -439,11 +449,11 @@ public:
 
 	void close() override { closeSocket(); }
 
-	explicit Connection(boost::asio::io_service& io_service)
+	explicit Connection(boost::asio::io_context& io_service)
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service) {}
 
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
-	static Future<Reference<IConnection>> connect(boost::asio::io_service* ios, NetworkAddress addr) {
+	static Future<Reference<IConnection>> connect(boost::asio::io_context* ios, NetworkAddress addr) {
 		Reference<Connection> self(new Connection(*ios));
 
 		self->peer_address = addr;
@@ -497,7 +507,7 @@ public:
 		boost::system::error_code err;
 		++g_net2->countReads;
 		size_t toRead = end - begin;
-		size_t size = socket.read_some(boost::asio::mutable_buffers_1(begin, toRead), err);
+		size_t size = socket.read_some(boost::asio::mutable_buffer(begin, toRead), err);
 		g_net2->bytesReceived += size;
 		//TraceEvent("ConnRead", this->id).detail("Bytes", size);
 		if (err) {
@@ -525,7 +535,7 @@ public:
 		if (err) {
 			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit is
 			// positive so check explicitly.
-			ASSERT(limit > 0);
+			ASSERT_GT(limit, 0);
 			bool notEmpty = false;
 			for (auto p = data; p; p = p->next) {
 				if (p->bytes_written - p->bytes_sent > 0) {
@@ -579,8 +589,7 @@ private:
 
 	void closeSocket() {
 		boost::system::error_code error;
-		socket.close(error);
-		if (error) {
+		if (socket.close(error)) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("PeerAddr", peer_address)
@@ -648,7 +657,7 @@ class UDPSocket : public IUDPSocket, ReferenceCounted<UDPSocket> {
 	bool isPublic = false;
 
 public:
-	static Future<Reference<IUDPSocket>> connect(boost::asio::io_service* io_service,
+	static Future<Reference<IUDPSocket>> connect(boost::asio::io_context* io_service,
 	                                             Optional<NetworkAddress> toAddress,
 	                                             bool isV6) {
 		Reference<UDPSocket> self(new UDPSocket(*io_service, toAddress, isV6));
@@ -726,8 +735,7 @@ public:
 
 	void bind(NetworkAddress const& addr) override {
 		boost::system::error_code ec;
-		socket.bind(udpEndpoint(addr), ec);
-		if (ec) {
+		if (socket.bind(udpEndpoint(addr), ec)) {
 			Error x;
 			if (ec.value() == EADDRINUSE)
 				x = address_in_use();
@@ -754,13 +762,12 @@ public:
 	boost::asio::ip::udp::socket::native_handle_type native_handle() override { return socket.native_handle(); }
 
 private:
-	UDPSocket(boost::asio::io_service& io_service, Optional<NetworkAddress> toAddress, bool isV6)
+	UDPSocket(boost::asio::io_context& io_service, Optional<NetworkAddress> toAddress, bool isV6)
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service, isV6 ? udp::v6() : udp::v4()) {}
 
 	void closeSocket() {
 		boost::system::error_code error;
-		socket.close(error);
-		if (error) {
+		if (socket.close(error)) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("ErrorCode", error.value())
@@ -821,7 +828,7 @@ public:
 			acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
 			co_await f;
 			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes())
-			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
+			                                                    : IPAddress(peer_endpoint.address().to_v4().to_uint());
 			conn->accept(NetworkAddress(peer_address, peer_endpoint.port()));
 
 			co_return conn;
@@ -861,18 +868,18 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		ssl_socket::handshake_type type;
 		boost::system::error_code err;
 		NetworkAddress peerAddr;
+		// If set, receives `err` before `done` is set. Owned by the connection, which outlives the handshake.
+		boost::system::error_code* errorOut = nullptr;
 	};
 
 	void action(Handshake& h) {
 		try {
-			h.socket.next_layer().non_blocking(false, h.err);
-			if (!h.err.failed()) {
-				h.socket.handshake(h.type, h.err);
-			}
-			if (!h.err.failed()) {
-				h.socket.next_layer().non_blocking(true, h.err);
-			}
-			if (h.err.failed()) {
+			if (h.socket.next_layer().non_blocking(false, h.err).failed() ||
+			    h.socket.handshake(h.type, h.err).failed() ||
+			    h.socket.next_layer().non_blocking(true, h.err).failed()) {
+				if (h.errorOut) {
+					*h.errorOut = h.err;
+				}
 				TraceEvent(SevWarn,
 				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
 				                                                        : "N2_AcceptHandshakeError"_audit)
@@ -899,6 +906,16 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 	}
 };
 
+// Whether `error` is how a TLS handshake ends when overload on either end makes it time out or the peer give up: a
+// handshake worker's deadline (timed_out), a worker job cancelled by closeSocket() (operation_aborted), or the
+// connection closing.
+static bool isTimeoutOrDisconnect(const boost::system::error_code& error) {
+	return error == boost::asio::error::timed_out || error == boost::asio::error::operation_aborted ||
+	       error == boost::asio::error::eof || error == boost::asio::ssl::error::stream_truncated ||
+	       error == boost::asio::error::connection_reset || error == boost::asio::error::connection_aborted ||
+	       error == boost::asio::error::broken_pipe;
+}
+
 class SSLConnection final : public IConnection, ReferenceCounted<SSLConnection> {
 public:
 	void addref() override { ReferenceCounted<SSLConnection>::addref(); }
@@ -906,7 +923,7 @@ public:
 
 	void close() override { closeSocket(); }
 
-	explicit SSLConnection(boost::asio::io_service& io_service,
+	explicit SSLConnection(boost::asio::io_context& io_service,
 	                       Reference<ReferencedObject<boost::asio::ssl::context>> context)
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service), ssl_sock(socket, context->mutate()),
 	    sslContext(context), has_trusted_peer(false) {}
@@ -916,7 +933,7 @@ public:
 	    ssl_sock(socket, context->mutate()), sslContext(context) {}
 
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
-	static Future<Reference<IConnection>> connect(boost::asio::io_service* ios,
+	static Future<Reference<IConnection>> connect(boost::asio::io_context* ios,
 	                                              Reference<ReferencedObject<boost::asio::ssl::context>> context,
 	                                              NetworkAddress addr,
 	                                              tcp::socket* existingSocket = nullptr,
@@ -941,6 +958,7 @@ public:
 		if (existingSocket != nullptr) {
 			Reference<SSLConnection> self(new SSLConnection(context, existingSocket));
 			self->peer_address = addr;
+			self->sni_hostname = std::move(hostname);
 			self->init();
 			co_return self;
 		}
@@ -980,17 +998,26 @@ public:
 			                   self->peer_address,
 			                   [conn = self.getPtr()](bool verifyOk) { conn->has_trusted_peer = verifyOk; });
 
-			// If the background handshakers are not all busy, use one
-			// FIXME: see comment elsewhere about making this the only path.
-			if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
-			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
-				static SimpleCounter<int64_t>* countServerTLSHandshakesOnSideThreads =
-				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnSideThreads");
+			// Where the handshake runs:
+			// - Non-blocking workers (TLS_HANDSHAKE_NONBLOCKING_WORKERS): each worker thread drives many handshakes,
+			//   so a slow peer never ties up a thread and the network thread never runs handshakes.
+			// - Blocking pool: one handshake per thread. With DISABLE_MAINTHREAD_TLS_HANDSHAKE, handshakes queue for a
+			//   pool thread; otherwise they use one only if a thread is free.
+			// - Network thread: when there are no handshake threads, or every pool thread is busy and
+			//   DISABLE_MAINTHREAD_TLS_HANDSHAKE is off. The handshake's crypto then runs ahead of all other tasks.
+			static SimpleCounter<int64_t>* countServerTLSHandshakesOnSideThreads =
+			    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnSideThreads");
+			if (useHandshakeWorkers()) {
+				countServerTLSHandshakesOnSideThreads->increment(1);
+				onHandshook = self->startWorkerHandshake(boost::asio::ssl::stream_base::server);
+			} else if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
+			           N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				countServerTLSHandshakesOnSideThreads->increment(1);
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
 				handshake->setPeerAddr(self->getPeerAddress());
+				handshake->errorOut = &self->handshakeError;
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -999,13 +1026,16 @@ public:
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnMainThread");
 				countServerTLSHandshakesOnMainThread->increment(1);
 				BindPromise p("N2_AcceptHandshakeError"_audit, self->id, self->getPeerAddress());
+				p.setErrorOut(&self->handshakeError);
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
 			co_await onHandshook;
+			self->endWorkerHandshake();
 			co_await delay(0, TaskPriority::Handshake);
 			connected.send(Void());
 		} catch (...) {
+			self->abandonWorkerHandshake();
 			self->closeSocket();
 			connected.sendError(connection_failed());
 		}
@@ -1052,17 +1082,12 @@ public:
 				static SimpleCounter<int64_t>* countServerTLSHandshakesTimedout =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesTimedout");
 				countServerTLSHandshakesTimedout->increment(1);
+				self->handshakeTimedOut = true;
 				throw connection_failed();
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
-				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-				if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-					iter->second.first++;
-				} else {
-					g_network->networkInfo.serverTLSConnectionThrottler[peerIP] =
-					    std::make_pair(0, now() + FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT);
-				}
+				self->recordHandshakeFailure(peerIP, FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT);
 			}
 			// Either the connection failed, or was cancelled by the caller
 			self->closeSocket();
@@ -1077,16 +1102,40 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(N2::g_net2->activeTlsPolicy,
-			                   self->ssl_sock,
-			                   self->peer_address,
-			                   [conn = self.getPtr()](bool verifyOk) { conn->has_trusted_peer = verifyOk; });
+			if (self->sni_hostname.empty()) {
+				ConfigureSSLStream(N2::g_net2->activeTlsPolicy,
+				                   self->ssl_sock,
+				                   self->peer_address,
+				                   [conn = self.getPtr()](bool verifyOk) { conn->has_trusted_peer = verifyOk; });
+			} else {
+				// An external server (S3, a KMS) is authenticated by CA chain plus the SSL_set1_host() check below.
+				// The cluster's --tls-verify-peers rules describe FDB peers and would reject any such server.
+				self->ssl_sock.set_verify_callback(
+				    [conn = self.getPtr()](bool preverified, boost::asio::ssl::verify_context& ctx) {
+					    if (!preverified) {
+						    TraceEvent(SevWarn, "TLSExternalServerVerifyFailed")
+						        .suppressFor(1.0)
+						        .detail("PeerAddress", conn->peer_address)
+						        .detail("Hostname", conn->sni_hostname)
+						        .detail("VerifyError",
+						                X509_verify_cert_error_string(X509_STORE_CTX_get_error(ctx.native_handle())));
+					    }
+					    conn->has_trusted_peer = preverified;
+					    return preverified;
+				    });
+			}
 
 			// Set SNI hostname if we have one (for connections made with hostname) and SSL flags to check
 			// certificate against.
 			if (!self->sni_hostname.empty()) {
 				int result = SSL_set_tlsext_host_name(self->ssl_sock.native_handle(), self->sni_hostname.c_str());
-				SSL_set1_host(self->ssl_sock.native_handle(), self->sni_hostname.c_str());
+				// The hostname check is the only identity check beyond the CA chain, so it must not fail open.
+				if (SSL_set1_host(self->ssl_sock.native_handle(), self->sni_hostname.c_str()) != 1) {
+					TraceEvent(SevWarnAlways, "TLSSetHostnameCheckFailed")
+					    .detail("Hostname", self->sni_hostname)
+					    .detail("Addr", self->peer_address);
+					throw connection_failed();
+				}
 				SSL_set_hostflags(self->ssl_sock.native_handle(), X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
 				TraceEvent("SSLSetSNIResult")
 				    .detail("Hostname", self->sni_hostname)
@@ -1094,24 +1143,20 @@ public:
 				    .detail("Addr", self->peer_address);
 			}
 
-			// If the background handshakers are not all busy, use one
-
-			// FIXME: this should probably be changed never to use the
-			// main thread, as waiting for potentially high-RTT TLS
-			// handshakes can delay execution of everything else that
-			// runs on the main thread.  The cost of that (in terms of
-			// unpredictable system performance and reliability) is
-			// much, much higher than the cost a few hundred or
-			// thousand incremental threads.
-			if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
-			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
-				static SimpleCounter<int64_t>* countClientTLSHandshakesOnSideThreads =
-				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesOnSideThreads");
+			// Where the handshake runs: see doAcceptHandshake().
+			static SimpleCounter<int64_t>* countClientTLSHandshakesOnSideThreads =
+			    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesOnSideThreads");
+			if (useHandshakeWorkers()) {
+				countClientTLSHandshakesOnSideThreads->increment(1);
+				onHandshook = self->startWorkerHandshake(boost::asio::ssl::stream_base::client);
+			} else if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
+			           N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				countClientTLSHandshakesOnSideThreads->increment(1);
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
 				handshake->setPeerAddr(self->getPeerAddress());
+				handshake->errorOut = &self->handshakeError;
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -1120,13 +1165,16 @@ public:
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesOnMainThread");
 				countClientTLSHandshakesOnMainThread->increment(1);
 				BindPromise p("N2_ConnectHandshakeError"_audit, self->id, self->getPeerAddress());
+				p.setErrorOut(&self->handshakeError);
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
 			co_await onHandshook;
+			self->endWorkerHandshake();
 			co_await delay(0, TaskPriority::Handshake);
 			connected.send(Void());
 		} catch (...) {
+			self->abandonWorkerHandshake();
 			self->closeSocket();
 			connected.sendError(connection_failed());
 		}
@@ -1152,19 +1200,14 @@ public:
 				static SimpleCounter<int64_t>* countClientTLSHandshakesTimedout =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesTimedout");
 				countClientTLSHandshakesTimedout->increment(1);
+				self->handshakeTimedOut = true;
 				throw connection_failed();
 			}
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
 			if (e.code() != error_code_actor_cancelled) {
-				std::pair<IPAddress, uint16_t> peerIP = std::make_pair(self->peer_address.ip, self->peer_address.port);
-				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-				if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-					iter->second.first++;
-				} else {
-					g_network->networkInfo.serverTLSConnectionThrottler[peerIP] =
-					    std::make_pair(0, now() + FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT);
-				}
+				self->recordHandshakeFailure(std::make_pair(self->peer_address.ip, self->peer_address.port),
+				                             FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT);
 			}
 			self->closeSocket();
 			throw;
@@ -1197,7 +1240,7 @@ public:
 		boost::system::error_code err;
 		++g_net2->countReads;
 		size_t toRead = end - begin;
-		size_t size = ssl_sock.read_some(boost::asio::mutable_buffers_1(begin, toRead), err);
+		size_t size = ssl_sock.read_some(boost::asio::mutable_buffer(begin, toRead), err);
 		g_net2->bytesReceived += size;
 		//TraceEvent("ConnRead", this->id).detail("Bytes", size);
 		if (err) {
@@ -1230,7 +1273,7 @@ public:
 		if (err) {
 			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit is
 			// positive so check explicitly.
-			ASSERT(limit > 0);
+			ASSERT_GT(limit, 0);
 			bool notEmpty = false;
 			for (auto p = data; p; p = p->next) {
 				if (p->bytes_written - p->bytes_sent > 0) {
@@ -1257,6 +1300,13 @@ public:
 
 	bool hasTrustedPeer() const override { return has_trusted_peer; }
 
+	// Must not be called while the handshake may still be running, i.e. after it was cancelled.
+	bool handshakeTimedOutOrDisconnected() const override {
+		// After our timeout the handshake may still be running on another thread, writing handshakeError, so it is only
+		// read if the handshake finished.
+		return handshakeTimedOut || isTimeoutOrDisconnect(handshakeError);
+	}
+
 	UID getDebugID() const override { return id; }
 
 	tcp::socket& getSocket() override { return socket; }
@@ -1271,6 +1321,88 @@ private:
 	Reference<ReferencedObject<boost::asio::ssl::context>> sslContext;
 	bool has_trusted_peer;
 	std::string sni_hostname; // For Server Name Indication
+	// The error the TLS handshake failed with, if any.
+	boost::system::error_code handshakeError;
+	// Set when the handshake timeout fires before the handshake finishes.
+	bool handshakeTimedOut = false;
+
+	// Records a failed handshake toward TLS connection throttling of `peer`, which is throttled for `throttleTimeout`
+	// once its failures reach the limit. With TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS, timeouts and disconnects
+	// are not recorded. Must not be called if the handshake was cancelled, since it may still be running then.
+	void recordHandshakeFailure(std::pair<IPAddress, uint16_t> peer, double throttleTimeout) {
+		if (FLOW_KNOBS->TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS && handshakeTimedOutOrDisconnected()) {
+			return;
+		}
+		auto& throttler = g_network->networkInfo.serverTLSConnectionThrottler;
+		auto iter = throttler.find(peer);
+		if (iter != throttler.end()) {
+			iter->second.first++;
+		} else {
+			throttler[peer] = std::make_pair(0, now() + throttleTimeout);
+		}
+	}
+	// Set when closeSocket() is called while a handshake worker owns the socket. The handshake coroutine then closes
+	// the socket itself once the worker hands it back, and fails the connection even if the handshake succeeded.
+	bool closeRequested = false;
+
+	// Whether to use non-blocking handshake workers: only if this process created any (never on Windows, nor with zero
+	// handshake threads).
+	static bool useHandshakeWorkers() { return !N2::g_net2->sslHandshakeWorkers.empty(); }
+
+#ifndef _WIN32
+	// Set from startWorkerHandshake() until the worker hands the socket back; while set, only the worker thread may
+	// use the socket.
+	std::shared_ptr<TLSHandshakeJob> handshakeJob;
+
+	// Hands the handshake job to the least loaded worker. The returned future is ready when the worker hands the socket
+	// back, with an error if the handshake failed, timed out or was cancelled. The caller must then call
+	// endWorkerHandshake() (on success) or abandonWorkerHandshake() (on error) before using or closing the socket.
+	Future<Void> startWorkerHandshake(ssl_socket::handshake_type type) {
+		handshakeJob = std::make_shared<TLSHandshakeJob>(ssl_sock, type, getPeerAddress());
+		Future<Void> done = handshakeJob->done.getFuture();
+		const auto& workers = N2::g_net2->sslHandshakeWorkers;
+		auto leastLoaded = std::min_element(
+		    workers.begin(), workers.end(), [](auto* a, auto* b) { return a->activeJobCount() < b->activeJobCount(); });
+		(*leastLoaded)->submitJob(handshakeJob);
+		return done;
+	}
+
+	// Takes the socket back from the worker after it finished (or when no worker was used), keeping its error for
+	// handshakeError.
+	void abandonWorkerHandshake() {
+		if (handshakeJob) {
+			handshakeError = handshakeJob->error;
+		}
+		handshakeJob.reset();
+	}
+
+	// Closing a socket while a worker thread is still using it is unsafe: the descriptor number could be reused by a
+	// new connection under the worker. So if a worker owns the socket, ask it to stop and return true; the socket is
+	// then closed by the handshake coroutine (doAcceptHandshake/doConnectHandshake) when the worker hands it back.
+	bool deferCloseToWorker() {
+		if (!handshakeJob) {
+			return false;
+		}
+		closeRequested = true;
+		handshakeJob->worker->cancelJob(*handshakeJob);
+		return true;
+	}
+#else
+	// Handshake workers need epoll or kqueue; on Windows handshakes keep using the blocking pool.
+	Future<Void> startWorkerHandshake(ssl_socket::handshake_type) { UNREACHABLE(); }
+	void abandonWorkerHandshake() {}
+	bool deferCloseToWorker() { return false; }
+#endif
+
+	// Takes the socket back from the worker after a successful handshake. Throws if closeSocket() was called in the
+	// meantime (e.g. the handshake timed out just as it finished), so the caller closes the connection instead of using
+	// it. No-op unless a worker owned the socket.
+	void endWorkerHandshake() {
+		abandonWorkerHandshake();
+		if (closeRequested) {
+			throw connection_failed();
+		}
+	}
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
@@ -1280,11 +1412,17 @@ private:
 	}
 
 	void closeSocket() {
+		if (deferCloseToWorker()) {
+			return;
+		}
 		boost::system::error_code cancelError;
+		// NOLINTNEXTLINE(bugprone-unused-return-value): Closing the socket below also cancels outstanding operations.
 		socket.cancel(cancelError);
 		boost::system::error_code closeError;
+		// NOLINTNEXTLINE(bugprone-unused-return-value): Asio closes the descriptor even when close reports an error.
 		socket.close(closeError);
 		boost::system::error_code shutdownError;
+		// NOLINTNEXTLINE(bugprone-unused-return-value): Best-effort TLS teardown after the transport has closed.
 		ssl_sock.shutdown(shutdownError);
 	}
 
@@ -1347,7 +1485,7 @@ public:
 			acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
 			co_await f;
 			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes())
-			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
+			                                                    : IPAddress(peer_endpoint.address().to_v4().to_uint());
 
 			conn->accept(NetworkAddress(peer_address, peer_endpoint.port(), false, true));
 
@@ -1444,6 +1582,23 @@ static Future<Void> reloadCertificatesOnChange(
 	}
 }
 
+#ifndef _WIN32
+static bool useNonblockingHandshakeWorkers() {
+	return FLOW_KNOBS->TLS_HANDSHAKE_NONBLOCKING_WORKERS;
+}
+static TLSHandshakeWorker* newHandshakeWorker() {
+	return new TLSHandshakeWorker(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
+}
+#else
+// Non-blocking handshake workers need epoll or kqueue; Windows always uses the blocking pool.
+static bool useNonblockingHandshakeWorkers() {
+	return false;
+}
+static TLSHandshakeWorker* newHandshakeWorker() {
+	UNREACHABLE();
+}
+#endif
+
 void Net2::initTLS(ETLSInitState targetState) {
 	if (tlsInitializedState >= targetState) {
 		return;
@@ -1491,6 +1646,9 @@ void Net2::initTLS(ETLSInitState targetState) {
 		threadsToStart -= sslHandshakerThreadsStarted;
 
 		if (threadsToStart > 0) {
+			// Handshake threads are either non-blocking workers (TLS_HANDSHAKE_NONBLOCKING_WORKERS) or a blocking pool;
+			// never both. They serve incoming and outgoing handshakes and live for the rest of the process.
+			const bool useNonBlockingWorkers = useNonblockingHandshakeWorkers();
 			if (sslHandshakerThreadsStarted == 0) {
 #if defined(__linux__)
 				if (mallopt(M_ARENA_MAX, FLOW_KNOBS->TLS_MALLOC_ARENA_MAX) != 1) {
@@ -1498,14 +1656,26 @@ void Net2::initTLS(ETLSInitState targetState) {
 					    .detail("MaxArenas", FLOW_KNOBS->TLS_MALLOC_ARENA_MAX);
 				};
 #endif
-				sslHandshakerPool = createGenericThreadPool(FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE);
+				if (!useNonBlockingWorkers) {
+					sslHandshakerPool = createGenericThreadPool(FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE);
+				}
 			}
 
 			for (int i = 0; i < threadsToStart; ++i) {
 				++sslHandshakerThreadsStarted;
-				sslHandshakerPool->addThread(new SSLHandshakerThread(), "fdb-ssl-connect");
+				if (useNonBlockingWorkers) {
+					sslHandshakeWorkers.push_back(newHandshakeWorker());
+				} else {
+					sslHandshakerPool->addThread(new SSLHandshakerThread(), "fdb-ssl-connect");
+				}
 			}
 		}
+
+		TraceEvent("TLSHandshakeSettings")
+		    .detail("TargetState", targetState == ETLSInitState::LISTEN ? "Listen" : "Connect")
+		    .detail("HandshakeThreads", sslHandshakerThreadsStarted)
+		    .detail("NonblockingWorkers", !sslHandshakeWorkers.empty())
+		    .detail("DisableMainThreadHandshake", FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE);
 	}
 
 	tlsInitializedState = targetState;
@@ -1961,6 +2131,7 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket*
 		throw connection_failed();
 	}
 
+	ASSERT(existingSocket == nullptr);
 	return Connection::connect(&this->reactor.ios, toAddr);
 }
 
@@ -1968,12 +2139,14 @@ Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr) {
 	return connect(toAddr);
 }
 
-Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr, const std::string& hostname) {
+Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr,
+                                                                 const std::string& hostname,
+                                                                 tcp::socket* existingSocket) {
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
-		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, nullptr, hostname);
+		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, existingSocket, hostname);
 	}
-	return connect(toAddr);
+	return connect(toAddr, existingSocket);
 }
 
 Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {
@@ -1990,7 +2163,7 @@ static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* self, s
 	Future<std::vector<NetworkAddress>> result = promise.getFuture();
 
 	tcpResolver.async_resolve(
-	    host, service, [promise](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
+	    host, service, [promise](const boost::system::error_code& ec, tcp::resolver::results_type results) {
 		    if (ec) {
 			    promise.sendError(lookup_failed());
 			    return;
@@ -1998,9 +2171,8 @@ static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* self, s
 
 		    std::vector<NetworkAddress> addrs;
 
-		    tcp::resolver::iterator end;
-		    while (iter != end) {
-			    auto endpoint = iter->endpoint();
+		    for (const auto& entry : results) {
+			    auto endpoint = entry.endpoint();
 			    auto addr = endpoint.address();
 			    if (addr.is_v6()) {
 				    // IPV6 loopback might not be supported, only return IPV6 address
@@ -2008,9 +2180,8 @@ static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* self, s
 					    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
 				    }
 			    } else {
-				    addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+				    addrs.emplace_back(addr.to_v4().to_uint(), endpoint.port());
 			    }
-			    ++iter;
 		    }
 
 		    if (addrs.empty()) {
@@ -2068,35 +2239,59 @@ static Future<Void> coordinatorDNSCacheRefresh(Net2* self) {
 	}
 }
 
+static Future<std::vector<NetworkAddress>> cacheResolvedTCPEndpoint(DNSCache* cache,
+                                                                    std::string host,
+                                                                    std::string service,
+                                                                    Future<std::vector<NetworkAddress>> resolution) {
+	std::vector<NetworkAddress> addresses = co_await resolution;
+	cache->add(host, service, addresses);
+	co_return addresses;
+}
+
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const std::string& host,
                                                                          const std::string& service) {
 	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
 		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
 		if (cache.present()) {
-			co_return cache.get();
+			return cache.get();
 		}
-		std::vector<NetworkAddress> addresses = co_await resolveTCPEndpoint_impl(this, host, service);
-		dnsCache.add(host, service, addresses);
-		co_return addresses;
+		return cacheResolvedTCPEndpoint(&dnsCache, host, service, resolveTCPEndpoint_impl(this, host, service));
 	}
-	co_return co_await resolveTCPEndpoint_impl(this, host, service);
+	return resolveTCPEndpoint_impl(this, host, service);
+}
+
+TEST_CASE("/flow/Net2/DNSCacheArgumentLifetime") {
+	DNSCache cache;
+	std::string host = "original-host";
+	std::string service = "4500";
+	Promise<std::vector<NetworkAddress>> resolution;
+	Future<std::vector<NetworkAddress>> result =
+	    cacheResolvedTCPEndpoint(&cache, host, service, resolution.getFuture());
+	ASSERT(!result.isReady());
+	host = "changed-host";
+	service = "4501";
+	const std::vector<NetworkAddress> addresses{ NetworkAddress::parse("127.0.0.1:4500") };
+	resolution.send(addresses);
+	ASSERT(result.isReady());
+	ASSERT(result.get() == addresses);
+	ASSERT(cache.find("original-host", "4500").get() == addresses);
+	ASSERT(!cache.find(host, service).present());
+	return Void();
 }
 
 std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& host, const std::string& service) {
 	tcp::resolver tcpResolver(reactor.ios);
 	try {
-		auto iter = tcpResolver.resolve(host, service);
-		decltype(iter) end;
+		auto results = tcpResolver.resolve(host, service);
 		std::vector<NetworkAddress> addrs;
-		while (iter != end) {
-			auto endpoint = iter->endpoint();
+		for (const auto& entry : results) {
+			auto endpoint = entry.endpoint();
 			auto addr = endpoint.address();
 			if (addr.is_v6()) {
 				addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
 			} else {
-				addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+				addrs.emplace_back(addr.to_v4().to_uint(), endpoint.port());
 			}
-			++iter;
 		}
 		if (addrs.empty()) {
 			throw lookup_failed();
@@ -2131,12 +2326,12 @@ bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {
 		addressOnHostCache.clear(); // Bound cache memory; should not really happen
 
 	try {
-		boost::asio::io_service ioService;
+		boost::asio::io_context ioService;
 		boost::asio::ip::udp::socket socket(ioService);
 		boost::asio::ip::udp::endpoint endpoint(tcpAddress(addr.ip), 1);
 		socket.connect(endpoint);
 		bool local = addr.ip.isV6() ? socket.local_endpoint().address().to_v6().to_bytes() == addr.ip.toV6()
-		                            : socket.local_endpoint().address().to_v4().to_ulong() == addr.ip.toV4();
+		                            : socket.local_endpoint().address().to_v4().to_uint() == addr.ip.toV4();
 		socket.close();
 		if (local)
 			TraceEvent(SevInfo, "AddressIsOnHost").detail("Address", addr);
@@ -2191,7 +2386,7 @@ void Net2::getDiskBytes(std::string const& directory, int64_t& free, int64_t& to
 #include <sched.h>
 #endif
 
-ASIOReactor::ASIOReactor(Net2* net) : do_not_stop(ios), network(net), firstTimer(ios) {
+ASIOReactor::ASIOReactor(Net2* net) : do_not_stop(ios.get_executor()), network(net), firstTimer(ios) {
 #ifdef __linux__
 	// Reactor flags are used only for experimentation, and are platform-specific
 	if (FLOW_KNOBS->REACTOR_FLAGS & 1) {
@@ -2246,13 +2441,13 @@ void ASIOReactor::react() {
 }
 
 void ASIOReactor::wake() {
-	ios.post(nullCompletionHandler);
+	boost::asio::post(ios, nullCompletionHandler);
 }
 
 } // namespace N2
 
 SendBufferIterator::SendBufferIterator(SendBuffer const* p, int limit) : p(p), limit(limit) {
-	ASSERT(limit > 0);
+	ASSERT_GT(limit, 0);
 }
 
 void SendBufferIterator::operator++() {
@@ -2361,12 +2556,10 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 	std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
 		                                            QueueTestThreadState(1, 100000),
 		                                            QueueTestThreadState(2, 1000000) };
-	std::vector<Future<Void>> doneProducing;
 
 	int total = 0;
 	for (int t = 0; t < perThread.size(); ++t) {
 		auto& s = perThread[t];
-		doneProducing.push_back(s.doneProducing.getFuture());
 		total += s.toProduce;
 		auto produce = [&queue, &s]() {
 			printf("Thread%d\n", s.threadId);
@@ -2379,7 +2572,6 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 				}
 			}
 			printf("T%dDone\n", s.threadId);
-			s.doneProducing.send(Void());
 		};
 		s.handle = startThreadF(produce);
 	}
@@ -2398,18 +2590,11 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 			queue.canSleep();
 	}
 
-	co_await waitForAll(doneProducing);
-
-	// Make sure we continue on the main thread.
-	Promise<Void> signal;
-	Future<Void> doneConsuming = signal.getFuture();
-	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
-	co_await doneConsuming;
-
 	for (int t = 0; t < perThread.size(); ++t) {
 		waitThread(perThread[t].handle);
 		perThread[t].checkDone();
 	}
+	return Void();
 }
 
 TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
@@ -2433,7 +2618,7 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 				int v = s.nextProduced();
 				onMainThreadVoid([&s, v]() { ASSERT_EQ(v, s.nextConsumed()); });
 			}
-			s.doneProducing.send(Void());
+			onMainThreadVoid([&s]() { s.doneProducing.send(Void()); });
 		});
 	}
 	co_await waitForAll(doneProducing);

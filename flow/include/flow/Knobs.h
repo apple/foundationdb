@@ -108,11 +108,48 @@ public:
 	double COORDINATOR_DNS_CACHE_TTL;
 	double CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED;
 
+	// When true, enables tracing to debug stale peer issues (see StalePeerTest.toml).
+	// Not recommended for production due to potential performance overhead.
+	//
+	// Debugging workflow: if a simulation test fails with a dangling peer reference
+	// error, re-run the same seed with stale_peer_observability=true. This causes
+	// interfaceTracker to emit trace events recording creation and destruction at
+	// different layers of the RPC stack: interface, request stream, flow receiver.
+	// See InterfaceTracker-related traces in FlowTransport.cpp. These traces include
+	// backtraces that can be used to identify where the leak originated. From there,
+	// reason about what the code is doing, why it runs into the stale peer issue,
+	// and what can be done to prune the stale peers. The fix will vary case by case.
+	bool STALE_PEER_OBSERVABILITY;
+
+	// Used for two purposes off the same value: (1) eviction age -- an address is
+	// pruned from TransportData::persistentConnectFailedCount once it has had no
+	// connect failure for this many seconds; and (2) sweep cadence -- the prune
+	// scan runs at most once per this interval (and only when triggered by a
+	// connect failure). Bounds that map and the locationCachePeerEvictor
+	// snapshot/streak maps it feeds. 0 disables pruning. Coupling both onto one
+	// knob is a deliberate simplification: sweep about as often as the eviction
+	// horizon.
+	//
+	// NOTE: this value should be set to a multiple of LOCATION_CACHE_PEER_EVICTOR_DELAY
+	// so that a dead address is not pruned from this map before the evictor has a
+	// chance to observe its failure delta and evict the corresponding location cache entries.
+	// It should also be a multiple of the reconnect interval, so that an address that is
+	// still being targeted by RPCs re-fails and refreshes its timestamp before the TTL,
+	// and is never pruned while actively dead.
+	double PERSISTENT_CONNECT_FAILED_COUNT_TTL;
 	double DELAY_JITTER_OFFSET;
 	double DELAY_JITTER_RANGE;
 	double BUSY_WAIT_THRESHOLD;
 	double CLIENT_REQUEST_INTERVAL;
 	double SERVER_REQUEST_INTERVAL;
+	// If true, a client does not probe a peer it considers available after losing the connection to it, including
+	// closing it as idle; it reconnects when it next has something to send. Otherwise every client probes every peer
+	// it holds an interface for FAILURE_DETECTION_DELAY after a cluster restart, all at the same moment. Trade-off: a
+	// peer that died is marked failed only when the client next sends to it, after one failed connection attempt.
+	bool CLIENT_SKIP_AVAILABLE_PEER_PROBE;
+	// Seconds. A client probes a peer it considers failed every SERVER_REQUEST_INTERVAL plus a random delay of up to
+	// this much, so that clients do not probe the same restarted servers in lockstep. 0 disables.
+	double CLIENT_FAILED_PEER_PROBE_JITTER;
 
 	int DISABLE_ASSERTS;
 	double QUEUE_MODEL_SMOOTHING_AMOUNT;
@@ -174,6 +211,7 @@ public:
 	double CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY;
 
 	// FlowTransport
+	double CONNECTION_EVENT_SUPPRESS_FOR;
 	double CONNECTION_REJECTED_MESSAGE_DELAY;
 	double CONNECTION_ID_TIMEOUT;
 	double CONNECTION_CLEANUP_DELAY;
@@ -195,12 +233,26 @@ public:
 	double TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT;
 	int TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS;
 	int TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS;
+	// If true, TLS handshakes that time out or whose connection closes do not count toward per-address TLS connection
+	// throttling.
+	bool TLS_THROTTLE_IGNORE_TIMEOUTS_AND_DISCONNECTS;
+	// If true, an outgoing TLS connection whose handshake timed out or whose connection closed during the handshake
+	// does not count as a connect failure toward peer health.
+	bool TLS_HANDSHAKE_TIMEOUT_IS_NOT_CONNECT_FAILURE;
+	// If true, an outgoing connection attempt that this process cancelled does not count as a connect failure toward
+	// peer health.
+	bool CANCELLED_CONNECT_IS_NOT_CONNECT_FAILURE;
 	int TLS_CLIENT_HANDSHAKE_THREADS;
 	int TLS_SERVER_HANDSHAKE_THREADS;
 	int TLS_HANDSHAKE_THREAD_STACKSIZE;
 	int TLS_MALLOC_ARENA_MAX;
 	int TLS_HANDSHAKE_LIMIT;
 	bool DISABLE_MAINTHREAD_TLS_HANDSHAKE;
+	// If true, each TLS handshake thread drives many handshakes concurrently on non-blocking sockets, with a
+	// per-handshake deadline, and handshakes never run on the network thread while handshake threads exist;
+	// DISABLE_MAINTHREAD_TLS_HANDSHAKE then has no effect. Because each thread then serves many handshakes, fewer
+	// TLS_SERVER_HANDSHAKE_THREADS may suffice; every busy one competes with the network thread for CPU.
+	bool TLS_HANDSHAKE_NONBLOCKING_WORKERS;
 	int TLS_HANDSHAKE_FLOWLOCK_PRIORITY;
 
 	int NETWORK_TEST_CLIENT_COUNT;
@@ -401,6 +453,9 @@ public:
 	int RESTCLIENT_REQUEST_TRIES;
 	int RESTCLIENT_REQUEST_TIMEOUT_SEC;
 	int REST_LOG_LEVEL;
+
+	// Serialization
+	bool FLATBUFFERS_BOUNDS_CHECKS_ENABLED;
 
 	FlowKnobs(class Randomize, class IsSimulated);
 	void initialize(class Randomize, class IsSimulated);

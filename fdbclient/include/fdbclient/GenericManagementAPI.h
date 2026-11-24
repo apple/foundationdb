@@ -128,6 +128,8 @@ ConfigureAutoResult parseConfig(StatusObject const& status);
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {
 
+std::vector<ProcessData> decodeWorkers(const RangeResult& processClasses, const RangeResult& processData);
+
 template <class Tr>
 Future<std::vector<ProcessData>> getWorkers(Reference<Tr> tr,
                                             typename Tr::template FutureT<RangeResult> processClassesF,
@@ -139,30 +141,7 @@ Future<std::vector<ProcessData>> getWorkers(Reference<Tr> tr,
 	Future<RangeResult> processData = safeThreadFutureToFuture(processDataF);
 
 	co_await (success(processClasses) && success(processData));
-	ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
-	ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
-
-	std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
-	for (int i = 0; i < processClasses.get().size(); i++) {
-		id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
-		    decodeProcessClassValue(processClasses.get()[i].value);
-	}
-
-	std::vector<ProcessData> results;
-
-	for (int i = 0; i < processData.get().size(); i++) {
-		ProcessData data = decodeWorkerListValue(processData.get()[i].value);
-		ProcessClass processClass = id_class[data.locality.processId()];
-
-		if (processClass.classSource() == ProcessClass::DBSource ||
-		    data.processClass.classType() == ProcessClass::UnsetClass)
-			data.processClass = processClass;
-
-		if (data.processClass.classType() != ProcessClass::TesterClass)
-			results.push_back(data);
-	}
-
-	co_return results;
+	co_return decodeWorkers(processClasses.get(), processData.get());
 }
 
 // All versions of changeConfig apply the given set of configuration tokens to the database, and return a

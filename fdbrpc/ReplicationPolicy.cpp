@@ -44,9 +44,7 @@ bool IReplicationPolicy::validateFull(bool solved,
 	}
 
 	if (!solved) {
-		if (validate(totalSolution, fromServers)) {
-			valid = false;
-		} else if (validate(fromServers->getGroupEntries(), fromServers)) {
+		if (validate(totalSolution, fromServers) || validate(fromServers->getGroupEntries(), fromServers)) {
 			valid = false;
 		}
 	} else if (!validate(totalSolution, fromServers)) {

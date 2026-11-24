@@ -372,6 +372,8 @@ public:
 
 	template <class Key_, class Value_>
 	MapPair(Key_&& key, Value_&& value) : key(std::forward<Key_>(key)), value(std::forward<Value_>(value)) {}
+	// Memberwise assignment has the same self-assignment behavior as a defaulted operator.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(MapPair const& rhs) {
 		key = rhs.key;
 		value = rhs.value;

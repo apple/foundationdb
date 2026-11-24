@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
@@ -28,7 +26,10 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
+#include "BackupSteps.h"
 #include "BulkSetup.h"
+#include "MultiBackupRanges.h"
+#include "ValidateRestoreAudit.h"
 #include "flow/IRandom.h"
 
 // TODO: explain the purpose of this workload and how it different from the
@@ -52,6 +53,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
 	bool defaultBackup;
+	QuiescentValidation validation;
+	// -1 for a standalone backup; otherwise this instance's index in a multi-backup scenario (see MultiBackupRanges.h).
+	int multiBackupIndex;
+	// An instance beyond the scenario's active backup count does nothing.
+	bool multiBackupIdle = false;
 	Optional<std::string> encryptionKeyFileName;
 
 	// This workload is not compatible with RandomRangeLock workload because they will race in locked range
@@ -90,6 +96,24 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		allowPauses = getOption(options, "allowPauses"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
 		defaultBackup = getOption(options, "defaultBackup"_sr, false);
+		validation.configure(options, restoreAfter);
+		multiBackupIndex = getOption(options, "multiBackupIndex"_sr, -1);
+		MultiBackupRanges::Scenario multiBackupScenario = MultiBackupRanges::scenarioFor(sharedRandomNumber);
+		int multiBackupCount = MultiBackupRanges::activeBackupCount(sharedRandomNumber);
+		if (multiBackupIndex >= 0) {
+			ASSERT(multiBackupIndex < MultiBackupRanges::MAX_BACKUPS);
+			multiBackupIdle = multiBackupIndex >= multiBackupCount;
+			// A peer backup may still be running when this one finishes, so the log range can legitimately be shared.
+			shareLogRange = true;
+			performRestore = performRestore && !multiBackupIdle &&
+			                 MultiBackupRanges::shouldRestore(multiBackupScenario, multiBackupIndex, multiBackupCount);
+			TraceEvent("BARW_MultiBackup")
+			    .detail("Index", multiBackupIndex)
+			    .detail("ActiveBackups", multiBackupCount)
+			    .detail("Idle", multiBackupIdle)
+			    .detail("Scenario", MultiBackupRanges::toString(multiBackupScenario))
+			    .detail("PerformRestore", performRestore);
+		}
 
 		std::vector<std::string> restorePrefixesToInclude =
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
@@ -102,7 +126,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent("BARW_ClientId").detail("Id", wcx.clientId);
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 		TraceEvent("BARW_PerformRestore", randomID).detail("Value", performRestore);
-		if (defaultBackup) {
+		if (multiBackupIndex >= 0) {
+			// An idle instance still needs non-empty ranges to construct; reuse the last active backup's.
+			MultiBackupRanges::addRanges(
+			    multiBackupScenario, std::min(multiBackupIndex, multiBackupCount - 1), multiBackupCount, backupRanges);
+		} else if (defaultBackup) {
 			addDefaultBackupRanges(backupRanges);
 		} else if (shareLogRange) {
 			bool beforePrefix = sharedRandomNumber & 1;
@@ -179,7 +207,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		if (clientId != 0) {
+		if (clientId != 0 || multiBackupIdle) {
 			return Void();
 		}
 
@@ -200,7 +228,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		if (clientId != 0)
+		if (clientId != 0 || multiBackupIdle)
 			return Void();
 
 		TraceEvent(SevInfo, "BARW_Param").detail("Locked", locked);
@@ -216,11 +244,13 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent(SevInfo, "BARW_Param").detail("AgentRequest", agentRequest);
 		TraceEvent(SevInfo, "BARW_Param").detail("Encrypted", encryptionKeyFileName.present());
 
+		validation.claim();
+
 		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override {
-		if (clientId != 0)
+		if (clientId != 0 || multiBackupIdle)
 			return true;
 		else
 			return _check(cx);
@@ -337,92 +367,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			    .detail("Tag", printable(tag))
 			    .detail("DifferentialAfter", stopDifferentialDelay);
 
-			try {
-				if (buggify()) {
-					KeyBackedTag backupTag = makeBackupTag(tag.toString());
-					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName);
+			// A discontinued backup stops at the version its log copy has reached, so let it catch up first.
+			co_await validation.waitForBackupToCover(cx, backupAgent, tag.toString());
 
-					// Wait until the backup is in a restorable state and get the status, URL, and UID atomically
-					Reference<IBackupContainer> lastBackupContainer;
-					UID lastBackupUID;
-					EBackupState resultWait = co_await backupAgent->waitBackup(
-					    cx, backupTag.tagName, StopWhenDone::False, &lastBackupContainer, &lastBackupUID);
-
-					TraceEvent("BARW_DoBackupWaitForRestorable", randomID)
-					    .detail("Tag", backupTag.tagName)
-					    .detail("Result", BackupAgentBase::getStateText(resultWait));
-
-					bool restorable = false;
-					if (lastBackupContainer) {
-						Future<BackupDescription> fdesc = lastBackupContainer->describeBackup();
-						co_await ready(fdesc);
-
-						if (!fdesc.isError()) {
-							BackupDescription desc = fdesc.get();
-							co_await desc.resolveVersionTimes(cx);
-							printf("BackupDescription:\n%s\n", desc.toString().c_str());
-							restorable = desc.maxRestorableVersion.present();
-						}
-					}
-
-					TraceEvent("BARW_LastBackupContainer", randomID)
-					    .detail("BackupTag", printable(tag))
-					    .detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
-					    .detail("LastBackupUID", lastBackupUID)
-					    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait))
-					    .detail("Restorable", restorable);
-
-					// Do not check the backup, if aborted
-					if (resultWait == EBackupState::STATE_ABORTED) {
-					}
-					// Ensure that a backup container was found
-					else if (!lastBackupContainer) {
-						TraceEvent(SevError, "BARW_MissingBackupContainer", randomID)
-						    .detail("LastBackupUID", lastBackupUID)
-						    .detail("BackupTag", printable(tag))
-						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait));
-						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %s\n",
-						       printable(tag).c_str(),
-						       BackupAgentBase::getStateText(resultWait));
-					}
-					// Check that backup is restorable
-					else if (!restorable) {
-						TraceEvent(SevError, "BARW_NotRestorable", randomID)
-						    .detail("LastBackupUID", lastBackupUID)
-						    .detail("BackupTag", printable(tag))
-						    .detail("BackupFolder", lastBackupContainer->getURL())
-						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait));
-						printf("BackupCorrectnessNotRestorable:  tag: %s\n", printable(tag).c_str());
-					}
-
-					// Abort the backup, if not the first backup because the second backup may have aborted the backup
-					// by now
-					if (startDelay) {
-						TraceEvent("BARW_DoBackupAbortBackup2", randomID)
-						    .detail("Tag", printable(tag))
-						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait))
-						    .detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
-						    .detail("Restorable", restorable);
-						co_await backupAgent->abortBackup(cx, tag.toString());
-					} else {
-						TraceEvent("BARW_DoBackupDiscontinueBackup", randomID)
-						    .detail("Tag", printable(tag))
-						    .detail("DifferentialAfter", stopDifferentialDelay);
-						co_await backupAgent->discontinueBackup(cx, tag);
-					}
-				}
-
-				else {
-					TraceEvent("BARW_DoBackupDiscontinueBackup", randomID)
-					    .detail("Tag", printable(tag))
-					    .detail("DifferentialAfter", stopDifferentialDelay);
-					co_await backupAgent->discontinueBackup(cx, tag);
-				}
-			} catch (Error& e) {
-				TraceEvent("BARW_DoBackupDiscontinueBackupException", randomID).error(e).detail("Tag", printable(tag));
-				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
-					throw;
-			}
+			co_await BackupSteps::endBackupAfterRestorable(
+			    cx, backupAgent, tag, randomID, "BARW_", startDelay != 0, stopDifferentialDelay);
 		}
 
 		// Wait for the backup to complete
@@ -530,7 +479,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	Future<Void> _start(Database cx) {
 		FileBackupAgent backupAgent;
 		Future<Void> extraBackup;
-		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
+		PendingValidationClaim validationClaim = validation.takeClaim();
+		validation.begin(cx);
 		TraceEvent("BARW_Arguments")
 		    .detail("BackupTag", printable(backupTag))
 		    .detail("PerformRestore", performRestore)
@@ -555,6 +505,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		try {
 			Future<Void> startRestore = delay(restoreAfter);
+			Future<Void> startValidation = delay(validation.validateAfter);
 
 			// backup
 			co_await delay(backupAfter);
@@ -600,6 +551,20 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			Reference<IBackupContainer> lastBackupContainer =
 			    co_await BackupConfig(logUid).backupContainer().getD(cx.getReference());
 
+			if (validation.enabled) {
+				// Validation runs as soon as this backup is done, possibly while other backups are still running.
+				co_await startValidation;
+				if (lastBackupContainer) {
+					co_await validateAgainstPrefixedRestore(cx,
+					                                        &backupAgent,
+					                                        lastBackupContainer,
+					                                        backupRanges,
+					                                        backupTag,
+					                                        ValidationTraceOptions{ "BARW_", randomID, true });
+				}
+				validationClaim.release();
+			}
+
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!locked && buggify()) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(backupTag));
@@ -630,6 +595,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				                                                 lastBackupContainer->getEncryptionKeyFileName(),
 				                                                 lastBackupContainer->getEncryptionBlockSize());
 				BackupDescription desc = co_await container->describeBackup();
+
+				co_await RestoreValidationGate::waitUntilNonePending();
 
 				if (deterministicRandom()->random01() < 0.5) {
 					co_await attemptDirtyRestore(cx,

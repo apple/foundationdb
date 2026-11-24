@@ -153,7 +153,8 @@ struct ValidateStorage : TestWorkload {
 			try {
 				AuditStorageState auditState_ = co_await getAuditState(cx, type, auditId);
 				auditState = auditState_;
-				if (auditState.getPhase() == AuditPhase::Complete) {
+				if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Error ||
+				    auditState.getPhase() == AuditPhase::Failed) {
 					break;
 				} else if (auditState.getPhase() == AuditPhase::Running) {
 					TraceEvent("TestAuditStorageWait")
@@ -162,10 +163,6 @@ struct ValidateStorage : TestWorkload {
 					    .detail("AuditType", type);
 					co_await delay(30);
 					continue;
-				} else if (auditState.getPhase() == AuditPhase::Error) {
-					break;
-				} else if (auditState.getPhase() == AuditPhase::Failed) {
-					break;
 				} else {
 					UNREACHABLE();
 				}

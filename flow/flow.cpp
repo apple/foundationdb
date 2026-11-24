@@ -137,10 +137,10 @@ std::string UID::toString() const {
 }
 
 UID UID::fromString(std::string const& s) {
-	ASSERT(s.size() == 32);
+	ASSERT_EQ(s.size(), 32);
 	uint64_t a = 0, b = 0;
 	int r = sscanf(s.c_str(), "%16" SCNx64 "%16" SCNx64, &a, &b);
-	ASSERT(r == 2);
+	ASSERT_EQ(r, 2);
 	return UID(a, b);
 }
 
@@ -422,7 +422,7 @@ void bindDeterministicRandomToOpenssl() {
 }
 
 int nChooseK(int n, int k) {
-	assert(n >= k && k >= 0);
+	ASSERT(n >= k && k >= 0);
 	if (k == 0) {
 		return 1;
 	}
@@ -437,7 +437,7 @@ int nChooseK(int n, int k) {
 		ret *= n - i + 1;
 		ret /= i;
 	}
-	ASSERT(ret <= INT_MAX);
+	ASSERT_LE(ret, INT_MAX);
 
 	return ret;
 }

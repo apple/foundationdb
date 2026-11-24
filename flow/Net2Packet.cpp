@@ -147,14 +147,14 @@ void UnsentPacketQueue::sent(int bytes) {
 		if (b->bytes_sent + bytes <= b->bytes_written &&
 		    (b->bytes_sent + bytes != b->bytes_written || (!b->next && b->bytes_unwritten()))) {
 			b->bytes_sent += bytes;
-			ASSERT(b->bytes_sent <= b->size());
+			ASSERT_LE(b->bytes_sent, b->size());
 			break;
 		}
 
 		// We've sent an entire buffer
 		bytes -= b->bytes_written - b->bytes_sent;
 		b->bytes_sent = b->bytes_written;
-		ASSERT(b->bytes_written <= b->size());
+		ASSERT_LE(b->bytes_written, b->size());
 		double queue_time = now() - b->enqueue_time;
 		sendQueueLatencyHistogram->sampleSeconds(queue_time);
 		unsent_first = b->nextPacketBuffer();

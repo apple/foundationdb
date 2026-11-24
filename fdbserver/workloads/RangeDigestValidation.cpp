@@ -378,46 +378,28 @@ struct RangeDigestValidationWorkload : TestWorkload {
 	// Retries the whole audit on transient cluster errors (e.g. movekeys_conflict during DD failover),
 	// mirroring RestoreValidation's tolerance for buggify-induced instability.
 	Future<RangeDigestSummary> runOneDigest(Database cx) {
-		Reference<IClusterConnectionRecord> clusterFile = cx->getConnectionRecord();
+		AuditWaitOptions waitOptions;
+		waitOptions.pollIntervalSeconds = checkInterval;
+		waitOptions.maxWaitSeconds = maxWaitTime;
+		waitOptions.traceContext = "RangeDigestValidation";
+		// Triggering can take several attempts while the cluster controller or data distributor recovers under
+		// buggify; give each attempt as long as the audit itself gets.
+		waitOptions.maxScheduleAttempts = 10;
+		waitOptions.roundTripTimeoutSeconds = maxWaitTime;
 		int auditRetryCount = 0;
 		int maxAuditRetries = 10;
 		while (true) {
 			Error retryErr;
-			// Distinguishes a launch timeout from a completion timeout: both surface as timed_out, but
-			// only the former is unambiguously transient (see the retry decision below).
-			bool auditScheduled = false;
 			try {
-				UID auditId = co_await auditStorage(
-				    clusterFile, normalKeys, AuditType::RangeDigest, KeyValueStoreType::END, maxWaitTime);
-				auditScheduled = true;
-				TraceEvent("RangeDigestValidationAuditScheduled")
-				    .detail("AuditID", auditId)
-				    .detail("RetryCount", auditRetryCount);
-
-				double startTime = now();
-				bool done = false;
-				AuditStorageState finalState;
-				while (!done) {
-					co_await delay(checkInterval);
-					AuditStorageState st = co_await getAuditState(cx, AuditType::RangeDigest, auditId);
-					if (st.getPhase() == AuditPhase::Complete) {
-						finalState = st;
-						done = true;
-						break;
-					}
-					if (st.getPhase() == AuditPhase::Error || st.getPhase() == AuditPhase::Failed) {
-						TraceEvent(SevWarn, "RangeDigestValidationAuditPhaseFailed")
-						    .detail("AuditID", auditId)
-						    .detail("Phase", (int)st.getPhase())
-						    .detail("Error", st.error);
-						throw audit_storage_failed();
-					}
-					if (now() - startTime > maxWaitTime) {
-						TraceEvent(SevWarn, "RangeDigestValidationTimeout").detail("AuditID", auditId);
-						throw timed_out();
-					}
+				AuditStorageState finalState = co_await auditStorageAndWait(
+				    cx, normalKeys, AuditType::RangeDigest, KeyValueStoreType::END, waitOptions);
+				if (finalState.getPhase() != AuditPhase::Complete) {
+					TraceEvent(SevWarn, "RangeDigestValidationAuditPhaseFailed")
+					    .detail("AuditID", finalState.id)
+					    .detail("Phase", (int)finalState.getPhase())
+					    .detail("Error", finalState.error);
+					throw audit_storage_failed();
 				}
-
 				// The combined root is stored in the top-level audit record on completion (the
 				// per-range progress is cleared by then).
 				RangeDigestSummary summary;
@@ -426,11 +408,12 @@ struct RangeDigestValidationWorkload : TestWorkload {
 				summary.byteCount = finalState.byteCount;
 				summary.complete = true;
 				TraceEvent("RangeDigestValidationAuditRoot")
-				    .detail("AuditID", auditId)
+				    .detail("AuditID", finalState.id)
 				    .detail("Root", summary.root.toHex())
 				    .detail("KVCount", summary.kvCount)
 				    .detail("Bytes", summary.byteCount)
-				    .detail("Complete", summary.complete);
+				    .detail("Complete", summary.complete)
+				    .detail("RetryCount", auditRetryCount);
 				co_return summary;
 			} catch (Error& e) {
 				retryErr = e;
@@ -438,16 +421,14 @@ struct RangeDigestValidationWorkload : TestWorkload {
 			if (retryErr.code() == error_code_actor_cancelled) {
 				throw retryErr;
 			}
-			// audit_storage_failed and related transient conditions are retryable under buggify. A
-			// timed_out from auditStorage() means the CC never issued an audit ID -- no audit exists to
-			// be stuck, so it is equally transient. A timed_out from the completion wait is NOT retried:
-			// that audit was scheduled and stopped making progress, which is a finding, and re-arming it
-			// maxAuditRetries times would spend maxWaitTime on each before failing anyway.
+			// audit_storage_failed and related transient conditions are retryable under buggify. A timed_out
+			// is not retried: it means the audit was scheduled and stopped making progress, which is a finding
+			// (an audit that could not be triggered at all was already retried by auditStorageAndWait), and
+			// re-arming it maxAuditRetries times would spend maxWaitTime on each before failing anyway.
 			if ((retryErr.code() == error_code_audit_storage_failed ||
 			     retryErr.code() == error_code_persist_new_audit_metadata_error ||
 			     retryErr.code() == error_code_audit_storage_cancelled ||
-			     retryErr.code() == error_code_audit_storage_task_outdated ||
-			     (retryErr.code() == error_code_timed_out && !auditScheduled)) &&
+			     retryErr.code() == error_code_audit_storage_task_outdated) &&
 			    auditRetryCount < maxAuditRetries) {
 				++auditRetryCount;
 				TraceEvent(SevWarn, "RangeDigestValidationAuditRetry")

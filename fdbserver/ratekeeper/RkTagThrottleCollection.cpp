@@ -54,19 +54,6 @@ Optional<double> RkTagThrottleCollection::RkTagThrottleData::updateAndGetClientR
 	}
 }
 
-RkTagThrottleCollection::RkTagThrottleCollection(RkTagThrottleCollection&& other) {
-	autoThrottledTags = std::move(other.autoThrottledTags);
-	manualThrottledTags = std::move(other.manualThrottledTags);
-	tagData = std::move(other.tagData);
-}
-
-RkTagThrottleCollection& RkTagThrottleCollection::RkTagThrottleCollection::operator=(RkTagThrottleCollection&& other) {
-	autoThrottledTags = std::move(other.autoThrottledTags);
-	manualThrottledTags = std::move(other.manualThrottledTags);
-	tagData = std::move(other.tagData);
-	return *this;
-}
-
 double RkTagThrottleCollection::computeTargetTpsRate(double currentBusyness,
                                                      double targetBusyness,
                                                      double requestRate) {
@@ -250,7 +237,6 @@ PrioritizedTransactionTagMap<ClientTagThrottleLimits> RkTagThrottleCollection::g
 			if (manualItr->second.empty()) {
 				CODE_PROBE(true, "All manual throttles expired");
 				manualThrottledTags.erase(manualItr);
-				break;
 			}
 		}
 

@@ -30,6 +30,7 @@
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/SpecialKeySpace.h"
 #include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
 
@@ -221,13 +222,25 @@ ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, cons
 	});
 }
 
-ThreadFuture<CDCStreamId> ThreadSafeDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
+ThreadFuture<CDCStreamId> ThreadSafeDatabase::registerNativeCdcStream(const KeyRef& name,
+                                                                      const std::vector<KeyRange>& ranges) {
 	DatabaseContext* db = this->db;
 	Key nameCopy(name);
-	KeyRange keysCopy(keys);
-	return onMainThread([db, nameCopy, keysCopy]() -> Future<CDCStreamId> {
+	return onMainThread([db, nameCopy, ranges]() -> Future<CDCStreamId> {
 		db->checkDeferredError();
-		return registerNativeCdcStreamClient(Database(Reference<DatabaseContext>::addRef(db)), nameCopy, keysCopy);
+		return registerNativeCdcStreamClient(Database(Reference<DatabaseContext>::addRef(db)), nameCopy, ranges);
+	});
+}
+
+ThreadFuture<CDCStreamId> ThreadSafeDatabase::registerNativeCdcOrderedStream(const KeyRef& name,
+                                                                             const std::vector<KeyRange>& ranges,
+                                                                             const std::vector<Key>& splitPoints) {
+	DatabaseContext* db = this->db;
+	Key nameCopy(name);
+	return onMainThread([db, nameCopy, ranges, splitPoints]() -> Future<CDCStreamId> {
+		db->checkDeferredError();
+		return registerNativeCdcOrderedStreamClient(
+		    Database(Reference<DatabaseContext>::addRef(db)), nameCopy, ranges, splitPoints);
 	});
 }
 
@@ -386,7 +399,13 @@ ThreadFuture<Optional<Value>> ThreadSafeTransaction::get(const KeyRef& key, bool
 
 	ReadYourWritesTransaction* tr = this->tr;
 	return onMainThread([tr, k, snapshot]() -> Future<Optional<Value>> {
-		tr->checkDeferredError();
+		// Keep the failed mutation pending while allowing its diagnostic to be read.
+		if (tr->deferredError.code() == error_code_special_keys_api_failure &&
+		    k == SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin) {
+			tr->getTransaction().checkDeferredError();
+		} else {
+			tr->checkDeferredError();
+		}
 		return tr->get(k, Snapshot{ snapshot });
 	});
 }

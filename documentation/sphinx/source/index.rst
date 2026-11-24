@@ -1,8 +1,8 @@
 .. FoundationDB documentation master file
    
-######################
-FoundationDB |version|
-######################
+############
+FoundationDB
+############
 
 Overview
 ========

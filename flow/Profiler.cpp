@@ -146,7 +146,7 @@ struct Profiler {
 		}
 		if (flowProfilingEnabled) {
 			double t = timer();
-			output_buffer->push(*(void**)&t);
+			output_buffer->push(std::bit_cast<void*>(t));
 			size_t n = platform::raw_backtrace(addresses, 256);
 			for (int i = 0; i < n; i++)
 				output_buffer->push(addresses[i]);

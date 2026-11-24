@@ -163,7 +163,7 @@ class ExitGuard {
 	std::decay_t<Func> fn;
 
 public:
-	ExitGuard(Func&& fn) : fn(std::forward<Func>(fn)) {}
+	explicit ExitGuard(Func&& fn) : fn(std::forward<Func>(fn)) {}
 
 	~ExitGuard() { fn(); }
 };
@@ -174,7 +174,7 @@ class FailGuard {
 	std::decay_t<Func> fn;
 
 public:
-	FailGuard(Func&& fn) : fn(std::forward<Func>(fn)) {}
+	explicit FailGuard(Func&& fn) : fn(std::forward<Func>(fn)) {}
 
 	~FailGuard() {
 		if (std::uncaught_exceptions()) {

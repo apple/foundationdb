@@ -12,7 +12,7 @@ Documentation can be found online at <https://apple.github.io/foundationdb/>. Th
 
 ## Forums
 
-[The FoundationDB Forums](https://forums.foundationdb.org/) are the home for most of the discussion and communication about the FoundationDB project. We welcome your participation! We want FoundationDB to be a great project to be a part of, and as part of that, we have established a [Code of Conduct](CODE_OF_CONDUCT.md) to define what constitutes permissible modes of interaction.
+[The FoundationDB Forums](https://forums.foundationdb.org/) are the home for most of the discussion and communication about the FoundationDB project. We welcome your participation! We want FoundationDB to be a great project to be a part of, and as part of that, we have established a [Code of Conduct](https://github.com/apple/.github/blob/main/CODE_OF_CONDUCT.md) to define what constitutes permissible modes of interaction.
 
 ## Contributing
 
@@ -25,12 +25,14 @@ Contributions to FoundationDB can include contributions to the codebase, sharing
 The latest stable releases are versions that are recommended for production use, which have been extensively validated via simulation and real cluster tests and used in our production environment.
 
 | Branch   |     Latest Production Release      |  Notes |
-|:--------:|:-------------:|------:|
-| 7.3      |  [7.3.77](https://github.com/apple/foundationdb/releases/tag/7.3.77) | Supported |
-| 7.2      |   | Experimental |
-| 7.1      |  [7.1.57](https://github.com/apple/foundationdb/releases/tag/7.1.57)   |   Bug fixes |
-| 7.0      |           |   Experimental |
-| 6.3      |  [6.3.25](https://github.com/apple/foundationdb/releases/tag/6.3.25) |   Unsupported |
+|:--------:|:----------------------------------:|-------:|
+| 8.0      | [8.0.1](https://github.com/apple/foundationdb/releases/tag/8.0.1)   | Supported    |
+| 7.4      | [7.4.8](https://github.com/apple/foundationdb/releases/tag/7.4.8)   | Supported    |
+| 7.3      | [7.3.77](https://github.com/apple/foundationdb/releases/tag/7.3.77) | Bug Fixes    |
+| 7.2      |                                                                     | Experimental |
+| 7.1      | [7.1.57](https://github.com/apple/foundationdb/releases/tag/7.1.57) | Unsupported  |
+| 7.0      |                                                                     | Experimental |
+| 6.3      | [6.3.25](https://github.com/apple/foundationdb/releases/tag/6.3.25) | Unsupported  |
 
 - `Supported` branches are those we actively maintain and will publish new patch releases.
 - `Bug fixes` are branches where we still accept bug fixes, but may not publish newer patch releases. The community can build the latest release binaries if needed and is encouraged to upgrade to the `Supported` branches.
@@ -140,7 +142,7 @@ Building FoundationDB requires at least 8GB of memory. More memory is needed whe
 
 ### macOS
 
-The build under macOS will work the same way as on Linux. [Homebrew](https://brew.sh/) can be used to install the `boost` library and the `ninja` build tool. Be careful: the current main branch uses Boost 1.86; install this version or let CMake download it. Also, if the Swift binding is not of interest, use `-DBUILD_SWIFT_BINDING=OFF`.
+The build under macOS will work the same way as on Linux. [Homebrew](https://brew.sh/) can be used to install the `boost` library and the `ninja` build tool. Be careful: the current main branch uses Boost 1.89; install this version or let CMake download it. Also, if the Swift binding is not of interest, use `-DBUILD_SWIFT_BINDING=OFF`.
 
 ```sh
 cmake -G Ninja <FDB_SOURCE_DIR> -B <BUILD_DIR>
@@ -160,7 +162,7 @@ Under Windows, only Visual Studio with ClangCl is supported.
 
 1. Install Visual Studio 2019 (IDE or Build Tools), and enable LLVM support
 1. Install [CMake 3.24.2](https://cmake.org/download/) or higher
-1. Download [Boost 1.86.0](https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.bz2)
+1. Download [Boost 1.89.0](https://archives.boost.io/release/1.89.0/source/boost_1_89_0.tar.bz2)
 1. Unpack boost to C:\boost, or use `-DBOOST_ROOT=<PATH_TO_BOOST>` with `cmake` if unpacked elsewhere
 1. Install [Python](https://www.python.org/downloads/) if it is not already installed by Visual Studio
 1. (Optional) Install [OpenJDK 11](https://developers.redhat.com/products/openjdk/download) to build Java bindings
