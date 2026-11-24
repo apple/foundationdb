@@ -48,9 +48,9 @@ struct TestCreds {
 	std::string caCert;
 };
 
-TestCreds makeTestCreds(mkcert::ESide side) {
+TestCreds makeTestCreds(mkcert::ESide side, unsigned length = 3) {
 	Arena arena;
-	auto chain = mkcert::makeCertChain(arena, mkcert::makeCertChainSpec(arena, 3, side), {});
+	auto chain = mkcert::makeCertChain(arena, mkcert::makeCertChainSpec(arena, length, side), {});
 	auto nonRoot = chain;
 	nonRoot.pop_back();
 	return TestCreds{ mkcert::concatCertChain(arena, nonRoot).toString(),
@@ -70,8 +70,8 @@ std::unique_ptr<ssl::context> makeContext(const TestCreds& own, const std::strin
 // Two connected, non-blocking stream sockets, one TLS stream per end. The client end can stay silent.
 struct TestPair {
 	boost::asio::io_context ioc;
-	tcp::socket serverSocket{ ioc };
-	tcp::socket clientSocket{ ioc };
+	TLSHandshakeTransport serverSocket{ ioc };
+	TLSHandshakeTransport clientSocket{ ioc };
 	std::unique_ptr<TLSHandshakeSocket> server;
 	std::unique_ptr<TLSHandshakeSocket> client;
 
@@ -141,6 +141,30 @@ TEST_CASE("noSim/flow/TLSHandshakeWorker/Success") {
 	ASSERT(!(co_await clientResult));
 	ASSERT_EQ(serverWorker.activeJobCount(), 0);
 	ASSERT_EQ(clientWorker.activeJobCount(), 0);
+	co_return;
+}
+
+TEST_CASE("noSim/flow/TLSHandshakeWorker/PartialWrite") {
+	noUnseed = true;
+	auto serverCreds = makeTestCreds(mkcert::ESide::Server, 12);
+	auto clientCreds = makeTestCreds(mkcert::ESide::Client);
+	auto serverCtx = makeContext(serverCreds, clientCreds.caCert);
+	auto clientCtx = makeContext(clientCreds, serverCreds.caCert);
+	TestPair pair(*serverCtx, *clientCtx);
+	pair.serverSocket.set_option(boost::asio::socket_base::send_buffer_size(1024));
+	// Both ends use one worker, so the client cannot drain the server's certificate flight while it is being sent.
+	TLSHandshakeWorker worker(kNoTimeout);
+	auto serverJob = pair.serverJob();
+	auto clientJob = pair.clientJob();
+	auto serverResult = outcome(serverJob);
+	auto clientResult = outcome(clientJob);
+	worker.submitJob(serverJob);
+	worker.submitJob(clientJob);
+	ASSERT(!(co_await serverResult));
+	ASSERT(!(co_await clientResult));
+	// The buffer retains its allocation after draining. This checks that the test actually blocked a write.
+	ASSERT_GT(serverJob->pendingOutput.capacity(), 0);
+	ASSERT(serverJob->pendingOutput.empty());
 	co_return;
 }
 

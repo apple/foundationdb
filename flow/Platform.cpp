@@ -125,8 +125,7 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <signal.h>
 /* Needed for gnu_dev_{major,minor} */
 #include <sys/sysmacros.h>
-/* Needed for ReadinessPoller and socketSendQueueBytes */
-#include <linux/sockios.h>
+/* Needed for ReadinessPoller */
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
@@ -2944,19 +2943,23 @@ ReadinessPoller::~ReadinessPoller() {
 	::close(pollFd);
 }
 
-int ReadinessPoller::watch(int fd, void* tag) {
+int ReadinessPoller::watch(int fd, void* tag, bool write) {
 	ASSERT(tag != nullptr);
 	epoll_event ev{};
 	// EPOLLERR and EPOLLHUP are always reported.
-	ev.events = EPOLLIN | EPOLLRDHUP | EPOLLET;
+	ev.events = (write ? EPOLLOUT : EPOLLIN) | EPOLLRDHUP | EPOLLET;
 	ev.data.ptr = tag;
 	return ::epoll_ctl(pollFd, EPOLL_CTL_ADD, fd, &ev) == 0 ? 0 : errno;
 }
 
-void ReadinessPoller::unwatch(int fd) {
+void ReadinessPoller::unwatch(int fd, bool) {
 	// Kernels before 2.6.9 require a non-null event even for EPOLL_CTL_DEL.
 	epoll_event ev{};
-	[[maybe_unused]] int rc = ::epoll_ctl(pollFd, EPOLL_CTL_DEL, fd, &ev);
+	int rc;
+	do {
+		rc = ::epoll_ctl(pollFd, EPOLL_CTL_DEL, fd, &ev);
+	} while (rc < 0 && errno == EINTR);
+	ASSERT(rc == 0 || errno == ENOENT);
 }
 
 void ReadinessPoller::wait(int timeoutMs, std::vector<void*>& ready) {
@@ -2976,11 +2979,6 @@ void ReadinessPoller::wait(int timeoutMs, std::vector<void*>& ready) {
 void ReadinessPoller::wake() {
 	uint64_t one = 1;
 	[[maybe_unused]] auto rc = ::write(wakeFd, &one, sizeof(one));
-}
-
-int socketSendQueueBytes(int fd) {
-	int bytes = 0;
-	return ::ioctl(fd, SIOCOUTQ, &bytes) == 0 ? bytes : -1;
 }
 
 #elif defined(__APPLE__) || defined(__FreeBSD__)
@@ -3004,18 +3002,22 @@ ReadinessPoller::~ReadinessPoller() {
 	::close(pollFd);
 }
 
-int ReadinessPoller::watch(int fd, void* tag) {
+int ReadinessPoller::watch(int fd, void* tag, bool write) {
 	ASSERT(tag != nullptr);
-	// EV_CLEAR makes the read filter edge-triggered; hang-ups and errors are reported through it with EV_EOF.
+	// EV_CLEAR makes the filter edge-triggered.
 	struct kevent ev;
-	EV_SET(&ev, fd, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, tag);
+	EV_SET(&ev, fd, write ? EVFILT_WRITE : EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, tag);
 	return ::kevent(pollFd, &ev, 1, nullptr, 0, nullptr) == 0 ? 0 : errno;
 }
 
-void ReadinessPoller::unwatch(int fd) {
+void ReadinessPoller::unwatch(int fd, bool write) {
 	struct kevent ev;
-	EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, nullptr);
-	[[maybe_unused]] int rc = ::kevent(pollFd, &ev, 1, nullptr, 0, nullptr);
+	EV_SET(&ev, fd, write ? EVFILT_WRITE : EVFILT_READ, EV_DELETE, 0, 0, nullptr);
+	int rc;
+	do {
+		rc = ::kevent(pollFd, &ev, 1, nullptr, 0, nullptr);
+	} while (rc < 0 && errno == EINTR);
+	ASSERT(rc == 0 || errno == ENOENT);
 }
 
 void ReadinessPoller::wait(int timeoutMs, std::vector<void*>& ready) {
@@ -3024,7 +3026,7 @@ void ReadinessPoller::wait(int timeoutMs, std::vector<void*>& ready) {
 	struct kevent events[128];
 	int n = ::kevent(pollFd, nullptr, 0, events, 128, timeoutMs < 0 ? nullptr : &timeout);
 	for (int i = 0; i < n; ++i) {
-		if (events[i].filter == EVFILT_READ) {
+		if (events[i].filter == EVFILT_READ || events[i].filter == EVFILT_WRITE) {
 			ready.push_back(events[i].udata);
 		}
 	}
@@ -3034,16 +3036,6 @@ void ReadinessPoller::wake() {
 	struct kevent ev;
 	EV_SET(&ev, 0, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
 	[[maybe_unused]] int rc = ::kevent(pollFd, &ev, 1, nullptr, 0, nullptr);
-}
-
-int socketSendQueueBytes(int fd) {
-#ifdef __APPLE__
-	int bytes = 0;
-	socklen_t len = sizeof(bytes);
-	return ::getsockopt(fd, SOL_SOCKET, SO_NWRITE, &bytes, &len) == 0 ? bytes : -1;
-#else
-	return -1;
-#endif
 }
 
 #endif // __linux__

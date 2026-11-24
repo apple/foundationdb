@@ -33,14 +33,10 @@ class TLSHandshakeWorker;
 #include <mutex>
 #include <vector>
 
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/ssl.hpp>
-
 #include "flow/IThreadPool.h"
 #include "flow/Platform.h"
+#include "flow/TLSHandshakeSocket.h"
 #include "flow/network.h"
-
-using TLSHandshakeSocket = boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>;
 
 // One TLS handshake owned by a TLSHandshakeWorker. The worker is the only thread that touches the socket until `done`
 // is fulfilled, and never touches it (or `fd`) after; meanwhile the network thread may only cancel the job with
@@ -56,11 +52,14 @@ struct TLSHandshakeJob {
 	std::atomic<bool> cancelled{ false }; // Set by TLSHandshakeWorker::cancelJob().
 	TLSHandshakeWorker* worker = nullptr; // The worker the job was submitted to.
 	std::list<std::shared_ptr<TLSHandshakeJob>>::iterator position; // In the worker's job list; worker thread only.
+	std::vector<uint8_t> pendingOutput;
+	std::size_t outputWritten = 0;
+	bool handshakeComplete = false;
 	ThreadReturnPromise<Void> done; // Sent once the handshake finishes, fails, times out or is cancelled.
 };
 
 // Drives many TLS handshakes on one thread. Each handshake runs OpenSSL's state machine on a non-blocking socket and is
-// resumed when the socket becomes readable (epoll or kqueue), so a slow or silent peer costs no thread time while it
+// resumed when the socket is ready (epoll or kqueue), so a slow or silent peer costs no thread time while it
 // waits, and every handshake ends by its deadline.
 class TLSHandshakeWorker {
 public:
