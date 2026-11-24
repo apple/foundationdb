@@ -165,6 +165,24 @@ Future<Void> advanceVersion(Database cx, Version v);
 
 Future<int> setDDMode(Database cx, int mode);
 
+struct RangeReplicationOverride {
+	KeyRange range;
+	int replicas;
+	bool operator==(const RangeReplicationOverride&) const = default;
+};
+
+// API 900. Returns maximal contiguous replication overrides in key order, clipped to the requested range.
+// Gaps use the cluster default. Actual readable replica counts can differ during placement
+Future<std::vector<RangeReplicationOverride>> getRangeReplicationOverrides(Database cx, KeyRange range = allKeys);
+
+// API 900. Sets a positive target storage team size for [begin, end). The cluster replication policy sets the minimum.
+// Completion means the configuration is durable. A change restarts the data distributor before placement resumes.
+// Additional copies require large teams to be enabled and enough eligible storage servers
+Future<Void> setRangeReplication(Database cx, KeyRange range, int replicas);
+
+// Removes only the replication override. The same completion and restart semantics apply as for setRangeReplication
+Future<Void> clearRangeReplication(Database cx, KeyRange range);
+
 Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Standalone<StringRef> dcId);
 
 // Start an audit on range of the specific type.

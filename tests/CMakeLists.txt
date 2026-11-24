@@ -280,6 +280,7 @@ if(WITH_PYTHON)
     TEST_FILES fast/NativeCdcRetagDisableRestart-1.toml
     fast/NativeCdcRetagDisableRestart-2.toml)
   add_fdb_test(TEST_FILES fast/RangeLockCycle.toml)
+  add_fdb_test(TEST_FILES fast/RangeReplication.toml)
   add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.toml IGNORE) # TODO re-enable once read hot detection is enabled.
   add_fdb_test(TEST_FILES fast/ReportConflictingKeys.toml)
   add_fdb_test(TEST_FILES fast/RESTUnit.toml IGNORE)
