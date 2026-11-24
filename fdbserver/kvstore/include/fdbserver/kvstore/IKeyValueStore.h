@@ -140,6 +140,11 @@ public:
 	// Compact a range of keys in the store
 	virtual Future<Void> compactRange(KeyRangeRef range) { throw not_implemented(); }
 
+	// Completes deferred on-disk work (e.g. Redwood's lazy clear and remap queues, RocksDB compaction) so the files
+	// reach a steady state layout. Starts once the last commit completes. Must be called with no uncommitted mutations,
+	// and no mutations or commits may be issued until it completes.
+	virtual Future<Void> vacuum() { throw not_implemented(); }
+
 	/*
 	Concurrency contract
 	    Causal consistency:

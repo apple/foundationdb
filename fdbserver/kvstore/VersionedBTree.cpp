@@ -5290,6 +5290,41 @@ public:
 		return m_latestCommit;
 	}
 
+	// Commits until the lazy clear queue and the pager's remap queue are both empty, so space freed by earlier clears
+	// and overwrites is reusable and no cleanup is left for later commits. Must be called with no uncommitted
+	// mutations. Each commit advances the version by one.
+	Future<Void> vacuum() {
+		m_latestCommit = vacuum_impl(this, m_latestCommit);
+		return m_latestCommit;
+	}
+
+	static Future<Void> vacuum_impl(VersionedBTree* self, Future<Void> previousCommit) {
+		co_await previousCommit;
+
+		int freedPages = 0;
+		do {
+			ASSERT_EQ(self->m_mutationCount, 0);
+			self->m_newOldestVersion = self->getLastCommittedVersion();
+			co_await commit_impl(self, self->getLastCommittedVersion() + 1, Void());
+			// Let the lazy clear started by the commit run to its batch limit instead of being stopped by the next
+			// commit
+			freedPages = co_await self->m_lazyClearActor;
+			CODE_PROBE(freedPages > 0, "Redwood vacuum processed lazy clear queue");
+		} while (freedPages != 0);
+		ASSERT_EQ(self->m_lazyClearQueue.numEntries, 0);
+
+		// clearRemapQueue commits internally, and getLastCommittedVersion() below picks up the versions it advanced to
+		co_await self->m_pager->clearRemapQueue();
+
+		ASSERT_EQ(self->m_mutationCount, 0);
+		self->m_newOldestVersion = self->getLastCommittedVersion();
+		co_await commit_impl(self, self->getLastCommittedVersion() + 1, Void());
+
+		TraceEvent e("RedwoodVacuum");
+		self->m_pager->toTraceEvent(e);
+		e.log();
+	}
+
 	// Clear all btree data, allow pager remap to fully process its queue, and verify final
 	// page counts in pager and queues.
 	static Future<Void> clearAllAndCheckSanity_impl(VersionedBTree* self) {
@@ -7912,11 +7947,29 @@ public:
 	Future<Void> onClosed() const override { return m_closed.getFuture(); }
 
 	Future<Void> commit(bool sequential = false) override {
+		ASSERT(!m_vacuuming);
 		m_lastCommit = catchError(m_tree->commit(m_nextCommitVersion));
 		// Currently not keeping history
 		m_tree->setOldestReadableVersion(m_nextCommitVersion);
 		++m_nextCommitVersion;
 		return m_lastCommit;
+	}
+
+	Future<Void> vacuum() override {
+		ASSERT(!m_vacuuming);
+		m_vacuuming = true;
+		m_lastCommit = catchError(vacuum_impl(this));
+		return m_lastCommit;
+	}
+
+	static Future<Void> vacuum_impl(KeyValueStoreRedwood* self) {
+		// Unlike commit, versions only advance once vacuum completes since it may commit several times. This is safe
+		// because commits and other vacuums are blocked until then. On error m_vacuuming stays set so nothing commits
+		// a stale version.
+		co_await self->m_tree->vacuum();
+		self->m_tree->setOldestReadableVersion(self->m_tree->getLastCommittedVersion());
+		self->m_nextCommitVersion = self->m_tree->getLastCommittedVersion() + 1;
+		self->m_vacuuming = false;
 	}
 
 	KeyValueStoreType getType() const override { return KeyValueStoreType::SSD_REDWOOD_V1; }
@@ -8135,6 +8188,7 @@ private:
 	bool prefetch;
 	Version m_nextCommitVersion;
 	Future<Void> m_lastCommit = Void();
+	bool m_vacuuming = false;
 
 	template <typename T>
 	inline Future<T> catchError(Future<T> f) {
@@ -10329,6 +10383,49 @@ TEST_CASE("Lredwood/correctness/seekExactKey") {
 	co_await reopenedClosed;
 
 	co_return;
+}
+
+TEST_CASE("Lredwood/correctness/vacuum") {
+	g_redwoodMetricsActor = Void();
+	g_redwoodMetrics.clear();
+
+	std::string file = "unittest_kvstore-vacuum.redwood-v1";
+	deleteFile(file);
+	IKeyValueStore* kvStore = keyValueStoreRedwoodV1(file, UID(), {}, FLOW_KNOBS->PAGE_CACHE_4K);
+	co_await kvStore->init();
+
+	auto key = [](int i) { return format("key-%06d", i); };
+	auto value = [](int i, char c) { return format("value-%06d-%s", i, std::string(512, c).c_str()); };
+	int const count = 2000;
+	for (int i = 0; i < count; ++i) {
+		kvStore->set(KeyValueRef(StringRef(key(i)), StringRef(value(i, 'a'))));
+	}
+	co_await kvStore->commit();
+
+	// Overwrites leave old page versions in the remap queue and the range clear leaves subtrees in the lazy clear
+	// queue, so vacuum has both to do
+	for (int i = 0; i < count; i += 2) {
+		kvStore->set(KeyValueRef(StringRef(key(i)), StringRef(value(i, 'b'))));
+	}
+	kvStore->clear(KeyRangeRef(StringRef(key(count / 2)), StringRef(key(count))));
+	co_await kvStore->commit();
+
+	co_await kvStore->vacuum();
+	ASSERT_EQ(kvStore->getStorageBytes().temp, 0);
+
+	co_await checkExactKVStoreKey(kvStore, key(0), value(0, 'b'));
+	co_await checkExactKVStoreKey(kvStore, key(1), value(1, 'a'));
+	co_await checkExactKVStoreKey(kvStore, key(count / 2), Optional<std::string>());
+	co_await checkExactKVStoreKey(kvStore, key(count - 1), Optional<std::string>());
+
+	// Commits pick up after the versions vacuum advanced through
+	kvStore->set(KeyValueRef(StringRef(key(count)), "after-vacuum"_sr));
+	co_await kvStore->commit();
+	co_await checkExactKVStoreKey(kvStore, key(count), std::string("after-vacuum"));
+
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->dispose();
+	co_await closed;
 }
 
 TEST_CASE("Lredwood/correctness/btree") {

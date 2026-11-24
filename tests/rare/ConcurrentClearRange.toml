@@ -1,0 +1,25 @@
+# Clears a second copy of a YCSB dataset, under its own nodePrefix, while YCSB runs against the first.
+
+[[test]]
+testTitle = 'ConcurrentClearRangeYCSB'
+
+    [[test.workload]]
+    testName = 'YCSB'
+    testDuration = 30.0
+    threads = 4
+    nodeCount = 1000
+    nodePrefix = 1
+    keyBytes = 32
+    tps = 100
+    valueBytes = 1024
+    variant = 'multiCF'
+    distribution = 'random'
+
+    [[test.workload]]
+    testName = 'ConcurrentClearRange'
+    nodeCount = 1000
+    nodePrefix = 2
+    keyBytes = 32
+    valueBytes = 1024
+    variant = 'multiCF'
+    clearDelay = 10.0
