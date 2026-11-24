@@ -1341,6 +1341,8 @@ public:
 	                                  // queue is empty
 	int REDWOOD_LAZY_CLEAR_MAX_PAGES; // Maximum number of pages to free before ending a lazy clear cycle, unless the
 	                                  // queue is empty
+	int REDWOOD_LAZY_CLEAR_YIELD_INTERVAL; // Yield after this many processed lazy clear pages to break up slow tasks,
+	                                       // or never if 0
 	int64_t REDWOOD_REMAP_CLEANUP_WINDOW_BYTES; // Total size of remapped pages to keep before being removed by
 	                                            // remap cleanup
 	double REDWOOD_REMAP_CLEANUP_TOLERANCE_RATIO; // Maximum ratio of the remap cleanup window that remap cleanup is
