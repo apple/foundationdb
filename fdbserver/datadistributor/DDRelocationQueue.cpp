@@ -916,148 +916,84 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 	bool hasHealthPriority = !destinationFailureRetry && RelocateData::isHealthPriority(rd.priority);
 	bool hasBoundaryPriority = !destinationFailureRetry && RelocateData::isBoundaryPriority(rd.priority);
 
+	// A partially replaced relocation can leave queued work on either side of the new range.
+	std::set<KeyRange, KeyRangeRef::ArbitraryOrder> partiallyReplaced;
 	auto ranges = queueMap.intersectingRanges(rd.keys);
 	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
-		RelocateData& rrs = r->value();
-
-		auto fetchingSourcesItr = fetchingSourcesQueue.find(rrs);
-		bool foundActiveFetching = fetchingSourcesItr != fetchingSourcesQueue.end();
-		std::set<RelocateData, std::greater<RelocateData>>* firstQueue;
-		std::set<RelocateData, std::greater<RelocateData>>::iterator firstRelocationItr;
-		bool foundActiveRelocation = false;
-
-		if (!foundActiveFetching && !rrs.src.empty()) {
-			firstQueue = &queue[rrs.src[0]];
-			firstRelocationItr = firstQueue->find(rrs);
-			foundActiveRelocation = firstRelocationItr != firstQueue->end();
+		const RelocateData& rrs = r->value();
+		auto& firstQueue = rrs.src.empty() ? fetchingSourcesQueue : queue[rrs.src.front()];
+		if (firstQueue.erase(rrs) == 0) {
+			continue;
+		}
+		for (int i = 1; i < rrs.src.size(); ++i) {
+			queue[rrs.src[i]].erase(rrs);
+		}
+		if (!rd.keys.contains(rrs.keys)) {
+			partiallyReplaced.insert(rrs.keys);
 		}
 
-		// If there is a queued job that wants data relocation which we are about to cancel/modify,
-		//  make sure that we keep the relocation intent for the job that we queue up
-		if (foundActiveFetching || foundActiveRelocation) {
-			rd.wantsNewServers |= rrs.wantsNewServers;
-			rd.startTime = std::min(rd.startTime, rrs.startTime);
-			if (destinationFailureRetry) {
-				// Some priorities, such as TEAM_FAILED, belong to neither category below.
-				rd.priority = std::max(rd.priority, rrs.priority);
-			}
-			if (!hasHealthPriority) {
-				rd.healthPriority = std::max(rd.healthPriority, rrs.healthPriority);
-			}
-			if (!hasBoundaryPriority) {
-				rd.boundaryPriority = std::max(rd.boundaryPriority, rrs.boundaryPriority);
-			}
-			rd.priority = std::max(rd.priority, std::max(rd.boundaryPriority, rd.healthPriority));
+		// Keep the relocation intent of the queued work we replace.
+		rd.wantsNewServers |= rrs.wantsNewServers;
+		rd.startTime = std::min(rd.startTime, rrs.startTime);
+		if (destinationFailureRetry) {
+			// Some priorities, such as TEAM_FAILED, belong to neither category below.
+			rd.priority = std::max(rd.priority, rrs.priority);
 		}
+		if (!hasHealthPriority) {
+			rd.healthPriority = std::max(rd.healthPriority, rrs.healthPriority);
+		}
+		if (!hasBoundaryPriority) {
+			rd.boundaryPriority = std::max(rd.boundaryPriority, rrs.boundaryPriority);
+		}
+		rd.priority = std::max(rd.priority, std::max(rd.boundaryPriority, rd.healthPriority));
 
-		if (rd.keys.contains(rrs.keys)) {
-			if (foundActiveFetching) {
-				fetchingSourcesQueue.erase(fetchingSourcesItr);
-			} else if (foundActiveRelocation) {
-				firstQueue->erase(firstRelocationItr);
-				for (int i = 1; i < rrs.src.size(); i++)
-					queue[rrs.src[i]].erase(rrs);
-			}
-		}
-
-		if (foundActiveFetching || foundActiveRelocation) {
-			serversToLaunchFrom.insert(rrs.src.begin(), rrs.src.end());
-			/*TraceEvent(rrs.interval.end(), mi.id()).detail("Result","Cancelled")
-			    .detail("WasFetching", foundActiveFetching).detail("Contained", rd.keys.contains( rrs.keys ));*/
-			queuedRelocations--;
-			TraceEvent(SevVerbose, "QueuedRelocationsChanged")
-			    .detail("DataMoveID", rrs.dataMoveId)
-			    .detail("RandomID", rrs.randomId)
-			    .detail("Total", queuedRelocations);
-			finishRelocation(rrs.priority, rrs.healthPriority);
-		}
+		serversToLaunchFrom.insert(rrs.src.begin(), rrs.src.end());
+		queuedRelocations--;
+		TraceEvent(SevVerbose, "QueuedRelocationsChanged")
+		    .detail("DataMoveID", rrs.dataMoveId)
+		    .detail("RandomID", rrs.randomId)
+		    .detail("Total", queuedRelocations);
+		finishRelocation(rrs.priority, rrs.healthPriority);
 	}
 
-	// determine the final state of the relocations map
 	auto affectedQueuedItems = queueMap.getAffectedRangesAfterInsertion(rd.keys, rd);
-
-	// put the new request into the global map of requests (modifies the ranges already present)
 	queueMap.insert(rd.keys, rd);
-
-	// cancel all the getSourceServers actors that intersect the new range that we will be getting
 	getSourceActors.cancel(KeyRangeRef(affectedQueuedItems.front().begin, affectedQueuedItems.back().end));
 
-	// update fetchingSourcesQueue and the per-server queue based on truncated ranges after insertion, (re-)launch
-	// getSourceServers
-	auto queueMapItr = queueMap.rangeContaining(affectedQueuedItems[0].begin);
-
-	// Put off erasing elements from fetchingSourcesQueue
-	std::set<RelocateData, std::greater<RelocateData>> delayDelete;
+	auto queueMapItr = queueMap.rangeContaining(affectedQueuedItems.front().begin);
 	for (int r = 0; r < affectedQueuedItems.size(); ++r, ++queueMapItr) {
-		// ASSERT(queueMapItr->value() == queueMap.rangeContaining(affectedQueuedItems[r].begin)->value());
 		RelocateData& rrs = queueMapItr->value();
+		const KeyRange& piece = affectedQueuedItems[r];
+		const bool shouldQueue = piece == rd.keys || partiallyReplaced.contains(rrs.keys);
+		rrs.keys = piece;
+		if (!shouldQueue) {
+			ASSERT(!rrs.src.empty() || rrs.startTime == -1);
+			continue;
+		}
 
-		if (rrs.src.empty() && (rrs.keys == rd.keys || fetchingSourcesQueue.contains(rrs))) {
-			if (rrs.keys != rd.keys) {
-				delayDelete.insert(rrs);
-			}
+		rrs.interval = TraceInterval("QueuedRelocation", rrs.randomId);
+		DebugRelocationTraceEvent(rrs.interval.begin(), distributorId)
+		    .detail("KeyBegin", rrs.keys.begin)
+		    .detail("KeyEnd", rrs.keys.end)
+		    .detail("Priority", rrs.priority)
+		    .detail("WantsNewServers", rrs.wantsNewServers);
 
-			rrs.keys = affectedQueuedItems[r];
-			rrs.interval = TraceInterval("QueuedRelocation", rrs.randomId); // inherit the old randomId
+		queuedRelocations++;
+		TraceEvent(SevVerbose, "QueuedRelocationsChanged")
+		    .detail("DataMoveID", rrs.dataMoveId)
+		    .detail("RandomID", rrs.randomId)
+		    .detail("Total", queuedRelocations);
+		startRelocation(rrs.priority, rrs.healthPriority);
 
-			DebugRelocationTraceEvent(rrs.interval.begin(), distributorId)
-			    .detail("KeyBegin", rrs.keys.begin)
-			    .detail("KeyEnd", rrs.keys.end)
-			    .detail("Priority", rrs.priority)
-			    .detail("WantsNewServers", rrs.wantsNewServers);
-
-			queuedRelocations++;
-			TraceEvent(SevVerbose, "QueuedRelocationsChanged")
-			    .detail("DataMoveID", rrs.dataMoveId)
-			    .detail("RandomID", rrs.randomId)
-			    .detail("Total", queuedRelocations);
-			startRelocation(rrs.priority, rrs.healthPriority);
-
+		if (rrs.src.empty()) {
 			fetchingSourcesQueue.insert(rrs);
 			getSourceActors.insert(rrs.keys,
 			                       getSourceServersForRange(this, rrs, fetchSourceServersComplete, fetchSourceLock));
 		} else {
-			RelocateData newData(rrs);
-			newData.keys = affectedQueuedItems[r];
-			ASSERT(!rrs.src.empty() || rrs.startTime == -1);
-
-			bool foundActiveRelocation = false;
-			for (int i = 0; i < rrs.src.size(); i++) {
-				auto& serverQueue = queue[rrs.src[i]];
-
-				if (serverQueue.erase(rrs) > 0) {
-					if (!foundActiveRelocation) {
-						newData.interval = TraceInterval("QueuedRelocation", rrs.randomId); // inherit the old randomId
-
-						DebugRelocationTraceEvent(newData.interval.begin(), distributorId)
-						    .detail("KeyBegin", newData.keys.begin)
-						    .detail("KeyEnd", newData.keys.end)
-						    .detail("Priority", newData.priority)
-						    .detail("WantsNewServers", newData.wantsNewServers);
-
-						queuedRelocations++;
-						TraceEvent(SevVerbose, "QueuedRelocationsChanged")
-						    .detail("DataMoveID", newData.dataMoveId)
-						    .detail("RandomID", newData.randomId)
-						    .detail("Total", queuedRelocations);
-						startRelocation(newData.priority, newData.healthPriority);
-						foundActiveRelocation = true;
-					}
-
-					serverQueue.insert(newData);
-				} else {
-					break;
-				}
+			for (UID source : rrs.src) {
+				queue[source].insert(rrs);
 			}
-
-			// We update the keys of a relocation even if it is "dead" since it helps validate()
-			rrs.keys = affectedQueuedItems[r];
-			rrs.interval = newData.interval;
 		}
-	}
-
-	for (const auto& it : delayDelete) {
-		fetchingSourcesQueue.erase(it);
 	}
 	DebugRelocationTraceEvent("ReceivedRelocateShard", distributorId)
 	    .detail("KeyBegin", rd.keys.begin)
@@ -3883,6 +3819,61 @@ TEST_CASE("/DataDistribution/DDQueue/RetryInheritsOneReplicaRepair") {
 		}
 		self.inFlightActors.cancel(merged);
 	}
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/DDQueue/SplitRetryInsideQueuedRepair") {
+	RetryQueueTest test;
+	auto& self = test.queue;
+	const KeyRange whole = KeyRangeRef("a"_sr, "z"_sr);
+	const KeyRange left = KeyRangeRef("a"_sr, "m"_sr);
+	const KeyRange middle = KeyRangeRef("m"_sr, "p"_sr);
+	const KeyRange right = KeyRangeRef("p"_sr, "z"_sr);
+	for (const auto& shard : { left, middle, right }) {
+		test.trackedShards.insert(shard, ShardTrackedData());
+	}
+
+	// The repair has found its sources, but neither has capacity to start the move.
+	self.queueRelocation(RelocateShard(whole, DataMovementReason::TEAM_1_LEFT, RelocateReason::OTHER),
+	                     test.serversToLaunchFrom);
+	RelocateData repair = self.queueMap[whole.begin];
+	self.getSourceActors.cancel(whole);
+	repair.src = { UID(1, 0), UID(2, 0) };
+	for (UID source : repair.src) {
+		self.busymap[source].addWork(repair.priority, WORK_FULL_UTILIZATION);
+	}
+	self.completeSourceFetch(repair);
+	self.launchQueuedWork(repair, &test.ddEnabledState);
+	ASSERT_EQ(self.queuedRelocations, 1);
+
+	RelocateData merge(
+	    RelocateShard(KeyRangeRef("m"_sr, "z"_sr), DataMovementReason::MERGE_SHARD, RelocateReason::MERGE_SHARD));
+	auto retries = self.output.getFuture();
+	self.queueRelocation(makeDestinationFailureRetry(merge, UID(3, 0)), test.serversToLaunchFrom);
+	ASSERT(retries.isReady());
+	auto first = retries.pop();
+	ASSERT(first.keys == middle);
+	self.queueRelocation(first, test.serversToLaunchFrom);
+
+	ASSERT(self.queueMap[left.begin].keys == left);
+	ASSERT(self.queueMap[right.begin].keys == right);
+	for (UID source : repair.src) {
+		const auto& queued = self.queue.at(source);
+		ASSERT(queued.contains(self.queueMap[left.begin]));
+		ASSERT(queued.contains(self.queueMap[right.begin]));
+		ASSERT(!queued.contains(repair));
+	}
+	ASSERT_EQ(self.queuedRelocations, 3);
+	ASSERT(retries.isReady());
+	auto second = retries.pop();
+	ASSERT(second.keys == right);
+	self.queueRelocation(second, test.serversToLaunchFrom);
+	const auto& retried = self.queueMap[right.begin];
+	ASSERT_EQ(retried.priority, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT);
+	ASSERT_EQ(retried.healthPriority, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT);
+	ASSERT_EQ(self.queuedRelocations, 3);
+	ASSERT_EQ(self.unhealthyRelocations, 3);
+	ASSERT(!retries.isReady());
 	return Void();
 }
 
