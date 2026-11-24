@@ -1314,6 +1314,16 @@ Future<Void> rebootAndCheck(ClusterControllerData* cluster, Optional<Standalone<
 	}
 }
 
+static void eraseWorkerLocality(std::unordered_map<NetworkAddress, LocalityData>& localities,
+                                const NetworkAddress& address,
+                                const LocalityData& workerLocality) {
+	// Another process may have registered at this address before the old worker's failure was detected.
+	auto it = localities.find(address);
+	if (it != localities.end() && it->second.processId() == workerLocality.processId()) {
+		localities.erase(it);
+	}
+}
+
 void removeFailedWorker(WorkerInterface const& worker, ClusterControllerData* cluster) {
 	auto workerInfo = cluster->id_worker.find(worker.locality.processId());
 	if (workerInfo == cluster->id_worker.end() || workerInfo->second.details.interf.id() != worker.id()) {
@@ -1337,9 +1347,9 @@ void removeFailedWorker(WorkerInterface const& worker, ClusterControllerData* cl
 	// Currently, only CC_ONLY_CONSIDER_INTRA_DC_LATENCY feature relies on addr_locality mapping. In the
 	// future, if needed, we can populate the mapping unconditionally.
 	if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY) {
-		cluster->addr_locality.erase(worker.address());
+		eraseWorkerLocality(cluster->addr_locality, worker.address(), worker.locality);
 		if (worker.secondaryAddress().present()) {
-			cluster->addr_locality.erase(worker.secondaryAddress().get());
+			eraseWorkerLocality(cluster->addr_locality, worker.secondaryAddress().get(), worker.locality);
 		}
 	}
 	cluster->updateClusterHealthMonitorInputs();
@@ -4190,6 +4200,21 @@ TEST_CASE("/fdbserver/clustercontroller/recheckDeferredSingletonWorkerIdentity")
 	HaltDataDistributorRequest halt = newHalts.pop();
 	ASSERT(halt.requesterID == data.id);
 	halt.reply.send(Void());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/preserveLocalityOnAddressReuse") {
+	const NetworkAddress address(IPAddress(0x01010101), 1);
+	LocalityData oldWorker;
+	oldWorker.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "old" }));
+	LocalityData replacement;
+	replacement.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "replacement" }));
+	std::unordered_map<NetworkAddress, LocalityData> localities{ { address, replacement } };
+
+	eraseWorkerLocality(localities, address, oldWorker);
+	ASSERT(localities.contains(address));
+	eraseWorkerLocality(localities, address, replacement);
+	ASSERT(localities.empty());
 	return Void();
 }
 
