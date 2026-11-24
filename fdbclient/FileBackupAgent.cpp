@@ -7876,9 +7876,28 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 			co_return LogProgress{ type, {}, {}, true, worker, cursor };
 		}
 	}
-	auto restorable = co_await config.getLatestRestorableVersion(tr);
-	co_await dispatch;
-	co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT), dispatch.get(), restorable };
+	auto restorable = config.getLatestRestorableVersion(tr);
+	auto cursor = co_await dispatch;
+	if (schema == BackupStatusSchema::V2 && cursor.present()) {
+		// Startup samples the first cursor before initializing the snapshot, even for logs-only backups.
+		// Every later ordinary cursor waits for the preceding batch of log files to finish.
+		auto snapshotBegin = co_await config.snapshotBeginVersion().get(tr);
+		if (cursor.get() <= snapshotBegin.orDefault(MAX_VERSION)) {
+			// A new range snapshot can move snapshotBegin past a completed log batch. The first completed
+			// range snapshot still bounds the initial cursor. A bulk dump can reuse an older job.
+			auto firstEnd = config.firstSnapshotEndVersion().get(tr);
+			auto mode = config.snapshotMode().getD(tr);
+			auto logsOnly = config.incrementalBackupOnly().getD(tr);
+			co_await (success(firstEnd) && success(mode) && success(logsOnly));
+			auto snapshotMode = static_cast<SnapshotMode>(mode.get());
+			bool usesRangeSnapshots =
+			    !logsOnly.get() && (snapshotMode == SnapshotMode::RANGEFILE || snapshotMode == SnapshotMode::BOTH);
+			if (!usesRangeSnapshots || cursor.get() <= firstEnd.get().orDefault(MAX_VERSION)) {
+				co_return LogProgress{ MutationLogType::DEFAULT, {}, {}, true, {}, cursor };
+			}
+		}
+	}
+	co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT), cursor, co_await restorable };
 }
 
 struct LogInfo : public ReferenceCounted<LogInfo> {

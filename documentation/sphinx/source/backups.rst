@@ -401,6 +401,11 @@ These counters do not show whether each partition saved files covering the entir
 When the database cannot establish a restore point, schema 2 reports ``RestorePointStatus`` as ``unknown`` and omits ``Restorable`` and ``LatestRestorablePoint``.
 ``LogDispatchCursor`` shows where the log dispatcher has advanced. A dispatcher can advance while it waits for workers.
 
+For ordinary logs, the first dispatch sets the starting version before it copies any files.
+For example, a logs-only backup that starts at version 121 can complete with an empty container.
+Text output and schema 2 show this initial cursor and report the restore point as unknown.
+Once the dispatcher advances after copying a log batch, its new cursor is the exclusive end of that batch.
+
 Existing clients can continue to use ``--json`` for schema 1. Its ``Restorable`` Boolean and version fields retain their historical metadata-based calculation.
 
 .. program:: fdbbackup delete
