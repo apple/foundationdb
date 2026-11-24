@@ -684,7 +684,7 @@ public:
 	                 int blockSize,
 	                 std::vector<MutationLogBackup> backups)
 	  : workerId(workerId), tag(tag), totalTags(totalTags), popVersion(popVersion), numMessages(numMessages),
-	    blockSize(blockSize), backups(std::move(backups)) {
+	    blockSize(blockSize), backups(std::move(backups)), finishes(this->backups.size()) {
 		for (int i = 0; i < this->backups.size(); ++i) {
 			const auto& backup = this->backups[i];
 			ASSERT(backup.container.isValid() && backup.beginVersion <= popVersion);
@@ -703,7 +703,7 @@ public:
 	Future<std::vector<CompletedMutationLogFile>> write(std::vector<VersionedMessage>* messages,
 	                                                    Version minKnownCommittedVersion,
 	                                                    Version savedVersion,
-	                                                    IsStopped isStopped) const;
+	                                                    IsStopped isStopped);
 
 private:
 	void insertRange(KeyRangeRef range, int index) {
@@ -726,6 +726,8 @@ private:
 	const int numMessages;
 	const int blockSize;
 	const std::vector<MutationLogBackup> backups;
+	// Keep pending and acknowledged finishes across attempts. Only a failed finish needs a fresh file.
+	std::vector<Future<Reference<IBackupFile>>> finishes;
 	KeyRangeMap<std::set<int>> keyRangeMap;
 };
 
@@ -860,16 +862,25 @@ template <class IsStopped>
 Future<std::vector<CompletedMutationLogFile>> MutationLogBatch::write(std::vector<VersionedMessage>* messages,
                                                                       Version minKnownCommittedVersion,
                                                                       Version savedVersion,
-                                                                      IsStopped isStopped) const {
+                                                                      IsStopped isStopped) {
 	ASSERT(numMessages <= messages->size());
 	std::vector<Future<Reference<IBackupFile>>> logFileFutures;
 	logFileFutures.reserve(backups.size());
 	std::vector<Reference<IBackupFile>> logFiles;
-	for (const auto& backup : backups) {
-		logFileFutures.push_back(isStopped(backup.uid)
-		                             ? Future<Reference<IBackupFile>>(Reference<IBackupFile>())
-		                             : backup.container->writeTaggedLogFile(
-		                                   backup.beginVersion, popVersion + 1, blockSize, tag.id, totalTags));
+	for (int i = 0; i < backups.size(); ++i) {
+		const auto& backup = backups[i];
+		if (isStopped(backup.uid)) {
+			finishes[i] = Reference<IBackupFile>();
+		}
+		if (finishes[i].isValid() && !finishes[i].isError()) {
+			logFileFutures.emplace_back(Reference<IBackupFile>());
+		} else {
+			// A failed tagged future still owns the old writer. Release it so its upload can be
+			// cleaned up before the replacement needs space at the same destination.
+			finishes[i] = Future<Reference<IBackupFile>>();
+			logFileFutures.push_back(backup.container->writeTaggedLogFile(
+			    backup.beginVersion, popVersion + 1, blockSize, tag.id, totalTags));
+		}
 	}
 	co_await waitForAll(logFileFutures);
 
@@ -934,18 +945,18 @@ Future<std::vector<CompletedMutationLogFile>> MutationLogBatch::write(std::vecto
 		co_await waitForAll(adds);
 	}
 
-	std::vector<Future<Void>> finished;
-	for (const auto& file : logFiles) {
+	for (int i = 0; i < logFiles.size(); ++i) {
+		const auto& file = logFiles[i];
 		if (file.isValid()) {
-			finished.push_back(file->finish());
+			finishes[i] = ::tag(file->finish(), file);
 		}
 	}
 
-	co_await waitForAll(finished);
+	co_await waitForAll(finishes);
 
 	std::vector<CompletedMutationLogFile> completedFiles;
-	for (int i = 0; i < logFiles.size(); i++) {
-		const auto& file = logFiles[i];
+	for (int i = 0; i < finishes.size(); i++) {
+		const auto& file = finishes[i].get();
 		if (!file.isValid()) {
 			continue;
 		}
@@ -1386,6 +1397,7 @@ public:
 	int64_t size() const override { return contents.size(); }
 	void addref() override { ReferenceCounted<MutationLogUploadTestFile>::addref(); }
 	void delref() override { ReferenceCounted<MutationLogUploadTestFile>::delref(); }
+	using ReferenceCounted<MutationLogUploadTestFile>::debugGetReferenceCount;
 	const std::string& bytes() const { return contents; }
 	bool isFinished() const { return finished; }
 
@@ -1406,8 +1418,10 @@ public:
 
 	explicit MutationLogUploadTestContainer(std::vector<Failure> failures,
 	                                        Future<Void> firstAppend = Void(),
-	                                        Future<Void> finishFailure = io_timeout())
-	  : failures(std::move(failures)), firstAppend(firstAppend), finishFailure(finishFailure) {}
+	                                        Future<Void> finishFailure = io_timeout(),
+	                                        int delayedAppendAttempt = 1)
+	  : failures(std::move(failures)), firstAppend(firstAppend), finishFailure(finishFailure),
+	    delayedAppendAttempt(delayedAppendAttempt) {}
 
 	Future<Reference<IBackupFile>> writeFile(const std::string& name) override {
 		Failure failure = attempts < failures.size() ? failures[attempts] : Failure::NONE;
@@ -1416,7 +1430,7 @@ public:
 			return io_error();
 		}
 		auto file = makeReference<MutationLogUploadTestFile>(
-		    name, failure, attempts == 1 ? firstAppend : Future<Void>(Void()), finishFailure);
+		    name, failure, attempts == delayedAppendAttempt ? firstAppend : Future<Void>(Void()), finishFailure);
 		files.push_back(file);
 		return Reference<IBackupFile>(file);
 	}
@@ -1439,6 +1453,7 @@ private:
 	const std::vector<Failure> failures;
 	const Future<Void> firstAppend;
 	const Future<Void> finishFailure;
+	const int delayedAppendAttempt;
 	int attempts = 0;
 	std::vector<Reference<MutationLogUploadTestFile>> files;
 };
@@ -1469,11 +1484,13 @@ TEST_CASE("/BackupWorker/MutationLogUpload/RetryFreshFiles") {
 	int retries = 0;
 	Promise<Void> firstRetry;
 	Promise<Void> finishReady;
+	Promise<Void> replacementAppend;
 	using Failure = MutationLogUploadTestFile::Failure;
 	auto container = makeReference<MutationLogUploadTestContainer>(
 	    std::vector<Failure>{ Failure::CREATE, Failure::APPEND, Failure::FINISH, Failure::NONE },
-	    Future<Void>(Void()),
-	    finishReady.getFuture());
+	    replacementAppend.getFuture(),
+	    finishReady.getFuture(),
+	    4);
 	std::vector<VersionedMessage> messages{ testMutationLogMessage(
 		MutationRef(MutationRef::SetValue, "key"_sr, "v"_sr)) };
 	MutationLogBatch batch(
@@ -1495,8 +1512,12 @@ TEST_CASE("/BackupWorker/MutationLogUpload/RetryFreshFiles") {
 	ASSERT_EQ(retries, 2);
 	ASSERT(!result.isReady());
 	finishReady.sendError(http_request_failed());
-	std::vector<CompletedMutationLogFile> completed = co_await result;
 	ASSERT_EQ(container->getAttempts(), 4);
+	ASSERT(!result.isReady());
+	// While the new file is appending, only the test container's history can still own the failed file.
+	ASSERT_EQ(container->getFiles().at(1)->debugGetReferenceCount(), 1);
+	replacementAppend.send(Void());
+	std::vector<CompletedMutationLogFile> completed = co_await result;
 	ASSERT_EQ(retries, 3);
 	const auto& files = container->getFiles();
 	ASSERT_EQ(files.size(), 3);
@@ -1519,16 +1540,25 @@ TEST_CASE("/BackupWorker/MutationLogUpload/ChangingRecipients") {
 	const UID firstUid(1, 1);
 	const UID stoppedUid(2, 2);
 	const UID lateUid(3, 3);
+	const UID confirmedUid(4, 4);
+	const UID pendingUid(5, 5);
 	const UID workerId(9, 9);
 	const Tag tag(tagLocalityLogRouter, 0);
 	Promise<Void> appendReady;
 	Promise<Void> retryReady;
-	auto first = makeReference<MutationLogUploadTestContainer>(std::vector<Failure>{}, appendReady.getFuture());
-	auto other = makeReference<MutationLogUploadTestContainer>(std::vector<Failure>{ Failure::FINISH });
+	Promise<Void> pendingFinish;
+	auto first = makeReference<MutationLogUploadTestContainer>(std::vector<Failure>{ Failure::FINISH, Failure::FINISH },
+	                                                           appendReady.getFuture());
+	auto other = makeReference<MutationLogUploadTestContainer>(std::vector<Failure>{});
+	auto confirmed = makeReference<MutationLogUploadTestContainer>(std::vector<Failure>{});
+	auto pendingFinishContainer = makeReference<MutationLogUploadTestContainer>(
+	    std::vector<Failure>{ Failure::FINISH }, Void(), pendingFinish.getFuture());
 	auto late = makeReference<MutationLogUploadTestContainer>(std::vector<Failure>{});
 	std::map<UID, BackupData::PerBackupInfo> infos;
 	infos.emplace(firstUid, testMutationLogBackup(first, 90, { KeyRangeRef("a"_sr, "z"_sr) }, 100));
 	infos.emplace(stoppedUid, testMutationLogBackup(other, 90, { KeyRangeRef("m"_sr, "n"_sr) }, 100));
+	infos.emplace(confirmedUid, testMutationLogBackup(confirmed, 90, { KeyRangeRef("a"_sr, "z"_sr) }, 100));
+	infos.emplace(pendingUid, testMutationLogBackup(pendingFinishContainer, 90, { KeyRangeRef("a"_sr, "z"_sr) }, 100));
 	std::vector<VersionedMessage> messages{ testMutationLogMessage(
 		MutationRef(MutationRef::ClearRange, "a"_sr, "z"_sr)) };
 	auto isStopped = [&](UID uid) {
@@ -1536,7 +1566,7 @@ TEST_CASE("/BackupWorker/MutationLogUpload/ChangingRecipients") {
 		return info == infos.end() || info->second.stopped;
 	};
 	auto snapshot = snapshotMutationLogBackups(infos, workerId, 50, 99, Optional<Version>(100), 100);
-	ASSERT_EQ(snapshot.size(), 2);
+	ASSERT_EQ(snapshot.size(), 4);
 	MutationLogBatch batch(workerId, tag, 1, 100, 1, 1024, std::move(snapshot));
 	bool stopped = false;
 	int retries = 0;
@@ -1556,18 +1586,33 @@ TEST_CASE("/BackupWorker/MutationLogUpload/ChangingRecipients") {
 	ASSERT_EQ(retries, 1);
 	ASSERT(!result.isReady());
 	ASSERT(first->getFiles().front()->isFinished());
+	ASSERT(confirmed->getFiles().front()->isFinished());
+	ASSERT_EQ(infos.at(confirmedUid).lastSavedVersion, 100);
 	ASSERT_EQ(infos.at(firstUid).lastSavedVersion, 100);
 
 	infos.at(stoppedUid).stop();
 	infos.emplace(lateUid, testMutationLogBackup(late, 99, { KeyRangeRef("g"_sr, "t"_sr) }));
 	retryReady.send(Void());
+	ASSERT_EQ(retries, 2);
+	ASSERT(!result.isReady());
+	ASSERT_EQ(pendingFinishContainer->getAttempts(), 1);
+	pendingFinish.send(Void());
 	auto completed = co_await result;
-	ASSERT_EQ(completed.size(), 1);
-	ASSERT_EQ(completed.front().backupUid, firstUid);
-	ASSERT_EQ(first->getAttempts(), 2);
+	ASSERT_EQ(confirmed->getAttempts(), 1);
 	ASSERT_EQ(other->getAttempts(), 1);
-	ASSERT_EQ(first->getFiles()[0]->bytes(), first->getFiles()[1]->bytes());
+	ASSERT_EQ(first->getAttempts(), 3);
+	ASSERT_EQ(completed.size(), 3);
 	advanceMutationLogVersions(infos, completed, 100);
+	ASSERT_EQ(infos.at(firstUid).lastSavedVersion, 101);
+	ASSERT_EQ(infos.at(confirmedUid).lastSavedVersion, 101);
+	ASSERT_EQ(infos.at(pendingUid).lastSavedVersion, 101);
+	ASSERT_EQ(infos.at(stoppedUid).lastSavedVersion, 100);
+
+	// A lost finish acknowledgement still requires a fresh file with exactly the same contents.
+	for (const auto& file : first->getFiles()) {
+		ASSERT(file->isFinished());
+		ASSERT_EQ(file->bytes(), first->getFiles().front()->bytes());
+	}
 
 	// A stopped backup's boundaries must still split the first backup's retry.
 	auto unsplit = makeReference<MutationLogUploadTestFile>("unsplit", Failure::NONE);
