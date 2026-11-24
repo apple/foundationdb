@@ -7923,13 +7923,16 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    .detail("FKID", fetchKeysID);
 					// Clear the key range before ingestion. This mirrors the replaceRange done in the case were
 					// we do not ingest SST files.
+					const double phasesStartTime = g_network->timer();
 					data->storage.getKeyValueStore()->clear(keys);
 
 					// Now wait on the durableVersion to be updated so clear has been committed.
 					co_await data->durableVersion.whenAtLeast(data->storageVersion() + 1);
+					const double clearDurableTime = g_network->timer();
 
 					// Compact the range before ingestion to optimize storage
 					co_await data->storage.getKeyValueStore()->compactRange(keys);
+					const double preCompactTime = g_network->timer();
 
 					// Ingest the SST files.
 					// Measure duration at this level so we capture the inter-thread handoff time.
@@ -7940,9 +7943,21 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					// Compact the range after ingestion to avoid accumulating compaction overtime
 					co_await data->storage.getKeyValueStore()->compactRange(keys);
+					const double postCompactTime = g_network->timer();
 
 					// Process sample files after SST ingestion
 					co_await processSampleFiles(data, keys, ownedBulkLoadFileSets, readOptions);
+
+					TraceEvent(bulkLoadPerfEventSev(), "SSBulkLoadTaskIngestPhases", data->thisServerID)
+					    .detail("DataMoveId", dataMoveId.toString())
+					    .detail("Range", keys)
+					    .detail("FKID", fetchKeysID)
+					    .detail("FileSets", ownedBulkLoadFileSets->size())
+					    .detail("ClearDurable", clearDurableTime - phasesStartTime)
+					    .detail("PreCompact", preCompactTime - clearDurableTime)
+					    .detail("Ingest", ingestDuration)
+					    .detail("PostCompact", postCompactTime - ingestStartTime - ingestDuration)
+					    .detail("SampleFiles", g_network->timer() - postCompactTime);
 
 					// NOTICE: We break the 'fetchKeys' loop here if we successfully ingest the SST files.
 					// EARLY EXIT FROM 'fetchKeys' LOOP!!!
