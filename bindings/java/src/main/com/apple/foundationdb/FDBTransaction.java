@@ -738,11 +738,11 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			CompletableFuture<Void> f = new FutureVoid(Transaction_onError(getPtr(), ((FDBException) e).getCode()),
 					executor);
 			final Transaction tr = transfer();
-			return f.thenApply(v -> tr).whenComplete((v, t) -> {
+			return f.whenComplete((v, t) -> {
 				if (t != null) {
 					tr.close();
 				}
-			});
+			}).thenApply(v -> tr);
 		} finally {
 			pointerReadLock.unlock();
 			if(!transactionOwner) {
