@@ -383,100 +383,43 @@ public:
 		data += sizeof(T);
 	}
 
-	// Deserialize RLE encoded tag locality values.
-	void deserializeLocalities(const uint8_t*& data,
-	                           size_t& utlCount,
-	                           std::vector<int8_t>& localities,
-	                           std::vector<uint16_t>& localityCounts) {
-		// Initialization
-		localities.clear();
-		localityCounts.clear();
-
-		// Extract unique tag locality count from the buffer.
-		deserialize<size_t>(data, utlCount);
-
-		if (utlCount == 0) {
-			return;
-		}
-
-		int8_t locality;
-		uint16_t localityCount;
-		localities.reserve(utlCount);
-		localityCounts.reserve(utlCount);
-		for (size_t i = 0; i < utlCount; i++) {
-			deserialize<int8_t>(data, locality);
-			localities.push_back(locality);
-
-			deserialize<uint16_t>(data, localityCount);
-			localityCounts.push_back(localityCount);
-		}
-	}
-
-	// Deserialize tag ids and commit version values.
-	// T: Type that was used to serialize tag ids (uint8_t/uint16_t)
-	// V: Type that was used to serialize commit version deltas (uint8_t/uint16_t/uint32_t/uint64_t)
-	template <typename T, typename V>
-	void deserializeSizedTagIdsAndSizedCommitVersions(const uint8_t*& data,
-	                                                  std::vector<int8_t>& localities,
-	                                                  std::vector<uint16_t>& localityCounts) {
-		Version minCommitVersion;
-		deserialize<Version>(data, minCommitVersion);
-
-		size_t pairCount; // number of serialized <tag id, commit version> pairs
-		deserialize<size_t>(data, pairCount);
-
-		T tagId;
-		V versionDelta;
-		for (size_t i = 0; i < localities.size(); i++) {
-			for (size_t j = 0; j < localityCounts[i]; j++) {
-				// Deserialize tag id.
-				deserialize<T>(data, tagId);
-
-				// Deserialize commit version delta.
-				deserialize<V>(data, versionDelta);
-
-				Tag tag(localities[i], tagId);
-				setVersionNoCheck(tag, minCommitVersion + versionDelta);
+	// The caller has checked the byte size and the total number of pairs across all runs.
+	template <typename TagId, typename Delta>
+	bool deserializePairs(const uint8_t*& data,
+	                      const std::vector<std::pair<int8_t, uint16_t>>& runs,
+	                      Version minVersion) {
+		const uint64_t maxDelta = uint64_t(MAX_VERSION) - uint64_t(minVersion);
+		for (const auto& [locality, count] : runs) {
+			for (uint16_t i = 0; i < count; ++i) {
+				TagId id;
+				Delta delta;
+				deserialize(data, id);
+				deserialize(data, delta);
+				if (delta > maxDelta) {
+					return false;
+				}
+				setVersionNoCheck(Tag(locality, id), static_cast<Version>(uint64_t(minVersion) + delta));
 			}
 		}
+		return true;
 	}
 
-	// Figrue out the type that was used to serialize commit version deltas and call the above
-	// method to do the deserialization.
-	// T: Type that was used to serialize tag ids (uint8_t/uint16_t)
-	template <typename T>
-	void deserializeSizedTagIdsAndCommitVersions(const uint8_t*& data,
-	                                             std::vector<int8_t>& localities,
-	                                             std::vector<uint16_t>& localityCounts) {
-		uint8_t commitVersionDeltaSize; // number of bytes that were used to serialize an individual commit version
-		                                // delta value
-		deserialize<uint8_t>(data, commitVersionDeltaSize);
-
-		if (commitVersionDeltaSize == sizeof(uint8_t)) {
-			deserializeSizedTagIdsAndSizedCommitVersions<T, uint8_t>(data, localities, localityCounts);
-		} else if (commitVersionDeltaSize == sizeof(uint16_t)) {
-			deserializeSizedTagIdsAndSizedCommitVersions<T, uint16_t>(data, localities, localityCounts);
-		} else if (commitVersionDeltaSize == sizeof(uint32_t)) {
-			deserializeSizedTagIdsAndSizedCommitVersions<T, uint32_t>(data, localities, localityCounts);
-		} else {
-			ASSERT(commitVersionDeltaSize == sizeof(uint64_t));
-			deserializeSizedTagIdsAndSizedCommitVersions<T, uint64_t>(data, localities, localityCounts);
-		}
-	}
-
-	// Figure out the types that were used to serialize tag ids and commit version deltas, and
-	// call the above methods to do the deserialization.
-	void deserializeTagIdsAndCommitVersions(const uint8_t*& data,
-	                                        std::vector<int8_t>& localities,
-	                                        std::vector<uint16_t>& localityCounts) {
-		uint8_t tagIdSize; // number of bytes that were used to serialize an individual tag id
-		deserialize<uint8_t>(data, tagIdSize);
-
-		if (tagIdSize == sizeof(uint8_t)) {
-			deserializeSizedTagIdsAndCommitVersions<uint8_t>(data, localities, localityCounts);
-		} else {
-			ASSERT(tagIdSize == sizeof(uint16_t));
-			deserializeSizedTagIdsAndCommitVersions<uint16_t>(data, localities, localityCounts);
+	template <typename TagId>
+	bool deserializePairs(const uint8_t*& data,
+	                      const std::vector<std::pair<int8_t, uint16_t>>& runs,
+	                      Version minVersion,
+	                      uint8_t deltaSize) {
+		switch (deltaSize) {
+		case sizeof(uint8_t):
+			return deserializePairs<TagId, uint8_t>(data, runs, minVersion);
+		case sizeof(uint16_t):
+			return deserializePairs<TagId, uint16_t>(data, runs, minVersion);
+		case sizeof(uint32_t):
+			return deserializePairs<TagId, uint32_t>(data, runs, minVersion);
+		case sizeof(uint64_t):
+			return deserializePairs<TagId, uint64_t>(data, runs, minVersion);
+		default:
+			return false;
 		}
 	}
 };
@@ -538,22 +481,59 @@ struct dynamic_size_traits<VersionVector> : std::true_type {
 
 	template <class Context>
 	static void load(const uint8_t* data, size_t size, VersionVector& vv, Context& context) {
-		auto* p = data;
-
-		size_t utlCount;
-		std::vector<int8_t> localities;
-		std::vector<uint16_t> localityCounts;
-		vv.deserializeLocalities(data, utlCount, localities, localityCounts);
-		if (utlCount > 0) {
-			vv.deserializeTagIdsAndCommitVersions(data, localities, localityCounts);
+		if (size < sizeof(size_t) + sizeof(Version)) {
+			detail::load_failed(context, "version vector is missing its count or maximum version");
+		}
+		const uint8_t* pairsEnd = data + size - sizeof(Version);
+		size_t localityCount;
+		vv.deserialize(data, localityCount);
+		// Localities are unique signed bytes. Bound the count before allocating or summing the run lengths.
+		if (localityCount > UINT8_MAX + 1 || localityCount > (pairsEnd - data) / (sizeof(int8_t) + sizeof(uint16_t))) {
+			detail::load_failed(context, "invalid version vector locality count");
 		}
 
-		// Deserialize VersionVector::maxVersion.
-		Version maxVersion;
-		vv.deserialize<Version>(data, maxVersion);
-		vv.setMaxVersion(maxVersion);
-
-		ASSERT(data - p == size);
+		VersionVector decoded;
+		if (localityCount > 0) {
+			std::vector<std::pair<int8_t, uint16_t>> runs;
+			runs.reserve(localityCount);
+			size_t totalPairs = 0;
+			for (size_t i = 0; i < localityCount; ++i) {
+				int8_t locality;
+				uint16_t count;
+				vv.deserialize(data, locality);
+				vv.deserialize(data, count);
+				runs.emplace_back(locality, count);
+				totalPairs += count;
+			}
+			if (pairsEnd - data < 2 * sizeof(uint8_t) + sizeof(Version) + sizeof(size_t)) {
+				detail::load_failed(context, "truncated version vector pair header");
+			}
+			uint8_t idSize, deltaSize;
+			Version minVersion;
+			size_t pairCount;
+			vv.deserialize(data, idSize);
+			vv.deserialize(data, deltaSize);
+			vv.deserialize(data, minVersion);
+			vv.deserialize(data, pairCount);
+			if (idSize != sizeof(uint8_t) && idSize != sizeof(uint16_t)) {
+				detail::load_failed(context, "invalid version vector tag ID size");
+			}
+			size_t pairSize = idSize + deltaSize;
+			size_t remaining = pairsEnd - data;
+			if (pairCount != totalPairs || remaining / pairSize != pairCount || remaining % pairSize != 0) {
+				detail::load_failed(context, "invalid version vector pair count");
+			}
+			bool valid = idSize == sizeof(uint8_t)
+			                 ? decoded.deserializePairs<uint8_t>(data, runs, minVersion, deltaSize)
+			                 : decoded.deserializePairs<uint16_t>(data, runs, minVersion, deltaSize);
+			if (!valid) {
+				detail::load_failed(context, "invalid version vector delta");
+			}
+		} else if (data != pairsEnd) {
+			detail::load_failed(context, "empty version vector has extra bytes");
+		}
+		decoded.deserialize(data, decoded.maxVersion);
+		vv = std::move(decoded);
 	}
 };
 

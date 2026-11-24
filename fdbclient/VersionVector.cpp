@@ -64,6 +64,49 @@ TEST_CASE("/fdbclient/VersionVector/emptyVV") {
 	return Void();
 }
 
+TEST_CASE("/fdbclient/VersionVector/RejectsMalformedFields") {
+	if (g_network->isSimulated()) {
+		return Void(); // Malformed object buffers assert in simulation.
+	}
+	Arena arena;
+	TestContextArena context{ arena };
+	VersionVector source;
+	source.setVersion(Tag(1, 2), 10);
+	source.setVersion(Tag(1, 3), 11);
+	using Encoding = dynamic_size_traits<VersionVector>;
+	std::vector<uint8_t> encoded(Encoding::size(source, context));
+	Encoding::save(encoded.data(), source, context);
+
+	auto checkRejected = [&](const uint8_t* data, size_t size) {
+		VersionVector output(42);
+		try {
+			Encoding::load(data, size, output, context);
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_serialization_failed);
+			ASSERT(output.empty() && output.getMaxVersion() == 42);
+		}
+	};
+	for (size_t size = 0; size < encoded.size(); ++size) {
+		checkRejected(encoded.data(), size);
+	}
+	auto checkField = [&](size_t offset, auto value) {
+		auto bad = encoded;
+		memcpy(bad.data() + offset, &value, sizeof(value));
+		checkRejected(bad.data(), bad.size());
+	};
+	const size_t runCountOffset = sizeof(size_t) + sizeof(int8_t);
+	const size_t idSizeOffset = runCountOffset + sizeof(uint16_t);
+	const size_t minVersionOffset = idSizeOffset + 2 * sizeof(uint8_t);
+	checkField(0, std::numeric_limits<size_t>::max());
+	checkField(runCountOffset, uint16_t(3));
+	checkField(idSizeOffset, uint8_t(0));
+	checkField(idSizeOffset + 1, uint8_t(3));
+	checkField(minVersionOffset, Version(MAX_VERSION));
+	checkField(minVersionOffset + sizeof(Version), std::numeric_limits<size_t>::max());
+	return Void();
+}
+
 TEST_CASE("/fdbclient/VersionVector/simpleVV") {
 	Arena arena;
 	TestContextArena context{ arena };
