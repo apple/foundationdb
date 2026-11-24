@@ -7912,10 +7912,10 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 		}
 	}
 	auto cursor = co_await dispatch;
-	auto restorable = co_await config.getLatestRestorableVersion(tr);
-	LogProgress progress{ type.orDefault(MutationLogType::DEFAULT), cursor, restorable };
-	if (schema == BackupStatusSchema::V1 || !cursor.present()) {
-		co_return progress;
+	if (schema == BackupStatusSchema::V1) {
+		co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT),
+			                   cursor,
+			                   co_await config.getLatestRestorableVersion(tr) };
 	}
 
 	Optional<Versionstamp> captureStart;
@@ -7924,25 +7924,75 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 	co_await (store(captureStart, config.mutationLogCaptureStart().get(tr)) &&
 	          store(mode, config.snapshotMode().getD(tr)) && store(logsOnly, config.incrementalBackupOnly().getD(tr)));
 	auto snapshotMode = static_cast<SnapshotMode>(mode);
-	bool usesRangeSnapshots =
-	    !logsOnly && (snapshotMode == SnapshotMode::RANGEFILE || snapshotMode == SnapshotMode::BOTH);
+	bool usesRangeSnapshots = !logsOnly && snapshotMode != SnapshotMode::BULKDUMP;
+	LogProgress progress{ MutationLogType::DEFAULT, {}, {} };
+	Optional<Version> logTarget;
 	// Startup sampled the initial cursor before capture committed. The first dispatch reads
 	// after that commit and chooses a strictly later version for the end of its file batch.
-	bool batchComplete = captureStart.present()
-	                         ? cursor.get() > captureStart.get().version
-	                         : co_await hasLegacyOrdinaryLogBatch(tr, config, cursor.get(), usesRangeSnapshots);
-	if (!batchComplete) {
-		co_return LogProgress{ MutationLogType::DEFAULT, {}, {}, true, {}, cursor };
-	}
-	if (restorable.present() && !logsOnly &&
-	    (snapshotMode == SnapshotMode::BULKDUMP || snapshotMode == SnapshotMode::BOTH)) {
-		// An adopted dump may predate capture, even if its oldest batch lies inside the first named log file.
-		auto oldestBatch = co_await config.bulkDumpSnapshotBeginVersion().get(tr);
-		if (!captureStart.present() || !oldestBatch.present() || oldestBatch.get() < captureStart.get().version) {
-			progress.restorable.reset();
+	if (cursor.present()) {
+		bool batchComplete = captureStart.present()
+		                         ? cursor.get() > captureStart.get().version
+		                         : co_await hasLegacyOrdinaryLogBatch(tr, config, cursor.get(), usesRangeSnapshots);
+		if (batchComplete) {
+			progress.exclusiveLogEnd = cursor;
+			logTarget = cursor.get() - 1;
+		} else {
+			progress.logDispatchCursor = cursor;
 			progress.restorePointUnknown = true;
 		}
 	}
+	if (logsOnly) {
+		progress.restorable = logTarget;
+		co_return progress;
+	}
+
+	LogProgress range = progress;
+	if (usesRangeSnapshots) {
+		auto firstEnd = co_await config.firstSnapshotEndVersion().get(tr);
+		if (firstEnd.present()) {
+			Version rangeEnd = firstEnd.get();
+			if (snapshotMode == SnapshotMode::RANGEFILE) {
+				// A newer snapshot may restore without logs. Only its maximum file version is recorded.
+				// In BOTH mode the latest end can belong to either format. The first range snapshot
+				// suffices to prove that the range reader can reach a shared log target.
+				rangeEnd = co_await config.latestSnapshotEndVersion().getD(tr, Snapshot::False, rangeEnd);
+			}
+			if (logTarget.present() && rangeEnd <= logTarget.get()) {
+				range.restorable = logTarget;
+			} else {
+				range.restorePointUnknown = true;
+			}
+		}
+		if (snapshotMode == SnapshotMode::RANGEFILE) {
+			co_return range;
+		}
+	}
+
+	LogProgress bulk = progress;
+	auto newest = co_await config.bulkDumpSnapshotEndVersion().get(tr);
+	if (newest.present()) {
+		auto oldest = co_await config.bulkDumpSnapshotBeginVersion().get(tr);
+		if (oldest == newest && newest.get() >= logTarget.orDefault(invalidVersion)) {
+			// The validated dump covers the entire backup range at one version.
+			bulk.restorable = newest;
+			bulk.restorePointUnknown = false;
+		} else if (logTarget.present() && newest.get() <= logTarget.get()) {
+			// An adopted dump can predate capture, even inside the first named log file.
+			if (oldest.present() && captureStart.present() && oldest.get() >= captureStart.get().version) {
+				bulk.restorable = logTarget;
+			} else {
+				bulk.restorePointUnknown = true;
+			}
+		} else if (!oldest.present()) {
+			bulk.restorePointUnknown = true;
+		}
+	}
+	if (snapshotMode == SnapshotMode::BULKDUMP ||
+	    (range.restorable == bulk.restorable && range.restorePointUnknown == bulk.restorePointUnknown)) {
+		co_return bulk;
+	}
+	// In BOTH mode either restore method can be selected. One method cannot establish a point for the other.
+	progress.restorePointUnknown = true;
 	co_return progress;
 }
 
@@ -8641,6 +8691,8 @@ public:
 					doc.setKey("Status", statusDoc);
 
 					Optional<Version> logEnd;
+					bool snapshotProgress = backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
+					                        backupState == EBackupState::STATE_RUNNING;
 
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						Reference<IBackupContainer> bc;
@@ -8651,8 +8703,7 @@ public:
 						auto latestRestorable = co_await getTimestampedVersion(tr, logs.restorable);
 						bc = fileBackup::getBackupContainerWithProxy(bc);
 
-						if (schema == BackupStatusSchema::V2 && backupState == EBackupState::STATE_COMPLETED &&
-						    logEnd.present()) {
+						if (schema == BackupStatusSchema::V2 && !snapshotProgress && logEnd.present()) {
 							auto latestLogEnd = co_await getTimestampedVersion(tr, logEnd);
 							doc.setKey("LatestLogEnd", latestLogEnd.toJSON());
 						}
@@ -8682,8 +8733,7 @@ public:
 						doc.setKey("MutationLogType", logs.typeName());
 					}
 
-					if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
-					    backupState == EBackupState::STATE_RUNNING) {
+					if (snapshotProgress) {
 						int64_t snapshotInterval{ 0 };
 						int64_t logBytesWritten{ 0 };
 						int64_t rangeBytesWritten{ 0 };
@@ -8928,11 +8978,13 @@ public:
 					if (logs.logDispatchCursor.present()) {
 						statusText += format("Log dispatch cursor: %lld\n", logs.logDispatchCursor.get());
 					}
-					if (backupState == EBackupState::STATE_COMPLETED && logs.exclusiveLogEnd.present()) {
+					if (!snapshotProgress && logs.exclusiveLogEnd.present()) {
 						statusText += format("Log end version (exclusive): %lld\n", logs.exclusiveLogEnd.get());
 					}
 					if (logs.restorePointUnknown) {
 						statusText += "Latest restore point: unknown from backup metadata.\n";
+					} else if (latestRestorableVersion.present() && backupState != EBackupState::STATE_COMPLETED) {
+						statusText += format("Latest restore point: %lld\n", latestRestorableVersion.get());
 					}
 
 					// Check if backup is BulkLoad compatible (has bulkdump_data/).

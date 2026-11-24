@@ -455,78 +455,173 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 	co_await container->deleteContainer();
 }
 
+Future<Void> writeStatusRangeSnapshot(Reference<IBackupContainer> container,
+                                      Version start,
+                                      Version oldest,
+                                      Version newest) {
+	std::vector<std::string> files;
+	std::vector<std::pair<Key, Key>> ranges;
+	if (oldest != newest) {
+		auto early = co_await container->writeRangeFile(start, 0, oldest, 1024);
+		co_await early->finish();
+		files.push_back(early->getFileName());
+		ranges.emplace_back("a"_sr, "m"_sr);
+	}
+	auto last = co_await container->writeRangeFile(start, files.size(), newest, 1024);
+	// A nonempty range file gives its snapshot a distinct name from an SST descriptor with the same bounds.
+	co_await last->append("x", 1);
+	co_await last->finish();
+	ranges.emplace_back(files.empty() ? "a"_sr : "m"_sr, "z"_sr);
+	files.push_back(last->getFileName());
+	co_await container->writeKeyspaceSnapshotFile(files, ranges, last->size(), IncludeKeyRangeMap::True);
+}
+
 TEST_CASE("/backup/status/bulkDumpOrdinaryLogCoverage") {
 	Database db = DatabaseContext::create(
 	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
 	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	BackupConfig config(UID(1, 2));
-	config.clear(tr);
-	config.mutationLogType().set(tr, MutationLogType::DEFAULT);
-	config.mutationLogCaptureStart().set(tr, Versionstamp(125, 0));
-	config.snapshotBeginVersion().set(tr, 123);
-	config.latestLogEndVersion().set(tr, 201);
-
-	std::vector<std::pair<Version, Version>> batchVersions{
-		{ 100, 100 }, { 100, 150 }, { 121, 150 }, { 125, 150 }, { 130, 150 }
+	enum Evidence { complete, noOldest, noCapture };
+	enum Readers { neither, rangeReader, bulkReader, bothReaders };
+	struct Bounds {
+		Version oldest, newest;
 	};
-	for (auto [oldest, newest] : batchVersions) {
+	struct RestorePoint {
+		Optional<Version> version;
+		bool unknown = false;
+	};
+	struct Example {
+		SnapshotMode mode;
+		Bounds bulk, range;
+		Evidence evidence;
+		Readers readers; // Readers that accept the target in the container.
+		RestorePoint status;
+		Optional<Version> schema1;
+		Version cursor = 201;
+		Version earlierRangeEnd = invalidVersion;
+	};
+
+	const auto bulkOnly = SnapshotMode::BULKDUMP;
+	const auto both = SnapshotMode::BOTH;
+	const Bounds absent{ invalidVersion, invalidVersion }, range160{ 160, 160 };
+	const Bounds single{ 210, 210 }, mixed{ 150, 210 };
+	const RestorePoint unknown{ {}, true }, noPoint{}, at200{ 200 }, at210{ 210 };
+	// Check target 200 or the end of the newest snapshot, whichever is later.
+	const std::vector<Example> examples{
+		// The first file starts at 121, but the transaction that installed capture committed at 125.
+		{ bulkOnly, { 100, 100 }, absent, complete, neither, unknown, 200 },
+		{ both, { 100, 150 }, range160, complete, rangeReader, unknown, 200 },
+		{ bulkOnly, { 121, 150 }, absent, complete, bulkReader, unknown, 200 },
+		{ both, { 125, 150 }, range160, complete, bothReaders, at200, 200 },
+		{ bulkOnly, { 130, 150 }, absent, complete, bulkReader, at200, 200 },
+		{ both, { 130, 150 }, range160, noOldest, bothReaders, unknown, 200 },
+		{ bulkOnly, { 130, 150 }, absent, noCapture, bulkReader, unknown, 200 },
+		{ both, { 200, 200 }, range160, noCapture, bothReaders, at200, 200 },
+		// Equal bounds need no logs. Older records save only the maximum for either manifest.
+		{ bulkOnly, single, absent, complete, bulkReader, at210, {} },
+		{ bulkOnly, single, absent, noCapture, bulkReader, at210, {} },
+		{ bulkOnly, mixed, absent, complete, neither, noPoint, {} },
+		{ bulkOnly, single, absent, noOldest, bulkReader, unknown, {} },
+		{ bulkOnly, mixed, absent, noOldest, neither, unknown, {} },
+		{ bulkOnly, single, absent, complete, bulkReader, at210, {}, 121 },
+		{ bulkOnly, single, absent, complete, bulkReader, at210, {}, invalidVersion },
+		// Each restore mode opens its own snapshot. A range end of 210 does not identify its oldest file.
+		{ both, single, single, complete, bothReaders, unknown, {} },
+		{ both, single, mixed, complete, bulkReader, unknown, {} },
+		{ both, mixed, range160, complete, neither, unknown, {} }, // Range restore can still select 200.
+		{ both, { 130, 150 }, single, complete, rangeReader, at200, 200, 201, 160 },
+		{ both, single, absent, complete, bulkReader, unknown, {} },
+		{ both, mixed, absent, complete, neither, noPoint, {} },
+		{ both, absent, range160, complete, rangeReader, unknown, {} },
+		{ both, absent, absent, complete, neither, noPoint, {} }
+	};
+
+	for (const auto& row : examples) {
+		config.clear(tr);
+		config.mutationLogType().set(tr, MutationLogType::DEFAULT);
+		config.snapshotMode().set(tr, static_cast<int>(row.mode));
+		config.snapshotBeginVersion().set(tr, 123);
+		if (row.evidence != noCapture) {
+			config.mutationLogCaptureStart().set(tr, Versionstamp(125, 0));
+		}
+		Optional<Version> cursor, logEnd;
+		if (row.cursor != invalidVersion) {
+			cursor = row.cursor;
+			config.latestLogEndVersion().set(tr, row.cursor);
+		}
 		std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
 		auto container = IBackupContainer::openContainer(url, {}, {}, 0);
 		co_await container->create();
-		auto log = co_await container->writeLogFile(121, 201, 1024);
-		co_await log->finish();
-		std::string job = deterministicRandom()->randomUniqueID().toString();
-		std::string manifest = fmt::format(
-		    "[FormatVersion]: 1, [ManifestCount]: 2\n"
-		    "[BeginKey]: 61, [EndKey]: 6d, [ManifestRelativePath]: a/{0}-manifest.txt, [Version]: {0}, [Bytes]: 0\n"
-		    "[BeginKey]: 6d, [EndKey]: 7a, [ManifestRelativePath]: b/{1}-manifest.txt, [Version]: {1}, [Bytes]: 0\n",
-		    newest,
-		    oldest);
-		auto fs = container.castTo<BackupContainerFileSystem>();
-		co_await fs->writeEntireFile("bulkdump_data/" + job + "/" + getBulkLoadJobManifestFileName(), manifest);
-		co_await container->writeKeyspaceSnapshotFile(
-		    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(job, oldest, newest, 0));
-		auto bulk = co_await container->getRestoreSet(200, {}, false, invalidVersion, true);
-		ASSERT(bulk.present() == (oldest >= 121));
-		if (bulk.present()) {
-			ASSERT(bulk.get().snapshot.beginVersion == oldest && bulk.get().snapshot.endVersion == newest);
-			ASSERT(bulk.get().logs.size() == 1 && bulk.get().logs.front().fileName == log->getFileName());
+		if (row.cursor == 201) {
+			auto log = co_await container->writeLogFile(121, 201, 1024);
+			co_await log->finish();
+			logEnd = row.cursor;
 		}
-		config.bulkDumpSnapshotEndVersion().set(tr, newest);
-		for (auto mode : { SnapshotMode::BULKDUMP, SnapshotMode::BOTH }) {
-			config.snapshotMode().set(tr, static_cast<int>(mode));
-			config.firstSnapshotEndVersion().set(tr, mode == SnapshotMode::BOTH ? 160 : newest);
-			if (mode == SnapshotMode::BOTH) {
-				auto range = co_await container->writeRangeFile(130, 0, 160, 1024);
-				co_await range->finish();
-				std::vector<std::string> files{ range->getFileName() };
-				std::vector<std::pair<Key, Key>> ranges{ { "a"_sr, "z"_sr } };
-				co_await container->writeKeyspaceSnapshotFile(files, ranges, range->size(), IncludeKeyRangeMap::True);
-				ASSERT((co_await container->getRestoreSet(200)).present());
+		if (row.bulk.newest != invalidVersion) {
+			std::string job = deterministicRandom()->randomUniqueID().toString();
+			std::string manifest = fmt::format(
+			    "[FormatVersion]: 1, [ManifestCount]: 2\n"
+			    "[BeginKey]: 61, [EndKey]: 6d, [ManifestRelativePath]: a/{0}-manifest.txt, [Version]: {0}, [Bytes]: 0\n"
+			    "[BeginKey]: 6d, [EndKey]: 7a, [ManifestRelativePath]: b/{1}-manifest.txt, [Version]: {1}, [Bytes]: "
+			    "0\n",
+			    row.bulk.newest,
+			    row.bulk.oldest);
+			auto fs = container.castTo<BackupContainerFileSystem>();
+			co_await fs->writeEntireFile("bulkdump_data/" + job + "/" + getBulkLoadJobManifestFileName(), manifest);
+			co_await container->writeKeyspaceSnapshotFile(
+			    {},
+			    {},
+			    0,
+			    IncludeKeyRangeMap::False,
+			    SnapshotMetadata::bulkDump(job, row.bulk.oldest, row.bulk.newest, 0));
+			config.bulkDumpSnapshotEndVersion().set(tr, row.bulk.newest);
+			config.latestSnapshotEndVersion().set(tr, row.bulk.newest);
+			if (row.evidence != noOldest) {
+				config.bulkDumpSnapshotBeginVersion().set(tr, row.bulk.oldest);
 			}
-			for (bool haveOldest : { false, true }) {
-				if (haveOldest) {
-					config.bulkDumpSnapshotBeginVersion().set(tr, oldest);
-				} else {
-					config.bulkDumpSnapshotBeginVersion().clear(tr); // Older backups saved only the maximum.
-				}
-				// The file starts at 121, but capture was not active until the transaction committed at 125.
-				bool canRestore = haveOldest && bulk.present() && oldest >= 125;
-				Optional<Version> expected = canRestore ? Optional<Version>(200) : Optional<Version>();
-				for (auto state : { EBackupState::STATE_RUNNING, EBackupState::STATE_COMPLETED }) {
-					auto logs = co_await config.getStatusLogProgress(tr, state);
-					ASSERT(logs.exclusiveLogEnd == 201 && logs.restorable == expected);
-					ASSERT(logs.restorePointUnknown == !canRestore);
-					auto v1 = co_await config.getStatusLogProgress(tr, state, BackupStatusSchema::V1);
-					ASSERT(v1.exclusiveLogEnd == 201 && v1.restorable == 200 && !v1.restorePointUnknown);
-				}
+			if (row.mode == bulkOnly) {
+				config.firstSnapshotEndVersion().set(tr, row.bulk.newest);
 			}
-			// The snapshot's read version predates the commit that enabled capture.
-			config.mutationLogCaptureStart().clear(tr);
-			auto upgraded = co_await config.getStatusLogProgress(tr, EBackupState::STATE_COMPLETED);
-			ASSERT(upgraded.exclusiveLogEnd == 201 && upgraded.restorePointUnknown && !upgraded.restorable.present());
-			config.mutationLogCaptureStart().set(tr, Versionstamp(125, 0));
+		}
+		if (row.range.newest != invalidVersion) {
+			Version start = 123;
+			Version firstRangeEnd = row.range.newest;
+			if (row.earlierRangeEnd != invalidVersion) {
+				firstRangeEnd = row.earlierRangeEnd;
+				co_await writeStatusRangeSnapshot(container, start, firstRangeEnd, firstRangeEnd);
+				start = firstRangeEnd + 1;
+				config.snapshotBeginVersion().set(tr, start);
+			}
+			co_await writeStatusRangeSnapshot(container, start, row.range.oldest, row.range.newest);
+			config.firstSnapshotEndVersion().set(tr, firstRangeEnd);
+			config.latestSnapshotEndVersion().set(tr, row.range.newest);
+		}
+
+		Version target = std::max<Version>({ 200, row.bulk.newest, row.range.newest });
+		auto bulk = co_await container->getRestoreSet(target, {}, false, invalidVersion, true);
+		auto range = co_await container->getRestoreSet(target);
+		ASSERT(bulk.present() == (row.readers == bulkReader || row.readers == bothReaders));
+		ASSERT(range.present() == (row.readers == rangeReader || row.readers == bothReaders));
+		if (bulk.present()) {
+			ASSERT(bulk.get().targetVersion == target && bulk.get().snapshot.beginVersion == row.bulk.oldest &&
+			       bulk.get().snapshot.endVersion == row.bulk.newest);
+			ASSERT(bulk.get().logs.empty() == (row.bulk.oldest == target));
+		}
+		if (row.range.newest == 160 && target > 200) {
+			ASSERT((co_await container->getRestoreSet(200)).present());
+		}
+		if (row.earlierRangeEnd != invalidVersion) {
+			ASSERT((co_await container->getRestoreSet(200)).present());
+			ASSERT((co_await container->getRestoreSet(200, {}, false, invalidVersion, true)).present());
+		}
+		for (auto state : { EBackupState::STATE_RUNNING, EBackupState::STATE_COMPLETED }) {
+			auto logs = co_await config.getStatusLogProgress(tr, state);
+			ASSERT(logs.exclusiveLogEnd == logEnd &&
+			       logs.logDispatchCursor == (logEnd.present() ? Optional<Version>() : cursor));
+			ASSERT(logs.restorable == row.status.version && logs.restorePointUnknown == row.status.unknown);
+			auto v1 = co_await config.getStatusLogProgress(tr, state, BackupStatusSchema::V1);
+			ASSERT(v1.exclusiveLogEnd == cursor && v1.restorable == row.schema1 && !v1.restorePointUnknown);
 		}
 		co_await container->deleteContainer();
 	}
@@ -539,59 +634,91 @@ TEST_CASE("/backup/status/ordinaryLogSnapshotRotation") {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	BackupConfig config(UID(1, 2));
 	config.clear(tr);
-	config.snapshotBeginVersion().set(tr, 123);
-	config.latestLogEndVersion().set(tr, 121);
 	Key dest = BinaryWriter::toValue(UID(5, 6), Unversioned());
 	config.destUidValue().set(tr, dest);
 	auto owners = dest.withPrefix(backupLatestVersionsPrefix);
 	tr->clear(prefixRange(owners));
 	Key owner = config.getUidAsKey().withPrefix(owners);
-	tr->set(owner, BinaryWriter::toValue<Version>(100, Unversioned())); // Submission's read version.
 	Key sibling = BackupConfig(UID(3, 4)).getUidAsKey().withPrefix(owners);
 	tr->set(sibling, BinaryWriter::toValue<Version>(121, Unversioned()));
-	auto status = [&] { return config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING); };
-	auto logs = co_await status();
-	ASSERT(logs.logDispatchCursor == 121 && !logs.exclusiveLogEnd.present() && logs.restorePointUnknown);
+	auto check = [&](Optional<Version> cursor,
+	                 Optional<Version> end,
+	                 Optional<Version> version,
+	                 bool unknown,
+	                 EBackupState state = EBackupState::STATE_RUNNING) -> Future<Void> {
+		auto logs = co_await config.getStatusLogProgress(tr, state);
+		ASSERT(logs.logDispatchCursor == cursor && logs.exclusiveLogEnd == end);
+		ASSERT(logs.restorable == version && logs.restorePointUnknown == unknown);
+	};
 
-	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
-	auto container = IBackupContainer::openContainer(url, {}, {}, 0);
-	co_await container->create();
-	auto batch = co_await container->writeLogFile(121, 201, 1024);
-	co_await batch->finish();
-	config.latestLogEndVersion().set(tr, 201);
-	co_await eraseLogData(tr, config.getUidAsKey(), dest, 201);
-	logs = co_await status();
-	ASSERT(logs.exclusiveLogEnd == 201 && !logs.restorable.present() && !logs.restorePointUnknown);
+	for (bool coveredFirstSnapshot : { false, true }) {
+		for (bool singleVersion : { false, true }) {
+			config.mutationLogCaptureStart().clear(tr);
+			config.firstSnapshotEndVersion().clear(tr);
+			config.latestSnapshotEndVersion().clear(tr);
+			config.snapshotBeginVersion().set(tr, 123);
+			config.latestLogEndVersion().set(tr, 121);
+			tr->set(owner, BinaryWriter::toValue<Version>(100, Unversioned())); // Submission's read version.
+			co_await check(121, {}, {}, true);
 
-	// The first snapshot ends after the last log file. Starting another snapshot must preserve the known log end.
-	auto early = co_await container->writeRangeFile(123, 0, 150, 1024);
-	auto late = co_await container->writeRangeFile(123, 1, 210, 1024);
-	co_await (early->finish() && late->finish());
-	std::vector<std::string> files{ early->getFileName(), late->getFileName() };
-	std::vector<std::pair<Key, Key>> ranges{ { "a"_sr, "m"_sr }, { "m"_sr, "z"_sr } };
-	co_await container->writeKeyspaceSnapshotFile(files, ranges, 0, IncludeKeyRangeMap::True);
-	config.firstSnapshotEndVersion().set(tr, 210);
-	config.latestSnapshotEndVersion().set(tr, 210);
-	config.snapshotBeginVersion().set(tr, 220);
-	ASSERT((co_await container->getRestoreSet(200, {}, true, 121)).present());
-	ASSERT(!(co_await container->getRestoreSet(200)).present());
-	logs = co_await status();
-	ASSERT(logs.exclusiveLogEnd == 201 && !logs.restorable.present() && !logs.restorePointUnknown);
+			std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+			auto container = IBackupContainer::openContainer(url, {}, {}, 0);
+			co_await container->create();
+			auto batch = co_await container->writeLogFile(121, 201, 1024);
+			co_await batch->finish();
+			config.latestLogEndVersion().set(tr, 201);
+			co_await eraseLogData(tr, config.getUidAsKey(), dest, 201);
+			co_await check({}, 201, {}, false);
 
-	// Cleanup removes this backup's entry. New backups retain the commit version that enabled capture.
-	co_await eraseLogData(tr, config.getUidAsKey(), dest);
-	ASSERT(!(co_await tr->get(owner)).present());
-	config.mutationLogCaptureStart().set(tr, Versionstamp(125, 0));
-	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_COMPLETED);
-	ASSERT(logs.exclusiveLogEnd == 201 && !logs.restorable.present() && !logs.restorePointUnknown);
+			Version start = 123;
+			if (coveredFirstSnapshot) {
+				co_await writeStatusRangeSnapshot(container, start, 150, 150);
+				config.firstSnapshotEndVersion().set(tr, 150);
+				config.latestSnapshotEndVersion().set(tr, 150);
+				start = 175;
+				config.snapshotBeginVersion().set(tr, start);
+				ASSERT((co_await container->getRestoreSet(200)).present());
+				co_await check({}, 201, 200, false);
+			}
+			// Both manifests record the same end in the database. Only the one-file manifest restores at 210.
+			Version oldest = singleVersion ? 210 : std::max<Version>(start, 150);
+			co_await writeStatusRangeSnapshot(container, start, oldest, 210);
+			if (!coveredFirstSnapshot) {
+				config.firstSnapshotEndVersion().set(tr, 210);
+			}
+			config.latestSnapshotEndVersion().set(tr, 210);
+			config.snapshotBeginVersion().set(tr, 220);
+			ASSERT((co_await container->getRestoreSet(200, {}, true, 121)).present());
+			ASSERT((co_await container->getRestoreSet(200)).present() == coveredFirstSnapshot);
+			auto at210 = co_await container->getRestoreSet(210);
+			ASSERT(at210.present() == singleVersion);
+			if (at210.present()) {
+				ASSERT(at210.get().targetVersion == 210 && at210.get().ranges.size() == 1 && at210.get().logs.empty());
+			}
+			co_await check({}, 201, {}, true);
+			auto v1 = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING, BackupStatusSchema::V1);
+			ASSERT(v1.exclusiveLogEnd == 201 && !v1.restorePointUnknown);
+			ASSERT(v1.restorable == (coveredFirstSnapshot ? Optional<Version>(200) : Optional<Version>()));
 
-	auto next = co_await container->writeLogFile(201, 231, 1024);
-	co_await next->finish();
-	config.latestLogEndVersion().set(tr, 231);
-	ASSERT((co_await container->getRestoreSet(230)).present());
-	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_COMPLETED);
-	ASSERT(logs.exclusiveLogEnd == 231 && logs.restorable == 230 && !logs.restorePointUnknown);
-	co_await container->deleteContainer();
+			// Cleanup removes this backup's entry. New records retain the capture commit.
+			co_await eraseLogData(tr, config.getUidAsKey(), dest);
+			ASSERT(!(co_await tr->get(owner)).present());
+			if (coveredFirstSnapshot) {
+				co_await check({}, 201, {}, true, EBackupState::STATE_COMPLETED);
+			} else {
+				co_await check(201, {}, {}, true, EBackupState::STATE_COMPLETED);
+			}
+			config.mutationLogCaptureStart().set(tr, Versionstamp(125, 0));
+			co_await check({}, 201, {}, true, EBackupState::STATE_COMPLETED);
+
+			auto next = co_await container->writeLogFile(201, 231, 1024);
+			co_await next->finish();
+			config.latestLogEndVersion().set(tr, 231);
+			ASSERT((co_await container->getRestoreSet(230)).present());
+			co_await check({}, 231, 230, false, EBackupState::STATE_COMPLETED);
+			co_await container->deleteContainer();
+		}
+	}
 }
 } // namespace
 
