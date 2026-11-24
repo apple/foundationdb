@@ -598,6 +598,23 @@ struct BulkDumping : TestWorkload {
 		    .detail("Rejected", rejected);
 	}
 
+	static Future<Void> abortGuardBackup(Database cx, FileBackupAgent& agent, std::string tag) {
+		try {
+			co_await agent.abortBackup(cx, tag);
+			co_return;
+		} catch (Error& e) {
+			if (e.code() != error_code_backup_unneeded) {
+				throw;
+			}
+		}
+		// A retry after an unknown commit result can find the backup already aborted.
+		// This workload owns the tag and only reuses it after the abort returns.
+		if ((co_await agent.waitBackup(cx, tag)) != EBackupState::STATE_ABORTED) {
+			throw backup_unneeded();
+		}
+		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Backup Already Aborted");
+	}
+
 	// While a backup is registered, submitBulkLoadJob must fail with bulkload_range_under_backup, both once its log
 	// range is registered and while its start task has not yet run; once it is aborted the job must be accepted
 	// again. Conversely, while a job is live, submitBackup must fail with backup_range_under_bulkload.
@@ -624,14 +641,16 @@ struct BulkDumping : TestWorkload {
 		co_await backupAgent.changePause(cx, true);
 		co_await submitBackup();
 		co_await expectRejected(submitLoad(), error_code_bulkload_range_under_backup, "SubmittedNotStarted");
-		co_await backupAgent.abortBackup(cx, spec.tag.toString());
+		co_await abortGuardBackup(cx, backupAgent, spec.tag.toString());
 		co_await backupAgent.changePause(cx, false);
 
 		co_await submitBackup();
 		// The mutation-log range is registered by the backup's first task, not by submitBackup.
 		co_await waitForLogRanges(cx, true);
 		co_await expectRejected(submitLoad(), error_code_bulkload_range_under_backup, "LogRangeRegistered");
-		co_await backupAgent.abortBackup(cx, spec.tag.toString());
+		co_await abortGuardBackup(cx, backupAgent, spec.tag.toString());
+		// Exercise the already-committed abort even without a lost commit reply.
+		co_await abortGuardBackup(cx, backupAgent, spec.tag.toString());
 		co_await waitForLogRanges(cx, false);
 
 		// The bulkload mode is still off, so DD does not dispatch the job and it stays live.
