@@ -309,6 +309,7 @@ public:
 	Promise<Void> error;
 	PromiseStream<RelocateData> dataTransferComplete;
 	PromiseStream<RelocateData> relocationComplete;
+	PromiseStream<KeyRange> rangesToLaunch;
 	PromiseStream<RelocateData> fetchSourceServersComplete; // find source SSs for a relocate range
 
 	PromiseStream<RelocateShard> output;
@@ -403,6 +404,8 @@ public:
 	UID bulkLoadInjectionTargetTaskId;
 
 	void processRelocationComplete(const RelocateData& done);
+	void resetFetchKeysComplete(const RelocateData& rd);
+	void scheduleRangeLaunch(KeyRange keys);
 
 	Future<SrcDestTeamPair> getSrcDestTeams(const int& teamCollectionIndex,
 	                                        const GetTeamRequest& srcReq,
