@@ -2227,11 +2227,48 @@ Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 	}
 }
 
-VersionHistory globalConfigHistoryForProtocolChange(ValueRef globalConfigVersion) {
-	BinaryReader versionReader(globalConfigVersion, Unversioned());
-	Version committedVersion;
-	versionReader >> committedVersion;
-	return VersionHistory(bigEndian64(committedVersion));
+// A single entry with no mutations tells stale clients to refresh from a GRV proxy
+// that has observed this configuration version.
+std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, const RangeResult& rows) {
+	if (versionstamp.size() < sizeof(Version)) {
+		TraceEvent(SevWarnAlways, "GlobalConfigVersionTooShort").suppressFor(60.0).detail("Size", versionstamp.size());
+		return {};
+	}
+	Version committedVersion = bigEndian64(BinaryReader::fromStringRef<Version>(versionstamp, Unversioned()));
+	std::vector<VersionHistory> history;
+	try {
+		for (const auto& kv : rows) {
+			if (kv.value.size() < sizeof(uint64_t)) {
+				throw serialization_failed();
+			}
+			ArenaObjectReader reader(rows.arena(), kv.value, IncludeVersion());
+			if (reader.protocolVersion() != g_network->protocolVersion() || buggify(0.01)) {
+				return { VersionHistory(committedVersion) };
+			}
+
+			StringRef suffix = kv.key.removePrefix(globalConfigHistoryPrefix);
+			if (suffix.size() < sizeof(Version)) {
+				throw serialization_failed();
+			}
+			VersionHistory vh;
+			reader.deserialize(vh);
+			vh.version = bigEndian64(BinaryReader::fromStringRef<Version>(suffix, Unversioned()));
+			history.push_back(std::move(vh));
+		}
+		if (history.empty()) {
+			throw serialization_failed();
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_serialization_failed && e.code() != error_code_incompatible_protocol_version) {
+			throw;
+		}
+		TraceEvent(SevWarnAlways, "GlobalConfigHistoryDecodeError").errorUnsuppressed(e).suppressFor(60.0);
+		return { VersionHistory(committedVersion) };
+	}
+
+	// Clients use the oldest entry only to decide whether they missed updates.
+	history.front().mutations = Standalone<VectorRef<MutationRef>>();
+	return history;
 }
 
 // Monitors the global configuration version key for changes. When changes are
@@ -2242,7 +2279,6 @@ VersionHistory globalConfigHistoryForProtocolChange(ValueRef globalConfigVersion
 Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 	while (true) {
 		ReadYourWritesTransaction tr(db->db);
-		ClientDBInfo clientInfo;
 		while (true) {
 			Error err;
 			try {
@@ -2251,71 +2287,17 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				Optional<Value> globalConfigVersion = co_await tr.get(globalConfigVersionKey);
 
 				if (globalConfigVersion.present()) {
-					// Since the history keys end with versionstamps, they
-					// should be sorted correctly (versionstamps are stored in
-					// big-endian order).
-					RangeResult globalConfigHistory =
-					    co_await tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY);
-					// If the global configuration version key has been set,
-					// the history should contain at least one item.
-					ASSERT(!globalConfigHistory.empty());
-					clientInfo = db->serverInfo->get().client;
-					clientInfo.history.clear();
-
-					for (const auto& kv : globalConfigHistory) {
-						ObjectReader reader(kv.value, IncludeVersion());
-						if (reader.protocolVersion() != g_network->protocolVersion() || buggify(0.01)) {
-							// If the protocol version has changed, the
-							// GlobalConfig actor should refresh its view by
-							// reading the entire global configuration key
-							// range. Preserve the actual committed version so
-							// refresh waits for a GRV proxy that has observed
-							// this configuration change.
-							clientInfo.history.clear();
-							clientInfo.history.push_back(
-							    globalConfigHistoryForProtocolChange(globalConfigVersion.get()));
-							break;
-						}
-
-						VersionHistory vh;
-						reader.deserialize(vh);
-
-						// Read commit version out of versionstamp at end of key.
-						BinaryReader versionReader =
-						    BinaryReader(kv.key.removePrefix(globalConfigHistoryPrefix), Unversioned());
-						Version historyCommitVersion;
-						versionReader >> historyCommitVersion;
-						historyCommitVersion = bigEndian64(historyCommitVersion);
-						vh.version = historyCommitVersion;
-
-						clientInfo.history.push_back(std::move(vh));
+					RangeResult rows = co_await tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY);
+					auto history = decodeGlobalConfigHistory(globalConfigVersion.get(), rows);
+					if (!history.empty()) {
+						ServerDBInfo serverInfo = db->serverInfo->get();
+						serverInfo.client.history = std::move(history);
+						serverInfo.client.id = deterministicRandom()->randomUniqueID();
+						serverInfo.id = deterministicRandom()->randomUniqueID();
+						serverInfo.infoGeneration = ++db->dbInfoCount;
+						db->serverInfo->set(serverInfo);
+						db->clientInfo->set(serverInfo.client);
 					}
-
-					if (!clientInfo.history.empty()) {
-						// The first item in the historical list of mutations
-						// is only used to:
-						//   a) Recognize that some historical changes may have
-						//      been missed, and the entire global
-						//      configuration keyspace needs to be read, or..
-						//   b) Check which historical updates have already
-						//      been applied. If this is the case, the first
-						//      history item must have a version greater than
-						//      or equal to whatever version the global
-						//      configuration was last updated at, and
-						//      therefore won't need to be applied again.
-						clientInfo.history[0].mutations = Standalone<VectorRef<MutationRef>>();
-					}
-
-					clientInfo.id = deterministicRandom()->randomUniqueID();
-					// Update ServerDBInfo so fdbserver processes receive updated history.
-					ServerDBInfo serverInfo = db->serverInfo->get();
-					serverInfo.id = deterministicRandom()->randomUniqueID();
-					serverInfo.infoGeneration = ++db->dbInfoCount;
-					serverInfo.client = clientInfo;
-					db->serverInfo->set(serverInfo);
-
-					// Update ClientDBInfo so client processes receive updated history.
-					db->clientInfo->set(clientInfo);
 				}
 
 				Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
@@ -3738,9 +3720,64 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigProtocolChangeUsesCommittedV
 	BinaryWriter encodedVersion(Unversioned());
 	encodedVersion << bigEndian64(committedVersion) << uint16_t(7);
 
-	const VersionHistory history = globalConfigHistoryForProtocolChange(encodedVersion.toValue());
-	ASSERT_EQ(history.version, committedVersion);
-	ASSERT_EQ(history.mutations.size(), 0);
+	BinaryWriter olderHistory(IncludeVersion(ProtocolVersion::withStorageInterfaceReadiness()));
+	RangeResult rows;
+	rows.push_back_deep(rows.arena(), KeyValueRef(globalConfigHistoryPrefix, olderHistory.toValue()));
+	auto history = decodeGlobalConfigHistory(encodedVersion.toValue(), rows);
+	ASSERT_EQ(history.size(), 1);
+	ASSERT_EQ(history.front().version, committedVersion);
+	ASSERT_EQ(history.front().mutations.size(), 0);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigMalformedHistory") {
+	BinaryWriter version(Unversioned());
+	version << bigEndian64(Version(42)) << uint16_t(0);
+	RangeResult rows;
+	ASSERT(decodeGlobalConfigHistory("short"_sr, rows).empty());
+
+	auto checkRefresh = [&] {
+		auto history = decodeGlobalConfigHistory(version.toValue(), rows);
+		ASSERT_EQ(history.size(), 1);
+		ASSERT_EQ(history.front().version, 42);
+		ASSERT(history.front().mutations.empty());
+	};
+	checkRefresh();
+
+	// A valid value with no version in its key.
+	auto validValue = ObjectWriter::toValue(VersionHistory(0), IncludeVersion());
+	rows.push_back_deep(rows.arena(), KeyValueRef(globalConfigHistoryPrefix, validValue));
+	checkRefresh();
+
+	rows = RangeResult();
+	auto key = version.toValue().withPrefix(globalConfigHistoryPrefix);
+	rows.push_back_deep(rows.arena(), KeyValueRef(key, "a"_sr));
+	checkRefresh();
+
+	if (!g_network->isSimulated()) {
+		// The object reader deliberately asserts on corrupt FlatBuffers in simulation.
+		BinaryWriter truncated(IncludeVersion(currentProtocolVersion()));
+		rows = RangeResult();
+		rows.push_back_deep(rows.arena(), KeyValueRef(key, truncated.toValue()));
+		checkRefresh();
+
+		VersionHistory update(0);
+		update.mutations.emplace_back_deep(update.mutations.arena(),
+		                                   MutationRef(MutationRef::SetValue, "k"_sr, "value"_sr));
+		auto encodedUpdate = ObjectWriter::toValue(update, IncludeVersion());
+		BinaryWriter previous(Unversioned());
+		previous << bigEndian64(Version(41)) << uint16_t(0);
+		rows = RangeResult();
+		rows.push_back_deep(rows.arena(),
+		                    KeyValueRef(previous.toValue().withPrefix(globalConfigHistoryPrefix), validValue));
+		rows.push_back_deep(rows.arena(), KeyValueRef(key, encodedUpdate));
+		auto repaired = decodeGlobalConfigHistory(version.toValue(), rows);
+		rows = RangeResult();
+		ASSERT_EQ(repaired.size(), 2);
+		ASSERT_EQ(repaired.back().version, 42);
+		ASSERT_EQ(repaired.back().mutations.size(), 1);
+		ASSERT_EQ(repaired.back().mutations[0].param2, "value"_sr);
+	}
 	return Void();
 }
 
