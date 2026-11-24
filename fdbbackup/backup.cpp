@@ -970,9 +970,9 @@ static void printBackupUsage(bool devhelp) {
 	       "and ignore the range files.\n");
 	printf("  --encryption-key-file"
 	       "                 The AES-256-GCM key in the provided file is used for encrypting backup files.\n"
-	       "                 For modify operations, need to pass encryption key file only if Backup container URL is "
-	       "changed to "
-	       "re-encrypt all future backup files. \n");
+	       "                 With modify -d, supply the original key file when specifying the same encrypted "
+	       "destination.\n"
+	       "                 For a new destination, this key encrypts future backup files.\n");
 	printf("  --encryption-block-size"
 	       "                 Block size in bytes for file encryption. Only used with fdbbackup start command. Default "
 	       "is 1048576 (1MB).\n");
@@ -2826,39 +2826,23 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 			if (options.destURL.present()) {
 				Reference<IBackupContainer> prevContainer =
 				    co_await config.backupContainer().getOrThrow(tr, Snapshot::False, backup_invalid_info());
-				std::string prevURL = prevContainer->getURL();
-				std::string newURL = options.destURL.get();
-				if (!prevURL.empty() && prevURL.back() == '/') {
-					prevURL.pop_back();
-				}
-				if (!newURL.empty() && newURL.back() == '/') {
-					newURL.pop_back();
-				}
-
-				if (prevURL == newURL) {
-					if ((options.encryptionKeyFile.present() && !prevContainer->getEncryptionKeyFileName().present()) ||
-					    (!options.encryptionKeyFile.present() && prevContainer->getEncryptionKeyFileName().present()) ||
-					    (options.encryptionKeyFile.present() && prevContainer->getEncryptionKeyFileName().present() &&
-					     options.encryptionKeyFile.get() != prevContainer->getEncryptionKeyFileName().get())) {
-						fprintf(stderr,
-						        "Destination URL matches the existing backup URL for tag '%s', "
-						        "but the encryption key file does not match.\n",
-						        tagName.c_str());
-						throw backup_error();
-					}
-				}
-
-				Reference<IBackupContainer> bc;
 				TraceEvent("ModifyBackupSetNewContainer")
 				    .detail("TagName", tagName)
 				    .detail("DestURL", options.destURL.get())
 				    .detail("EncryptionKeyFile",
 				            options.encryptionKeyFile.present() ? options.encryptionKeyFile.get() : "None");
-				bc = openBackupContainer(exeBackup.toString().c_str(),
-				                         options.destURL.get(),
-				                         options.proxy,
-				                         options.encryptionKeyFile,
-				                         prevContainer->getEncryptionBlockSize());
+				auto bc = openBackupContainer(exeBackup.toString().c_str(),
+				                              options.destURL.get(),
+				                              options.proxy,
+				                              options.encryptionKeyFile,
+				                              prevContainer->getEncryptionBlockSize());
+				if (!config.tryChangeBackupContainer(tr, prevContainer, bc)) {
+					fprintf(stderr,
+					        "Destination URL matches the existing backup URL for tag '%s', "
+					        "but the encryption key file does not match.\n",
+					        tagName.c_str());
+					throw backup_error();
+				}
 				try {
 					co_await timeoutError(bc->create(), 30);
 				} catch (Error& e) {
@@ -2870,7 +2854,6 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 					        e.what());
 					throw backup_error();
 				}
-				config.changeBackupContainer(tr, prevContainer, bc);
 				co_await bc->writeEncryptionMetadata(bc->getEncryptionBlockSize());
 			} else if (options.encryptionKeyFile.present()) {
 				fprintf(stdout,

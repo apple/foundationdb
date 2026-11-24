@@ -6936,17 +6936,28 @@ static KeyBackedBinaryValue<Version> mutationLogConsumerVersion(BackupConfig& co
 	return config.getUidAsKey().withPrefix(destination).withPrefix(backupLatestVersionsPrefix);
 }
 
-void BackupConfig::changeBackupContainer(Reference<ReadYourWritesTransaction> tr,
-                                         const Reference<IBackupContainer>& previous,
-                                         const Reference<IBackupContainer>& next) {
-	auto location = [](std::string_view url) {
-		// LocalDirectory ignores trailing path separators. Blobstore parameters can select a bucket or prefix.
+bool BackupConfig::tryChangeBackupContainer(Reference<ReadYourWritesTransaction> tr,
+                                            const Reference<IBackupContainer>& previous,
+                                            const Reference<IBackupContainer>& next) {
+	auto configuredLocation = [](std::string_view url) {
+		// Relative paths and symlinks can resolve differently on another backup agent.
 		return url.starts_with("file://") ? url.substr(0, url.find_last_not_of("/\\") + 1) : url;
 	};
-	if (location(previous->getURL()) != location(next->getURL())) {
+	bool sameURL = configuredLocation(previous->getURL()) == configuredLocation(next->getURL());
+	if (previous->getEncryptionKeyFileName() != next->getEncryptionKeyFileName()) {
+		auto keyLocation = [](std::string_view location) {
+			// Local containers use their resolved directory. Blobstore keys historically ignore one final slash.
+			return location.ends_with('/') ? location.substr(0, location.size() - 1) : location;
+		};
+		if (sameURL || keyLocation(previous->getLocation()) == keyLocation(next->getLocation())) {
+			return false;
+		}
+	}
+	if (!sameURL) {
 		backupURLChanged().set(tr, true);
 	}
 	backupContainer().set(tr, next);
+	return true;
 }
 
 Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,

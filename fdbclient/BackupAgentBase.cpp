@@ -349,7 +349,7 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 	// snapshot and first log file stay in the old directory.
 	auto moved = IBackupContainer::openContainer(url + "-moved", {}, {}, 0);
 	co_await moved->create();
-	config.changeBackupContainer(tr, container, moved);
+	ASSERT(config.tryChangeBackupContainer(tr, container, moved));
 	auto movedLog = co_await moved->writeLogFile(150, 170, 1024);
 	co_await movedLog->finish();
 	config.latestLogEndVersion().set(tr, 170);
@@ -360,14 +360,14 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 	ASSERT(logs.exclusiveLogEnd == 170);
 	v1 = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING_DIFFERENTIAL, BackupStatusSchema::V1);
 	ASSERT(v1.restorable == 169 && !v1.destinationURLChanged);
-	config.changeBackupContainer(tr, moved, container);
+	ASSERT(config.tryChangeBackupContainer(tr, moved, container));
 	ASSERT(co_await config.backupURLChanged().getD(tr));
 	co_await moved->deleteContainer();
 
 	// An older record has no URL history. Its target assumes the files are together.
 	config.backupURLChanged().clear(tr);
 	auto sameDirectory = IBackupContainer::openContainer(url + "/", {}, {}, 0);
-	config.changeBackupContainer(tr, container, sameDirectory);
+	ASSERT(config.tryChangeBackupContainer(tr, container, sameDirectory));
 	ASSERT(!(co_await config.backupURLChanged().getD(tr)));
 	// The final dispatch can stop before updating the consumer version. Completion clears it.
 	auto next = co_await container->writeLogFile(150, 170, 1024);

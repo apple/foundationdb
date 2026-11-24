@@ -900,9 +900,10 @@ public:
 
 	// A URL edit can separate files that belong to the same backup. Older clients did not record edits.
 	KeyBackedProperty<bool> backupURLChanged() { return configSpace.pack(__FUNCTION__sr); }
-	void changeBackupContainer(Reference<ReadYourWritesTransaction> tr,
-	                           const Reference<IBackupContainer>& previous,
-	                           const Reference<IBackupContainer>& next);
+	// Reject a new key file for the same destination before staging any changes.
+	[[nodiscard]] bool tryChangeBackupContainer(Reference<ReadYourWritesTransaction> tr,
+	                                            const Reference<IBackupContainer>& previous,
+	                                            const Reference<IBackupContainer>& next);
 
 	// Set to true when all backup workers for saving mutation logs have been started.
 	KeyBackedProperty<bool> allWorkerStarted() { return configSpace.pack(__FUNCTION__sr); }

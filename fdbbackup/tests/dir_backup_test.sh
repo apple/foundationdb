@@ -286,3 +286,6 @@ log "Backup_agent is up"
 # Run tests.
 test_dir_backup_and_restore "${build_dir}" "${SCRATCH_DIR}" "${ENCRYPTION_KEY_FILE}"
 log_test_result $? "test_dir_backup_and_restore"
+
+python3 "${cwd}/modify_encrypted_backup.py" "${build_dir}/bin" "${SCRATCH_DIR}/loopback_cluster/fdb.cluster" "${SCRATCH_DIR}"
+log_test_result $? "modify_encrypted_backup"
