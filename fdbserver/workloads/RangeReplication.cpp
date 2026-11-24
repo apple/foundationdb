@@ -48,8 +48,9 @@ struct RangeReplicationWorkload : TestWorkload {
 
 		auto all = co_await getRangeReplicationOverrides(cx);
 		ASSERT(std::count(all.begin(), all.end(), RangeReplicationOverride{ range, 4 }) == 1);
-		auto filtered = co_await getRangeReplicationOverrides(cx, middle);
-		ASSERT(filtered.size() == 1 && filtered[0] == (RangeReplicationOverride{ middle, 4 }));
+		KeyRange filter = KeyRangeRef("r11"_sr, "r35"_sr);
+		auto filtered = co_await getRangeReplicationOverrides(cx, filter);
+		ASSERT(filtered.size() == 1 && filtered[0] == (RangeReplicationOverride{ filter, 4 }));
 
 		auto configVersion = [&] {
 			return runTransaction(sys, [](auto tr) { return DDConfiguration().trigger.get(tr); });
@@ -58,18 +59,20 @@ struct RangeReplicationWorkload : TestWorkload {
 		co_await setRangeReplication(cx, range, 4);
 		ASSERT((co_await configVersion()) == before);
 
-		KeyRange cut = KeyRangeRef("r2"_sr, "r3"_sr);
+		KeyRange cut = KeyRangeRef("r2"_sr, "r25"_sr);
 		co_await clearRangeReplication(cx, cut);
 		before = co_await configVersion();
 		co_await clearRangeReplication(cx, cut);
 		ASSERT((co_await configVersion()) == before);
 
 		std::vector<RangeReplicationOverride> expected{ { KeyRangeRef("r0"_sr, "r2"_sr), 4 },
-			                                            { KeyRangeRef("r3"_sr, "r4"_sr), 4 } };
+			                                            { KeyRangeRef("r25"_sr, "r4"_sr), 4 } };
 		ASSERT((co_await getRangeReplicationOverrides(cx, range)) == expected);
 		auto snapshot = co_await config.getSnapshot(sys, range.begin, range.end);
 		ASSERT(snapshot->rangeContaining("r1"_sr).value() == DDRangeConfig(4, 7));
 		ASSERT(snapshot->rangeContaining("r2"_sr).value() == DDRangeConfig({}, 7));
+		co_await clearRangeReplication(cx, range);
+		ASSERT((co_await getRangeReplicationOverrides(cx, range)).empty());
 	}
 
 	Future<bool> check(Database const&) override { return true; }
