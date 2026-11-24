@@ -143,6 +143,14 @@ Do not write caller-location / "happening elsewhere" comments — narration of w
 
 After writing or changing a bunch of code, make a pass over it one last time to review the comments. Ask yourself: am I rambling? Am I repeating what the code is showing? Am I just telling stories here? Is the information I'm writing going to be relevant and important a week from now, a month from now, a year from now? Is it genuinely essential and **non-obvious from the code itself**?
 
+## Pull Requests
+
+Use the root `pull_request_template.md` as the default PR description format.
+Read it before creating or updating a PR. Keep its headings, replace its guidance
+comments with the actual description, and report only checks and results that
+you verified. Follow this format even when supplying the body through `gh`, an
+API, or another tool; commit messages alone do not replace the template.
+
 ## Code Review
 
 When reviewing, state explicitly: what the change is for, whether it is correct, bugs, omissions, better approaches, and a clear LGTM / no / not-yet. Read a construct's history (`git log -L`, `git blame`) before proposing to change something that looks odd.
