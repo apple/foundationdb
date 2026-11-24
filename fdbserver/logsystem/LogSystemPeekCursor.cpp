@@ -162,7 +162,6 @@ void ServerPeekCursor::nextMessage() {
 			hasMsg = false;
 			return;
 		}
-		ASSERT(!rd.empty());
 	}
 
 	messageAndTags.loadFromArena(&rd, &messageVersion.sub);

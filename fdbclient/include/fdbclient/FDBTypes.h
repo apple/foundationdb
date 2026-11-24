@@ -175,19 +175,31 @@ struct TagsAndMessage {
 	// T can be ArenaReader or BinaryReader.
 	template <class T>
 	void loadFromArena(T* rd, uint32_t* messageVersionSub) {
+		const int32_t fixedHeaderSize = getHeaderSize(0);
+		if (rd->remainingBytes() < fixedHeaderSize) {
+			throw serialization_failed();
+		}
+		const auto* raw = static_cast<const uint8_t*>(rd->peekBytes(fixedHeaderSize));
 		int32_t messageLength;
+		memcpy(&messageLength, raw, sizeof(messageLength));
+		const int64_t rawLength = int64_t(messageLength) + int32_t(sizeof(messageLength));
+		if (rawLength < fixedHeaderSize || rawLength > std::numeric_limits<int32_t>::max() ||
+		    rawLength > rd->remainingBytes()) {
+			throw serialization_failed();
+		}
 		uint16_t tagCount;
-		uint32_t sub;
+		memcpy(&tagCount, raw + fixedHeaderSize - sizeof(tagCount), sizeof(tagCount));
+		if (getHeaderSize(tagCount) > rawLength) {
+			throw serialization_failed();
+		}
 
 		rd->checkpoint();
-		*rd >> messageLength >> sub >> tagCount;
-		if (messageVersionSub)
-			*messageVersionSub = sub;
-		tags = VectorRef<Tag>((Tag*)rd->readBytes(tagCount * sizeof(Tag)), tagCount);
-		const int32_t rawLength = messageLength + sizeof(messageLength);
-		rd->rewind();
-		rd->checkpoint();
-		message = StringRef((const uint8_t*)rd->readBytes(rawLength), rawLength);
+		rd->readBytes(rawLength);
+		message = StringRef(raw, rawLength);
+		tags = VectorRef<Tag>((Tag*)(raw + fixedHeaderSize), tagCount);
+		if (messageVersionSub) {
+			memcpy(messageVersionSub, raw + sizeof(messageLength), sizeof(*messageVersionSub));
+		}
 	}
 
 	// Returns the size of the header, including: msg_length, version.sub, tag_count, tags.
