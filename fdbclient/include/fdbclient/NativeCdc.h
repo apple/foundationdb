@@ -108,14 +108,15 @@ struct NativeCdcStatus {
 	std::vector<NativeCdcProxyStatus> proxies;
 };
 
-// Durable fields share readVersion; proxy samples are advisory and may lag
-// acknowledgement or assignment changes. Missing samples remain explicit.
+// Durable fields share a system-priority read version so operators can inspect retention while ordinary reads stall.
+// Proxy samples are advisory, may lag acknowledgement or assignment changes, and remain explicit when missing.
 Future<NativeCdcStatus> getNativeCdcStatus(Database cx);
 
 enum class NativeCdcRemoveResult { Removed, AlreadyAbsent, StreamReplaced };
 
-// Never removes a same-name replacement, including across retries. Removed
-// means the registration is gone, not that its retained history is reclaimed.
+// Never removes a same-name replacement, including across retries. Guarded removal uses system priority on
+// supporting proxies; older proxies still verify the identity but their metadata transaction uses ordinary priority.
+// Removed means the registration is gone, not that its retained history is reclaimed.
 Future<NativeCdcRemoveResult> removeNativeCdcStreamGuarded(Database cx, Key name, CDCStreamId expectedStreamId);
 
 // Uses the ranges registered for this name; consumers do not respecify them. A
