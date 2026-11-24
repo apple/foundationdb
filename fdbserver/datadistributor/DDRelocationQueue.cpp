@@ -574,6 +574,22 @@ static void completeOwnedDest(RelocateData const& relocation,
 	}
 }
 
+static void recordDestinationFetch(DDQueue& queue,
+                                   RelocateData const& relocation,
+                                   const std::vector<UID>& remainingDestinations,
+                                   bool& signalledTransferComplete,
+                                   bool& ownsDestBusyness) {
+	// The first cross-region fetch frees the source. Only the final group can protect the move from preemption.
+	if (remainingDestinations.empty()) {
+		queue.fetchKeysComplete.insert(relocation);
+	}
+	if (!signalledTransferComplete) {
+		signalledTransferComplete = true;
+		ownsDestBusyness = false;
+		queue.dataTransferComplete.send(relocation);
+	}
+}
+
 static void resetDestinationsForRetry(RelocateData& relocation,
                                       ParallelTCInfo& healthyDestinations,
                                       std::map<UID, Busyness>& destBusymap,
@@ -2263,16 +2279,18 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                                        : Optional<BulkLoadTaskState>());
 			}
 			Future<Void> doMoveKeys = self->txnProcessor->moveKeys(*params);
+			Future<Void> dataMovementFuture = signalledTransferComplete ? Never() : dataMovementComplete.getFuture();
 			Future<Void> pollHealth = signalledTransferComplete && !ddEnabledState->shardEncodeLocationMetadata()
 			                              ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
 			try {
 				while (true) {
-					Future<Void> dataMovementFuture =
-					    signalledTransferComplete ? Never() : dataMovementComplete.getFuture();
 					auto res = co_await race(doMoveKeys, pollHealth, dataMovementFuture);
 					if (res.index() == 0) {
 						if (!extraIds.empty()) {
+							recordDestinationFetch(*self, rd, extraIds, signalledTransferComplete, ownsDestBusyness);
+							dataMovementComplete = Promise<Void>();
+							dataMovementFuture = dataMovementComplete.getFuture();
 							destIds.insert(destIds.end(), extraIds.begin(), extraIds.end());
 							healthyIds.insert(healthyIds.end(), extraIds.begin(), extraIds.end());
 							extraIds.clear();
@@ -2284,7 +2302,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 								                                          destIds,
 								                                          healthyIds,
 								                                          self->lock,
-								                                          Promise<Void>(),
+								                                          dataMovementComplete,
 								                                          &self->startMoveKeysParallelismLock,
 								                                          &self->finishMoveKeysParallelismLock,
 								                                          self->teamCollections.size() > 1,
@@ -2300,7 +2318,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 								                                          destIds,
 								                                          healthyIds,
 								                                          self->lock,
-								                                          Promise<Void>(),
+								                                          dataMovementComplete,
 								                                          &self->startMoveKeysParallelismLock,
 								                                          &self->finishMoveKeysParallelismLock,
 								                                          self->teamCollections.size() > 1,
@@ -2333,6 +2351,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 								signalledTransferComplete = true;
 								self->dataTransferComplete.send(rd);
 								ownsDestBusyness = false;
+								dataMovementFuture = Never();
 							}
 							if (ddEnabledState->shardEncodeLocationMetadata()) {
 								CODE_PROBE(true,
@@ -2358,12 +2377,8 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 						                 ? Never()
 						                 : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
 					} else if (res.index() == 2) {
-						self->fetchKeysComplete.insert(rd);
-						if (!signalledTransferComplete) {
-							signalledTransferComplete = true;
-							self->dataTransferComplete.send(rd);
-							ownsDestBusyness = false;
-						}
+						dataMovementFuture = Never();
+						recordDestinationFetch(*self, rd, extraIds, signalledTransferComplete, ownsDestBusyness);
 					} else {
 						UNREACHABLE();
 					}
@@ -3467,6 +3482,32 @@ TEST_CASE("/DataDistribution/DDQueue/SourceDiscoveryPreservesReadRebalanceCooldo
 	}
 	ASSERT(!self.timeThrottle(primary));
 	ASSERT(!self.timeThrottle(remote));
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/DDQueue/TwoStageDestinationFetch") {
+	DDQueue queue;
+	RelocateData move(
+	    RelocateShard(KeyRangeRef("a"_sr, "z"_sr), DataMovementReason::POPULATE_REGION, RelocateReason::OTHER));
+	auto transfers = queue.dataTransferComplete.getFuture();
+	std::vector<UID> remainingDestinations{ UID(2, 0), UID(3, 0) };
+	bool signalledTransferComplete = false;
+	bool ownsDestBusyness = true;
+
+	recordDestinationFetch(queue, move, remainingDestinations, signalledTransferComplete, ownsDestBusyness);
+	ASSERT(!queue.fetchKeysComplete.contains(move));
+	ASSERT(!ownsDestBusyness);
+	ASSERT(transfers.isReady());
+	ASSERT_EQ(transfers.pop().randomId, move.randomId);
+
+	// The seed's fetch and move completion can both arrive before the remaining replicas fetch.
+	recordDestinationFetch(queue, move, remainingDestinations, signalledTransferComplete, ownsDestBusyness);
+	ASSERT(!queue.fetchKeysComplete.contains(move));
+	ASSERT(!transfers.isReady());
+	remainingDestinations.clear();
+	recordDestinationFetch(queue, move, remainingDestinations, signalledTransferComplete, ownsDestBusyness);
+	ASSERT(queue.fetchKeysComplete.contains(move));
+	ASSERT(!transfers.isReady());
 	return Void();
 }
 
