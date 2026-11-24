@@ -396,6 +396,8 @@ When the database cannot establish a restore point, schema 2 reports ``RestorePo
 ``LogDispatchCursor`` shows where the log dispatcher has advanced. A dispatcher can advance while it waits for workers.
 An ordinary backup publishes its first dispatch cursor before it copies any logs. A logs-only backup can even complete at this cursor.
 Text and schema 2 show the cursor and leave the restore point unknown until the dispatcher has advanced past its starting position.
+A completed range snapshot can restore without logs if all its files have the same version.
+If the logs have not passed the snapshot end, status can show a confirmed log end and still report an unknown restore point.
 
 Existing clients can continue to use ``--json`` for schema 1. Its ``Restorable`` Boolean and version fields retain their historical metadata-based calculation.
 

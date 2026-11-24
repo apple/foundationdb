@@ -298,7 +298,7 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 	co_await file->finish();
 	config.latestLogEndVersion().set(tr, 150);
 	auto logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_COMPLETED);
-	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorable == 149);
+	ASSERT(logs.exclusiveLogEnd == 150 && !logs.restorePointUnknown && logs.restorable == 149);
 	ASSERT((co_await container->getRestoreSet(149, {}, true, 121)).present());
 
 	// If a snapshot finishes before the cursor, it confirms the copied end even after cleanup.
@@ -306,7 +306,7 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 	config.firstSnapshotEndVersion().set(tr, 135);
 	config.snapshotBeginVersion().set(tr, 160);
 	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_COMPLETED);
-	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorable == 149);
+	ASSERT(logs.exclusiveLogEnd == 150 && !logs.restorePointUnknown && logs.restorable == 149);
 
 	// The first snapshot can also finish beyond the end of the copied logs.
 	config.firstSnapshotEndVersion().clear(tr);
@@ -321,12 +321,28 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 	std::vector<std::string> files{ early->getFileName(), late->getFileName() };
 	std::vector<std::pair<Key, Key>> ranges{ { "a"_sr, "m"_sr }, { "m"_sr, "z"_sr } };
 	co_await container->writeKeyspaceSnapshotFile(files, ranges, 0, IncludeKeyRangeMap::True);
+	config.firstSnapshotEndVersion().set(tr, 155);
+	config.latestSnapshotEndVersion().set(tr, 155);
+	config.snapshotBeginVersion().set(tr, 160);
 	ASSERT(!(co_await container->getRestoreSet(155)).present());
 
-	config.firstSnapshotEndVersion().set(tr, 155);
-	config.snapshotBeginVersion().set(tr, 160);
+	// The same log and snapshot end versions can describe a single-version snapshot.
+	auto single = IBackupContainer::openContainer(url + "-single", {}, {}, 0);
+	co_await single->create();
+	auto singleLog = co_await single->writeLogFile(121, 150, 1024);
+	auto singleRange = co_await single->writeRangeFile(121, 0, 155, 1024);
+	co_await (singleLog->finish() && singleRange->finish());
+	files = { singleRange->getFileName() };
+	ranges = { { "a"_sr, "z"_sr } };
+	co_await single->writeKeyspaceSnapshotFile(files, ranges, 0, IncludeKeyRangeMap::True);
+	auto restoreSet = co_await single->getRestoreSet(155);
+	ASSERT(restoreSet.present() && restoreSet.get().ranges.size() == 1 && restoreSet.get().logs.empty());
+	co_await single->deleteContainer();
+
 	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING);
-	ASSERT(logs.exclusiveLogEnd == 150 && !logs.restorePointUnknown && !logs.restorable.present());
+	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorePointUnknown && !logs.restorable.present());
+	auto v1 = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING, BackupStatusSchema::V1);
+	ASSERT(v1.exclusiveLogEnd == 150 && !v1.restorePointUnknown && !v1.restorable.present());
 
 	// The final dispatch can stop before updating the consumer version. Completion clears it.
 	auto next = co_await container->writeLogFile(150, 170, 1024);
@@ -334,7 +350,7 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 	config.latestLogEndVersion().set(tr, 170);
 	tr->clear(ownerKey);
 	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_COMPLETED);
-	ASSERT(logs.exclusiveLogEnd == 170 && logs.restorable == 169);
+	ASSERT(logs.exclusiveLogEnd == 170 && !logs.restorePointUnknown && logs.restorable == 169);
 	ASSERT((co_await container->getRestoreSet(169)).present());
 	co_await container->deleteContainer();
 }

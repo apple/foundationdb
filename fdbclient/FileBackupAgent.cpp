@@ -7013,7 +7013,16 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 		}
 	}
 	auto restorable = co_await config.getLatestRestorableVersion(tr);
-	co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT), cursor, restorable };
+	LogProgress logs{ type.orDefault(MutationLogType::DEFAULT), cursor, restorable };
+	if (schema == BackupStatusSchema::V2 && !restorable.present() &&
+	    (co_await config.firstSnapshotEndVersion().get(tr)).present()) {
+		// A range snapshot taken at one version can restore without logs. Only its end is stored in the database.
+		auto mode = static_cast<SnapshotMode>(co_await config.snapshotMode().getD(tr));
+		logs.restorePointUnknown =
+		    mode == SnapshotMode::RANGEFILE ||
+		    (mode == SnapshotMode::BOTH && (co_await config.bulkDumpSnapshotEndVersion().get(tr)).present());
+	}
+	co_return logs;
 }
 
 struct LogInfo : public ReferenceCounted<LogInfo> {
@@ -7628,6 +7637,8 @@ public:
 					doc.setKey("Status", statusDoc);
 
 					Optional<Version> logEnd;
+					bool showSnapshotProgress = backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
+					                            backupState == EBackupState::STATE_RUNNING;
 
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						Reference<IBackupContainer> bc;
@@ -7647,6 +7658,10 @@ public:
 						}
 						if (logs.restorePointUnknown) {
 							doc.setKey("RestorePointStatus", "unknown");
+							if (!showSnapshotProgress && logEnd.present()) {
+								auto latestLogEnd = co_await getTimestampedVersion(tr, logEnd);
+								doc.setKey("LatestLogEnd", latestLogEnd.toJSON());
+							}
 						} else {
 							doc.setKey("Restorable", latestRestorable.present());
 						}
@@ -7666,8 +7681,7 @@ public:
 						}
 					}
 
-					if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
-					    backupState == EBackupState::STATE_RUNNING) {
+					if (showSnapshotProgress) {
 						int64_t snapshotInterval{ 0 };
 						int64_t logBytesWritten{ 0 };
 						int64_t rangeBytesWritten{ 0 };
@@ -7935,6 +7949,9 @@ public:
 					}
 					if (logs.restorePointUnknown) {
 						statusText += "Latest restore point: unknown from backup metadata.\n";
+						if (!snapshotProgress && logs.exclusiveLogEnd.present()) {
+							statusText += format("Log end version (exclusive): %lld\n", logs.exclusiveLogEnd.get());
+						}
 					}
 
 					// Check if backup is BulkLoad compatible (has bulkdump_data/).
@@ -8049,7 +8066,7 @@ public:
 						statusText += format("\nMutation Logs:\n");
 						statusText += format(" Bytes written: %s\n",
 						                     formatBytesHumanReadable(logBytesWritten.orDefault(0)).c_str());
-						if (!logs.restorePointUnknown) {
+						if (latestLogEndVersion.present() || !logs.restorePointUnknown) {
 							statusText += format(" Log end version (exclusive): %s (%s)\n",
 							                     versionToString(latestLogEndVersion).c_str(),
 							                     timeStampToString(latestLogEndVersionTimestamp).c_str());
