@@ -1565,6 +1565,19 @@ struct UnitTestsFunc : InstructionFunc {
 		}
 		API::selectAPIVersion(fdb->getAPIVersion());
 
+		for (int64_t value : { INT64_C(0x0102030405060708), -INT64_C(0x0102030405060708) }) {
+			auto packed = Tuple().append(value).pack();
+			for (int size = 1; size < packed.size(); ++size) {
+				try {
+					Tuple::unpack(packed.substr(0, size)).getInt(0);
+					ASSERT(false);
+				} catch (Error& e) {
+					ASSERT_EQ(e.code(), error_code_invalid_tuple_data_type);
+				}
+			}
+			ASSERT_EQ(Tuple::unpack(packed).getInt(0), value);
+		}
+
 		const uint64_t locationCacheSize = 100001;
 		const uint64_t maxWatches = 10001;
 		const uint64_t timeout = 60ULL * 1000;
