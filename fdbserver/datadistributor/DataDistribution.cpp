@@ -1635,6 +1635,30 @@ Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange taskRan
 	}
 }
 
+Future<bool> bulkJobIsPaused(Database cx, UID jobId, bool isBulkDump) {
+	Optional<BulkJobControlState> control = co_await getBulkJobControl(cx, jobId, isBulkDump);
+	co_return control.present() && control.get().isPaused();
+}
+
+// Only durable witness that a task was handed out: task metadata and progress describe what exists,
+// not what has started. Atomic add to stay off the read-modify-write path.
+Future<Void> recordBulkDumpAdmission(Database cx, UID jobId) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.atomicOp(bulkDumpAdmittedKeyFor(jobId), "\x01\x00\x00\x00\x00\x00\x00\x00"_sr, MutationRef::AddValue);
+			co_await tr.commit();
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 	Key beginKey = normalKeys.begin;
 	Key endKey = normalKeys.end;
@@ -1679,6 +1703,19 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 							break;
 						}
 						co_await self->bulkLoadEngineParallelismLimitor.waitUntilCounterChanged();
+					}
+					// A paused job admits nothing new; tasks already handed to the engine run to completion,
+					// so the job drains rather than stopping on the spot. Read per task and after the
+					// limiter wait: this pass walks every task and blocks on that limiter, so it lasts
+					// about as long as the job, and anything read before the wait would miss a pause that
+					// arrives during it. A task with no owning job cannot be paused.
+					UID taskJobId = bulkLoadTaskState.getJobId();
+					if (taskJobId.isValid() && co_await bulkJobIsPaused(cx, taskJobId, /*isBulkDump=*/false)) {
+						TraceEvent(SevInfo, "DDBulkLoadTaskJobPaused", self->ddId)
+						    .suppressFor(60.0)
+						    .detail("JobId", taskJobId)
+						    .detail("NotAdmittedRange", bulkLoadTaskState.getRange());
+						continue;
 					}
 					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskSchedule", self->ddId)
 					    .detail("Range", bulkLoadTaskState.getRange())
@@ -2181,6 +2218,7 @@ Future<Void> moveErrorBulkLoadJobToHistory(Reference<DataDistributor> self, std:
 			currentJobState.setEndTime(now());
 			co_await addBulkLoadJobToHistory(&tr, currentJobState);
 			co_await releaseExclusiveReadLockOnRange(&tr, jobRange, rangeLockNameForBulkLoad);
+			tr.clear(bulkLoadControlKeyFor(jobId));
 			co_await tr.commit();
 			break;
 		} catch (Error& e) {
@@ -2519,6 +2557,7 @@ Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 				    &tr, bulkLoadJobPrefix, jobState.getJobRange(), bulkLoadJobValue(BulkLoadJobState()));
 				co_await addBulkLoadJobToHistory(&tr, jobState);
 				co_await releaseExclusiveReadLockOnRange(&tr, jobState.getJobRange(), rangeLockNameForBulkLoad);
+				tr.clear(bulkLoadControlKeyFor(jobState.getJobId()));
 			} else {
 				co_await krmSetRange(&tr, bulkLoadJobPrefix, jobCompleteRange, bulkLoadJobValue(jobState));
 			}
@@ -2816,7 +2855,8 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	std::map<Key, KeyRange> skippedRanges;
 	std::vector<Future<Void>> actors;
 	Transaction tr(cx);
-	while (beginKey < endKey) {
+	bool pausedMidPass = false;
+	while (beginKey < endKey && !pausedMidPass) {
 		Error err;
 		try {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
@@ -2898,6 +2938,18 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 						}
 						co_await self->bulkDumpParallelismLimitor.waitUntilCounterChanged();
 					}
+					// One call of this function walks the whole remaining job and blocks on the limiter as it
+					// goes, so it can run for as long as the job does: a pause has to be read here, inside
+					// the dispatch loop and after the limiter wait, or it would not take effect until the
+					// job had finished. One point get per admitted shard task, against dumping a shard.
+					if (co_await bulkJobIsPaused(cx, jobId, /*isBulkDump=*/true)) {
+						TraceEvent(SevInfo, "DDBulkDumpJobScheduleJobPaused", self->ddId)
+						    .suppressFor(60.0)
+						    .detail("JobId", jobId)
+						    .detail("NotAdmittedRange", taskRange);
+						pausedMidPass = true;
+						break;
+					}
 					SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
 					                                        bulkDumpState.generateRangeTask(taskRange),
 					                                        targetDcId);
@@ -2908,6 +2960,7 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					    .detail("TaskJobID", bulkDumpState.getJobId())
 					    .detail("TaskRange", taskRange)
 					    .detail("TaskID", task.bulkDumpState.getTaskId());
+					co_await recordBulkDumpAdmission(cx, jobId);
 					actors.push_back(doBulkDumpTask(self, task.targetServer, task.bulkDumpState, task.checksumServers));
 				}
 				beginKey = rangeLocations.back().range.end;
@@ -3147,6 +3200,13 @@ Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 			// through bulkdump_task_outdated.
 			TraceEvent(SevWarnAlways, "DDBulkDumpJobFailed", self->ddId).suppressFor(60.0).detail("JobId", jobId);
 		} else {
+			// Cheap outer guard only: do not start a whole dispatch pass while already paused. A pause
+			// arriving mid-pass is caught inside the dispatch loop, which is the real enforcement point.
+			if (co_await bulkJobIsPaused(cx, jobId, /*isBulkDump=*/true)) {
+				TraceEvent(SevInfo, "DDBulkDumpManagerJobPaused", self->ddId).suppressFor(60.0).detail("JobId", jobId);
+				co_await delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
+				continue;
+			}
 			// Schedule the job
 			co_await scheduleBulkDumpJob(self);
 		}
