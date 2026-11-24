@@ -8283,7 +8283,7 @@ public:
 
 				if (verbose) {
 					std::string details = co_await restore.getProgress(tr);
-					printf("%s\n", details.c_str());
+					printf("%s\n%s\n", BackupAgentBase::formatTime((int64_t)timer()).c_str(), details.c_str());
 				}
 
 				ERestoreState status_ = co_await restore.stateEnum().getD(tr);
