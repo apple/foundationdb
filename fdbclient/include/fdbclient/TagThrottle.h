@@ -70,22 +70,24 @@ public:
 
 	template <class Context>
 	void load(const uint8_t* data, size_t size, Context& context) {
-		// const uint8_t *start = data;
+		TagSet decoded;
 		const uint8_t* end = data + size;
 		while (data < end) {
 			uint8_t len = *(data++);
+			if (len > end - data) {
+				detail::load_failed(context, "transaction tag exceeds tag set");
+			}
 			// Tags are already deduplicated
-			const auto& tag = tags.emplace_back(context.tryReadZeroCopy(data, len), len);
+			const auto& tag = decoded.tags.emplace_back(context.tryReadZeroCopy(data, len), len);
 			data += len;
-			bytes += tag.size();
+			decoded.bytes += tag.size();
 		}
-
-		ASSERT(data == end);
 
 		// Deserialized tag sets share the arena with the request that contained them
 		// For this reason, persisting a TagSet that shares memory with other request
 		// members should be done with caution.
-		arena = context.arena();
+		decoded.arena = context.arena();
+		*this = std::move(decoded);
 	}
 
 	size_t getBytes() const { return bytes; }
@@ -140,7 +142,7 @@ struct TagThrottleKey {
 	  : tags(tags), throttleType(throttleType), priority(priority) {}
 
 	Key toKey() const;
-	static TagThrottleKey fromKey(const KeyRef& key);
+	static Optional<TagThrottleKey> tryFromKey(const KeyRef& key);
 };
 
 struct TagThrottleValue {
@@ -153,7 +155,7 @@ struct TagThrottleValue {
 	TagThrottleValue(double tpsRate, double expirationTime, double initialDuration, TagThrottledReason reason)
 	  : tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration), reason(reason) {}
 
-	static TagThrottleValue fromValue(const ValueRef& value);
+	static Optional<TagThrottleValue> tryFromValue(const ValueRef& value);
 
 	// To change this serialization, ProtocolVersion::TagThrottleValue must be updated, and downgrades need to be
 	// considered
@@ -278,8 +280,11 @@ Future<std::vector<TagThrottleInfo>> getRecommendedTags(Reference<DB> db, int li
 			RangeResult throttles = co_await safeThreadFutureToFuture(f);
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
-				results.push_back(TagThrottleInfo(TagThrottleKey::fromKey(throttle.key),
-				                                  TagThrottleValue::fromValue(throttle.value)));
+				auto key = TagThrottleKey::tryFromKey(throttle.key);
+				auto value = TagThrottleValue::tryFromValue(throttle.value);
+				if (key.present() && value.present()) {
+					results.emplace_back(key.get(), value.get());
+				}
 			}
 			co_return results;
 		} catch (Error& e) {
@@ -310,8 +315,11 @@ getThrottledTags(Reference<DB> db, int limit, ContainsRecommended containsRecomm
 			RangeResult throttles = co_await safeThreadFutureToFuture(f);
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
-				results.push_back(TagThrottleInfo(TagThrottleKey::fromKey(throttle.key),
-				                                  TagThrottleValue::fromValue(throttle.value)));
+				auto key = TagThrottleKey::tryFromKey(throttle.key);
+				auto value = TagThrottleValue::tryFromValue(throttle.value);
+				if (key.present() && value.present()) {
+					results.emplace_back(key.get(), value.get());
+				}
 			}
 			co_return results;
 		} catch (Error& e) {
@@ -381,19 +389,22 @@ Future<bool> unthrottleMatchingThrottles(Reference<DB> db,
 			uint64_t unthrottledTags = 0;
 			uint64_t manualUnthrottledTags = 0;
 			for (auto tag : tags) {
+				auto key = TagThrottleKey::tryFromKey(tag.key);
+				if (!key.present()) {
+					continue;
+				}
 				if (onlyExpiredThrottles) {
-					double expirationTime = TagThrottleValue::fromValue(tag.value).expirationTime;
-					if (expirationTime == 0 || expirationTime > now()) {
+					auto value = TagThrottleValue::tryFromValue(tag.value);
+					if (!value.present() || value.get().expirationTime == 0 || value.get().expirationTime > now()) {
 						continue;
 					}
 				}
 
-				TagThrottleKey key = TagThrottleKey::fromKey(tag.key);
-				if (priority.present() && key.priority != priority.get()) {
+				if (priority.present() && key.get().priority != priority.get()) {
 					continue;
 				}
 
-				if (key.throttleType == TagThrottleType::MANUAL) {
+				if (key.get().throttleType == TagThrottleType::MANUAL) {
 					++manualUnthrottledTags;
 				}
 
@@ -485,7 +496,7 @@ Future<bool> unthrottleTags(Reference<DB> db,
 			int delta = 0;
 			for (int i = 0; i < values.size(); ++i) {
 				if (values[i].get().present()) {
-					if (TagThrottleKey::fromKey(keys[i]).throttleType == TagThrottleType::MANUAL) {
+					if (keys[i] < tagThrottleAutoKeysPrefix) {
 						delta -= 1;
 					}
 

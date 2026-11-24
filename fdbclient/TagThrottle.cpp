@@ -101,26 +101,104 @@ Key TagThrottleKey::toKey() const {
 	return result;
 }
 
-TagThrottleKey TagThrottleKey::fromKey(const KeyRef& key) {
-	const uint8_t* str = key.substr(tagThrottleKeysPrefix.size()).begin();
-	auto throttleType = TagThrottleType(*(str++));
-	auto priority = TransactionPriority(*(str++));
-	TagSet tags;
-
-	while (str < key.end()) {
-		uint8_t size = *(str++);
-		tags.addTag(TransactionTagRef(str, size));
-		str += size;
+Optional<TagThrottleKey> TagThrottleKey::tryFromKey(const KeyRef& key) {
+	// A throttle currently encodes one tag: type, priority, length, and the tag bytes.
+	if (!key.startsWith(tagThrottleKeysPrefix)) {
+		return {};
 	}
-
+	KeyRef suffix = key.removePrefix(tagThrottleKeysPrefix);
+	if (suffix.size() < 3) {
+		return {};
+	}
+	auto throttleType = TagThrottleType(suffix[0]);
+	auto priority = TransactionPriority(suffix[1]);
+	int tagLength = suffix[2];
+	if (throttleType > TagThrottleType::AUTO || priority > TransactionPriority::MAX || tagLength != suffix.size() - 3 ||
+	    tagLength > CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH) {
+		return {};
+	}
+	TagSet tags;
+	tags.addTag(suffix.substr(3));
 	return TagThrottleKey(tags, throttleType, priority);
 }
 
-TagThrottleValue TagThrottleValue::fromValue(const ValueRef& value) {
-	TagThrottleValue throttleValue;
-	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
-	reader >> throttleValue;
-	return throttleValue;
+Optional<TagThrottleValue> TagThrottleValue::tryFromValue(const ValueRef& value) {
+	constexpr int minSize = sizeof(ProtocolVersion) + 3 * sizeof(double) + sizeof(TagThrottledReason);
+	if (value.size() < minSize) {
+		return {};
+	}
+	BinaryReader reader(value, Unversioned());
+	ProtocolVersion version;
+	reader >> version;
+	if (!version.hasTagThrottleValueReason() || version >= minInvalidProtocolVersion) {
+		return {};
+	}
+	reader.setProtocolVersion(version);
+	TagThrottleValue throttle;
+	reader >> throttle;
+	return throttle;
+}
+
+TEST_CASE("/fdbclient/TagThrottle/KeyDecoding") {
+	TagSet tags;
+	tags.addTag("abc"_sr);
+	auto key = TagThrottleKey(tags, TagThrottleType::AUTO, TransactionPriority::BATCH).toKey();
+	for (int size = 0; size < key.size(); ++size) {
+		ASSERT(!TagThrottleKey::tryFromKey(key.substr(0, size)).present());
+	}
+	auto decoded = TagThrottleKey::tryFromKey(key);
+	ASSERT(decoded.present());
+	ASSERT(decoded.get().throttleType == TagThrottleType::AUTO);
+	ASSERT(decoded.get().priority == TransactionPriority::BATCH);
+	ASSERT(*decoded.get().tags.begin() == "abc"_sr);
+	ASSERT(!TagThrottleKey::tryFromKey(key.withSuffix("\x00"_sr)).present());
+
+	TagSet emptyTag;
+	emptyTag.addTag(""_sr);
+	auto emptyKey = TagThrottleKey(emptyTag, TagThrottleType::MANUAL, TransactionPriority::IMMEDIATE).toKey();
+	auto decodedEmpty = TagThrottleKey::tryFromKey(emptyKey);
+	ASSERT(decodedEmpty.present() && decodedEmpty.get().tags.size() == 1);
+	return Void();
+}
+
+TEST_CASE("/fdbclient/TagThrottle/ValueDecoding") {
+	BinaryWriter writer(IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
+	TagThrottleValue throttle(1.0, 2.0, 3.0, TagThrottledReason::MANUAL);
+	writer << throttle;
+	auto value = writer.toValue();
+	for (int size = 0; size < value.size(); ++size) {
+		ASSERT(!TagThrottleValue::tryFromValue(value.substr(0, size)).present());
+	}
+	auto decoded = TagThrottleValue::tryFromValue(value);
+	ASSERT(decoded.present());
+	ASSERT(decoded.get().tpsRate == 1.0 && decoded.get().expirationTime == 2.0 &&
+	       decoded.get().initialDuration == 3.0 && decoded.get().reason == TagThrottledReason::MANUAL);
+	return Void();
+}
+
+TEST_CASE("/fdbclient/TagSet/WireLengths") {
+	constexpr FileIdentifier id{ 12345 };
+	for (StringRef payload : { "\x00\x03tag"_sr, "\x00\x04tag"_sr }) {
+		ObjectWriter writer(Unversioned());
+		writer.serialize(id, payload);
+		TagSet tags;
+		ArenaObjectReader reader(Arena(), writer.toStringRef(), Unversioned());
+		if (payload[1] == 3) {
+			reader.deserialize(id, tags);
+			ASSERT(tags.size() == 2 && tags.begin()->empty() && tags.begin()[1] == "tag"_sr);
+		} else if (!g_network->isSimulated()) {
+			// The object reader asserts on malformed input in simulation.
+			tags.addTag("original"_sr);
+			try {
+				reader.deserialize(id, tags);
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT(e.code() == error_code_serialization_failed);
+				ASSERT(tags.size() == 1 && *tags.begin() == "original"_sr);
+			}
+		}
+	}
+	return Void();
 }
 
 TEST_CASE("TagSet/toString") {
