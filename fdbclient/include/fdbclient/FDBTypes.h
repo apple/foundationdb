@@ -512,9 +512,8 @@ struct KeyValueRef {
 
 template <>
 struct string_serialized_traits<KeyValueRef> : std::true_type {
-	int32_t getSize(const KeyValueRef& item) const {
-		return 2 * sizeof(uint32_t) + item.key.size() + item.value.size();
-	}
+	static constexpr size_t minSize = 2 * sizeof(uint32_t);
+	int32_t getSize(const KeyValueRef& item) const { return minSize + item.key.size() + item.value.size(); }
 
 	uint32_t save(uint8_t* out, const KeyValueRef& item) const {
 		auto begin = out;
@@ -532,18 +531,23 @@ struct string_serialized_traits<KeyValueRef> : std::true_type {
 	}
 
 	template <class Context>
-	uint32_t load(const uint8_t* data, KeyValueRef& t, Context& context) {
-		auto begin = data;
-		uint32_t sz;
-		memcpy(&sz, data, sizeof(sz));
-		data += sizeof(sz);
-		t.key = StringRef(context.tryReadZeroCopy(data, sz), sz);
-		data += sz;
-		memcpy(&sz, data, sizeof(sz));
-		data += sizeof(sz);
-		t.value = StringRef(context.tryReadZeroCopy(data, sz), sz);
-		data += sz;
-		return data - begin;
+	void load(const uint8_t*& data, const uint8_t* end, KeyValueRef& t, Context& context) {
+		auto readString = [&]() {
+			uint32_t length;
+			if (end - data < sizeof(length)) {
+				detail::load_failed(context, "missing packed string length");
+			}
+			memcpy(&length, data, sizeof(length));
+			data += sizeof(length);
+			if (length > end - data) {
+				detail::load_failed(context, "packed string exceeds vector bounds");
+			}
+			StringRef result(context.tryReadZeroCopy(data, length), length);
+			data += length;
+			return result;
+		};
+		t.key = readString();
+		t.value = readString();
 	}
 };
 

@@ -23,6 +23,52 @@
 #include "fdbclient/NativeAPI.h"
 #include <boost/algorithm/string.hpp>
 
+TEST_CASE("/fdbclient/FDBTypes/PackedRangeReplyBounds") {
+	using Rows = VectorRef<KeyValueRef, VecSerStrategy::String>;
+	auto decode = [](StringRef packed, Standalone<Rows>& result) {
+		// Wrap the packed field in a complete object so only its inner lengths are under test.
+		constexpr FileIdentifier id{ 4242 };
+		ObjectWriter writer(Unversioned());
+		writer.serialize(id, packed);
+		auto bytes = writer.toString();
+		ArenaObjectReader reader(bytes.arena(), bytes, Unversioned());
+		reader.deserialize(id, result);
+	};
+	BinaryWriter packed(Unversioned());
+	packed << uint32_t(2) << "k"_sr << ""_sr << ""_sr << "v"_sr;
+	auto bytes = packed.toValue();
+	Standalone<Rows> rows;
+	decode(bytes, rows);
+	// Replacing a populated result must transfer both its rows and its strings to the new arena.
+	decode(bytes, rows);
+	ASSERT_EQ(rows.size(), 2);
+	ASSERT(rows[0].key == "k"_sr && rows[0].value.empty());
+	ASSERT(rows[1].key.empty() && rows[1].value == "v"_sr);
+	if (!g_network->isSimulated()) {
+		// Malformed object buffers deliberately assert in simulation.
+		auto expectInvalid = [&](StringRef field) {
+			try {
+				decode(field, rows);
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT_EQ(e.code(), error_code_serialization_failed);
+				ASSERT_EQ(rows.size(), 2);
+				ASSERT(rows[0].key == "k"_sr && rows[1].value == "v"_sr);
+			}
+		};
+		for (int length = 0; length < bytes.size(); ++length) {
+			expectInvalid(bytes.substr(0, length));
+		}
+		expectInvalid(bytes.withSuffix("x"_sr));
+		expectInvalid("\xff\xff\xff\xff"_sr);
+		auto badKeyLength = makeString(bytes.size());
+		memcpy(mutateString(badKeyLength), bytes.begin(), bytes.size());
+		memset(mutateString(badKeyLength) + sizeof(uint32_t), 0xff, sizeof(uint32_t));
+		expectInvalid(badKeyLength);
+	}
+	return Void();
+}
+
 KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, Optional<KeyRef> prefix) {
 	if (!prefix.present() || prefix.get().empty()) {
 		return range;

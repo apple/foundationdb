@@ -868,14 +868,13 @@ struct flow_ref<std::pair<A, B>> : std::integral_constant<bool, false> {};
 
 template <class T>
 struct string_serialized_traits : std::false_type {
+	static constexpr size_t minSize = 0;
 	int32_t getSize(const T& item) const { return 0; }
 
 	uint32_t save(uint8_t* out, const T& t) const { return 0; }
 
 	template <class Context>
-	uint32_t load(const uint8_t* data, T& t, Context& context) {
-		return 0;
-	}
+	void load(const uint8_t*& data, const uint8_t* end, T& t, Context& context) {}
 };
 
 enum class VecSerStrategy { FlatBuffers, String };
@@ -1544,16 +1543,28 @@ struct dynamic_size_traits<VectorRef<V, VecSerStrategy::String>> : std::true_typ
 	template <class Context>
 	static void load(const uint8_t* data, size_t size, T& t, Context& context) {
 		string_serialized_traits<V> traits;
-		auto* p = data;
 		uint32_t num_elements;
+		if (size < sizeof(num_elements) || size > std::numeric_limits<int32_t>::max()) {
+			detail::load_failed(context, "invalid packed vector size");
+		}
+		const uint8_t* end = data + size;
 		memcpy(&num_elements, data, sizeof(num_elements));
 		data += sizeof(num_elements);
-		t.resize(context.arena(), num_elements);
-		for (unsigned i = 0; i < num_elements; ++i) {
-			data += traits.load(data, t[i], context);
+		constexpr size_t maxAllocation = std::numeric_limits<int>::max() - sizeof(ArenaBlock) - sizeof(ArenaBlockRef);
+		if (num_elements > maxAllocation / sizeof(V) ||
+		    uint64_t(num_elements) * traits.minSize > size - sizeof(num_elements)) {
+			detail::load_failed(context, "invalid packed vector count");
 		}
-		ASSERT(data - p == size);
-		t._cached_size = size - sizeof(uint32_t);
+		T decoded;
+		decoded.resize(context.arena(), num_elements);
+		for (unsigned i = 0; i < num_elements; ++i) {
+			traits.load(data, end, decoded[i], context);
+		}
+		if (data != end) {
+			detail::load_failed(context, "trailing bytes in packed vector");
+		}
+		decoded._cached_size = size - sizeof(uint32_t);
+		t = decoded;
 	}
 };
 

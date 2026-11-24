@@ -366,12 +366,11 @@ TEST_CASE("flow/FlatBuffers/vectorBool") {
 
 template <>
 struct string_serialized_traits<Void> : std::true_type {
+	static constexpr size_t minSize = 0;
 	int32_t getSize(const Void& item) const { return 0; }
 	uint32_t save(uint8_t* out, const Void& t) const { return 0; }
 	template <class Context>
-	uint32_t load(const uint8_t* data, Void& t, Context& context) {
-		return 0;
-	}
+	void load(const uint8_t*& data, const uint8_t* end, Void& t, Context& context) {}
 };
 
 namespace unit_tests {

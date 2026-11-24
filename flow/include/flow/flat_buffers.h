@@ -157,26 +157,6 @@ struct vector_like_traits<std::deque<T, Alloc>> : std::true_type {
 	}
 };
 
-namespace detail {
-// Throws serialization_failed, after asserting in simulation where a malformed buffer is a bug. |reason| must be a
-// string literal.
-[[noreturn]] void flat_buffer_load_failed(const char* reason);
-
-// Traces and aborts the process. |reason| must be a string literal.
-[[noreturn]] void flat_buffer_load_fatal(const char* reason);
-
-// Reports a malformed buffer through the loading context, which picks between the two above. Contexts that cannot
-// bound the buffer throw.
-template <class Context>
-[[noreturn]] void load_failed(const Context& context, const char* reason) {
-	if constexpr (requires { context.loadFailed(reason); }) {
-		context.loadFailed(reason);
-	} else {
-		flat_buffer_load_failed(reason);
-	}
-}
-} // namespace detail
-
 template <class T, size_t N>
 struct vector_like_traits<std::array<T, N>> : std::true_type {
 	using Vec = std::array<T, N>;
