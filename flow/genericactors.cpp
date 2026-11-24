@@ -514,6 +514,27 @@ TEST_CASE("/flow/genericactors/ReadyRaceReleasesCapturedState") {
 	return Void();
 }
 
+TEST_CASE("/flow/genericactors/DetachReleasesInput") {
+	Promise<int> input;
+	auto result = detach(input.getFuture());
+	input.send(42);
+	ASSERT_EQ(result.get(), 42);
+	ASSERT_EQ(input.getFutureReferenceCount(), 0);
+
+	Promise<Void> failed;
+	auto error = detach(failed.getFuture());
+	failed.sendError(operation_failed());
+	ASSERT_EQ(error.getError().code(), error_code_operation_failed);
+	ASSERT_EQ(failed.getFutureReferenceCount(), 0);
+
+	Promise<Void> pending;
+	auto cancelled = detach(pending.getFuture());
+	cancelled.cancel();
+	ASSERT_EQ(cancelled.getError().code(), error_code_actor_cancelled);
+	ASSERT_EQ(pending.getFutureReferenceCount(), 0);
+	return Void();
+}
+
 TEST_CASE("/flow/genericactors/HoldWhileReleasesCapturedState") {
 	FlowLock lock(1);
 
