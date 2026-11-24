@@ -197,9 +197,13 @@ struct ChangeFeedsWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY);
 				tr.set(key, value);
+				// Recovering a successful commit sets the versionstamp but leaves getCommittedVersion() unset.
+				state Future<Standalone<StringRef>> versionstamp = tr.getVersionstamp();
 				wait(tr.commit());
-				return tr.getCommittedVersion();
+				Standalone<StringRef> stamp = wait(versionstamp);
+				return BinaryReader::fromStringRef<Versionstamp>(stamp, Unversioned()).version;
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
