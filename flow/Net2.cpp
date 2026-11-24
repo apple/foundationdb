@@ -1083,6 +1083,10 @@ public:
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesTimedout");
 				countServerTLSHandshakesTimedout->increment(1);
 				self->handshakeTimedOut = true;
+				if (self->deferCloseToWorker()) {
+					// Keep the incoming connection slot until the worker returns the socket and it is closed.
+					co_await connected.getFuture();
+				}
 				throw connection_failed();
 			}
 		} catch (Error& e) {
