@@ -147,7 +147,8 @@ class ServerStatus {
 public:
 	bool isWiggling;
 	bool isFailed;
-	bool failureMasked = false; // Maintenance suppressed the failure tracker.
+	// Base endpoint for which the failure tracker observed isFailed. Invalid during maintenance or handoff.
+	Endpoint readabilityEndpoint;
 	bool isUndesired;
 	bool isWrongConfiguration;
 	bool initialized; // AsyncMap erases default constructed objects
@@ -168,7 +169,7 @@ public:
 	bool operator==(ServerStatus const& r) const {
 		return isFailed == r.isFailed && isUndesired == r.isUndesired && isWiggling == r.isWiggling &&
 		       isWrongConfiguration == r.isWrongConfiguration && locality == r.locality &&
-		       initialized == r.initialized && failureMasked == r.failureMasked;
+		       initialized == r.initialized && readabilityEndpoint == r.readabilityEndpoint;
 	}
 	bool operator!=(ServerStatus const& r) const { return !(*this == r); }
 

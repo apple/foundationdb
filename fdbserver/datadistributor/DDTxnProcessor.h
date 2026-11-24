@@ -47,6 +47,9 @@ public:
 		std::vector<UID> srcServers, completeSources; // the same as RelocateData.src, RelocateData.completeSources;
 	};
 
+	// One entry per committed source. A missing registration or active failure suppression leaves it empty.
+	using RegisteredSources = std::vector<Optional<StorageServerInterface>>;
+
 	struct DDRangeLocations {
 		DDRangeLocations() = default;
 		explicit DDRangeLocations(KeyRangeRef range) : range(range) {}
@@ -61,11 +64,11 @@ public:
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 
 	// Read the first shard in range at a fresh read version. Once keyServers is read, verifiedEnd holds its
-	// exclusive end clipped to range.end, even if resolving the source IDs later fails or is cancelled.
+	// exclusive end clipped to range.end, even if checking the source registrations later fails or is cancelled.
 	// Keep verifiedEnd alive until the future completes or is cancelled. An empty result means unverified owners.
-	virtual Future<std::vector<UID>> getSourceServersForFirstShard(KeyRangeRef range, Optional<Key>& verifiedEnd) {
+	virtual Future<RegisteredSources> getSourceServersForFirstShard(KeyRangeRef range, Optional<Key>& verifiedEnd) {
 		verifiedEnd.reset();
-		return std::vector<UID>();
+		return RegisteredSources();
 	}
 
 	virtual Future<std::vector<DDRangeLocations>> getSourceServerInterfacesForRange(const KeyRangeRef range) {
@@ -170,7 +173,7 @@ public:
 
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
 
-	Future<std::vector<UID>> getSourceServersForFirstShard(KeyRangeRef range, Optional<Key>& verifiedEnd) override;
+	Future<RegisteredSources> getSourceServersForFirstShard(KeyRangeRef range, Optional<Key>& verifiedEnd) override;
 
 	Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(
 	    const KeyRangeRef range) override;

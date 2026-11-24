@@ -47,6 +47,16 @@ static void updateServersAndCompleteSources(std::set<UID>& servers,
 	}
 }
 
+static Optional<Key> activeHealthyZone(const Optional<Value>& value, Version readVersion) {
+	if (value.present()) {
+		auto [zone, endVersion] = decodeHealthyZoneValue(*value);
+		if (zone == ignoreSSFailuresZoneString || endVersion > readVersion) {
+			return zone;
+		}
+	}
+	return {};
+}
+
 class DDTxnProcessorImpl {
 	friend class DDTxnProcessor;
 
@@ -286,12 +296,7 @@ class DDTxnProcessorImpl {
 			co_await tr.onError(err);
 		}
 		if (healthyZoneRead) {
-			if (healthyZoneVal.present()) {
-				auto p = decodeHealthyZoneValue(healthyZoneVal.get());
-				if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailuresZoneString) {
-					co_return Optional<Key>(p.first);
-				}
-			}
+			co_return activeHealthyZone(healthyZoneVal, tr.getReadVersion().get());
 		} else {
 			TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "ReadHealthyZone", distributorId)
 			    .detail("MaxRetries", maxRetries)
@@ -1399,42 +1404,66 @@ static bool sourceTagsMatch(std::vector<Tag> expected, const std::vector<Optiona
 	return actual == expected;
 }
 
-Future<std::vector<UID>> DDTxnProcessor::getSourceServersForFirstShard(KeyRangeRef range, Optional<Key>& verifiedEnd) {
+static Future<std::vector<UID>> resolveShardSourceTags(Database cx, Transaction& tr, Key key, std::vector<Tag> tags) {
+	// The proxy suggests IDs for point reads, but its reply has no assignment version.
+	// Verify every tag against keyServers at the same read version.
+	if (!tags.empty()) {
+		auto loc = co_await getKeyLocation_internal(
+		    cx, key, SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, latestVersion);
+		if (loc.locations->size() == tags.size()) {
+			std::vector<Future<Optional<Value>>> serverTags;
+			std::vector<UID> candidates;
+			for (int i = 0; i < loc.locations->size(); ++i) {
+				UID id = loc.locations->getId(i);
+				candidates.push_back(id);
+				serverTags.push_back(tr.get(serverTagKeyFor(id)));
+			}
+			if (sourceTagsMatch(std::move(tags), co_await getAll(serverTags))) {
+				co_return candidates;
+			}
+		}
+	}
+	co_return std::vector<UID>();
+}
+
+Future<IDDTxnProcessor::RegisteredSources> DDTxnProcessor::getSourceServersForFirstShard(KeyRangeRef range,
+                                                                                         Optional<Key>& verifiedEnd) {
 	verifiedEnd.reset();
 	Transaction tr(cx);
 	tr.setOption(FDBTransactionOptions::SKIP_GRV_CACHE);
 	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	auto maintenance = tr.get(healthyZoneKey);
 	auto shards = co_await krmGetRanges(&tr, keyServersPrefix, range, 2, SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
 	ASSERT(shards.size() >= 2);
 	verifiedEnd = Key(shards[1].key);
 	auto owners = decodeShardSources(shards[0].value);
-	if (auto* ids = std::get_if<std::vector<UID>>(&owners)) {
-		co_return std::move(*ids);
+	std::vector<UID> ids;
+	if (auto* tags = std::get_if<std::vector<Tag>>(&owners)) {
+		ids = co_await resolveShardSourceTags(cx, tr, shards[0].key, std::move(*tags));
+	} else {
+		ids = std::move(std::get<std::vector<UID>>(owners));
 	}
 
-	// The tag index is keyed by server ID. The proxy suggests IDs for point reads, but its reply
-	// has no assignment version. Verify every tag against keyServers at the same read version.
-	auto& tags = std::get<std::vector<Tag>>(owners);
-	if (tags.empty()) {
-		co_return std::vector<UID>();
+	// A restarted server keeps its ID. Read each owner's registered interface at the assignment version.
+	std::vector<Future<Optional<Value>>> registrations;
+	for (UID id : ids) {
+		registrations.push_back(tr.get(serverListKeyFor(id)));
 	}
-	auto loc = co_await getKeyLocation_internal(
-	    cx, shards[0].key, SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, latestVersion);
-	if (loc.locations->size() == tags.size()) {
-		std::vector<Future<Optional<Value>>> serverTags;
-		std::vector<UID> candidates;
-		for (int i = 0; i < loc.locations->size(); ++i) {
-			UID id = loc.locations->getId(i);
-			candidates.push_back(id);
-			serverTags.push_back(tr.get(serverTagKeyFor(id)));
-		}
-		if (sourceTagsMatch(std::move(tags), co_await getAll(serverTags))) {
-			co_return candidates;
+	auto values = co_await getAll(registrations);
+	auto zone = activeHealthyZone(co_await maintenance, tr.getReadVersion().get());
+	RegisteredSources sources(ids.size());
+	for (size_t i = 0; i < ids.size(); ++i) {
+		if (values[i].present()) {
+			auto interf = decodeServerListValue(*values[i]);
+			if (interf.id() == ids[i] &&
+			    (!zone.present() || (*zone != ignoreSSFailuresZoneString && interf.locality.zoneId() != zone))) {
+				sources[i] = std::move(interf);
+			}
 		}
 	}
-	co_return std::vector<UID>();
+	co_return sources;
 }
 
 TEST_CASE("/DataDistribution/SourceShard/Encodings") {

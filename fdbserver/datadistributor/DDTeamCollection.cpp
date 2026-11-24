@@ -31,6 +31,7 @@
 #include "TCInfo.h"
 #include "ExclusionTracker.h"
 #include "flow/IRandom.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
 #include "flow/TxnCounters.h"
@@ -1990,11 +1991,15 @@ public:
 	                                                ServerStatus* status,
 	                                                Version addedVersion) {
 		StorageServerInterface interf = server->getLastKnownInterface();
+		const Endpoint& endpoint = interf.getValue.getEndpoint();
+		if (status->readabilityEndpoint != endpoint) {
+			status->readabilityEndpoint = Endpoint();
+		}
 		while (true) {
 			const bool inHealthyZone = self->isFailureMasked(interf.locality);
 			if (inHealthyZone) {
 				status->isFailed = false;
-				status->failureMasked = true;
+				status->readabilityEndpoint = Endpoint();
 				if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
 					TraceEvent("SSFailureTracker", self->distributorId)
 					    .suppressFor(1.0)
@@ -2045,20 +2050,26 @@ public:
 				                                        SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME,
 				                                        TaskPriority::DataDistribution);
 			}
-			// Once maintenance ends, require the same endpoint recovery signal as for a failed server.
-			Future<Void> unmaskedRecovery = status->failureMasked && !inHealthyZone
-			                                    ? IFailureMonitor::failureMonitor().onStateEqual(
-			                                          interf.waitFailure.getEndpoint(), FailureStatus(false))
-			                                    : Future<Void>(Never());
+			// Relocation keeps its previous state across a restart. Before using that state for a
+			// range sample, require a failure or recovery signal for the current interface.
+			Future<Void> confirmCurrentStatus = Never();
+			if (!inHealthyZone && !status->readabilityEndpoint.isValid() && !healthChanged.isReady()) {
+				confirmCurrentStatus =
+				    status->isFailed ? waitFailureClientStrict(interf.waitFailure,
+				                                               SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME,
+				                                               TaskPriority::DataDistribution)
+				                     : IFailureMonitor::failureMonitor().onStateEqual(interf.waitFailure.getEndpoint(),
+				                                                                      FailureStatus(false));
+			}
 			// Avoid starting a removal transaction when the earlier health-change branch is ready.
 			auto res = co_await race(healthChanged,
 			                         !healthChanged.isReady() && status->isUnhealthy()
 			                             ? self->waitForAllDataRemoved(interf.id(), addedVersion)
 			                             : Future<Void>(Never()),
 			                         self->healthyZone.onChange(),
-			                         unmaskedRecovery);
+			                         confirmCurrentStatus);
 			if (res.index() == 0) {
-				status->failureMasked = false;
+				status->readabilityEndpoint = endpoint;
 				status->isFailed = !status->isFailed;
 				if (status->isFailed && self->healthyZone.get().present()) {
 					if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
@@ -2092,7 +2103,7 @@ public:
 			} else if (res.index() == 1) {
 				break;
 			} else if (res.index() == 3) {
-				status->failureMasked = false;
+				status->readabilityEndpoint = endpoint;
 			}
 		}
 
@@ -3607,6 +3618,8 @@ public:
 			co_await self->init(initData, *ddEnabledState);
 			initData.clear(); // release reference count
 			self->addActor.send(self->serverGetTeamRequests(tci));
+			// Server trackers already run while the remote collection waits for log recovery.
+			self->addActor.send(self->waitHealthyZoneChange());
 
 			TraceEvent("DDTeamCollectionBegin", self->distributorId).detail("Primary", self->primary);
 			co_await (self->readyToStart || error);
@@ -3646,7 +3659,6 @@ public:
 			self->addActor.send(self->monitorStorageServerRecruitment());
 			self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
 			self->addActor.send(self->trackExcludedServers());
-			self->addActor.send(self->waitHealthyZoneChange());
 			self->addActor.send(self->monitorPerpetualStorageWiggle());
 			// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 			Future<int> loggingTrigger = self->sampleRemoteOnlyShardAvailability(0);
@@ -4694,10 +4706,11 @@ void DDTeamCollection::setServerStatus(UID id, ServerStatus status) {
 	const auto& previous = server_status.get(id);
 	if (status.initialized) {
 		const bool changed = !previous.initialized || previous.isFailed != status.isFailed ||
-		                     previous.failureMasked != status.failureMasked;
+		                     previous.readabilityEndpoint != status.readabilityEndpoint;
 		status.readabilityChangedAt = changed ? now() : previous.readabilityChangedAt;
 	}
-	if ((status.isFailed && !previous.isFailed) || (status.failureMasked && !previous.failureMasked)) {
+	if (previous.initialized && !previous.isFailed &&
+	    (status.isFailed || previous.readabilityEndpoint != status.readabilityEndpoint)) {
 		shardsAffectedByTeamFailure->invalidateRemoteOnlyAvailability();
 	}
 	server_status.set(id, status);
@@ -4722,26 +4735,31 @@ Future<int> DDTeamCollection::sampleRemoteOnlyShardAvailability(double delaySeco
 		const double lookupStart = now();
 		auto sources = co_await timeout(db->getSourceServersForFirstShard(*candidate, verifiedEnd),
 		                                std::max(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, minProbeInterval),
-		                                std::vector<UID>());
+		                                IDDTxnProcessor::RegisteredSources());
 		bool allFailed = !sources.empty();
-		for (UID id : sources) {
-			bool known = false;
+		for (const auto& source : sources) {
+			if (!source.present()) {
+				allFailed = false;
+				continue;
+			}
+			bool knownFailed = false;
 			for (const auto* collection : teamCollections) {
 				if (collection) {
-					const auto& status = collection->server_status.get(id);
+					const auto& status = collection->server_status.get(source->id());
 					// The assignment can change before its reply arrives. Accept only liveness evidence that
 					// was already in effect when the fresh assignment read started.
-					if (!status.initialized || status.readabilityChangedAt >= lookupStart || status.failureMasked ||
+					if (!status.initialized || status.readabilityChangedAt >= lookupStart ||
+					    status.readabilityEndpoint != source->getValue.getEndpoint() ||
 					    collection->isFailureMasked(status.locality)) {
 						continue;
 					}
-					if (!status.isFailed) {
+					if (!status.isFailed && source->isAcceptingRequests()) {
 						co_return shardsAffectedByTeamFailure->recordRemoteOnlyAvailability(verifiedEnd, 0);
 					}
-					known = true;
+					knownFailed |= status.isFailed;
 				}
 			}
-			allFailed &= known;
+			allFailed &= knownFailed;
 		}
 		unavailable = allFailed ? 1 : -1;
 	} catch (Error& e) {
@@ -6562,6 +6580,11 @@ Future<Void> DDTeamCollection::printSnapshotTeamsInfo(Reference<DDTeamCollection
 	return DDTeamCollectionImpl::printSnapshotTeamsInfo(self);
 }
 
+// Synthetic base endpoint for an instance of a fixture storage server.
+static Endpoint testStorageEndpoint(UID id, int incarnation = 1) {
+	return Endpoint({ NetworkAddress(IPAddress(0x01010101), id.first()) }, UID(id.first(), incarnation));
+}
+
 class DDTeamCollectionTestTxnProcessor final : public DDTxnProcessor {
 public:
 	explicit DDTeamCollectionTestTxnProcessor(Database database) : DDTxnProcessor(database) {}
@@ -6578,18 +6601,31 @@ public:
 		return serverListReplies.back().getFuture();
 	}
 
-	Future<std::vector<UID>> getSourceServersForFirstShard(KeyRangeRef keys, Optional<Key>& verifiedEnd) override {
+	Future<RegisteredSources> getSourceServersForFirstShard(KeyRangeRef keys, Optional<Key>& verifiedEnd) override {
 		lookups.emplace_back(keys);
 		for (const auto& [range, sources] : locations) {
 			if (range.contains(keys.begin)) {
 				verifiedEnd = std::min(keys.end, range.end);
-				auto reply = tag(releaseLookup, sources);
+				RegisteredSources registered;
+				for (UID id : sources) {
+					auto it = registrations.find(id);
+					if (it != registrations.end()) {
+						registered.push_back(it->second);
+					} else {
+						StorageServerInterface interf(id);
+						interf.getValue = PublicRequestStream<GetValueRequest>(testStorageEndpoint(id));
+						interf.startAcceptingRequests();
+						registered.emplace_back(std::move(interf));
+					}
+				}
+				auto reply = tag(releaseLookup, registered);
 				lookupStarted.trigger();
 				return reply;
 			}
 		}
-		return std::vector<UID>();
+		return RegisteredSources();
 	}
+	std::map<UID, Optional<StorageServerInterface>> registrations;
 	std::vector<std::pair<KeyRange, std::vector<UID>>> locations;
 	std::vector<KeyRange> lookups;
 	Future<Void> releaseLookup = Void();
@@ -6615,8 +6651,12 @@ public:
 	static void setTestEndpoint(StorageServerInterface& interface, int id) {
 		// These unit tests do not run storage server actors, but team tracking still logs each
 		// interface's address. Give every fixture interface a synthetic, unregistered endpoint.
-		interface.getValue =
-		    PublicRequestStream<GetValueRequest>(Endpoint({ NetworkAddress(IPAddress(0x01010101), id) }, UID(id, 1)));
+		interface.getValue = PublicRequestStream<GetValueRequest>(testStorageEndpoint(UID(id, 0)));
+	}
+
+	static void setTestServerStatus(DDTeamCollection* collection, UID id, ServerStatus status) {
+		status.readabilityEndpoint = testStorageEndpoint(id);
+		collection->setServerStatus(id, std::move(status));
 	}
 
 	static std::unique_ptr<DDTeamCollection> testTeamCollection(
@@ -6662,8 +6702,7 @@ public:
 			interface.locality.set("data_hall"_sr, Standalone<StringRef>(std::to_string(id % 3)));
 			collection->server_info[uid] = makeReference<TCServerInfo>(
 			    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
-			collection->server_status.set(
-			    uid, ServerStatus(IsFailed::False, IsUndesired::False, IsWiggling::False, interface.locality));
+			setTestServerStatus(collection.get(), uid, ServerStatus(interface.locality));
 			collection->checkAndCreateMachine(collection->server_info[uid]);
 		}
 
@@ -6678,47 +6717,69 @@ public:
 	}
 
 	static Future<Void> RemoteOnlyShardAvailabilityDuringMaintenance() {
-		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 2);
-		collection->teamCollections = { collection.get() };
-		auto processor = makeReference<DDTeamCollectionTestTxnProcessor>(collection->dbContext());
-		collection->db = processor;
+		auto shards = makeReference<ShardsAffectedByTeamFailure>();
+		auto primary = testTeamCollection(1, makeReference<PolicyOne>(), 0, shards);
+		Reference<DDTeamCollection> remote(testTeamCollection(1, makeReference<PolicyOne>(), 2, shards).release());
+		remote->primary = false;
+		remote->readyToStart = Never();
+		primary->teamCollections = { primary.get(), remote.getPtr() };
+		remote->teamCollections = primary->teamCollections;
+		auto processor = makeReference<DDTeamCollectionTestTxnProcessor>(primary->dbContext());
+		primary->db = remote->db = processor;
+		DDEnabledState ddEnabledState;
+		const auto started = waitHealthyZoneChangeCounters()->started->get();
+		auto run = DDTeamCollection::run(remote, makeReference<InitialDataDistribution>(), {}, {}, ddEnabledState);
+		// No servers or teams in initData, so startup reaches its first maintenance read synchronously.
+		ASSERT_EQ(waitHealthyZoneChangeCounters()->started->get(), started + 1);
+
 		const KeyRange range = KeyRangeRef("a"_sr, "z"_sr);
 		const UID owner(1, 0), other(2, 0);
-		auto server = collection->server_info.at(owner);
+		auto server = remote->server_info.at(owner);
 		const auto& interf = server->getLastKnownInterface();
 		auto failureRequests = interf.waitFailure.getFuture();
 		ServerStatus status(IsFailed::True, IsUndesired::False, IsWiggling::False, interf.locality);
-
-		collection->shardsAffectedByTeamFailure->trackRemoteOnlyRange(range);
-		processor->locations = { { range, { owner } } };
-		collection->healthyZone.set(interf.locality.zoneId());
-		auto tracker = collection->storageServerFailureTracker(server.getPtr(), &status, 1);
-		ASSERT(!status.isFailed); // Maintenance suppresses relocation of the failed owner.
-		ASSERT(!failureRequests.isReady());
-		ASSERT_EQ(co_await collection->sampleRemoteOnlyShardAvailability(0), -1);
-
-		processor->locations = { { range, { owner, other } } };
-		ASSERT_EQ(co_await collection->sampleRemoteOnlyShardAvailability(0), 0);
-		collection->healthyZone.set(ignoreSSFailuresZoneString);
-		ASSERT_EQ(co_await collection->sampleRemoteOnlyShardAvailability(0), -1);
-
+		status.readabilityEndpoint = interf.getValue.getEndpoint();
 		auto& monitor = IFailureMonitor::failureMonitor();
 		const auto address = interf.waitFailure.getEndpoint().getPrimaryAddress();
 		const auto previous = monitor.getState(address);
+		ScopeExit restoreStatus([&]() { monitor.setStatus(address, previous); });
 		monitor.setStatus(address, FailureStatus(true));
-		collection->healthyZone.set(Optional<Key>());
-		const bool stillMasked = collection->server_status.get(owner).failureMasked;
-		auto statusChanged = collection->server_status.onChange(owner);
+		auto tracker = remote->storageServerFailureTracker(server.getPtr(), &status, 1);
+
+		shards->trackRemoteOnlyRange(range);
+		processor->locations = { { range, { owner } } };
+		auto sample = [&]() { return primary->sampleRemoteOnlyShardAvailability(0); };
+		ASSERT_EQ(co_await sample(), 1);
+		// Maintenance has committed at the assignment's read version, but the watch has not fired.
+		processor->registrations[owner] = {};
+		ASSERT_EQ(co_await sample(), -1);
+		remote->healthyZone.set(interf.locality.zoneId());
+		ASSERT(!status.isFailed); // Maintenance suppresses relocation of the failed owner.
+		ASSERT(!failureRequests.isReady());
+		ASSERT_EQ(co_await sample(), -1);
+
+		processor->locations = { { range, { owner, other } } };
+		ASSERT_EQ(co_await sample(), 0);
+		// The previously healthy second owner must also be masked before the global watch fires.
+		processor->registrations[other] = {};
+		ASSERT_EQ(co_await sample(), -1);
+		remote->healthyZone.set(ignoreSSFailuresZoneString);
+		ASSERT_EQ(co_await sample(), -1);
+
+		processor->registrations.clear();
+		processor->locations = { { range, { owner } } };
+		ASSERT_EQ(co_await sample(), -1); // The tracker still has the old maintenance setting.
+		remote->healthyZone.set(Optional<Key>());
+		ASSERT(!remote->server_status.get(owner).readabilityEndpoint.isValid());
+		auto statusChanged = remote->server_status.onChange(owner);
 		monitor.setStatus(address, FailureStatus(false));
 		co_await timeout(statusChanged, 5.0);
-		const bool recovered = !collection->server_status.get(owner).failureMasked;
+		ASSERT(remote->server_status.get(owner).readabilityEndpoint.isValid());
 		co_await delay(0); // Let the tracker finish publishing before cancelling it.
 		tracker.cancel();
-		monitor.setStatus(address, previous);
-		ASSERT(stillMasked);
-		ASSERT(recovered);
-		processor->locations = { { range, { owner } } };
-		ASSERT_EQ(co_await collection->sampleRemoteOnlyShardAvailability(0), 0);
+		ASSERT_EQ(co_await sample(), 0);
+		ASSERT(!remote->readyToStart.isReady());
+		ASSERT(!run.isReady());
 	}
 
 	static void HighestTeamPriorityByRegion() {
@@ -6776,9 +6837,9 @@ public:
 		ASSERT(processor->lookups.empty());
 
 		shards->trackRemoteOnlyRange(left);
-		remote->setServerStatus(oldRemote, live);
-		remote->setServerStatus(newRemote, failed);
-		primary->setServerStatus(partialPrimary, failed);
+		setTestServerStatus(remote.get(), oldRemote, live);
+		setTestServerStatus(remote.get(), newRemote, failed);
+		setTestServerStatus(primary.get(), partialPrimary, failed);
 		processor->locations = { { left, { oldRemote } } };
 		ASSERT_EQ(co_await sample(), 0);
 
@@ -6790,7 +6851,7 @@ public:
 		remote->initialFailureReactionDelay = Never();
 		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::False), -1);
 		ASSERT_EQ(co_await sample(), 1);
-		primary->setServerStatus(partialPrimary, live);
+		setTestServerStatus(primary.get(), partialPrimary, live);
 		ASSERT_EQ(co_await sample(), 0);
 
 		// A full repair is readable. A later assignment can still lose every source.
@@ -6836,9 +6897,9 @@ public:
 		const ServerStatus failed(IsFailed::True, IsUndesired::False, IsWiggling::False, LocalityData{});
 		shards->trackRemoteOnlyRange(repaired);
 		shards->trackRemoteOnlyRange(other);
-		collection->setServerStatus(oldOwner, live);
-		collection->setServerStatus(newOwner, live);
-		collection->setServerStatus(otherOwner, failed);
+		setTestServerStatus(collection.get(), oldOwner, live);
+		setTestServerStatus(collection.get(), newOwner, live);
+		setTestServerStatus(collection.get(), otherOwner, failed);
 		processor->locations = { { repaired, { oldOwner } }, { other, { otherOwner } } };
 
 		Promise<Void> release;
@@ -6848,16 +6909,90 @@ public:
 		co_await lookupStarted;
 		// The repair commits before the old owner fails. The pending reply still names the old owner.
 		processor->locations.front().second = { newOwner };
-		collection->setServerStatus(oldOwner, failed);
+		setTestServerStatus(collection.get(), oldOwner, failed);
 		release.send(Void());
 		ASSERT_EQ(co_await sample, -1);
 		ASSERT_EQ(co_await collection->sampleRemoteOnlyShardAvailability(0), 1);
 		ASSERT_EQ(processor->lookups.back(), other);
 
-		collection->setServerStatus(otherOwner, live);
+		setTestServerStatus(collection.get(), otherOwner, live);
 		ASSERT_EQ(co_await collection->sampleRemoteOnlyShardAvailability(0), -1);
 		ASSERT_EQ(co_await collection->sampleRemoteOnlyShardAvailability(0), 0);
 		ASSERT_EQ(processor->lookups.back(), repaired);
+	}
+
+	static Future<Void> RemoteOnlyShardAvailabilityDuringRestart() {
+		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 1);
+		collection->teamCollections = { collection.get() };
+		auto processor = makeReference<DDTeamCollectionTestTxnProcessor>(collection->dbContext());
+		collection->db = processor;
+		const UID owner(1, 0);
+		const KeyRange range = KeyRangeRef("a"_sr, "z"_sr);
+		collection->shardsAffectedByTeamFailure->trackRemoteOnlyRange(range);
+		processor->locations = { { range, { owner } } };
+		auto sample = [&]() { return collection->sampleRemoteOnlyShardAvailability(0); };
+		auto server = collection->server_info.at(owner);
+		collection->server_and_tss_info[owner] = server;
+		ServerStatus status = collection->server_status.get(owner);
+		status.isFailed = true;
+		collection->setServerStatus(owner, status);
+		ASSERT_EQ(co_await sample(), 1);
+
+		DDEnabledState ddEnabledState;
+		PromiseStream<Void> removed;
+		auto poll = collection->waitServerListChange(removed.getFuture(), ddEnabledState);
+		co_await delay(SERVER_KNOBS->SERVER_LIST_DELAY + FLOW_KNOBS->MAX_BUGGIFIED_DELAY + 0.01,
+		               TaskPriority::DataDistributionLaunch);
+		ASSERT(processor->isServerListFetchActive(0));
+		// The new instance uses the same ID and address, but a different endpoint token.
+		StorageServerInterface replacement(owner);
+		replacement.getValue = PublicRequestStream<GetValueRequest>(testStorageEndpoint(owner, 2));
+		replacement.locality = server->getLastKnownInterface().locality;
+		replacement.startAcceptingRequests();
+		processor->registrations[owner] = replacement;
+		ASSERT_EQ(co_await sample(), -1); // The old endpoint's failure cannot prove outage.
+		status.isFailed = false;
+		collection->setServerStatus(owner, status);
+		ASSERT_EQ(co_await sample(), -1); // Its health cannot prove readability either.
+
+		// Deliver the poll while another probe is reading the replacement registration.
+		Promise<Void> release;
+		processor->releaseLookup = release.getFuture();
+		auto lookupStarted = processor->lookupStarted.onTrigger();
+		auto pending = sample();
+		co_await lookupStarted;
+		auto interfaceChanged = server->onInterfaceChanged;
+		ServerWorkerInfos infos;
+		infos.servers.emplace_back(replacement, ProcessClass());
+		infos.readVersion = 1;
+		processor->completeServerListFetch(0, std::move(infos));
+		auto [newInterface, newClass] = co_await interfaceChanged;
+		server->updateLastKnown(newInterface, newClass);
+
+		auto& monitor = IFailureMonitor::failureMonitor();
+		auto address = newInterface.waitFailure.getEndpoint().getPrimaryAddress();
+		auto previous = monitor.getState(address);
+		ScopeExit restoreStatus([&]() { monitor.setStatus(address, previous); });
+		monitor.setStatus(address, FailureStatus(true));
+		auto failureRequests = newInterface.waitFailure.getFuture();
+		status.isFailed = true; // Relocation still carries the old failure into the new tracker.
+		auto tracker = collection->storageServerFailureTracker(server.getPtr(), &status, 1);
+		ASSERT(!status.readabilityEndpoint.isValid());
+		auto statusChanged = collection->server_status.onChange(owner);
+		monitor.setStatus(address, FailureStatus(false));
+		co_await timeout(statusChanged, 5.0);
+		ASSERT(!status.isFailed && status.readabilityEndpoint == replacement.getValue.getEndpoint());
+		release.send(Void());
+		ASSERT_EQ(co_await pending, -1); // The new endpoint became known after the lookup began.
+
+		replacement.stopAcceptingRequests();
+		processor->registrations[owner] = replacement;
+		ASSERT_EQ(co_await sample(), -1);
+		replacement.startAcceptingRequests();
+		processor->registrations[owner] = replacement;
+		ASSERT_EQ(co_await sample(), 0);
+		processor->registrations[owner].reset();
+		ASSERT_EQ(co_await sample(), -1);
 	}
 
 	static std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
@@ -8166,6 +8301,10 @@ TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
 
 TEST_CASE("/DataDistribution/RemoteOnlyShardAvailability") {
 	co_await DDTeamCollectionUnitTest::RemoteOnlyShardAvailability();
+}
+
+TEST_CASE("/DataDistribution/RemoteOnlyShardAvailabilityDuringRestart") {
+	co_await DDTeamCollectionUnitTest::RemoteOnlyShardAvailabilityDuringRestart();
 }
 
 TEST_CASE("/DataDistribution/RemoteOnlyShardAvailabilityDuringRepair") {
