@@ -430,8 +430,8 @@ void executeShardSplit(DataDistributionTracker* self,
 	auto s = describeSplit(keys, splitKeys);
 	TraceEvent(SevInfo, "ExecutingShardSplit").suppressFor(0.5).detail("Splitting", s).detail("NumShards", numShards);
 
-	// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
-	// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)
+	// Process the unskipped ranges from the edges inward so each request leaves at most one
+	// remainder of the shard being split.
 	for (int i = 0; i < skipRange; i++)
 		restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]));
 	restartShardTrackers(self, KeyRangeRef(splitKeys[skipRange], splitKeys[skipRange + 1]));

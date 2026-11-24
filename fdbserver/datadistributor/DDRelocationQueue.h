@@ -358,7 +358,7 @@ public:
 
 	void validate();
 
-	// This function cannot handle relocation requests which split a shard into three pieces
+	// Replace queued work in the requested range and preserve any queued remainders.
 	void queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFrom);
 
 	void completeSourceFetch(const RelocateData& results);
