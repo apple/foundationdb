@@ -23,6 +23,47 @@
 
 void forceLinkShardsAffectedByTeamFailureTests() {}
 
+TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/RemoteOnlyRangeRotation") {
+	ShardsAffectedByTeamFailure shards;
+	for (int i = 0; i < 100; ++i) {
+		shards.trackRemoteOnlyRange(KeyRangeRef(Key(format("key/%03d", i)), Key(format("key/%03d/end", i))));
+	}
+	for (int i = 0; i < 100; ++i) {
+		auto next = shards.nextRemoteOnlyRange().get();
+		ASSERT(next.begin == Key(format("key/%03d", i)));
+		ASSERT_EQ(shards.recordRemoteOnlyAvailability(next.end, 0), i == 99 ? 0 : -1);
+	}
+	auto first = shards.nextRemoteOnlyRange().get();
+	ASSERT_EQ(shards.recordRemoteOnlyAvailability(first.end, 0), 0);
+	shards.invalidateRemoteOnlyAvailability();
+	for (int i = 0; i < 99; ++i) {
+		ASSERT_EQ(shards.recordRemoteOnlyAvailability({}, -1), -1);
+	}
+	ASSERT(shards.nextRemoteOnlyRange().get() == first);
+	ASSERT_EQ(shards.recordRemoteOnlyAvailability(first.end, 1), 1);
+	ASSERT(shards.nextRemoteOnlyRange().get() == first);
+	ASSERT_EQ(shards.recordRemoteOnlyAvailability({}, -1), -1);
+	ASSERT(shards.nextRemoteOnlyRange()->begin == "key/001"_sr);
+	co_return;
+}
+
+TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/RemoteOnlyRangeBoundaries") {
+	ShardsAffectedByTeamFailure shards;
+	const KeyRange left = KeyRangeRef("a"_sr, "c"_sr);
+	const KeyRange right = KeyRangeRef("p"_sr, "z"_sr);
+	shards.trackRemoteOnlyRange(left);
+	shards.trackRemoteOnlyRange(right);
+	ASSERT_EQ(shards.recordRemoteOnlyAvailability(Key("b"_sr), -1), -1);
+	ASSERT(shards.nextRemoteOnlyRange().get() == right);
+	ASSERT_EQ(shards.recordRemoteOnlyAvailability(right.end, 0), -1);
+	// A single committed interval now covers both pieces of the original split.
+	ASSERT(shards.nextRemoteOnlyRange().get() == left);
+	ASSERT_EQ(shards.recordRemoteOnlyAvailability(left.end, 0), -1);
+	ASSERT(shards.nextRemoteOnlyRange().get() == right);
+	ASSERT_EQ(shards.recordRemoteOnlyAvailability(right.end, 0), 0);
+	co_return;
+}
+
 TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/SplitAndMerge") {
 	ShardsAffectedByTeamFailure shards;
 	shards.setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);

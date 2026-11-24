@@ -32,6 +32,7 @@ class TCTeamInfo;
 class TCMachineInfo;
 class TCMachineTeamInfo;
 class DDTeamCollection;
+class ShardsAffectedByTeamFailure;
 
 class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	friend class TCServerInfoImpl;
@@ -54,6 +55,11 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	int64_t dataInFlightToServer = 0, readInFlightToServer = 0;
 	std::vector<Reference<TCTeamInfo>> teams{};
 	ErrorOr<GetStorageMetricsReply> metrics;
+	// A tracker transition invalidates requests issued in the previous epoch.
+	uint64_t storageMetricsEpoch = 0;
+	double storageMetricsConfirmedAt = 0;
+	Future<Void> storageMetricsDisconnected = Void();
+	Future<Void> rangeSourceDisconnected;
 	Optional<HealthMetrics::StorageStats> storageStats;
 	Optional<double> storageQueueTooLongStartTime; // When a storage queue becomes long
 
@@ -113,6 +119,12 @@ public:
 	void removeTeamsContainingServer(UID removedServer);
 	void removeTeam(Reference<TCTeamInfo>);
 	bool metricsPresent() const { return metrics.present(); }
+	void resetStorageMetricsEvidence() {
+		++storageMetricsEpoch;
+		storageMetricsDisconnected = Void();
+		rangeSourceDisconnected = Future<Void>();
+	}
+	bool hasStorageMetricsEvidenceBefore(double lookupStart, Reference<ShardsAffectedByTeamFailure> const& shards);
 
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const {
 		// A new storage server's store type may not be set immediately.

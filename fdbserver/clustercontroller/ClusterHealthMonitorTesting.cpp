@@ -396,6 +396,26 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationF
 		ASSERT_EQ(level, test.expected);
 	}
 
+	// The same regional priorities can describe a remote outage on a different range.
+	for (auto [unavailable, expected] : { std::pair{ 0, Level::CRITICAL_INTERVENTION_REQUIRED },
+	                                      std::pair{ 1, Level::OUTAGE },
+	                                      std::pair{ -1, Level::METRICS_MISSING } }) {
+		auto fields = teamMetrics(SERVER_KNOBS->PRIORITY_POPULATE_REGION, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT);
+		fields.addField("RemoteOnlyShardUnavailable", std::to_string(unavailable));
+		provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(fields));
+		Level level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+		ASSERT_EQ(level, expected);
+	}
+	// Current source failures establish an outage even if the remote team retired or recovery
+	// has yet to produce its priority.
+	for (int remotePriority : { SERVER_KNOBS->PRIORITY_TEAM_HEALTHY, -1 }) {
+		auto fields = teamMetrics(SERVER_KNOBS->PRIORITY_POPULATE_REGION, remotePriority);
+		fields.addField("RemoteOnlyShardUnavailable", "1");
+		provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(fields));
+		Level level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+		ASSERT_EQ(level, Level::OUTAGE);
+	}
+
 	provider->setStorageTeamOneReplicaLeftIsCritical(true);
 	provider->setLatestDataDistributorEvents(
 	    "TotalDataInFlight",
@@ -409,6 +429,14 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationF
 	provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(partialRegionalMetrics));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
+
+	// A confirmed outage does not depend on the relocation queue having reported yet.
+	auto recovering = teamMetrics(-1, -1);
+	recovering.addField("RemoteOnlyShardUnavailable", "1");
+	provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(recovering));
+	provider->setLatestDataDistributorEvents("MovingData", makeLatestWorkerEvents(TraceEventFields()));
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::OUTAGE);
 }
 
 TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/RecoveryStateFactor") {

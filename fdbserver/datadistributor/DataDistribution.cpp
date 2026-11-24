@@ -874,6 +874,11 @@ public:
 			teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primarySrc, true));
 			if (self->configuration.usableRegions > 1) {
 				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
+				// Normal regional moves select a primary destination. Failed exclusion rebuilds DD and
+				// can leave the recovered source assignment entirely in the remote region.
+				if (iShard.primarySrc.empty() && !iShard.remoteSrc.empty()) {
+					self->shardsAffectedByTeamFailure->trackRemoteOnlyRange(KeyRangeRef(iShard.key, endKey));
+				}
 			}
 
 			for (int r = 0; r < ranges.size(); r++) {

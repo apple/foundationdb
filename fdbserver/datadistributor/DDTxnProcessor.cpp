@@ -25,8 +25,11 @@
 #include "DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/TxnCounters.h"
+#include "flow/UnitTest.h"
 #include "flow/CoroUtils.h"
 #include "flow/genericactors.h"
+
+#include <variant>
 
 static void updateServersAndCompleteSources(std::set<UID>& servers,
                                             std::vector<UID>& completeSources,
@@ -42,6 +45,16 @@ static void updateServersAndCompleteSources(std::set<UID>& servers,
 			}
 		}
 	}
+}
+
+static Optional<Key> activeHealthyZone(const Optional<Value>& value, Version readVersion) {
+	if (value.present()) {
+		auto [zone, endVersion] = decodeHealthyZoneValue(*value);
+		if (zone == ignoreSSFailuresZoneString || endVersion > readVersion) {
+			return zone;
+		}
+	}
+	return {};
 }
 
 class DDTxnProcessorImpl {
@@ -283,12 +296,7 @@ class DDTxnProcessorImpl {
 			co_await tr.onError(err);
 		}
 		if (healthyZoneRead) {
-			if (healthyZoneVal.present()) {
-				auto p = decodeHealthyZoneValue(healthyZoneVal.get());
-				if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailuresZoneString) {
-					co_return Optional<Key>(p.first);
-				}
-			}
+			co_return activeHealthyZone(healthyZoneVal, tr.getReadVersion().get());
 		} else {
 			TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "ReadHealthyZone", distributorId)
 			    .detail("MaxRetries", maxRetries)
@@ -1365,6 +1373,114 @@ Future<Void> DDTxnProcessor::waitForAllDataRemoved(
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
+}
+
+// Both UID encodings and the tag encoding put the source vector first.
+static std::variant<std::vector<UID>, std::vector<Tag>> decodeShardSources(ValueRef value) {
+	if (!value.empty()) {
+		BinaryReader rd(value, IncludeVersion());
+		if (rd.protocolVersion().hasKeyServerValueV2() && !rd.protocolVersion().hasShardEncodeLocationMetaData()) {
+			std::vector<Tag> tags;
+			rd >> tags;
+			return tags;
+		}
+		std::vector<UID> sources;
+		rd >> sources;
+		return sources;
+	}
+	return std::vector<UID>();
+}
+
+static bool sourceTagsMatch(std::vector<Tag> expected, const std::vector<Optional<Value>>& serverTags) {
+	std::vector<Tag> actual;
+	for (const auto& value : serverTags) {
+		if (!value.present()) {
+			return false;
+		}
+		actual.push_back(decodeServerTagValue(value.get()));
+	}
+	std::sort(actual.begin(), actual.end());
+	std::sort(expected.begin(), expected.end());
+	return actual == expected;
+}
+
+static Future<std::vector<UID>> resolveShardSourceTags(Database cx, Transaction& tr, Key key, std::vector<Tag> tags) {
+	// The proxy suggests IDs for point reads, but its reply has no assignment version.
+	// Verify every tag against keyServers at the same read version.
+	if (!tags.empty()) {
+		auto loc = co_await getKeyLocation_internal(
+		    cx, key, SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, latestVersion);
+		if (loc.locations->size() == tags.size()) {
+			std::vector<Future<Optional<Value>>> serverTags;
+			std::vector<UID> candidates;
+			for (int i = 0; i < loc.locations->size(); ++i) {
+				UID id = loc.locations->getId(i);
+				candidates.push_back(id);
+				serverTags.push_back(tr.get(serverTagKeyFor(id)));
+			}
+			if (sourceTagsMatch(std::move(tags), co_await getAll(serverTags))) {
+				co_return candidates;
+			}
+		}
+	}
+	co_return std::vector<UID>();
+}
+
+Future<IDDTxnProcessor::RegisteredSources> DDTxnProcessor::getSourceServersForFirstShard(KeyRangeRef range,
+                                                                                         Optional<Key>& verifiedEnd) {
+	verifiedEnd.reset();
+	Transaction tr(cx);
+	tr.setOption(FDBTransactionOptions::SKIP_GRV_CACHE);
+	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	auto maintenance = tr.get(healthyZoneKey);
+	auto shards = co_await krmGetRanges(&tr, keyServersPrefix, range, 2, SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
+	ASSERT(shards.size() >= 2);
+	verifiedEnd = Key(shards[1].key);
+	auto owners = decodeShardSources(shards[0].value);
+	std::vector<UID> ids;
+	if (auto* tags = std::get_if<std::vector<Tag>>(&owners)) {
+		ids = co_await resolveShardSourceTags(cx, tr, shards[0].key, std::move(*tags));
+	} else {
+		ids = std::move(std::get<std::vector<UID>>(owners));
+	}
+
+	// A restarted server keeps its ID. Read each owner's registered interface at the assignment version.
+	std::vector<Future<Optional<Value>>> registrations;
+	for (UID id : ids) {
+		registrations.push_back(tr.get(serverListKeyFor(id)));
+	}
+	auto values = co_await getAll(registrations);
+	auto zone = activeHealthyZone(co_await maintenance, tr.getReadVersion().get());
+	RegisteredSources sources(ids.size());
+	for (size_t i = 0; i < ids.size(); ++i) {
+		if (values[i].present()) {
+			auto interf = decodeServerListValue(*values[i]);
+			if (interf.id() == ids[i] &&
+			    (!zone.present() || (*zone != ignoreSSFailuresZoneString && interf.locality.zoneId() != zone))) {
+				sources[i] = std::move(interf);
+			}
+		}
+	}
+	co_return sources;
+}
+
+TEST_CASE("/DataDistribution/SourceShard/Encodings") {
+	const std::vector<UID> sources{ UID(1, 1), UID(2, 2) };
+	const std::vector<UID> dest{ UID(3, 3) };
+	BinaryWriter oldFormat(IncludeVersion(ProtocolVersion::withKeyServerValue()));
+	oldFormat << sources << dest;
+	ASSERT(std::get<std::vector<UID>>(decodeShardSources(oldFormat.toValue())) == sources);
+	ASSERT(std::get<std::vector<UID>>(decodeShardSources(keyServersValue(sources, dest, UID(4, 4), UID(5, 5)))) ==
+	       sources);
+	const std::vector<Tag> tags{ Tag(0, 4), Tag(1, 8) };
+	ASSERT(std::get<std::vector<Tag>>(decodeShardSources(keyServersValue(tags, { Tag(1, 9) }))) == tags);
+	ASSERT(sourceTagsMatch(tags, { serverTagValue(tags[1]), serverTagValue(tags[0]) }));
+	ASSERT(!sourceTagsMatch(tags, { serverTagValue(tags[0]), serverTagValue(Tag(1, 9)) }));
+	ASSERT(!sourceTagsMatch(tags, { serverTagValue(tags[0]), Optional<Value>() }));
+	ASSERT(!sourceTagsMatch(tags, { serverTagValue(tags[0]), serverTagValue(tags[0]) }));
+	co_return;
 }
 
 Future<std::vector<IDDTxnProcessor::DDRangeLocations>> DDTxnProcessor::getSourceServerInterfacesForRange(

@@ -147,9 +147,13 @@ class ServerStatus {
 public:
 	bool isWiggling;
 	bool isFailed;
+	// Unmasked base endpoint. A failed endpoint needs a strict failure observation. A live
+	// endpoint needs a separate storage metrics reply before the range sampler can use it.
+	Endpoint readabilityEndpoint;
 	bool isUndesired;
 	bool isWrongConfiguration;
 	bool initialized; // AsyncMap erases default constructed objects
+	double readabilityChangedAt = 0;
 	LocalityData locality;
 	ServerStatus()
 	  : isWiggling(false), isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
@@ -165,7 +169,8 @@ public:
 
 	bool operator==(ServerStatus const& r) const {
 		return isFailed == r.isFailed && isUndesired == r.isUndesired && isWiggling == r.isWiggling &&
-		       isWrongConfiguration == r.isWrongConfiguration && locality == r.locality && initialized == r.initialized;
+		       isWrongConfiguration == r.isWrongConfiguration && locality == r.locality &&
+		       initialized == r.initialized && readabilityEndpoint == r.readabilityEndpoint;
 	}
 	bool operator!=(ServerStatus const& r) const { return !(*this == r); }
 
@@ -236,6 +241,10 @@ protected:
 	std::map<int, int> priority_teams;
 	// For one region; -1 until its team health is initialized. An absent remote region is healthy.
 	int getHighestTeamPriority(IsPrimary primaryRegion) const;
+	bool isFailureMasked(const LocalityData& locality) const;
+	void setServerStatus(UID id, ServerStatus status);
+	// TotalDataInFlight reports 1 for a confirmed outage, 0 for available, and -1 for unknown.
+	Future<int> sampleRemoteOnlyShardAvailability(double delaySeconds);
 	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
 	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a
 	                                                            // read-only concatenation of 2 data structures?

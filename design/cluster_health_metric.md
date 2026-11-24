@@ -81,6 +81,7 @@ Source events from the current data distributor:
 Fields used:
 - `HighestPrimaryTeamPriority`
 - `HighestRemoteTeamPriority`
+- `RemoteOnlyShardUnavailable` when reported by the data distributor
 - `HighestTeamPriority` for compatibility with older data distributors
 - `InQueue`
 - `InFlight`
@@ -94,11 +95,16 @@ Behavior:
 - Uses the data distributor's current primary and remote team collections, so the regional roles follow failover.
 - Returns `METRICS_MISSING` if an event contains only one of the two regional priority fields.
 - Returns `OUTAGE` if a team in the primary region has no replicas left, even when the remote priority is `-1` (unknown).
+- DD keeps the ranges recovered with remote sources only until its next restart. At each sample it reads the current source assignment for one interval, with at least one second between probes. At one fresh read version it reads two assignment rows, the maintenance setting, and one server registration per source. For a tag-encoded assignment, it also checks the candidate servers’ tags at that version. A repair destination counts once it becomes an assigned source.
+- DD counts a source as readable when its registration accepts requests and its storage role answered a metrics poll before the assignment lookup began. A disconnect or known endpoint failure invalidates that evidence. To count a source as failed, DD must have confirmed failure for the registered endpoint before the lookup. A replacement using the same server ID needs its own evidence.
+- An active maintenance zone masks sources in that zone. Global storage-failure suppression masks all sources. The remote collection watches maintenance while it waits for log recovery. After suppression ends, the role must answer a poll issued after the transition, or the tracker must confirm its failure. Until then the source is unknown. Another live, unmasked source can establish readability.
+- If all assigned sources of an interval are known to be down, DD reports `OUTAGE` and checks that interval again at the next sample. Otherwise it rotates to the next interval, including after a timeout or unknown source status. It retains both pieces of a split and can combine adjacent intervals when one committed assignment covers both.
+- DD reports `METRICS_MISSING` until it has observed a live source for every watched interval in a complete sweep after a server failure or an inconclusive check. Larger sets of recovered ranges take more samples to cover. A confirmed outage takes precedence over unknown regional priorities and missing relocation counts.
 - Otherwise, returns `METRICS_MISSING` if a required team summary is unknown. A database with one region treats the absent remote region as healthy.
 - Returns `CRITICAL_INTERVENTION_REQUIRED` if a team in the remote region has no replicas left. It also returns this level if a team in either region has one replica left and the configured storage team size is 3.
 - Returns `SELF_HEALING` if a team is unhealthy or data movement is queued or in flight to restore replication.
 - Returns `HEALTHY` otherwise.
-- During an upgrade, an older data distributor's combined `HighestTeamPriority` retains the existing conservative scoring because it cannot identify the affected region.
+- During an upgrade, regional priorities without `RemoteOnlyShardUnavailable` retain regional scoring. An older data distributor's combined `HighestTeamPriority` retains the existing conservative scoring because it cannot identify the affected region.
 
 ### `RecoveryState`
 

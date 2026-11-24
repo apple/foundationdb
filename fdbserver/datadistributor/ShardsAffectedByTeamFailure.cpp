@@ -20,6 +20,56 @@
 
 #include "ShardsAffectedByTeamFailure.h"
 
+void ShardsAffectedByTeamFailure::trackRemoteOnlyRange(KeyRangeRef keys) {
+	ASSERT(!keys.empty());
+	remoteOnlyRanges.emplace_back(keys);
+	invalidateRemoteOnlyAvailability();
+}
+
+Optional<KeyRange> ShardsAffectedByTeamFailure::nextRemoteOnlyRange() const {
+	if (remoteOnlyRanges.empty()) {
+		return {};
+	}
+	const auto& first = remoteOnlyRanges.front();
+	if (remoteOnlyRanges.size() > 1 && first.end == remoteOnlyRanges[1].begin) {
+		// The two-row metadata lookup can also show that an old split no longer exists.
+		return KeyRangeRef(first.begin, remoteOnlyRanges[1].end);
+	}
+	return first;
+}
+
+int ShardsAffectedByTeamFailure::recordRemoteOnlyAvailability(Optional<Key> verifiedEnd, int unavailable) {
+	KeyRange checked = std::move(remoteOnlyRanges.front());
+	remoteOnlyRanges.pop_front();
+	if (verifiedEnd.present() && verifiedEnd.get() < checked.end) {
+		ASSERT(checked.begin < verifiedEnd.get());
+		KeyRange suffix = KeyRangeRef(verifiedEnd.get(), checked.end);
+		checked = KeyRangeRef(checked.begin, verifiedEnd.get());
+		invalidateRemoteOnlyAvailability();
+		if (unavailable != 1) {
+			// Give the other ranges a turn even if this range keeps splitting.
+			remoteOnlyRanges.push_back(std::move(checked));
+			remoteOnlyRanges.push_back(std::move(suffix));
+			return -1;
+		}
+		remoteOnlyRanges.push_front(std::move(suffix));
+	} else if (verifiedEnd.present() && !remoteOnlyRanges.empty() && checked.end == remoteOnlyRanges.front().begin &&
+	           remoteOnlyRanges.front().end <= verifiedEnd.get()) {
+		checked = KeyRangeRef(checked.begin, remoteOnlyRanges.front().end);
+		remoteOnlyRanges.pop_front();
+		invalidateRemoteOnlyAvailability();
+	}
+	if (unavailable == 1) {
+		// Reconfirm this witness on the next sample. An inconclusive retry rotates it to the back.
+		remoteOnlyRanges.push_front(std::move(checked));
+		invalidateRemoteOnlyAvailability();
+		return 1;
+	}
+	remoteOnlyRanges.push_back(std::move(checked));
+	consecutiveReadableRanges = unavailable < 0 ? 0 : std::min(consecutiveReadableRanges + 1, remoteOnlyRanges.size());
+	return consecutiveReadableRanges == remoteOnlyRanges.size() ? 0 : -1;
+}
+
 std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) const {
 	std::vector<KeyRange> r;
 	for (auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
