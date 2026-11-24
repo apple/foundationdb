@@ -144,24 +144,12 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 		co_return Level::METRICS_MISSING;
 	}
 
-	auto eventsAndErrors = co_await workerEventProvider->getLatestDataDistributorEvents("MovingData");
-	if (!eventsAndErrors.present()) {
-		co_return Level::METRICS_MISSING;
-	}
-
-	auto const& [events, _errors] = eventsAndErrors.get();
-	WorkerEvents filteredEvents = filterEmptyEvents(events);
-	if (filteredEvents.empty()) {
-		co_return Level::METRICS_MISSING;
-	}
-
 	try {
 		// MovingData counts scheduled relocations, which can disappear or be admitted long after a
 		// failure. Use live team summaries for replication severity instead.
 		int64_t highestPrimaryTeamPriority = 0;
 		int64_t highestRemoteTeamPriority = 0;
 		bool teamMetricsMissing = false;
-		bool remoteOnlyShardUnavailable = false;
 		for (auto const& [address, traceEvent] : teamEvents) {
 			std::string value;
 			bool hasPrimaryPriority = traceEvent.tryGetValue("HighestPrimaryTeamPriority", value);
@@ -176,14 +164,26 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 			teamMetricsMissing = teamMetricsMissing || primaryPriority < 0 || remotePriority < 0;
 			if (traceEvent.tryGetValue("RemoteOnlyShardUnavailable", value)) {
 				int64_t unavailable = traceEvent.getInt64("RemoteOnlyShardUnavailable");
+				// The relocation queue can publish its first snapshot after this confirmed outage.
+				if (unavailable > 0) {
+					CODE_PROBE(trackCodeProbes, "ClusterHealth StorageReplicationFactor confirms range outage");
+					co_return Level::OUTAGE;
+				}
 				teamMetricsMissing |= unavailable < 0;
-				remoteOnlyShardUnavailable |= unavailable > 0;
 			}
 			highestPrimaryTeamPriority = std::max(highestPrimaryTeamPriority, primaryPriority);
 			highestRemoteTeamPriority = std::max(highestRemoteTeamPriority, remotePriority);
 		}
 		int64_t highestTeamPriority = std::max(highestPrimaryTeamPriority, highestRemoteTeamPriority);
 
+		auto eventsAndErrors = co_await workerEventProvider->getLatestDataDistributorEvents("MovingData");
+		if (!eventsAndErrors.present()) {
+			co_return Level::METRICS_MISSING;
+		}
+		WorkerEvents filteredEvents = filterEmptyEvents(eventsAndErrors.get().first);
+		if (filteredEvents.empty()) {
+			co_return Level::METRICS_MISSING;
+		}
 		int64_t queuedOrInFlightRepairMoves = 0;
 		for (auto const& [address, traceEvent] : filteredEvents) {
 			(void)address;
@@ -201,7 +201,7 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 		}
 
 		// A known primary outage takes precedence over missing remote team health.
-		if (remoteOnlyShardUnavailable || highestPrimaryTeamPriority >= SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
+		if (highestPrimaryTeamPriority >= SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
 			CODE_PROBE(trackCodeProbes, "ClusterHealth StorageReplicationFactor returns OUTAGE");
 			co_return Level::OUTAGE;
 		}
@@ -223,6 +223,9 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 		CODE_PROBE(trackCodeProbes, "ClusterHealth StorageReplicationFactor returns HEALTHY");
 		co_return Level::HEALTHY;
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		TraceEvent(SevWarnAlways, "StorageReplicationFactorFetchFailed").error(e);
 		co_return Level::METRICS_MISSING;
 	}

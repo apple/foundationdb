@@ -20,7 +20,7 @@
 #ifndef FOUNDATIONDB_SHARDSAFFECTEDBYTEAMFAILURE_H
 #define FOUNDATIONDB_SHARDSAFFECTEDBYTEAMFAILURE_H
 
-#include <functional>
+#include <deque>
 
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
@@ -84,22 +84,12 @@ public:
 	std::vector<KeyRange> getShardsFor(Team team) const;
 	bool hasShards(Team team) const;
 
-	struct RemoteOnlyRange {
-		KeyRange keys;
-		std::vector<UID> sources;
-	};
-
-	// A dead source set identifies ranges whose current read locations need verification.
-	bool hasRemoteOnlyRanges() const { return !remoteOnlyRanges.empty(); }
-	void trackRemoteOnlyRange(KeyRangeRef keys, const std::vector<UID>& sources);
-	void resetRemoteOnlyRangeSearch() { nextRemoteOnlyGroup = remoteOnlyRanges.begin(); }
-	bool hasUncheckedRemoteOnlyRanges() const {
-		return nextRemoteOnlyGroup != remoteOnlyRanges.end() || suspectRemoteOnlyGroup != remoteOnlyRanges.end();
-	}
-	Optional<RemoteOnlyRange> findUnavailableRemoteOnlyRange(const std::function<bool(UID)>& isSourceLive);
-	void updateRemoteOnlyRange(const RemoteOnlyRange& candidate,
-	                           KeyRangeRef verifiedRange,
-	                           std::vector<UID> remainingSources);
+	// Retain these ranges for this DD's lifetime. A committed move can replace the
+	// sources even when its actor never receives the acknowledgement.
+	void trackRemoteOnlyRange(KeyRangeRef keys);
+	Optional<KeyRange> nextRemoteOnlyRange() const;
+	void invalidateRemoteOnlyAvailability() { consecutiveReadableRanges = 0; }
+	int recordRemoteOnlyAvailability(Optional<Key> verifiedEnd, int unavailable);
 
 	// The first element of the pair is either the source for non-moving shards or the destination team for in-flight
 	// shards. The second element of the pair is all previous sources for in-flight shards. This function only returns
@@ -147,9 +137,8 @@ private:
 	                 // usable_regions > 1
 	std::set<std::pair<Team, KeyRange>, OrderByTeamKey> team_shards;
 	std::map<UID, int> storageServerShards;
-	std::map<std::vector<UID>, std::vector<KeyRange>> remoteOnlyRanges;
-	decltype(remoteOnlyRanges)::iterator nextRemoteOnlyGroup = remoteOnlyRanges.end();
-	decltype(remoteOnlyRanges)::iterator suspectRemoteOnlyGroup = remoteOnlyRanges.end();
+	std::deque<KeyRange> remoteOnlyRanges;
+	size_t consecutiveReadableRanges = 0;
 
 	// only erase from team_shards
 	void erase(Team team, KeyRange const& range);

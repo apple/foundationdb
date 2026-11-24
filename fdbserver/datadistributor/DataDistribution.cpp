@@ -877,8 +877,7 @@ public:
 				// Normal regional moves select a primary destination. Failed exclusion rebuilds DD and
 				// can leave the recovered source assignment entirely in the remote region.
 				if (iShard.primarySrc.empty() && !iShard.remoteSrc.empty()) {
-					self->shardsAffectedByTeamFailure->trackRemoteOnlyRange(KeyRangeRef(iShard.key, endKey),
-					                                                        iShard.remoteSrc);
+					self->shardsAffectedByTeamFailure->trackRemoteOnlyRange(KeyRangeRef(iShard.key, endKey));
 				}
 			}
 

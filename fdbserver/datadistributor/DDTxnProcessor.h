@@ -60,9 +60,15 @@ public:
 	// get the source server list and complete source server list for range
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 
-	// With a row limit of 2, return only the first shard interval in the requested range.
-	virtual Future<std::vector<DDRangeLocations>> getSourceServerInterfacesForRange(const KeyRangeRef range,
-	                                                                                int rowLimit = 0) {
+	// Read the first shard in range in one transaction. Once keyServers is read, verifiedEnd holds its
+	// exclusive end clipped to range.end, even if resolving the source IDs later fails or is cancelled.
+	// Keep verifiedEnd alive until the future completes or is cancelled. An empty result means unverified owners.
+	virtual Future<std::vector<UID>> getSourceServersForFirstShard(KeyRangeRef range, Optional<Key>& verifiedEnd) {
+		verifiedEnd.reset();
+		return std::vector<UID>();
+	}
+
+	virtual Future<std::vector<DDRangeLocations>> getSourceServerInterfacesForRange(const KeyRangeRef range) {
 		return std::vector<DDRangeLocations>();
 	}
 
@@ -164,8 +170,10 @@ public:
 
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
 
-	Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(const KeyRangeRef range,
-	                                                                                         int rowLimit = 0) override;
+	Future<std::vector<UID>> getSourceServersForFirstShard(KeyRangeRef range, Optional<Key>& verifiedEnd) override;
+
+	Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(
+	    const KeyRangeRef range) override;
 
 	// Call NativeAPI implementation directly
 	Future<ServerWorkerInfos> getServerListAndProcessClasses() override;

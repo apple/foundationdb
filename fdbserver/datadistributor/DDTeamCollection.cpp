@@ -4684,77 +4684,52 @@ int DDTeamCollection::getHighestTeamPriority(IsPrimary primaryRegion) const {
 
 void DDTeamCollection::setServerStatus(UID id, const ServerStatus& status) {
 	if (status.isFailed && !server_status.get(id).isFailed) {
-		shardsAffectedByTeamFailure->resetRemoteOnlyRangeSearch();
+		shardsAffectedByTeamFailure->invalidateRemoteOnlyAvailability();
 	}
 	server_status.set(id, status);
 }
 
-Future<int> DDTeamCollection::checkRemoteOnlyShardAvailability() {
-	auto sourceIsLive = [this](UID id) {
-		return std::any_of(teamCollections.begin(), teamCollections.end(), [&](const auto* collection) {
-			return collection && !collection->server_status.get(id).isFailed;
-		});
-	};
-	auto candidate = shardsAffectedByTeamFailure->findUnavailableRemoteOnlyRange(sourceIsLive);
-	if (!candidate.present()) {
-		co_return shardsAffectedByTeamFailure->hasUncheckedRemoteOnlyRanges() ? -1 : 0;
-	}
-	// Moves can commit after their actor is cancelled. Read one committed keyServers interval per sample.
-	auto locations = co_await db->getSourceServerInterfacesForRange(candidate->keys, /*rowLimit=*/2);
-	if (locations.empty() || !locations.front().range.contains(candidate->keys.begin)) {
-		co_return -1;
-	}
-	const auto& location = locations.front();
-	bool hasLiveSource = false;
-	bool hasLivePrimary = false;
-	bool unknownSource = false;
-	std::vector<UID> sources;
-	for (const auto& [dc, servers] : location.servers) {
-		for (const auto& server : servers) {
-			UID id = server.id();
-			sources.push_back(id);
-			hasLiveSource |= sourceIsLive(id);
-			hasLivePrimary |= !server_status.get(id).isFailed;
-			unknownSource |= std::none_of(teamCollections.begin(), teamCollections.end(), [&](const auto* collection) {
-				return collection && collection->server_status.get(id).initialized;
-			});
-		}
-	}
-	if (!hasLiveSource) {
-		co_return unknownSource || sources.empty() ? -1 : 1;
-	}
-	// A two-step move can publish one primary before the rest of its team. Keep watching
-	// those sources until an ordinary primary team tracker covers the assignment.
-	if (hasLivePrimary && findTeamFromServers(sources, /*wantHealthy=*/false).present()) {
-		sources.clear();
-	}
-	shardsAffectedByTeamFailure->updateRemoteOnlyRange(*candidate, location.range, std::move(sources));
-	// Resume at the next suspect interval on the next sample. Never infer availability from a partial check.
-	auto next = shardsAffectedByTeamFailure->findUnavailableRemoteOnlyRange(sourceIsLive);
-	co_return next.present() || shardsAffectedByTeamFailure->hasUncheckedRemoteOnlyRanges() ? -1 : 0;
-}
-
 Future<int> DDTeamCollection::sampleRemoteOnlyShardAvailability(double delaySeconds) {
-	if (delaySeconds > 0) {
-		co_await delay(delaySeconds, TaskPriority::FlushTrace);
-	}
-	if (!shardsAffectedByTeamFailure->hasRemoteOnlyRanges()) {
+	auto candidate = shardsAffectedByTeamFailure->nextRemoteOnlyRange();
+	// Periodic tracing can run every event-loop turn. Limit metadata probes to one per second.
+	constexpr double minProbeInterval = 1.0;
+	co_await delay(primary && candidate.present() ? std::max(delaySeconds, minProbeInterval) : delaySeconds,
+	               TaskPriority::FlushTrace);
+	if (!candidate.present()) {
 		co_return 0;
 	}
-	if (!primary || getHighestTeamPriority(IsPrimary::True) < 0 || getHighestTeamPriority(IsPrimary::False) < 0) {
+	if (!primary) {
 		co_return -1;
 	}
+
+	Optional<Key> verifiedEnd;
+	int unavailable = -1;
 	try {
-		auto result =
-		    co_await timeout(checkRemoteOnlyShardAvailability(), SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL);
-		co_return result.orDefault(-1);
+		auto sources = co_await timeout(db->getSourceServersForFirstShard(*candidate, verifiedEnd),
+		                                std::max(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, minProbeInterval),
+		                                std::vector<UID>());
+		bool allFailed = !sources.empty();
+		for (UID id : sources) {
+			bool known = false;
+			for (const auto* collection : teamCollections) {
+				if (collection) {
+					const auto& status = collection->server_status.get(id);
+					if (!status.isFailed) {
+						co_return shardsAffectedByTeamFailure->recordRemoteOnlyAvailability(verifiedEnd, 0);
+					}
+					known |= status.initialized;
+				}
+			}
+			allFailed &= known;
+		}
+		unavailable = allFailed ? 1 : -1;
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
-		TraceEvent(SevWarn, "RemoteOnlyShardLocationError", distributorId).errorUnsuppressed(e);
-		co_return -1;
+		TraceEvent(SevWarn, "RemoteOnlyShardLocationError", distributorId).suppressFor(5.0).errorUnsuppressed(e);
 	}
+	co_return shardsAffectedByTeamFailure->recordRemoteOnlyAvailability(verifiedEnd, unavailable);
 }
 
 bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>>& team, int amount) const {
@@ -6582,17 +6557,22 @@ public:
 		return serverListReplies.back().getFuture();
 	}
 
-	Future<std::vector<DDRangeLocations>> getSourceServerInterfacesForRange(KeyRangeRef keys, int rowLimit) override {
-		++sourceLookups;
-		ASSERT_EQ(rowLimit, 2);
-		if (location.present()) {
-			ASSERT(location->range.contains(keys.begin));
-			return std::vector<DDRangeLocations>{ *location };
+	Future<std::vector<UID>> getSourceServersForFirstShard(KeyRangeRef keys, Optional<Key>& verifiedEnd) override {
+		lookups.emplace_back(keys);
+		for (const auto& [range, sources] : locations) {
+			if (range.contains(keys.begin)) {
+				verifiedEnd = std::min(keys.end, range.end);
+				if (stallLookup) {
+					return Never();
+				}
+				return sources;
+			}
 		}
-		return std::vector<DDRangeLocations>{};
+		return std::vector<UID>();
 	}
-	Optional<DDRangeLocations> location;
-	int sourceLookups = 0;
+	std::vector<std::pair<KeyRange, std::vector<UID>>> locations;
+	std::vector<KeyRange> lookups;
+	bool stallLookup = false;
 
 	int getDataRemovalCheckCount() const { return dataRemovalCheckCount; }
 
@@ -6713,66 +6693,70 @@ public:
 		auto remote = testTeamCollection(1, makeReference<PolicyOne>(), 0, shards);
 		remote->primary = false;
 		primary->teamCollections = { primary.get(), remote.get() };
+		remote->teamCollections = primary->teamCollections;
 		auto processor = makeReference<DDTeamCollectionTestTxnProcessor>(primary->db->context());
 		primary->db = processor;
-		StorageServerInterface primaryServer, remoteServer, otherRemote;
-		primaryServer.uniqueID = UID(1, 0);
-		remoteServer.uniqueID = UID(2, 0);
-		otherRemote.uniqueID = UID(3, 0);
-		const KeyRange keys = KeyRangeRef("a"_sr, "m"_sr);
+		const UID oldRemote(2, 0), newRemote(3, 0), partialPrimary(4, 0), unknown(5, 0);
+		const UID primaryServer(1, 0);
+		const KeyRange left = KeyRangeRef("a"_sr, "m"_sr);
+		const KeyRange prefix = KeyRangeRef(left.begin, "g"_sr);
+		const KeyRange suffix = KeyRangeRef(prefix.end, left.end);
+		const KeyRange right = KeyRangeRef("p"_sr, "z"_sr);
 		const ServerStatus live(LocalityData{});
 		const ServerStatus failed(IsFailed::True, IsUndesired::False, IsWiggling::False, LocalityData{});
-		primary->setServerStatus(primaryServer.id(), live);
-		primary->addTeam(std::vector<UID>{ primaryServer.id() }, IsInitialTeam::True);
-		remote->setServerStatus(remoteServer.id(), live);
-		remote->setServerStatus(otherRemote.id(), failed);
-		shards->trackRemoteOnlyRange(keys, { remoteServer.id() });
-		auto setLocations = [&](KeyRangeRef range, std::vector<StorageServerInterface> servers) {
-			IDDTxnProcessor::DDRangeLocations location(range);
-			location.servers["dc"] = std::move(servers);
-			processor->location = std::move(location);
-		};
-		int unavailable = co_await primary->checkRemoteOnlyShardAvailability();
-		ASSERT_EQ(unavailable, 0);
-		ASSERT_EQ(processor->sourceLookups, 0);
+		auto sample = [&]() { return primary->sampleRemoteOnlyShardAvailability(0); };
+		auto idle = sample();
+		ASSERT(!idle.isReady()); // The logging loop must yield even at a zero interval.
+		ASSERT_EQ(co_await idle, 0);
+		ASSERT(processor->lookups.empty());
 
-		// Choosing a primary destination leaves the remote source as the only location returned to readers.
-		shards->assignRangeToTeams(keys, { { {}, true }, { { remoteServer.id() }, false } });
-		shards->moveShard(keys, { { { primaryServer.id() }, true }, { { otherRemote.id() }, false } });
-		remote->setServerStatus(remoteServer.id(), failed);
-		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
-		ASSERT_EQ(unavailable, -1);
-		setLocations(keys, { remoteServer });
-		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
-		ASSERT_EQ(unavailable, 1);
+		shards->trackRemoteOnlyRange(left);
+		remote->setServerStatus(oldRemote, live);
+		remote->setServerStatus(newRemote, failed);
+		primary->setServerStatus(partialPrimary, failed);
+		processor->locations = { { left, { oldRemote } } };
+		ASSERT_EQ(co_await sample(), 0);
 
-		// A live partial primary copy serves reads, but its failure can still remove the last copy.
-		StorageServerInterface partialPrimary;
-		partialPrimary.uniqueID = UID(4, 0);
-		primary->setServerStatus(partialPrimary.id(), live);
-		setLocations(keys, { partialPrimary, remoteServer });
-		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
-		ASSERT_EQ(unavailable, 0);
-		primary->setServerStatus(partialPrimary.id(), failed);
-		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
-		ASSERT_EQ(unavailable, 1);
+		// A first-stage move can commit before its actor sees the acknowledgement.
+		// The old remote and the rest of the planned primary team remain live.
+		shards->assignRangeToTeams(left, { { {}, true }, { { oldRemote }, false } });
+		shards->moveShard(left, { { { primaryServer, partialPrimary }, true }, { { newRemote }, false } });
+		processor->locations = { { left, { partialPrimary, newRemote } } };
+		remote->initialFailureReactionDelay = Never();
+		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::False), -1);
+		ASSERT_EQ(co_await sample(), 1);
+		primary->setServerStatus(partialPrimary, live);
+		ASSERT_EQ(co_await sample(), 0);
 
-		// A committed repair is visible even if the move actor missed its acknowledgement. A split
-		// requires a separate check for its suffix.
-		setLocations(KeyRangeRef(keys.begin, "g"_sr), { primaryServer, otherRemote });
-		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
-		ASSERT_EQ(unavailable, -1);
-		setLocations(KeyRangeRef("g"_sr, keys.end), { remoteServer });
-		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
-		ASSERT_EQ(unavailable, 1);
-		setLocations(keys, { primaryServer, otherRemote });
-		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
-		ASSERT_EQ(unavailable, 0);
-		ASSERT_EQ(processor->sourceLookups, 7);
-		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
-		ASSERT_EQ(unavailable, 0);
-		ASSERT_EQ(processor->sourceLookups, 7);
-		primary->teamCollections.clear();
+		// A full repair is readable. A later assignment can still lose every source.
+		processor->locations = { { left, { primaryServer, newRemote } } };
+		ASSERT_EQ(co_await sample(), 0);
+		processor->locations = { { left, { newRemote } } };
+		ASSERT_EQ(co_await sample(), 1);
+
+		// Retain both pieces of a split, even if the prefix always lacks status.
+		processor->locations = { { prefix, { unknown, newRemote } }, { suffix, { newRemote } } };
+		processor->stallLookup = true; // Tag resolution stalls after the boundary read.
+		ASSERT_EQ(co_await sample(), -1);
+		processor->stallLookup = false;
+		ASSERT_EQ(co_await sample(), -1); // The prefix has an unknown source.
+		ASSERT_EQ(co_await sample(), 1);
+		ASSERT_EQ(processor->lookups.back(), suffix);
+		shards->trackRemoteOnlyRange(right);
+		processor->locations = { { prefix, { unknown } }, { suffix, { newRemote } }, { right, { newRemote } } };
+		processor->stallLookup = true;
+		ASSERT_EQ(co_await sample(), -1);
+		processor->stallLookup = false;
+		ASSERT_EQ(co_await sample(), -1);
+		ASSERT_EQ(processor->lookups.back(), prefix);
+		ASSERT_EQ(co_await sample(), 1);
+		ASSERT_EQ(processor->lookups.back(), right);
+		ASSERT_EQ(processor->lookups.size(), 11);
+
+		processor->locations = { { allKeys, { primaryServer, newRemote } } };
+		ASSERT_EQ(co_await sample(), -1);
+		ASSERT_EQ(co_await sample(), -1);
+		ASSERT_EQ(co_await sample(), 0);
 	}
 
 	static std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,

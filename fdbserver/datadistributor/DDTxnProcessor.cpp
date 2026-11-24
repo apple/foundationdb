@@ -25,8 +25,11 @@
 #include "DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/TxnCounters.h"
+#include "flow/UnitTest.h"
 #include "flow/CoroUtils.h"
 #include "flow/genericactors.h"
+
+#include <variant>
 
 static void updateServersAndCompleteSources(std::set<UID>& servers,
                                             std::vector<UID>& completeSources,
@@ -123,32 +126,29 @@ class DDTxnProcessorImpl {
 	}
 
 	static Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(Database cx,
-	                                                                                                KeyRange range,
-	                                                                                                int rowLimit) {
-		ASSERT(rowLimit == 0 || rowLimit >= 2);
+	                                                                                                KeyRangeRef range) {
 		std::vector<IDDTxnProcessor::DDRangeLocations> res;
 		Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 		while (true) {
 			res.clear();
 			Error err;
 			try {
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				RangeResult shards = co_await krmGetRanges(&tr,
 				                                           keyServersPrefix,
 				                                           range,
-				                                           rowLimit ? rowLimit : SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+				                                           SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
 				                                           SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
 				ASSERT(!shards.empty());
 
 				RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-				// A final page can contain an extra synthetic end row. Keep the caller's interval bound.
-				const int ranges = rowLimit ? std::min(shards.size() - 1, rowLimit - 1) : shards.size() - 1;
-				for (int i = 0; i < ranges; ++i) {
+				int i = 0;
+				for (i = 0; i < shards.size() - 1; ++i) {
 					std::vector<UID> src;
 					std::vector<UID> dest;
 					UID srcId, destId;
@@ -1370,10 +1370,92 @@ Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
 }
 
+// Both UID encodings and the tag encoding put the source vector first.
+static std::variant<std::vector<UID>, std::vector<Tag>> decodeShardSources(ValueRef value) {
+	if (!value.empty()) {
+		BinaryReader rd(value, IncludeVersion());
+		if (rd.protocolVersion().hasKeyServerValueV2() && !rd.protocolVersion().hasShardEncodeLocationMetaData()) {
+			std::vector<Tag> tags;
+			rd >> tags;
+			return tags;
+		}
+		std::vector<UID> sources;
+		rd >> sources;
+		return sources;
+	}
+	return std::vector<UID>();
+}
+
+static bool sourceTagsMatch(std::vector<Tag> expected, const std::vector<Optional<Value>>& serverTags) {
+	std::vector<Tag> actual;
+	for (const auto& value : serverTags) {
+		if (!value.present()) {
+			return false;
+		}
+		actual.push_back(decodeServerTagValue(value.get()));
+	}
+	std::sort(actual.begin(), actual.end());
+	std::sort(expected.begin(), expected.end());
+	return actual == expected;
+}
+
+Future<std::vector<UID>> DDTxnProcessor::getSourceServersForFirstShard(KeyRangeRef range, Optional<Key>& verifiedEnd) {
+	verifiedEnd.reset();
+	Transaction tr(cx);
+	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	auto shards = co_await krmGetRanges(&tr, keyServersPrefix, range, 2, SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
+	ASSERT(shards.size() >= 2);
+	verifiedEnd = Key(shards[1].key);
+	auto owners = decodeShardSources(shards[0].value);
+	if (auto* ids = std::get_if<std::vector<UID>>(&owners)) {
+		co_return std::move(*ids);
+	}
+
+	// The tag index is keyed by server ID. The proxy suggests IDs for point reads, but its reply
+	// has no assignment version. Verify every tag against keyServers at the same read version.
+	auto& tags = std::get<std::vector<Tag>>(owners);
+	if (tags.empty()) {
+		co_return std::vector<UID>();
+	}
+	auto loc = co_await getKeyLocation_internal(
+	    cx, shards[0].key, SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, latestVersion);
+	if (loc.locations->size() == tags.size()) {
+		std::vector<Future<Optional<Value>>> serverTags;
+		std::vector<UID> candidates;
+		for (int i = 0; i < loc.locations->size(); ++i) {
+			UID id = loc.locations->getId(i);
+			candidates.push_back(id);
+			serverTags.push_back(tr.get(serverTagKeyFor(id)));
+		}
+		if (sourceTagsMatch(std::move(tags), co_await getAll(serverTags))) {
+			co_return candidates;
+		}
+	}
+	co_return std::vector<UID>();
+}
+
+TEST_CASE("/DataDistribution/SourceShard/Encodings") {
+	const std::vector<UID> sources{ UID(1, 1), UID(2, 2) };
+	const std::vector<UID> dest{ UID(3, 3) };
+	BinaryWriter oldFormat(IncludeVersion(ProtocolVersion::withKeyServerValue()));
+	oldFormat << sources << dest;
+	ASSERT(std::get<std::vector<UID>>(decodeShardSources(oldFormat.toValue())) == sources);
+	ASSERT(std::get<std::vector<UID>>(decodeShardSources(keyServersValue(sources, dest, UID(4, 4), UID(5, 5)))) ==
+	       sources);
+	const std::vector<Tag> tags{ Tag(0, 4), Tag(1, 8) };
+	ASSERT(std::get<std::vector<Tag>>(decodeShardSources(keyServersValue(tags, { Tag(1, 9) }))) == tags);
+	ASSERT(sourceTagsMatch(tags, { serverTagValue(tags[1]), serverTagValue(tags[0]) }));
+	ASSERT(!sourceTagsMatch(tags, { serverTagValue(tags[0]), serverTagValue(Tag(1, 9)) }));
+	ASSERT(!sourceTagsMatch(tags, { serverTagValue(tags[0]), Optional<Value>() }));
+	ASSERT(!sourceTagsMatch(tags, { serverTagValue(tags[0]), serverTagValue(tags[0]) }));
+	co_return;
+}
+
 Future<std::vector<IDDTxnProcessor::DDRangeLocations>> DDTxnProcessor::getSourceServerInterfacesForRange(
-    const KeyRangeRef range,
-    int rowLimit) {
-	return DDTxnProcessorImpl::getSourceServerInterfacesForRange(cx, range, rowLimit);
+    const KeyRangeRef range) {
+	return DDTxnProcessorImpl::getSourceServerInterfacesForRange(cx, range);
 }
 
 Future<ServerWorkerInfos> DDTxnProcessor::getServerListAndProcessClasses() {

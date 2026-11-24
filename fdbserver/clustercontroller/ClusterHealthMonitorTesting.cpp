@@ -406,11 +406,15 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationF
 		Level level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 		ASSERT_EQ(level, expected);
 	}
-	auto retiredRemoteTeam = teamMetrics(SERVER_KNOBS->PRIORITY_POPULATE_REGION, SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
-	retiredRemoteTeam.addField("RemoteOnlyShardUnavailable", "1");
-	provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(retiredRemoteTeam));
-	Level retiredLevel = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
-	ASSERT_EQ(retiredLevel, Level::OUTAGE);
+	// Current source failures establish an outage even if the remote team retired or recovery
+	// has yet to produce its priority.
+	for (int remotePriority : { SERVER_KNOBS->PRIORITY_TEAM_HEALTHY, -1 }) {
+		auto fields = teamMetrics(SERVER_KNOBS->PRIORITY_POPULATE_REGION, remotePriority);
+		fields.addField("RemoteOnlyShardUnavailable", "1");
+		provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(fields));
+		Level level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+		ASSERT_EQ(level, Level::OUTAGE);
+	}
 
 	provider->setStorageTeamOneReplicaLeftIsCritical(true);
 	provider->setLatestDataDistributorEvents(
@@ -425,6 +429,14 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationF
 	provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(partialRegionalMetrics));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
+
+	// A confirmed outage does not depend on the relocation queue having reported yet.
+	auto recovering = teamMetrics(-1, -1);
+	recovering.addField("RemoteOnlyShardUnavailable", "1");
+	provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(recovering));
+	provider->setLatestDataDistributorEvents("MovingData", makeLatestWorkerEvents(TraceEventFields()));
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::OUTAGE);
 }
 
 TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/RecoveryStateFactor") {
