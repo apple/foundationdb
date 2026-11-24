@@ -6931,6 +6931,10 @@ StringRef StartFullRestoreTaskFunc::name = "restore_start"_sr;
 REGISTER_TASKFUNC(StartFullRestoreTaskFunc);
 } // namespace fileBackup
 
+static KeyBackedBinaryValue<Version> mutationLogConsumerVersion(BackupConfig& config, KeyRef destination) {
+	return config.getUidAsKey().withPrefix(destination).withPrefix(backupLatestVersionsPrefix);
+}
+
 Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,
                                                                      EBackupState state,
                                                                      BackupStatusSchema schema) {
@@ -6972,8 +6976,7 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 				if (dest.present() && ranges.present() && !ranges.get().empty()) {
 					// 8.0 installed ordinary capture rules when it finished an interrupted start.
 					// Those rules survive until the last consumer releases the shared destination.
-					auto ownerKey = config.getUidAsKey().withPrefix(dest.get()).withPrefix(backupLatestVersionsPrefix);
-					auto owner = tr->get(ownerKey);
+					auto owner = tr->get(mutationLogConsumerVersion(config, dest.get()).key);
 					auto capture = tr->getRange(prefixRange(dest.get().withPrefix(logRangesRange.begin)), 1);
 					co_await (success(owner) && success(capture));
 					if (owner.get().present() && capture.get().empty()) {
@@ -6997,7 +7000,16 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 		auto bulkEnd = config.bulkDumpSnapshotEndVersion().getD(tr, Snapshot::False, MAX_VERSION);
 		co_await (success(start) && success(firstEnd) && success(bulkEnd));
 		if (cursor.get() <= std::min({ start.get(), firstEnd.get(), bulkEnd.get() })) {
-			co_return LogProgress{ MutationLogType::DEFAULT, {}, {}, true, {}, cursor };
+			// Submission records a read version strictly before the first dispatch cursor.
+			// A later ordinary dispatch records its cursor here after the preceding batch finishes.
+			auto dest = co_await config.destUidValue().get(tr);
+			Optional<Version> consumerVersion;
+			if (dest.present()) {
+				consumerVersion = co_await mutationLogConsumerVersion(config, dest.get()).get(tr);
+			}
+			if (consumerVersion != cursor) {
+				co_return LogProgress{ MutationLogType::DEFAULT, {}, {}, true, {}, cursor };
+			}
 		}
 	}
 	auto restorable = co_await config.getLatestRestorableVersion(tr);
@@ -7215,8 +7227,7 @@ public:
 			}
 		}
 
-		tr->set(config.getUidAsKey().withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix),
-		        BinaryWriter::toValue<Version>(tr->getReadVersion().get(), Unversioned()));
+		mutationLogConsumerVersion(config, destUidValue).set(tr, tr->getReadVersion().get());
 		config.destUidValue().set(tr, destUidValue);
 
 		// Point the tag to this new uid

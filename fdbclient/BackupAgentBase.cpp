@@ -259,6 +259,12 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 	config.clear(tr);
 	config.latestLogEndVersion().set(tr, 121);
 	config.snapshotBeginVersion().set(tr, 121);
+	Key dest = BinaryWriter::toValue(UID(5, 6), Unversioned());
+	config.destUidValue().set(tr, dest);
+	Key owners = dest.withPrefix(backupLatestVersionsPrefix);
+	Key ownerKey = config.getUidAsKey().withPrefix(owners);
+	Key otherOwnerKey = BackupConfig(UID(3, 4)).getUidAsKey().withPrefix(owners);
+	tr->set(otherOwnerKey, BinaryWriter::toValue<Version>(121, Unversioned()));
 	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
 	auto container = IBackupContainer::openContainer(url, {}, {}, 0);
 	co_await container->create();
@@ -271,6 +277,11 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 		for (bool logsOnly : { false, true }) {
 			config.incrementalBackupOnly().set(tr, logsOnly);
 			for (auto state : { EBackupState::STATE_RUNNING_DIFFERENTIAL, EBackupState::STATE_COMPLETED }) {
+				if (state == EBackupState::STATE_COMPLETED) {
+					tr->clear(ownerKey);
+				} else {
+					tr->set(ownerKey, BinaryWriter::toValue<Version>(100, Unversioned()));
+				}
 				auto logs = co_await config.getStatusLogProgress(tr, state);
 				ASSERT(logs.type == MutationLogType::DEFAULT && logs.logDispatchCursor == 121);
 				ASSERT(logs.restorePointUnknown && !logs.exclusiveLogEnd.present() && !logs.restorable.present());
@@ -289,14 +300,43 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 	auto logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_COMPLETED);
 	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorable == 149);
 	ASSERT((co_await container->getRestoreSet(149, {}, true, 121)).present());
-	co_await container->deleteContainer();
 
-	// Starting another snapshot must not hide a log batch that has already finished.
+	// If a snapshot finishes before the cursor, it confirms the copied end even after cleanup.
 	config.incrementalBackupOnly().set(tr, false);
 	config.firstSnapshotEndVersion().set(tr, 135);
 	config.snapshotBeginVersion().set(tr, 160);
-	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING);
+	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_COMPLETED);
 	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorable == 149);
+
+	// The first snapshot can also finish beyond the end of the copied logs.
+	config.firstSnapshotEndVersion().clear(tr);
+	config.snapshotBeginVersion().set(tr, 125);
+	tr->set(ownerKey, BinaryWriter::toValue<Version>(150, Unversioned()));
+	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING);
+	ASSERT(logs.exclusiveLogEnd == 150 && !logs.restorePointUnknown && !logs.restorable.present());
+
+	auto early = co_await container->writeRangeFile(121, 0, 135, 1024);
+	auto late = co_await container->writeRangeFile(121, 1, 155, 1024);
+	co_await (early->finish() && late->finish());
+	std::vector<std::string> files{ early->getFileName(), late->getFileName() };
+	std::vector<std::pair<Key, Key>> ranges{ { "a"_sr, "m"_sr }, { "m"_sr, "z"_sr } };
+	co_await container->writeKeyspaceSnapshotFile(files, ranges, 0, IncludeKeyRangeMap::True);
+	ASSERT(!(co_await container->getRestoreSet(155)).present());
+
+	config.firstSnapshotEndVersion().set(tr, 155);
+	config.snapshotBeginVersion().set(tr, 160);
+	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING);
+	ASSERT(logs.exclusiveLogEnd == 150 && !logs.restorePointUnknown && !logs.restorable.present());
+
+	// The final dispatch can stop before updating the consumer version. Completion clears it.
+	auto next = co_await container->writeLogFile(150, 170, 1024);
+	co_await next->finish();
+	config.latestLogEndVersion().set(tr, 170);
+	tr->clear(ownerKey);
+	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_COMPLETED);
+	ASSERT(logs.exclusiveLogEnd == 170 && logs.restorable == 169);
+	ASSERT((co_await container->getRestoreSet(169)).present());
+	co_await container->deleteContainer();
 }
 
 TEST_CASE("/backup/status/legacyPartitionedLog") {
