@@ -73,6 +73,8 @@ if (WITH_GRPC)
 
   target_include_directories(fdbrpc PUBLIC ${Protobuf_INCLUDE_DIRS} ${gRPC_INCLUDE_DIRS})
   target_link_libraries(fdbrpc PUBLIC gRPC::grpc++)
+  target_link_libraries(fdbrpc PUBLIC absl::log_initialize absl::log_globals absl::log_sink absl::log_internal_log_sink_set
+    absl::random_internal_seed_material)
   target_link_libraries(fdbrpc PUBLIC proto_fdbrpc_test proto_fdbrpc_file_transfer)
 
   target_include_directories(fdbrpc_sampling PUBLIC ${Protobuf_INCLUDE_DIRS} ${gRPC_INCLUDE_DIRS})
