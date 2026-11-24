@@ -1403,6 +1403,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_METRICS_INTERVAL,                              5.0 );
 	init( REDWOOD_HISTOGRAM_INTERVAL,                           30.0 );
 	init( REDWOOD_EVICT_UPDATED_PAGES,                          true ); if( randomize && buggify() ) { REDWOOD_EVICT_UPDATED_PAGES = false; }
+	init( REDWOOD_COMMIT_SUBTREE_RECORD_OPS_PER_YIELD,          1000 ); if( randomize && buggify() ) { REDWOOD_COMMIT_SUBTREE_RECORD_OPS_PER_YIELD = deterministicRandom()->randomSkewedUInt32(1, 10000); }
+	init( REDWOOD_COMMIT_SUBTREE_PAGE_OPS_PER_YIELD,              10 ); if( randomize && buggify() ) { REDWOOD_COMMIT_SUBTREE_PAGE_OPS_PER_YIELD = deterministicRandom()->coinflip() ? 1 : 0; }
 	init( REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT,                    2 ); if( randomize && buggify() ) { REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT = deterministicRandom()->randomInt(1, 7); }
 	init( REDWOOD_NODE_MAX_UNBALANCE,                              2 );
 	init( REDWOOD_IO_PRIORITIES,                       "32,32,32,32" );
