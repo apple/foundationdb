@@ -40,6 +40,8 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	bool inDesiredDC;
 	DDTeamCollection* collection;
 	Future<Void> tracker;
+	Optional<Key> laggingZone;
+	void refreshLaggingZone();
 
 	// TODO: Remove?
 	[[maybe_unused]] Version addedVersion; // Read version when this Server is added
@@ -108,6 +110,7 @@ public:
 	void incrementDataInFlightToServer(int64_t bytes) { dataInFlightToServer += bytes; }
 	void incrementReadInFlightToServer(int64_t readBytes) { readInFlightToServer += readBytes; }
 	void cancel();
+	void removedFromCollection();
 	std::vector<Reference<TCTeamInfo>> const& getTeams() const { return teams; }
 	void addTeam(Reference<TCTeamInfo> team) { teams.push_back(team); }
 	void removeTeamsContainingServer(UID removedServer);
@@ -129,7 +132,6 @@ public:
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 	Future<Void> serverMetricsPolling(Reference<IDDTxnProcessor> txnProcessor);
 	bool updateAndGetStorageQueueTooLong(int64_t currentBytes);
-	~TCServerInfo();
 };
 
 class TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
