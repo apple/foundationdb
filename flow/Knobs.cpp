@@ -136,6 +136,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( RECONNECTION_RESET_TIME,                             5.0 );
 	init( ALWAYS_ACCEPT_DELAY,                                15.0 );
 	init( ACCEPT_BATCH_SIZE,                                    10 );
+	init( MAX_PENDING_INCOMING_CONNECTIONS_PER_LISTENER,      1000 ); if( isSimulated && randomize && buggify(1.0) ) MAX_PENDING_INCOMING_CONNECTIONS_PER_LISTENER = deterministicRandom()->coinflip() ? 0 : deterministicRandom()->randomInt(8, 513);
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );

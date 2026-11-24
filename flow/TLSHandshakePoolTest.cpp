@@ -21,6 +21,7 @@
 // Checks that TLS peers which connect but never complete a handshake do not starve Net2's handshake capacity:
 // - while such silent peers are pending, healthy handshakes still succeed, and none runs on the network thread;
 // - silent peers are disconnected at the handshake timeout (CONNECTION_MONITOR_TIMEOUT);
+// - a failed handshake returns to the listener only after its socket is closed;
 // - healthy handshakes still succeed afterwards.
 // There are as many silent peers as handshake threads, so the first check passes only if a handshake thread keeps
 // serving other handshakes while a silent one is pending on it, i.e. only if the handshake workers do not block.
@@ -33,12 +34,16 @@
 // silent peers tie up both blocking handshake threads, so healthy handshakes fall back to the network thread, and the
 // silent peers are not disconnected at the timeout because their threads stay blocked reading from them.
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
+
+#include <netinet/in.h>
+#include <sys/socket.h>
 
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
@@ -142,20 +147,33 @@ bool closedByServer(tcp::socket& socket) {
 	return ec == boost::asio::error::eof || ec == boost::asio::error::connection_reset;
 }
 
+Future<bool> handshakeClosedOnFailure(Reference<IConnection> conn) {
+	const int fd = conn->getSocket().native_handle();
+	const auto result = co_await coro::errorOr(conn->acceptHandshake());
+	if (!result.isError()) {
+		co_return true;
+	}
+	// Check at the point where the listener could admit another connection. Query the kernel directly, since the
+	// worker may still own the Asio socket if the handshake returned too early. Allow reuse of the descriptor.
+	sockaddr_in peer{};
+	socklen_t size = sizeof(peer);
+	co_return ::getpeername(fd, reinterpret_cast<sockaddr*>(&peer), &size) != 0 || peer.sin_family != AF_INET ||
+	    ntohs(peer.sin_port) != conn->getPeerAddress().port;
+}
+
 // Starts the TLS handshake of every accepted connection without waiting for it, so silent and healthy handshakes are in
 // progress at the same time.
-Future<Void> acceptLoop(Reference<IListener> listener, std::vector<Future<Void>>* handshakes) {
+Future<Void> acceptLoop(Reference<IListener> listener, std::vector<Future<bool>>* handshakes) {
 	while (true) {
 		Reference<IConnection> conn = co_await listener->accept();
-		// The future keeps the connection alive; a failed handshake just leaves its error in it.
-		handshakes->push_back(conn->acceptHandshake());
+		handshakes->push_back(handshakeClosedOnFailure(conn));
 	}
 }
 
 // Server: once the client is done, waits for every handshake started so far to finish, then stops the network. A
 // handshake still running on a handshake thread when the network stops would deliver its result on that thread,
 // racing with this thread's teardown of the same connections.
-Future<Void> stopWhenHandshakesDone(Future<Void> clientDone, std::vector<Future<Void>>* handshakes) {
+Future<Void> stopWhenHandshakesDone(Future<Void> clientDone, std::vector<Future<bool>>* handshakes) {
 	co_await clientDone;
 	co_await waitForAllReady(*handshakes);
 	g_network->stop();
@@ -175,11 +193,14 @@ Reference<IListener> startServer(const Creds& creds) {
 
 // Server: accepts connections and starts each one's TLS handshake, which Net2 runs where the knobs direct it. Runs
 // Net2's network thread on the calling thread until the client is done and every handshake has finished.
-void runServer(Reference<IListener> listener, Future<Void> clientDone) {
-	std::vector<Future<Void>> handshakes;
+bool runServer(Reference<IListener> listener, Future<Void> clientDone) {
+	std::vector<Future<bool>> handshakes;
 	Future<Void> accepting = acceptLoop(listener, &handshakes);
 	Future<Void> stopping = stopWhenHandshakesDone(clientDone, &handshakes);
 	g_network->run();
+	auto openAfterFailure = std::count_if(handshakes.begin(), handshakes.end(), [](const auto& f) { return !f.get(); });
+	std::cout << fmt::format("Sockets still open when a handshake failed: {}\n", openAfterFailure);
+	return openAfterFailure == 0;
 }
 
 // Client: opens the silent peers, then checks that healthy handshakes succeed while they are pending, that the server
@@ -219,7 +240,13 @@ void setKnobs(bool legacy) {
 bool runTest(bool legacy) {
 	setKnobs(legacy);
 	Creds creds = makeCreds();
+	const double handshakeTimeout = FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT;
+	if (!legacy) {
+		// Workers capture their deadline in listen(). Make the network thread time out first for the silent peers.
+		bootstrapGlobalFlowKnobs.CONNECTION_MONITOR_TIMEOUT = 60;
+	}
 	Reference<IListener> listener = startServer(creds);
+	bootstrapGlobalFlowKnobs.CONNECTION_MONITOR_TIMEOUT = handshakeTimeout;
 	tcp::endpoint server(boost::asio::ip::make_address("127.0.0.1"), listener->getListenAddress().port);
 
 	// The client uses blocking sockets, so it runs on its own thread while the server runs on this one. It only
@@ -231,9 +258,9 @@ bool runTest(bool legacy) {
 		ok = runClient(creds, server);
 		clientDone.send(Void());
 	});
-	runServer(listener, clientDoneFuture);
+	bool socketsClosed = runServer(listener, clientDoneFuture);
 	client.join();
-	return ok;
+	return ok && socketsClosed;
 }
 
 } // namespace
