@@ -40,20 +40,54 @@ _AssumeVersion::_AssumeVersion(ProtocolVersion version) : v(version) {
 	}
 }
 
-const void* BinaryReader::readBytes(int bytes) {
-	const char* b = begin;
-	const char* e = b + bytes;
-	if (e > end) {
-		uint64_t bytes_short = e - end;
-		ASSERT(!g_network->isSimulated());
-		TraceEvent("SerializationFailed").detail("ReadBytesTooShort", bytes_short).backtrace();
-		throw serialization_failed();
-	}
-	begin = e;
-	return b;
+void detail::invalidReadLength(int requested, size_t remaining) {
+	ASSERT(!g_network || !g_network->isSimulated());
+	TraceEvent("SerializationFailed")
+	    .detail("RequestedBytes", requested)
+	    .detail("RemainingBytes", remaining)
+	    .backtrace();
+	throw serialization_failed();
 }
 
 namespace {
+
+TEST_CASE("flow/serialize/RejectsInvalidReadLengths") {
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+	// The first length is too large for a StringRef. Only the final byte belongs to the following field.
+	BinaryWriter writer(Unversioned());
+	writer << uint32_t(0x80000000) << uint8_t(42);
+	auto bytes = writer.toValue();
+	auto check = [&](auto& reader) {
+		StringRef value;
+		try {
+			reader >> value;
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_serialization_failed);
+		}
+		ASSERT_EQ(reader.remainingBytes(), 1);
+		for (int length : { -1, 2, std::numeric_limits<int>::max() }) {
+			try {
+				reader.arenaRead(length);
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT_EQ(e.code(), error_code_serialization_failed);
+			}
+			ASSERT_EQ(reader.remainingBytes(), 1);
+		}
+		uint8_t last;
+		reader >> last;
+		ASSERT_EQ(last, 42);
+		ASSERT(reader.empty());
+	};
+	BinaryReader copied(bytes, Unversioned());
+	check(copied);
+	ArenaReader borrowed(bytes.arena(), bytes, Unversioned());
+	check(borrowed);
+	return Void();
+}
 
 struct _Struct {
 	static constexpr FileIdentifier file_identifier = 2340487;

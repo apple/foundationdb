@@ -637,6 +637,10 @@ private:
 	}
 };
 
+namespace detail {
+[[noreturn]] void invalidReadLength(int requested, size_t remaining);
+}
+
 template <class Impl>
 class _Reader {
 public:
@@ -645,8 +649,16 @@ public:
 	using READER = Impl;
 
 	const void* peekBytes(int bytes) const {
-		ASSERT(begin + bytes <= end);
+		if (bytes < 0 || static_cast<size_t>(bytes) > remainingBytes()) {
+			detail::invalidReadLength(bytes, remainingBytes());
+		}
 		return begin;
+	}
+
+	const void* readBytes(int bytes) {
+		const void* result = peekBytes(bytes);
+		begin += bytes;
+		return result;
 	}
 
 	void serializeBytes(void* data, int bytes) {
@@ -694,14 +706,6 @@ class ArenaReader : public _Reader<ArenaReader> {
 	Optional<ArenaObjectReader> arenaObjectReader;
 
 public:
-	const void* readBytes(int bytes) {
-		const char* b = begin;
-		const char* e = b + bytes;
-		ASSERT(e <= end);
-		begin = e;
-		return b;
-	}
-
 	const uint8_t* arenaRead(int bytes) { return (const uint8_t*)readBytes(bytes); }
 
 	const void* peekBytes(int bytes) const {
@@ -738,16 +742,15 @@ class BinaryReader : public _Reader<BinaryReader> {
 	Optional<ObjectReader> objectReader;
 
 public:
-	const void* readBytes(int bytes);
-
 	const uint8_t* arenaRead(int bytes) {
 		// Reads and returns the next bytes.
 		// The returned pointer has the lifetime of this.arena()
 		// Could be implemented zero-copy if [begin,end) was in this.arena() already; for now is a copy
 		if (!bytes)
 			return nullptr;
+		const void* source = readBytes(bytes);
 		uint8_t* dat = new (arena()) uint8_t[bytes];
-		serializeBytes(dat, bytes);
+		memcpy(dat, source, bytes);
 		return dat;
 	}
 
