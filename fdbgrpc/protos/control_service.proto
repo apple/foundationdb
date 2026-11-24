@@ -1,9 +1,9 @@
 syntax = "proto3";
 
-package fdbctl;
+package fdbgrpc;
 
-option go_package = "github.com/apple/foundationdb/fdbctl";
-option java_package = "com.apple.foundationdb.fdbctl";
+option go_package = "github.com/apple/foundationdb/fdbgrpc";
+option java_package = "com.apple.foundationdb.fdbgrpc";
 
 //------ RPCs ------
 

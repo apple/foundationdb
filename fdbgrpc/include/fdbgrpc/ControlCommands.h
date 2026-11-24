@@ -19,22 +19,22 @@
  */
 
 #ifdef FLOW_GRPC_ENABLED
-#ifndef FDB_CTL_LIB_FDB_CONTROL_COMMANDS_H
-#define FDB_CTL_LIB_FDB_CONTROL_COMMANDS_H
+#ifndef FDBGRPC_CONTROL_COMMANDS_H
+#define FDBGRPC_CONTROL_COMMANDS_H
 
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/FlowGrpc.h"
-#include "fdbctl/control_service/control_service.pb.h"
-#include "fdbctl/control_service/control_service.grpc.pb.h"
+#include "fdbgrpc/control_service/control_service.pb.h"
+#include "fdbgrpc/control_service/control_service.grpc.pb.h"
 
 #include <grpcpp/support/status.h>
 #include <map>
 #include <vector>
 #include <string>
 
-namespace fdbctl {
+namespace fdbgrpc {
 
 //-- Coordinators ----
 Future<grpc::Status> getCoordinators(Reference<IDatabase> db,
@@ -90,7 +90,7 @@ using management_api::failedServersSpecialKeyRange;
 
 const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 } // namespace special_keys
-} // namespace fdbctl
+} // namespace fdbgrpc
 
-#endif
+#endif // FDBGRPC_CONTROL_COMMANDS_H
 #endif // FLOW_GRPC_ENABLED
