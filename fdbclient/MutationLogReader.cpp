@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/MutationLogReader.h"
 #include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
@@ -30,10 +31,6 @@ Key versionToKey(Version version, Key prefix) {
 	return KeyRef((uint8_t*)&versionBigEndian, sizeof(uint64_t)).withPrefix(prefix);
 }
 
-Version keyRefToVersion(KeyRef key, int prefixLen) {
-	return (Version)bigEndian64(*((uint64_t*)key.substr(prefixLen).begin()));
-}
-
 } // namespace
 
 namespace mutation_log_reader {
@@ -44,11 +41,11 @@ Standalone<RangeResultRef> RangeResultBlock::consume() {
 	                                   CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE) +
 	                      1; // firstVersion rounded up to the nearest 1M versions, then + 1
 	int startIndex = indexToRead;
-	while (indexToRead < result.size() && keyRefToVersion(result[indexToRead].key, prefixLen) < stopVersion) {
+	while (indexToRead < result.size() && getLogKeyVersion(result[indexToRead].key, prefixLen) < stopVersion) {
 		++indexToRead;
 	}
 	if (indexToRead < result.size()) {
-		firstVersion = keyRefToVersion(result[indexToRead].key, prefixLen); // the version of result[indexToRead]
+		firstVersion = getLogKeyVersion(result[indexToRead].key, prefixLen); // the version of result[indexToRead]
 	}
 	return Standalone<RangeResultRef>(
 	    RangeResultRef(result.slice(startIndex, indexToRead), result.more, result.readThrough), result.arena());
@@ -86,8 +83,8 @@ Future<Void> PipelinedReader::getNext(Database cx) {
 				if (!kvs.empty()) {
 					// Send results to the reads stream
 					reads.send(RangeResultBlock{ .result = kvs,
-					                             .firstVersion = keyRefToVersion(kvs.front().key, prefix.size()),
-					                             .lastVersion = keyRefToVersion(kvs.back().key, prefix.size()),
+					                             .firstVersion = getLogKeyVersion(kvs.front().key, prefix.size()),
+					                             .lastVersion = getLogKeyVersion(kvs.back().key, prefix.size()),
 					                             .hash = hash,
 					                             .prefixLen = prefix.size(),
 					                             .indexToRead = 0 });
@@ -103,6 +100,10 @@ Future<Void> PipelinedReader::getNext(Database cx) {
 				break;
 			} catch (Error& e) {
 				err = e;
+			}
+			if (err.code() == error_code_restore_corrupted_data) {
+				reads.sendError(err);
+				co_return;
 			}
 			if (err.code() == error_code_transaction_too_old) {
 				// We are using this transaction until it's too old and then resetting to a fresh one,
@@ -171,12 +172,12 @@ namespace {
 TEST_CASE("/fdbclient/mutationlogreader/VersionKeyRefConversion") {
 	Key prefix = "foos"_sr;
 
-	ASSERT(keyRefToVersion(versionToKey(0, prefix), prefix.size()) == 0);
-	ASSERT(keyRefToVersion(versionToKey(1, prefix), prefix.size()) == 1);
-	ASSERT(keyRefToVersion(versionToKey(-1, prefix), prefix.size()) == -1);
-	ASSERT(keyRefToVersion(versionToKey(std::numeric_limits<int64_t>::min(), prefix), prefix.size()) ==
+	ASSERT(getLogKeyVersion(versionToKey(0, prefix), prefix.size()) == 0);
+	ASSERT(getLogKeyVersion(versionToKey(1, prefix), prefix.size()) == 1);
+	ASSERT(getLogKeyVersion(versionToKey(-1, prefix), prefix.size()) == -1);
+	ASSERT(getLogKeyVersion(versionToKey(std::numeric_limits<int64_t>::min(), prefix), prefix.size()) ==
 	       std::numeric_limits<int64_t>::min());
-	ASSERT(keyRefToVersion(versionToKey(std::numeric_limits<int64_t>::max(), prefix), prefix.size()) ==
+	ASSERT(getLogKeyVersion(versionToKey(std::numeric_limits<int64_t>::max(), prefix), prefix.size()) ==
 	       std::numeric_limits<int64_t>::max());
 
 	return Void();

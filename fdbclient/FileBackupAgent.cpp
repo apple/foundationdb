@@ -1419,16 +1419,96 @@ void TwoBuffers::fillBufferIfAbsent(int index) {
 	return;
 }
 
-bool endOfBlock(char* start, int offset) {
-	const unsigned char paddingChar = '\xff';
-	return (unsigned char)*(start + offset) == paddingChar;
+struct PartitionedLogRecord {
+	static constexpr size_t headerSize = sizeof(Version) + 2 * sizeof(uint32_t);
+	Version version;
+	int32_t subsequence;
+	StringRef mutation;
+};
+
+static PartitionedLogRecord readPartitionedLogRecord(const char* buffer, size_t size, size_t offset) {
+	if (offset > size || size - offset < PartitionedLogRecord::headerSize) {
+		throw restore_corrupted_data();
+	}
+	const char* record = buffer + offset;
+	uint64_t version;
+	uint32_t subsequence, mutationSize;
+	std::memcpy(&version, record, sizeof(version));
+	std::memcpy(&subsequence, record + sizeof(version), sizeof(subsequence));
+	std::memcpy(&mutationSize, record + sizeof(version) + sizeof(subsequence), sizeof(mutationSize));
+	mutationSize = bigEndian32(mutationSize);
+	if (mutationSize > size - offset - PartitionedLogRecord::headerSize) {
+		throw restore_corrupted_data();
+	}
+	return { static_cast<Version>(bigEndian64(version)),
+		     static_cast<int32_t>(bigEndian32(subsequence)),
+		     StringRef(reinterpret_cast<const uint8_t*>(record + PartitionedLogRecord::headerSize), mutationSize) };
 }
+
+static Standalone<VectorRef<VersionedMutation>> consumePartitionedLogBlock(const char* buffer,
+                                                                           size_t size,
+                                                                           size_t& offset,
+                                                                           int blockSize,
+                                                                           Version firstVersion) {
+	Standalone<VectorRef<VersionedMutation>> mutations;
+	while (offset < size) {
+		if (static_cast<uint8_t>(buffer[offset]) == 0xff) {
+			offset += blockSize - (offset % blockSize);
+			continue;
+		}
+		if (offset % blockSize == 0) {
+			offset += sizeof(uint32_t);
+		}
+		auto record = readPartitionedLogRecord(buffer, size, offset);
+		if (record.version != firstVersion) {
+			break;
+		}
+		Standalone<StringRef> mutationData(record.mutation);
+		ArenaReader reader(mutationData.arena(), mutationData, AssumeVersion(g_network->protocolVersion()));
+		VersionedMutation vm;
+		vm.version = record.version;
+		vm.subsequence = record.subsequence;
+		reader >> vm.mutation;
+		mutations.push_back_deep(mutations.arena(), vm);
+		offset += PartitionedLogRecord::headerSize + record.mutation.size();
+	}
+	return mutations;
+}
+
+namespace {
+TEST_CASE("/backup/partitioned-log/truncated-record") {
+	MutationRef mutation(MutationRef::SetValue, "k"_sr, "v"_sr);
+	BinaryWriter payload(AssumeVersion(g_network->protocolVersion()));
+	payload << mutation;
+	BinaryWriter writer(Unversioned());
+	writer << PARTITIONED_MLOG_VERSION << bigEndian64(123) << bigEndian32(7) << bigEndian32(payload.getLength());
+	writer.serializeBytes(payload.toValue());
+	Value block = writer.toValue();
+	const char* buffer = reinterpret_cast<const char*>(block.begin());
+	for (int length = 1; length < block.size(); ++length) {
+		size_t offset = 0;
+		try {
+			consumePartitionedLogBlock(buffer, length, offset, 4096, 123);
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_restore_corrupted_data);
+		}
+	}
+	size_t offset = 0;
+	auto decoded = consumePartitionedLogBlock(buffer, block.size(), offset, 4096, 123);
+	ASSERT_EQ(decoded.size(), 1);
+	ASSERT_EQ(decoded[0].version, 123);
+	ASSERT_EQ(decoded[0].subsequence, 7);
+	ASSERT(decoded[0].mutation.param1 == "k"_sr && decoded[0].mutation.param2 == "v"_sr);
+	ASSERT_EQ(offset, block.size());
+	return Void();
+}
+} // namespace
 
 class PartitionedLogIteratorSimple : public PartitionedLogIterator {
 public:
 	const int BATCH_READ_BLOCK_COUNT = 1;
 	const int BLOCK_SIZE = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
-	const int mutationHeaderBytes = sizeof(int64_t) + sizeof(int32_t) + sizeof(int32_t);
 	Reference<IBackupContainer> bc;
 	size_t bufferCapacity;
 	int tag;
@@ -1502,64 +1582,7 @@ void PartitionedLogIteratorSimple::removeBlockHeader() {
 }
 
 Standalone<VectorRef<VersionedMutation>> PartitionedLogIteratorSimple::consumeData(Version firstVersion) {
-	Standalone<VectorRef<VersionedMutation>> mutations = Standalone<VectorRef<VersionedMutation>>();
-	char* start = buffer.get();
-	bool foundNewVersion = false;
-	while (bufferOffset < bufferSize) {
-		while (bufferOffset < bufferSize && !endOfBlock(start, bufferOffset)) {
-			// for each block
-			removeBlockHeader();
-
-			// encoding format:
-			// wr << bigEndian64(message.version.version) << bigEndian32(message.version.sub) <<
-			// bigEndian32(mutation.size());
-			Version version;
-			std::memcpy(&version, start + bufferOffset, sizeof(Version));
-			version = bigEndian64(version);
-			if (version != firstVersion) {
-				foundNewVersion = true;
-				break; // Different version, stop here
-			}
-
-			int32_t subsequence;
-			std::memcpy(&subsequence, start + bufferOffset + sizeof(Version), sizeof(int32_t));
-			subsequence = bigEndian32(subsequence);
-
-			int32_t mutationSize;
-			std::memcpy(&mutationSize, start + bufferOffset + sizeof(Version) + sizeof(int32_t), sizeof(int32_t));
-			mutationSize = bigEndian32(mutationSize);
-
-			// assumption: the entire mutation is within the buffer
-			size_t mutationTotalSize = mutationHeaderBytes + mutationSize;
-			ASSERT(bufferOffset + mutationTotalSize <= bufferSize);
-
-			// transform from stringref to mutationref here
-			Standalone<StringRef> mutationData = makeString(mutationSize);
-			std::memcpy(mutateString(mutationData), start + bufferOffset + mutationHeaderBytes, mutationSize);
-			ArenaReader reader(mutationData.arena(), mutationData, AssumeVersion(g_network->protocolVersion()));
-			MutationRef mutation;
-			reader >> mutation;
-
-			VersionedMutation vm;
-			vm.version = version;
-			vm.subsequence = subsequence;
-			vm.mutation = mutation;
-			mutations.push_back_deep(mutations.arena(), vm);
-			// Move the bufferOffset to include this mutation
-			bufferOffset += mutationTotalSize;
-		}
-
-		if (bufferOffset < bufferSize && endOfBlock(start, bufferOffset)) {
-			// there are paddings
-			int remain = BLOCK_SIZE - (bufferOffset % BLOCK_SIZE);
-			bufferOffset += remain;
-		}
-		if (foundNewVersion) {
-			break;
-		}
-	}
-
-	return mutations;
+	return consumePartitionedLogBlock(buffer.get(), bufferSize, bufferOffset, BLOCK_SIZE, firstVersion);
 }
 
 Future<Void> PartitionedLogIteratorSimple::loadNextBlock() {
@@ -1598,8 +1621,7 @@ Future<Version> PartitionedLogIteratorSimple::peekNextVersion(Reference<Partitio
 	co_await self->loadNextBlock();
 	self->removeBlockHeader();
 	Version version{ 0 };
-	std::memcpy(&version, self->buffer.get() + self->bufferOffset, sizeof(Version));
-	version = bigEndian64(version);
+	version = readPartitionedLogRecord(self->buffer.get(), self->bufferSize, self->bufferOffset).version;
 
 	while (self->fileIndex < self->endVersions.size() - 1 && version >= self->endVersions[self->fileIndex]) {
 		TraceEvent("SimpleIteratorFindOverlapAndSkip")
@@ -1612,8 +1634,7 @@ Future<Version> PartitionedLogIteratorSimple::peekNextVersion(Reference<Partitio
 		self->fileIndex += 1;
 		co_await self->loadNextBlock();
 		self->removeBlockHeader();
-		std::memcpy(&version, self->buffer.get() + self->bufferOffset, sizeof(Version));
-		version = bigEndian64(version);
+		version = readPartitionedLogRecord(self->buffer.get(), self->bufferSize, self->bufferOffset).version;
 	}
 	co_return version;
 }
@@ -1678,7 +1699,6 @@ public:
 	// noted that each version has to be contained within 2 blocks
 	const int BATCH_READ_BLOCK_COUNT = 1;
 	const int BLOCK_SIZE = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
-	const int mutationHeaderBytes = sizeof(int64_t) + sizeof(int32_t) + sizeof(int32_t);
 	Reference<IBackupContainer> bc;
 	int tag;
 	std::vector<RestoreConfig::RestoreFile> files;
@@ -1714,67 +1734,12 @@ Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffer
 Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffers::consumeData(
     Reference<PartitionedLogIteratorTwoBuffers> self,
     Version firstVersion) {
-	Standalone<VectorRef<VersionedMutation>> mutations = Standalone<VectorRef<VersionedMutation>>();
 	co_await self->twobuffer->ready();
-	std::shared_ptr<char[]> start = self->twobuffer->peek();
-	int size = self->twobuffer->getBufferSize();
-	bool foundNewVersion = false;
-	while (self->bufferOffset < size) {
-		while (self->bufferOffset < size && !endOfBlock(start.get(), self->bufferOffset)) {
-			// for each block
-			self->removeBlockHeader();
-
-			// encoding is:
-			// wr << bigEndian64(message.version.version) << bigEndian32(message.version.sub) <<
-			// bigEndian32(mutation.size());
-			Version version;
-			std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
-			version = bigEndian64(version);
-			if (version != firstVersion) {
-				foundNewVersion = true;
-				break; // Different version, stop here
-			}
-
-			int32_t subsequence;
-			std::memcpy(&subsequence, start.get() + self->bufferOffset + sizeof(Version), sizeof(int32_t));
-			subsequence = bigEndian32(subsequence);
-
-			int32_t mutationSize;
-			std::memcpy(
-			    &mutationSize, start.get() + self->bufferOffset + sizeof(Version) + sizeof(int32_t), sizeof(int32_t));
-			mutationSize = bigEndian32(mutationSize);
-
-			// assumption: the entire mutation is within the buffer
-			size_t mutationTotalSize = self->mutationHeaderBytes + mutationSize;
-			ASSERT(self->bufferOffset + mutationTotalSize <= size);
-
-			Standalone<StringRef> mutationData = makeString(mutationSize);
-			std::memcpy(
-			    mutateString(mutationData), start.get() + self->bufferOffset + self->mutationHeaderBytes, mutationSize);
-			// transform from stringref to mutationref here
-			ArenaReader reader(mutationData.arena(), mutationData, AssumeVersion(g_network->protocolVersion()));
-			MutationRef mutation;
-			reader >> mutation;
-
-			VersionedMutation vm;
-			vm.version = version;
-			vm.subsequence = subsequence;
-			vm.mutation = mutation;
-			mutations.push_back_deep(mutations.arena(), vm);
-			// Move the bufferOffset to include this mutation
-			self->bufferOffset += mutationTotalSize;
-		}
-
-		if (self->bufferOffset < size && endOfBlock(start.get(), self->bufferOffset)) {
-			// there are paddings, skip them
-			int remain = self->BLOCK_SIZE - (self->bufferOffset % self->BLOCK_SIZE);
-			self->bufferOffset += remain;
-		}
-		if (foundNewVersion) {
-			break;
-		}
-	}
-	co_return mutations;
+	co_return consumePartitionedLogBlock(self->twobuffer->peek().get(),
+	                                     self->twobuffer->getBufferSize(),
+	                                     self->bufferOffset,
+	                                     self->BLOCK_SIZE,
+	                                     firstVersion);
 }
 
 void PartitionedLogIteratorTwoBuffers::removeBlockHeader() {
@@ -1810,8 +1775,7 @@ Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(Reference<Part
 	co_await self->twobuffer->ready();
 	start = self->twobuffer->peek();
 	self->removeBlockHeader();
-	std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
-	version = bigEndian64(version);
+	version = readPartitionedLogRecord(start.get(), self->twobuffer->getBufferSize(), self->bufferOffset).version;
 	fileIndex = self->twobuffer->getFileIndex();
 	while (fileIndex < self->endVersions.size() - 1 && version >= self->endVersions[fileIndex]) {
 		TraceEvent("RestoreLogFilesFoundOverlapAndSkip")
@@ -1825,8 +1789,7 @@ Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(Reference<Part
 		co_await self->twobuffer->ready();
 		start = self->twobuffer->peek();
 		self->removeBlockHeader();
-		std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
-		version = bigEndian64(version);
+		version = readPartitionedLogRecord(start.get(), self->twobuffer->getBufferSize(), self->bufferOffset).version;
 		fileIndex = self->twobuffer->getFileIndex();
 	}
 	co_return version;
