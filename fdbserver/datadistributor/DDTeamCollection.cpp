@@ -4775,18 +4775,21 @@ DDTeamCollection::~DDTeamCollection() {
 	//    .detail("ServerTrackerDestroyed", server_info.size());
 }
 
-void DDTeamCollection::updateLaggingZone(Optional<Key> const& oldZone, Optional<Key> const& newZone) {
-	if (oldZone.present()) {
-		auto iter = lagging_zones.find(oldZone.get());
-		ASSERT(iter != lagging_zones.end() && iter->second > 0);
-		if (--iter->second == 0) {
-			lagging_zones.erase(iter);
-		}
-	}
-	if (newZone.present()) {
-		++lagging_zones[newZone.get()];
-	}
-	disableFailingLaggingServers.set(lagging_zones.size() > std::max(1, configuration.storageTeamSize - 1));
+void DDTeamCollection::addLaggingStorageServer(Key zoneId) {
+	lagging_zones[zoneId]++;
+	if (lagging_zones.size() > std::max(1, configuration.storageTeamSize - 1) && !disableFailingLaggingServers.get())
+		disableFailingLaggingServers.set(true);
+}
+
+void DDTeamCollection::removeLaggingStorageServer(Key zoneId) {
+	auto iter = lagging_zones.find(zoneId);
+	ASSERT(iter != lagging_zones.end());
+	iter->second--;
+	ASSERT_GE(iter->second, 0);
+	if (iter->second == 0)
+		lagging_zones.erase(iter);
+	if (lagging_zones.size() <= std::max(1, configuration.storageTeamSize - 1) && disableFailingLaggingServers.get())
+		disableFailingLaggingServers.set(false);
 }
 
 bool DDTeamCollection::isWigglePausedServer(const UID& server) const {
@@ -6248,7 +6251,6 @@ void DDTeamCollection::removeTSS(UID removedServer) {
 
 	tss_info_by_pair.erase(removedServerInfo->getLastKnownInterface().tssPairID.get());
 	server_and_tss_info.erase(removedServer);
-	removedServerInfo->removedFromCollection();
 
 	server_status.clear(removedServer);
 }
@@ -6355,7 +6357,6 @@ void DDTeamCollection::removeServer(UID removedServer) {
 	}
 	server_info.erase(removedServer);
 	server_and_tss_info.erase(removedServer);
-	removedServerInfo->removedFromCollection();
 
 	if (server_status.get(removedServer).initialized && server_status.get(removedServer).isUnhealthy()) {
 		unhealthyServers--;
@@ -7869,36 +7870,6 @@ public:
 		ASSERT_EQ(team->tracker.getError().code(), error_code_actor_cancelled);
 		ASSERT(team->isSoleOwner());
 	}
-
-	static Future<Void> RetainedTeam_ReleasesLaggingServer() {
-		auto policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
-		auto collection = testTeamCollection(3, policy, 3);
-		const UID serverID(1, 0);
-		auto server = collection->server_info.at(serverID);
-		collection->server_and_tss_info[serverID] = server;
-		collection->addTeam(std::set<UID>({ serverID, UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
-		auto retainedTeam = collection->teams.front();
-
-		auto requests = server->getLastKnownInterface().getStorageMetrics.getFuture();
-		GetStorageMetricsReply lagging;
-		lagging.lastUpdate = now();
-		lagging.versionLag = SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG + 1;
-		Future<Void> metrics = server->updateServerMetrics();
-		requests.pop().reply.send(lagging);
-		co_await metrics;
-		ASSERT_EQ(collection->lagging_zones.at(server->getLastKnownInterface().locality.zoneId().get()), 1);
-
-		Future<Void> pendingMetrics = server->updateServerMetrics();
-		auto lateRequest = requests.pop();
-		collection->removeServer(serverID);
-		ASSERT(collection->lagging_zones.empty());
-		collection.reset();
-		lateRequest.reply.send(lagging);
-		co_await pendingMetrics;
-		ASSERT(server->updateServerMetrics().isReady());
-		server.clear();
-		retainedTeam.clear();
-	}
 };
 
 TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
@@ -8077,8 +8048,4 @@ TEST_CASE("/DataDistribution/TeamTracker/RechecksHealthyZone") {
 TEST_CASE("/DataDistribution/TeamTracker/ReleasesRemovedTeam") {
 	DDTeamCollectionUnitTest::TeamTracker_ReleasesRemovedTeam();
 	return Void();
-}
-
-TEST_CASE("/DataDistribution/TeamTracker/RetainedTeamReleasesLaggingServer") {
-	co_await DDTeamCollectionUnitTest::RetainedTeam_ReleasesLaggingServer();
 }
