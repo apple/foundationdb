@@ -1402,6 +1402,7 @@ static bool sourceTagsMatch(std::vector<Tag> expected, const std::vector<Optiona
 Future<std::vector<UID>> DDTxnProcessor::getSourceServersForFirstShard(KeyRangeRef range, Optional<Key>& verifiedEnd) {
 	verifiedEnd.reset();
 	Transaction tr(cx);
+	tr.setOption(FDBTransactionOptions::SKIP_GRV_CACHE);
 	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);

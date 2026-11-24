@@ -60,7 +60,7 @@ public:
 	// get the source server list and complete source server list for range
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 
-	// Read the first shard in range in one transaction. Once keyServers is read, verifiedEnd holds its
+	// Read the first shard in range at a fresh read version. Once keyServers is read, verifiedEnd holds its
 	// exclusive end clipped to range.end, even if resolving the source IDs later fails or is cancelled.
 	// Keep verifiedEnd alive until the future completes or is cancelled. An empty result means unverified owners.
 	virtual Future<std::vector<UID>> getSourceServersForFirstShard(KeyRangeRef range, Optional<Key>& verifiedEnd) {

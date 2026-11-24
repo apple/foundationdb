@@ -147,9 +147,11 @@ class ServerStatus {
 public:
 	bool isWiggling;
 	bool isFailed;
+	bool failureMasked = false; // Maintenance suppressed the failure tracker.
 	bool isUndesired;
 	bool isWrongConfiguration;
 	bool initialized; // AsyncMap erases default constructed objects
+	double readabilityChangedAt = 0;
 	LocalityData locality;
 	ServerStatus()
 	  : isWiggling(false), isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
@@ -165,7 +167,8 @@ public:
 
 	bool operator==(ServerStatus const& r) const {
 		return isFailed == r.isFailed && isUndesired == r.isUndesired && isWiggling == r.isWiggling &&
-		       isWrongConfiguration == r.isWrongConfiguration && locality == r.locality && initialized == r.initialized;
+		       isWrongConfiguration == r.isWrongConfiguration && locality == r.locality &&
+		       initialized == r.initialized && failureMasked == r.failureMasked;
 	}
 	bool operator!=(ServerStatus const& r) const { return !(*this == r); }
 
@@ -236,7 +239,8 @@ protected:
 	std::map<int, int> priority_teams;
 	// For one region; -1 until its team health is initialized. An absent remote region is healthy.
 	int getHighestTeamPriority(IsPrimary primaryRegion) const;
-	void setServerStatus(UID id, const ServerStatus& status);
+	bool isFailureMasked(const LocalityData& locality) const;
+	void setServerStatus(UID id, ServerStatus status);
 	// TotalDataInFlight reports 1 for a confirmed outage, 0 for available, and -1 for unknown.
 	Future<int> sampleRemoteOnlyShardAvailability(double delaySeconds);
 	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
