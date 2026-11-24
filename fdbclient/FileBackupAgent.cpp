@@ -6987,18 +6987,21 @@ Future<BackupConfig::LogProgress> BackupConfig::getStatusLogProgress(Reference<R
 			co_return LogProgress{ type, {}, {}, true, worker, cursor };
 		}
 	}
-	if (schema == BackupStatusSchema::V2 && !type.present() && (co_await config.incrementalBackupOnly().getD(tr))) {
-		auto cursor = co_await dispatch;
-		auto start = co_await config.snapshotBeginVersion().get(tr);
-		// Startup sets snapshotBeginVersion after choosing the first log cursor, even for logs-only
-		// backups. An ordinary cursor past that version has waited for the first log batch to finish.
-		if (cursor.present() && (!start.present() || cursor.get() <= start.get())) {
+	auto cursor = co_await dispatch;
+	if (schema == BackupStatusSchema::V2 && cursor.present()) {
+		// The first ordinary dispatch publishes its cursor before scheduling any file copy.
+		// Startup initializes a snapshot even for logs-only backups. Each snapshot boundary is
+		// at or after the first cursor. Keep the completed boundaries because the start can move.
+		auto start = config.snapshotBeginVersion().getD(tr, Snapshot::False, MAX_VERSION);
+		auto firstEnd = config.firstSnapshotEndVersion().getD(tr, Snapshot::False, MAX_VERSION);
+		auto bulkEnd = config.bulkDumpSnapshotEndVersion().getD(tr, Snapshot::False, MAX_VERSION);
+		co_await (success(start) && success(firstEnd) && success(bulkEnd));
+		if (cursor.get() <= std::min({ start.get(), firstEnd.get(), bulkEnd.get() })) {
 			co_return LogProgress{ MutationLogType::DEFAULT, {}, {}, true, {}, cursor };
 		}
 	}
 	auto restorable = co_await config.getLatestRestorableVersion(tr);
-	co_await dispatch;
-	co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT), dispatch.get(), restorable };
+	co_return LogProgress{ type.orDefault(MutationLogType::DEFAULT), cursor, restorable };
 }
 
 struct LogInfo : public ReferenceCounted<LogInfo> {

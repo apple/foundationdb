@@ -394,7 +394,8 @@ For example, ``SharedWorkerSavedVersion`` of 301 gives ``SharedWorkerLogEndExclu
 These counters do not show whether each partition saved files covering the entire snapshot.
 When the database cannot establish a restore point, schema 2 reports ``RestorePointStatus`` as ``unknown`` and omits ``Restorable`` and ``LatestRestorablePoint``.
 ``LogDispatchCursor`` shows where the log dispatcher has advanced. A dispatcher can advance while it waits for workers.
-A legacy logs-only backup also reports its first dispatch cursor before it has saved a log file.
+An ordinary backup publishes its first dispatch cursor before it copies any logs. A logs-only backup can even complete at this cursor.
+Text and schema 2 show the cursor and leave the restore point unknown until the dispatcher has advanced past its starting position.
 
 Existing clients can continue to use ``--json`` for schema 1. Its ``Restorable`` Boolean and version fields retain their historical metadata-based calculation.
 

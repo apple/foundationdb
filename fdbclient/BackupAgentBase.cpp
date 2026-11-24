@@ -250,6 +250,55 @@ TEST_CASE("/backup/logversion") {
 	return Void();
 }
 
+TEST_CASE("/backup/status/ordinaryLogDispatch") {
+	Database db = DatabaseContext::create(
+	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
+	auto tr = makeReference<ReadYourWritesTransaction>(db);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	BackupConfig config(UID(1, 2));
+	config.clear(tr);
+	config.latestLogEndVersion().set(tr, 121);
+	config.snapshotBeginVersion().set(tr, 121);
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	auto container = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await container->create();
+	ASSERT(!(co_await container->getRestoreSet(120, {}, true)).present());
+
+	for (bool explicitDefault : { false, true }) {
+		if (explicitDefault) {
+			config.mutationLogType().set(tr, MutationLogType::DEFAULT);
+		}
+		for (bool logsOnly : { false, true }) {
+			config.incrementalBackupOnly().set(tr, logsOnly);
+			for (auto state : { EBackupState::STATE_RUNNING_DIFFERENTIAL, EBackupState::STATE_COMPLETED }) {
+				auto logs = co_await config.getStatusLogProgress(tr, state);
+				ASSERT(logs.type == MutationLogType::DEFAULT && logs.logDispatchCursor == 121);
+				ASSERT(logs.restorePointUnknown && !logs.exclusiveLogEnd.present() && !logs.restorable.present());
+				auto v1 = co_await config.getStatusLogProgress(tr, state, BackupStatusSchema::V1);
+				ASSERT(v1.exclusiveLogEnd == 121 && v1.restorable.present() == logsOnly);
+				if (logsOnly) {
+					ASSERT(v1.restorable == 120);
+				}
+			}
+		}
+	}
+
+	auto file = co_await container->writeLogFile(121, 150, 1024);
+	co_await file->finish();
+	config.latestLogEndVersion().set(tr, 150);
+	auto logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_COMPLETED);
+	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorable == 149);
+	ASSERT((co_await container->getRestoreSet(149, {}, true, 121)).present());
+	co_await container->deleteContainer();
+
+	// Starting another snapshot must not hide a log batch that has already finished.
+	config.incrementalBackupOnly().set(tr, false);
+	config.firstSnapshotEndVersion().set(tr, 135);
+	config.snapshotBeginVersion().set(tr, 160);
+	logs = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING);
+	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorable == 149);
+}
+
 TEST_CASE("/backup/status/legacyPartitionedLog") {
 	Database db = DatabaseContext::create(
 	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
