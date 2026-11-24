@@ -236,6 +236,10 @@ protected:
 	std::map<int, int> priority_teams;
 	// For one region; -1 until its team health is initialized. An absent remote region is healthy.
 	int getHighestTeamPriority(IsPrimary primaryRegion) const;
+	void setServerStatus(UID id, const ServerStatus& status);
+	// TotalDataInFlight reports 1 for a confirmed outage, 0 for available, and -1 for unknown.
+	Future<int> checkRemoteOnlyShardAvailability();
+	Future<int> sampleRemoteOnlyShardAvailability(double delaySeconds);
 	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
 	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a
 	                                                            // read-only concatenation of 2 data structures?

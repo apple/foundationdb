@@ -396,6 +396,22 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationF
 		ASSERT_EQ(level, test.expected);
 	}
 
+	// The same regional priorities can describe a remote outage on a different range.
+	for (auto [unavailable, expected] : { std::pair{ 0, Level::CRITICAL_INTERVENTION_REQUIRED },
+	                                      std::pair{ 1, Level::OUTAGE },
+	                                      std::pair{ -1, Level::METRICS_MISSING } }) {
+		auto fields = teamMetrics(SERVER_KNOBS->PRIORITY_POPULATE_REGION, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT);
+		fields.addField("RemoteOnlyShardUnavailable", std::to_string(unavailable));
+		provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(fields));
+		Level level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+		ASSERT_EQ(level, expected);
+	}
+	auto retiredRemoteTeam = teamMetrics(SERVER_KNOBS->PRIORITY_POPULATE_REGION, SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
+	retiredRemoteTeam.addField("RemoteOnlyShardUnavailable", "1");
+	provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(retiredRemoteTeam));
+	Level retiredLevel = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(retiredLevel, Level::OUTAGE);
+
 	provider->setStorageTeamOneReplicaLeftIsCritical(true);
 	provider->setLatestDataDistributorEvents(
 	    "TotalDataInFlight",

@@ -20,6 +20,77 @@
 
 #include "ShardsAffectedByTeamFailure.h"
 
+void ShardsAffectedByTeamFailure::trackRemoteOnlyRange(KeyRangeRef keys, const std::vector<UID>& sources) {
+	ASSERT(!keys.empty() && !sources.empty() && std::is_sorted(sources.begin(), sources.end()));
+	auto [group, inserted] = remoteOnlyRanges.try_emplace(sources);
+	if (inserted && (nextRemoteOnlyGroup == remoteOnlyRanges.end() || sources < nextRemoteOnlyGroup->first)) {
+		nextRemoteOnlyGroup = group;
+	}
+	auto& ranges = group->second;
+	if (!ranges.empty() && ranges.back().end == keys.begin) {
+		ranges.back() = KeyRangeRef(ranges.back().begin, keys.end);
+	} else {
+		ranges.emplace_back(keys);
+	}
+}
+
+Optional<ShardsAffectedByTeamFailure::RemoteOnlyRange> ShardsAffectedByTeamFailure::findUnavailableRemoteOnlyRange(
+    const std::function<bool(UID)>& isSourceLive) {
+	constexpr int groupsPerProbe = 64;
+	for (int checked = 0; checked < groupsPerProbe; ++checked) {
+		// Recheck a witness first, including after another server fails during the metadata lookup.
+		auto group = suspectRemoteOnlyGroup;
+		if (group == remoteOnlyRanges.end()) {
+			if (nextRemoteOnlyGroup == remoteOnlyRanges.end()) {
+				break;
+			}
+			group = nextRemoteOnlyGroup++;
+		}
+		const auto& [sources, ranges] = *group;
+		if (std::none_of(sources.begin(), sources.end(), isSourceLive)) {
+			suspectRemoteOnlyGroup = group;
+			return RemoteOnlyRange{ ranges.back(), sources };
+		}
+		suspectRemoteOnlyGroup = remoteOnlyRanges.end();
+	}
+	return {};
+}
+
+void ShardsAffectedByTeamFailure::updateRemoteOnlyRange(const RemoteOnlyRange& candidate,
+                                                        KeyRangeRef verifiedRange,
+                                                        std::vector<UID> remainingSources) {
+	ASSERT(verifiedRange.contains(candidate.keys.begin));
+	uniquify(remainingSources);
+	if (remainingSources == candidate.sources) {
+		return;
+	}
+	auto group = remoteOnlyRanges.find(candidate.sources);
+	if (group == remoteOnlyRanges.end() || group->second.back() != candidate.keys) {
+		return;
+	}
+
+	// The metadata lookup starts at the first candidate key. Either range can
+	// extend beyond the other if a move split or merged the original shard.
+	KeyRangeRef prefix(candidate.keys.begin, std::min(verifiedRange.end, candidate.keys.end));
+	if (prefix.end == candidate.keys.end) {
+		group->second.pop_back();
+		if (group->second.empty()) {
+			if (suspectRemoteOnlyGroup == group) {
+				suspectRemoteOnlyGroup = remoteOnlyRanges.end();
+			}
+			if (nextRemoteOnlyGroup == group) {
+				++nextRemoteOnlyGroup;
+			}
+			remoteOnlyRanges.erase(group);
+		}
+	} else {
+		group->second.back() = KeyRangeRef(prefix.end, candidate.keys.end);
+	}
+	if (!remainingSources.empty()) {
+		trackRemoteOnlyRange(prefix, remainingSources);
+	}
+}
+
 std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) const {
 	std::vector<KeyRange> r;
 	for (auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));

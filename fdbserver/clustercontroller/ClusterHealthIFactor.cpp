@@ -161,6 +161,7 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 		int64_t highestPrimaryTeamPriority = 0;
 		int64_t highestRemoteTeamPriority = 0;
 		bool teamMetricsMissing = false;
+		bool remoteOnlyShardUnavailable = false;
 		for (auto const& [address, traceEvent] : teamEvents) {
 			std::string value;
 			bool hasPrimaryPriority = traceEvent.tryGetValue("HighestPrimaryTeamPriority", value);
@@ -173,6 +174,11 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 			    traceEvent.getInt64(hasPrimaryPriority ? "HighestPrimaryTeamPriority" : "HighestTeamPriority");
 			int64_t remotePriority = hasRemotePriority ? traceEvent.getInt64("HighestRemoteTeamPriority") : 0;
 			teamMetricsMissing = teamMetricsMissing || primaryPriority < 0 || remotePriority < 0;
+			if (traceEvent.tryGetValue("RemoteOnlyShardUnavailable", value)) {
+				int64_t unavailable = traceEvent.getInt64("RemoteOnlyShardUnavailable");
+				teamMetricsMissing |= unavailable < 0;
+				remoteOnlyShardUnavailable |= unavailable > 0;
+			}
 			highestPrimaryTeamPriority = std::max(highestPrimaryTeamPriority, primaryPriority);
 			highestRemoteTeamPriority = std::max(highestRemoteTeamPriority, remotePriority);
 		}
@@ -195,7 +201,7 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 		}
 
 		// A known primary outage takes precedence over missing remote team health.
-		if (highestPrimaryTeamPriority >= SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
+		if (remoteOnlyShardUnavailable || highestPrimaryTeamPriority >= SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
 			CODE_PROBE(trackCodeProbes, "ClusterHealth StorageReplicationFactor returns OUTAGE");
 			co_return Level::OUTAGE;
 		}

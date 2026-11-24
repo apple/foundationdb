@@ -23,6 +23,97 @@
 
 void forceLinkShardsAffectedByTeamFailureTests() {}
 
+TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/RemoteOnlySources") {
+	ShardsAffectedByTeamFailure shards;
+	const UID first(1, 0), second(2, 0), extra(3, 0);
+	const KeyRange left = KeyRangeRef("a"_sr, "c"_sr);
+	const KeyRange right = KeyRangeRef("d"_sr, "f"_sr);
+	shards.trackRemoteOnlyRange(KeyRangeRef("a"_sr, "b"_sr), { first });
+	shards.trackRemoteOnlyRange(KeyRangeRef("b"_sr, "c"_sr), { first });
+	shards.trackRemoteOnlyRange(right, { second });
+	auto findCandidate = [&](const std::set<UID>& live) {
+		shards.resetRemoteOnlyRangeSearch();
+		return shards.findUnavailableRemoteOnlyRange([&](UID id) { return live.contains(id); });
+	};
+
+	ASSERT(!findCandidate({ first, second }).present());
+	ASSERT(findCandidate({ first })->keys == right);
+	auto candidate = findCandidate({ second, extra }).get();
+	ASSERT(candidate.keys == left);
+
+	// A previously unknown live source serves only the prefix. The suffix still needs a lookup.
+	const KeyRange prefix = KeyRangeRef("a"_sr, "b"_sr);
+	shards.updateRemoteOnlyRange(candidate, KeyRangeRef(allKeys.begin, prefix.end), { extra, first, extra });
+	auto suffix = findCandidate({ second, extra }).get();
+	ASSERT(suffix.keys == KeyRangeRef("b"_sr, "c"_sr));
+	ASSERT(suffix.sources == std::vector<UID>{ first });
+
+	// A later proxy reply can span multiple original shards. Retire only the candidate suffix.
+	shards.updateRemoteOnlyRange(suffix, allKeys, {});
+	ASSERT(!findCandidate({ second, extra }).present());
+	candidate = findCandidate({ second }).get();
+	ASSERT(candidate.keys == prefix);
+	ASSERT((candidate.sources == std::vector<UID>{ first, extra }));
+	shards.updateRemoteOnlyRange(candidate, allKeys, {});
+	ASSERT(findCandidate({})->keys == right);
+	shards.updateRemoteOnlyRange(findCandidate({}).get(), allKeys, {});
+	ASSERT(!findCandidate({}).present());
+
+	shards.trackRemoteOnlyRange(left, { first });
+	shards.trackRemoteOnlyRange(right, { first });
+	candidate = findCandidate({}).get();
+	ASSERT(candidate.keys == right);
+	shards.updateRemoteOnlyRange(candidate, allKeys, {});
+	ASSERT(findCandidate({})->keys == left);
+	return Void();
+}
+
+TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/BoundedRemoteOnlySourceSearch") {
+	ShardsAffectedByTeamFailure shards;
+	for (int i = 0; i < 100; ++i) {
+		Key begin = Key(format("key/%03d", i));
+		Key end = Key(format("key/%03d", i + 1));
+		shards.trackRemoteOnlyRange(KeyRangeRef(begin, end), { UID(i, 1) });
+	}
+	int checks = 0;
+	std::set<UID> failed;
+	auto isLive = [&](UID id) {
+		++checks;
+		return !failed.contains(id);
+	};
+	ASSERT(!shards.findUnavailableRemoteOnlyRange(isLive).present());
+	ASSERT_EQ(checks, 64);
+	ASSERT(shards.hasUncheckedRemoteOnlyRanges());
+	ASSERT(!shards.findUnavailableRemoteOnlyRange(isLive).present());
+	ASSERT_EQ(checks, 100);
+	ASSERT(!shards.hasUncheckedRemoteOnlyRanges());
+	ASSERT(!shards.findUnavailableRemoteOnlyRange(isLive).present());
+	ASSERT_EQ(checks, 100);
+
+	// A failure invalidates the completed sweep. A known witness retains priority over a new sweep.
+	const UID last(99, 1);
+	failed.insert(last);
+	shards.resetRemoteOnlyRangeSearch();
+	ASSERT(!shards.findUnavailableRemoteOnlyRange(isLive).present());
+	auto witness = shards.findUnavailableRemoteOnlyRange(isLive).get();
+	ASSERT(witness.sources == std::vector<UID>{ last });
+	ASSERT_EQ(checks, 200);
+	failed.insert(UID(0, 1));
+	shards.resetRemoteOnlyRangeSearch();
+	ASSERT(shards.findUnavailableRemoteOnlyRange(isLive)->keys == witness.keys);
+	ASSERT_EQ(checks, 201);
+	shards.updateRemoteOnlyRange(witness, witness.keys, {});
+	witness = shards.findUnavailableRemoteOnlyRange(isLive).get();
+	ASSERT(witness.sources.front() == UID(0, 1));
+	ASSERT_EQ(checks, 202);
+	shards.resetRemoteOnlyRangeSearch();
+	shards.updateRemoteOnlyRange(witness, witness.keys, {});
+	ASSERT(!shards.findUnavailableRemoteOnlyRange(isLive).present());
+	ASSERT_EQ(checks, 266);
+	ASSERT(shards.hasUncheckedRemoteOnlyRanges());
+	return Void();
+}
+
 TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/SplitAndMerge") {
 	ShardsAffectedByTeamFailure shards;
 	shards.setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);

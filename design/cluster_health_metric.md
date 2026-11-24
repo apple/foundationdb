@@ -81,6 +81,7 @@ Source events from the current data distributor:
 Fields used:
 - `HighestPrimaryTeamPriority`
 - `HighestRemoteTeamPriority`
+- `RemoteOnlyShardUnavailable` when reported by the data distributor
 - `HighestTeamPriority` for compatibility with older data distributors
 - `InQueue`
 - `InFlight`
@@ -94,11 +95,13 @@ Behavior:
 - Uses the data distributor's current primary and remote team collections, so the regional roles follow failover.
 - Returns `METRICS_MISSING` if an event contains only one of the two regional priority fields.
 - Returns `OUTAGE` if a team in the primary region has no replicas left, even when the remote priority is `-1` (unknown).
+- If the recorded sources of a range recovered without a primary are all down, DD reads its current source assignment from `keyServers`. It reports `OUTAGE` when all assigned sources are known to be down. A repair destination counts once it becomes an assigned source.
+- DD checks recovered source teams in bounded batches and verifies at most one suspect interval per sample. It reports `METRICS_MISSING` when the lookup times out, source status is unknown, or other suspect intervals still need verification.
 - Otherwise, returns `METRICS_MISSING` if a required team summary is unknown. A database with one region treats the absent remote region as healthy.
 - Returns `CRITICAL_INTERVENTION_REQUIRED` if a team in the remote region has no replicas left. It also returns this level if a team in either region has one replica left and the configured storage team size is 3.
 - Returns `SELF_HEALING` if a team is unhealthy or data movement is queued or in flight to restore replication.
 - Returns `HEALTHY` otherwise.
-- During an upgrade, an older data distributor's combined `HighestTeamPriority` retains the existing conservative scoring because it cannot identify the affected region.
+- During an upgrade, regional priorities without `RemoteOnlyShardUnavailable` retain regional scoring. An older data distributor's combined `HighestTeamPriority` retains the existing conservative scoring because it cannot identify the affected region.
 
 ### `RecoveryState`
 

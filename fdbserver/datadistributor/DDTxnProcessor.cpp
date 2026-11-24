@@ -123,29 +123,32 @@ class DDTxnProcessorImpl {
 	}
 
 	static Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(Database cx,
-	                                                                                                KeyRangeRef range) {
+	                                                                                                KeyRange range,
+	                                                                                                int rowLimit) {
+		ASSERT(rowLimit == 0 || rowLimit >= 2);
 		std::vector<IDDTxnProcessor::DDRangeLocations> res;
 		Transaction tr(cx);
-		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 		while (true) {
 			res.clear();
 			Error err;
 			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				RangeResult shards = co_await krmGetRanges(&tr,
 				                                           keyServersPrefix,
 				                                           range,
-				                                           SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+				                                           rowLimit ? rowLimit : SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
 				                                           SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
 				ASSERT(!shards.empty());
 
 				RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-				int i = 0;
-				for (i = 0; i < shards.size() - 1; ++i) {
+				// A final page can contain an extra synthetic end row. Keep the caller's interval bound.
+				const int ranges = rowLimit ? std::min(shards.size() - 1, rowLimit - 1) : shards.size() - 1;
+				for (int i = 0; i < ranges; ++i) {
 					std::vector<UID> src;
 					std::vector<UID> dest;
 					UID srcId, destId;
@@ -1368,8 +1371,9 @@ Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(
 }
 
 Future<std::vector<IDDTxnProcessor::DDRangeLocations>> DDTxnProcessor::getSourceServerInterfacesForRange(
-    const KeyRangeRef range) {
-	return DDTxnProcessorImpl::getSourceServerInterfacesForRange(cx, range);
+    const KeyRangeRef range,
+    int rowLimit) {
+	return DDTxnProcessorImpl::getSourceServerInterfacesForRange(cx, range, rowLimit);
 }
 
 Future<ServerWorkerInfos> DDTxnProcessor::getServerListAndProcessClasses() {

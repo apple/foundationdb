@@ -60,7 +60,9 @@ public:
 	// get the source server list and complete source server list for range
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 
-	virtual Future<std::vector<DDRangeLocations>> getSourceServerInterfacesForRange(const KeyRangeRef range) {
+	// With a row limit of 2, return only the first shard interval in the requested range.
+	virtual Future<std::vector<DDRangeLocations>> getSourceServerInterfacesForRange(const KeyRangeRef range,
+	                                                                                int rowLimit = 0) {
 		return std::vector<DDRangeLocations>();
 	}
 
@@ -162,8 +164,8 @@ public:
 
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
 
-	Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(
-	    const KeyRangeRef range) override;
+	Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(const KeyRangeRef range,
+	                                                                                         int rowLimit = 0) override;
 
 	// Call NativeAPI implementation directly
 	Future<ServerWorkerInfos> getServerListAndProcessClasses() override;

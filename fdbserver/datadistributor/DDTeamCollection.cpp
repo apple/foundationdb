@@ -2033,7 +2033,7 @@ public:
 				}
 			}
 
-			self->server_status.set(interf.id(), *status);
+			self->setServerStatus(interf.id(), *status);
 			if (status->isFailed) {
 				TraceEvent("RestartRecruiting", self->distributorId)
 				    .detail("FailedServerID", interf.id())
@@ -3597,7 +3597,6 @@ public:
 	                        Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
 	                        DDEnabledState const* ddEnabledState) {
 		DDTeamCollection* self = teamCollection.getPtr();
-		Future<Void> loggingTrigger = Void();
 		PromiseStream<Void> serverRemoved;
 		Future<Void> error = actorCollection(self->addActor.getFuture());
 
@@ -3647,6 +3646,7 @@ public:
 			self->addActor.send(self->waitHealthyZoneChange());
 			self->addActor.send(self->monitorPerpetualStorageWiggle());
 			// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
+			Future<int> loggingTrigger = self->sampleRemoteOnlyShardAvailability(0);
 
 			while (true) {
 				auto res =
@@ -3699,6 +3699,7 @@ public:
 					    .detail("HighestTeamPriority", highestTeamPriority)
 					    .detail("HighestPrimaryTeamPriority", highestPrimaryTeamPriority)
 					    .detail("HighestRemoteTeamPriority", highestRemoteTeamPriority)
+					    .detail("RemoteOnlyShardUnavailable", std::get<3>(res))
 					    .trackLatest(self->primary ? "TotalDataInFlight"
 					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest
 					                                                             // lifetime is controlled by
@@ -3707,7 +3708,8 @@ public:
 					// The track latest key we use here must match the key used in
 					// the holder.
 
-					loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
+					loggingTrigger =
+					    self->sampleRemoteOnlyShardAvailability(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL);
 				}
 			}
 		} catch (Error& e) {
@@ -4678,6 +4680,81 @@ int DDTeamCollection::getHighestTeamPriority(IsPrimary primaryRegion) const {
 		highestPriority = std::max(highestPriority, collectionPriority);
 	}
 	return foundRegion || (!primaryRegion && configuration.usableRegions <= 1) ? highestPriority : -1;
+}
+
+void DDTeamCollection::setServerStatus(UID id, const ServerStatus& status) {
+	if (status.isFailed && !server_status.get(id).isFailed) {
+		shardsAffectedByTeamFailure->resetRemoteOnlyRangeSearch();
+	}
+	server_status.set(id, status);
+}
+
+Future<int> DDTeamCollection::checkRemoteOnlyShardAvailability() {
+	auto sourceIsLive = [this](UID id) {
+		return std::any_of(teamCollections.begin(), teamCollections.end(), [&](const auto* collection) {
+			return collection && !collection->server_status.get(id).isFailed;
+		});
+	};
+	auto candidate = shardsAffectedByTeamFailure->findUnavailableRemoteOnlyRange(sourceIsLive);
+	if (!candidate.present()) {
+		co_return shardsAffectedByTeamFailure->hasUncheckedRemoteOnlyRanges() ? -1 : 0;
+	}
+	// Moves can commit after their actor is cancelled. Read one committed keyServers interval per sample.
+	auto locations = co_await db->getSourceServerInterfacesForRange(candidate->keys, /*rowLimit=*/2);
+	if (locations.empty() || !locations.front().range.contains(candidate->keys.begin)) {
+		co_return -1;
+	}
+	const auto& location = locations.front();
+	bool hasLiveSource = false;
+	bool hasLivePrimary = false;
+	bool unknownSource = false;
+	std::vector<UID> sources;
+	for (const auto& [dc, servers] : location.servers) {
+		for (const auto& server : servers) {
+			UID id = server.id();
+			sources.push_back(id);
+			hasLiveSource |= sourceIsLive(id);
+			hasLivePrimary |= !server_status.get(id).isFailed;
+			unknownSource |= std::none_of(teamCollections.begin(), teamCollections.end(), [&](const auto* collection) {
+				return collection && collection->server_status.get(id).initialized;
+			});
+		}
+	}
+	if (!hasLiveSource) {
+		co_return unknownSource || sources.empty() ? -1 : 1;
+	}
+	// A two-step move can publish one primary before the rest of its team. Keep watching
+	// those sources until an ordinary primary team tracker covers the assignment.
+	if (hasLivePrimary && findTeamFromServers(sources, /*wantHealthy=*/false).present()) {
+		sources.clear();
+	}
+	shardsAffectedByTeamFailure->updateRemoteOnlyRange(*candidate, location.range, std::move(sources));
+	// Resume at the next suspect interval on the next sample. Never infer availability from a partial check.
+	auto next = shardsAffectedByTeamFailure->findUnavailableRemoteOnlyRange(sourceIsLive);
+	co_return next.present() || shardsAffectedByTeamFailure->hasUncheckedRemoteOnlyRanges() ? -1 : 0;
+}
+
+Future<int> DDTeamCollection::sampleRemoteOnlyShardAvailability(double delaySeconds) {
+	if (delaySeconds > 0) {
+		co_await delay(delaySeconds, TaskPriority::FlushTrace);
+	}
+	if (!shardsAffectedByTeamFailure->hasRemoteOnlyRanges()) {
+		co_return 0;
+	}
+	if (!primary || getHighestTeamPriority(IsPrimary::True) < 0 || getHighestTeamPriority(IsPrimary::False) < 0) {
+		co_return -1;
+	}
+	try {
+		auto result =
+		    co_await timeout(checkRemoteOnlyShardAvailability(), SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL);
+		co_return result.orDefault(-1);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		TraceEvent(SevWarn, "RemoteOnlyShardLocationError", distributorId).errorUnsuppressed(e);
+		co_return -1;
+	}
 }
 
 bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>>& team, int amount) const {
@@ -6374,7 +6451,7 @@ void DDTeamCollection::removeServer(UID removedServer) {
 	if (server_status.get(removedServer).initialized && server_status.get(removedServer).isUnhealthy()) {
 		unhealthyServers--;
 	}
-	server_status.clear(removedServer);
+	setServerStatus(removedServer, ServerStatus());
 
 	// FIXME: add remove support to localitySet so we do not have to recreate it
 	resetLocalitySet();
@@ -6505,6 +6582,18 @@ public:
 		return serverListReplies.back().getFuture();
 	}
 
+	Future<std::vector<DDRangeLocations>> getSourceServerInterfacesForRange(KeyRangeRef keys, int rowLimit) override {
+		++sourceLookups;
+		ASSERT_EQ(rowLimit, 2);
+		if (location.present()) {
+			ASSERT(location->range.contains(keys.begin));
+			return std::vector<DDRangeLocations>{ *location };
+		}
+		return std::vector<DDRangeLocations>{};
+	}
+	Optional<DDRangeLocations> location;
+	int sourceLookups = 0;
+
 	int getDataRemovalCheckCount() const { return dataRemovalCheckCount; }
 
 	int getServerListFetchCount() const { return static_cast<int>(serverListReplies.size()); }
@@ -6615,6 +6704,74 @@ public:
 		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::False), -1);
 		primary->configuration.usableRegions = 1;
 		ASSERT_EQ(primary->getHighestTeamPriority(IsPrimary::False), 0);
+		primary->teamCollections.clear();
+	}
+
+	static Future<Void> RemoteOnlyShardAvailability() {
+		auto shards = makeReference<ShardsAffectedByTeamFailure>();
+		auto primary = testTeamCollection(1, makeReference<PolicyOne>(), 1, shards);
+		auto remote = testTeamCollection(1, makeReference<PolicyOne>(), 0, shards);
+		remote->primary = false;
+		primary->teamCollections = { primary.get(), remote.get() };
+		auto processor = makeReference<DDTeamCollectionTestTxnProcessor>(primary->db->context());
+		primary->db = processor;
+		StorageServerInterface primaryServer, remoteServer, otherRemote;
+		primaryServer.uniqueID = UID(1, 0);
+		remoteServer.uniqueID = UID(2, 0);
+		otherRemote.uniqueID = UID(3, 0);
+		const KeyRange keys = KeyRangeRef("a"_sr, "m"_sr);
+		const ServerStatus live(LocalityData{});
+		const ServerStatus failed(IsFailed::True, IsUndesired::False, IsWiggling::False, LocalityData{});
+		primary->setServerStatus(primaryServer.id(), live);
+		primary->addTeam(std::vector<UID>{ primaryServer.id() }, IsInitialTeam::True);
+		remote->setServerStatus(remoteServer.id(), live);
+		remote->setServerStatus(otherRemote.id(), failed);
+		shards->trackRemoteOnlyRange(keys, { remoteServer.id() });
+		auto setLocations = [&](KeyRangeRef range, std::vector<StorageServerInterface> servers) {
+			IDDTxnProcessor::DDRangeLocations location(range);
+			location.servers["dc"] = std::move(servers);
+			processor->location = std::move(location);
+		};
+		int unavailable = co_await primary->checkRemoteOnlyShardAvailability();
+		ASSERT_EQ(unavailable, 0);
+		ASSERT_EQ(processor->sourceLookups, 0);
+
+		// Choosing a primary destination leaves the remote source as the only location returned to readers.
+		shards->assignRangeToTeams(keys, { { {}, true }, { { remoteServer.id() }, false } });
+		shards->moveShard(keys, { { { primaryServer.id() }, true }, { { otherRemote.id() }, false } });
+		remote->setServerStatus(remoteServer.id(), failed);
+		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
+		ASSERT_EQ(unavailable, -1);
+		setLocations(keys, { remoteServer });
+		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
+		ASSERT_EQ(unavailable, 1);
+
+		// A live partial primary copy serves reads, but its failure can still remove the last copy.
+		StorageServerInterface partialPrimary;
+		partialPrimary.uniqueID = UID(4, 0);
+		primary->setServerStatus(partialPrimary.id(), live);
+		setLocations(keys, { partialPrimary, remoteServer });
+		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
+		ASSERT_EQ(unavailable, 0);
+		primary->setServerStatus(partialPrimary.id(), failed);
+		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
+		ASSERT_EQ(unavailable, 1);
+
+		// A committed repair is visible even if the move actor missed its acknowledgement. A split
+		// requires a separate check for its suffix.
+		setLocations(KeyRangeRef(keys.begin, "g"_sr), { primaryServer, otherRemote });
+		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
+		ASSERT_EQ(unavailable, -1);
+		setLocations(KeyRangeRef("g"_sr, keys.end), { remoteServer });
+		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
+		ASSERT_EQ(unavailable, 1);
+		setLocations(keys, { primaryServer, otherRemote });
+		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
+		ASSERT_EQ(unavailable, 0);
+		ASSERT_EQ(processor->sourceLookups, 7);
+		unavailable = co_await primary->checkRemoteOnlyShardAvailability();
+		ASSERT_EQ(unavailable, 0);
+		ASSERT_EQ(processor->sourceLookups, 7);
 		primary->teamCollections.clear();
 	}
 
@@ -7920,6 +8077,10 @@ TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
 TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
 	DDTeamCollectionUnitTest::AddAllTeams_withLimit();
 	co_return;
+}
+
+TEST_CASE("/DataDistribution/RemoteOnlyShardAvailability") {
+	co_await DDTeamCollectionUnitTest::RemoteOnlyShardAvailability();
 }
 
 TEST_CASE("/DataDistribution/HighestTeamPriorityByRegion") {
