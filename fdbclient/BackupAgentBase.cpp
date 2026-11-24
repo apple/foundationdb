@@ -284,7 +284,8 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 				}
 				auto logs = co_await config.getStatusLogProgress(tr, state);
 				ASSERT(logs.type == MutationLogType::DEFAULT && logs.logDispatchCursor == 121);
-				ASSERT(logs.restorePointUnknown && !logs.exclusiveLogEnd.present() && !logs.restorable.present());
+				ASSERT(logs.restorePointUnknown == logsOnly && !logs.exclusiveLogEnd.present() &&
+				       !logs.restorable.present());
 				auto v1 = co_await config.getStatusLogProgress(tr, state, BackupStatusSchema::V1);
 				ASSERT(v1.exclusiveLogEnd == 121 && v1.restorable.present() == logsOnly);
 				if (logsOnly) {
@@ -353,6 +354,141 @@ TEST_CASE("/backup/status/ordinaryLogDispatch") {
 	ASSERT(logs.exclusiveLogEnd == 170 && !logs.restorePointUnknown && logs.restorable == 169);
 	ASSERT((co_await container->getRestoreSet(169)).present());
 	co_await container->deleteContainer();
+}
+
+TEST_CASE("/backup/status/independentSnapshots") {
+	Database db = DatabaseContext::create(
+	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
+	auto tr = makeReference<ReadYourWritesTransaction>(db);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	BackupConfig config(UID(1, 2));
+	config.clear(tr);
+	auto status = [&](EBackupState state = EBackupState::STATE_RUNNING) {
+		return config.getStatusLogProgress(tr, state);
+	};
+
+	for (bool explicitDefault : { false, true }) {
+		if (explicitDefault) {
+			config.mutationLogType().set(tr, MutationLogType::DEFAULT);
+		}
+		config.incrementalBackupOnly().set(tr, true);
+		auto logs = co_await status();
+		ASSERT(!logs.restorable.present() && !logs.restorePointUnknown && !logs.exclusiveLogEnd.present());
+	}
+	config.incrementalBackupOnly().set(tr, false);
+	config.snapshotBeginVersion().set(tr, 125);
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	auto container = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await container->create();
+	Standalone<VectorRef<KeyRangeRef>> filter;
+	filter.push_back_deep(filter.arena(), KeyRangeRef("a"_sr, "z"_sr));
+	auto range = co_await container->writeRangeFile(125, 0, 155, 1024);
+	co_await range->finish();
+	config.snapshotRangeFileMap().set(tr, "z"_sr, { "a"_sr, 155, range->getFileName(), range->size() });
+	ASSERT(!(co_await container->getRestoreSet(155, filter)).present());
+	auto logs = co_await status();
+	ASSERT(logs.restorePointUnknown && !logs.restorable.present());
+
+	// Publication and the first range completion marker are separate operations. Aborting
+	// between them leaves the same database records and a snapshot that passes restore preflight.
+	std::vector<std::string> files{ range->getFileName() };
+	std::vector<std::pair<Key, Key>> ranges{ { "a"_sr, "z"_sr } };
+	co_await container->writeKeyspaceSnapshotFile(files, ranges, 0, IncludeKeyRangeMap::True);
+	auto set = co_await container->getRestoreSet(155, filter);
+	ASSERT(set.present() && set.get().ranges.size() == 1 && set.get().logs.empty());
+	logs = co_await status(EBackupState::STATE_ABORTED);
+	ASSERT(logs.restorePointUnknown && !logs.restorable.present() && !logs.exclusiveLogEnd.present());
+	auto file = co_await container->writeLogFile(121, 150, 1024);
+	co_await file->finish();
+	config.latestLogEndVersion().set(tr, 150);
+	logs = co_await status(EBackupState::STATE_ABORTED);
+	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorePointUnknown && !logs.restorable.present());
+
+	// The range writer finishes first in BOTH. The bulk job has not published anything.
+	config.snapshotMode().set(tr, static_cast<int>(SnapshotMode::BOTH));
+	config.firstSnapshotEndVersion().set(tr, 155);
+	config.latestSnapshotEndVersion().set(tr, 155);
+	logs = co_await status();
+	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorePointUnknown && !logs.restorable.present());
+	ASSERT((co_await container->getRestoreSet(155, filter)).present());
+	auto next = co_await container->writeLogFile(150, 170, 1024);
+	co_await next->finish();
+	config.latestLogEndVersion().set(tr, 170);
+	logs = co_await status();
+	ASSERT(logs.exclusiveLogEnd == 170 && logs.restorable == 169 && !logs.restorePointUnknown);
+	ASSERT((co_await container->getRestoreSet(169, filter)).present());
+	auto v1 = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING, BackupStatusSchema::V1);
+	ASSERT(!v1.restorable.present() && !v1.restorePointUnknown);
+
+	config.mutationLogType().clear(tr);
+	logs = co_await status();
+	ASSERT(logs.exclusiveLogEnd == 170 && logs.restorable == 169 && !logs.restorePointUnknown);
+	// After rotation the shared end of an older BOTH writer can look like a range marker.
+	config.snapshotBeginVersion().set(tr, 180);
+	logs = co_await status();
+	ASSERT(logs.exclusiveLogEnd == 170 && logs.restorePointUnknown && !logs.restorable.present());
+	co_await container->deleteContainer();
+
+	// The bulk writer publishes its single-version manifest with the job ID and no range files.
+	auto bulk = IBackupContainer::openContainer(url + "-bulk", {}, {}, 0);
+	co_await bulk->create();
+	std::string jobId = UID(3, 4).toString();
+	auto metadata = SnapshotMetadata::bulkDump(jobId, 121, 0, 0);
+	co_await bulk->writeKeyspaceSnapshotFile({}, ranges, 0, IncludeKeyRangeMap::False, metadata);
+	set = co_await bulk->getRestoreSet(121, filter);
+	ASSERT(set.present() && set.get().ranges.empty() && set.get().logs.empty());
+	config.clear(tr);
+	config.mutationLogType().set(tr, MutationLogType::DEFAULT);
+	config.snapshotBeginVersion().set(tr, 125);
+	for (auto mode : { SnapshotMode::BULKDUMP, SnapshotMode::BOTH }) {
+		config.snapshotMode().set(tr, static_cast<int>(mode));
+		config.latestLogEndVersion().clear(tr);
+		config.firstSnapshotEndVersion().clear(tr);
+		config.bulkDumpSnapshotEndVersion().clear(tr);
+		config.bulkDumpJobId().clear(tr);
+		logs = co_await status(EBackupState::STATE_ABORTED);
+		ASSERT(logs.restorePointUnknown && !logs.restorable.present());
+
+		config.bulkDumpSnapshotEndVersion().set(tr, 121);
+		config.latestSnapshotEndVersion().set(tr, 121);
+		config.bulkDumpJobId().set(tr, jobId);
+		if (mode == SnapshotMode::BULKDUMP) {
+			config.firstSnapshotEndVersion().set(tr, 121);
+		}
+		logs = co_await status();
+		ASSERT(logs.restorePointUnknown && !logs.restorable.present() && !logs.logDispatchCursor.present());
+		config.latestLogEndVersion().set(tr, 121);
+		logs = co_await status();
+		ASSERT(logs.logDispatchCursor == 121 && logs.restorePointUnknown && !logs.restorable.present());
+		config.latestLogEndVersion().set(tr, 150);
+		logs = co_await status();
+		ASSERT(logs.exclusiveLogEnd == 150 && logs.restorePointUnknown && !logs.restorable.present());
+	}
+
+	// A subsequent range snapshot has its own end. The earlier bulk marker cannot supply
+	// the missing logs for a multiversion range snapshot.
+	auto early = co_await bulk->writeRangeFile(125, 0, 135, 1024);
+	auto late = co_await bulk->writeRangeFile(125, 1, 155, 1024);
+	auto bulkLogs = co_await bulk->writeLogFile(121, 150, 1024);
+	co_await (early->finish() && late->finish() && bulkLogs->finish());
+	files = { early->getFileName(), late->getFileName() };
+	ranges = { { "a"_sr, "m"_sr }, { "m"_sr, "z"_sr } };
+	co_await bulk->writeKeyspaceSnapshotFile(files, ranges, 0, IncludeKeyRangeMap::True);
+	config.firstSnapshotEndVersion().set(tr, 155);
+	config.latestSnapshotEndVersion().set(tr, 155);
+	config.snapshotBeginVersion().set(tr, 160);
+	logs = co_await status();
+	ASSERT(logs.exclusiveLogEnd == 150 && logs.restorePointUnknown && !logs.restorable.present());
+	v1 = co_await config.getStatusLogProgress(tr, EBackupState::STATE_RUNNING, BackupStatusSchema::V1);
+	ASSERT(v1.restorable == 149);
+	auto finalLogs = co_await bulk->writeLogFile(150, 170, 1024);
+	co_await finalLogs->finish();
+	set = co_await bulk->getRestoreSet(169, filter);
+	ASSERT(set.present() && set.get().ranges.size() == 2 && set.get().logs.size() == 2);
+	config.latestLogEndVersion().set(tr, 170);
+	logs = co_await status();
+	ASSERT(logs.exclusiveLogEnd == 170 && logs.restorable == 169 && !logs.restorePointUnknown);
+	co_await bulk->deleteContainer();
 }
 
 TEST_CASE("/backup/status/legacyPartitionedLog") {

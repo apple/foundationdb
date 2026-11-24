@@ -395,9 +395,34 @@ These counters do not show whether each partition saved files covering the entir
 When the database cannot establish a restore point, schema 2 reports ``RestorePointStatus`` as ``unknown`` and omits ``Restorable`` and ``LatestRestorablePoint``.
 ``LogDispatchCursor`` shows where the log dispatcher has advanced. A dispatcher can advance while it waits for workers.
 An ordinary backup publishes its first dispatch cursor before it copies any logs. A logs-only backup can even complete at this cursor.
-Text and schema 2 show the cursor and leave the restore point unknown until the dispatcher has advanced past its starting position.
-A completed range snapshot can restore without logs if all its files have the same version.
-If the logs have not passed the snapshot end, status can show a confirmed log end and still report an unknown restore point.
+For an ordinary backup, status uses the following database evidence. It does not read the backup container.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Backup evidence
+     - Restore point in text and schema 2
+   * - Logs-only backup, before the first dispatch
+     - None
+   * - Logs-only backup, first cursor recorded but no copy confirmed
+     - Unknown
+   * - Logs-only backup with a confirmed exclusive log end
+     - The log end minus one, for an incremental restore
+   * - Identified range snapshot with a confirmed exclusive log end past its last range file
+     - The log end minus one, including when a bulk dump is still pending
+   * - Newly submitted full backup, or a rangefile-only backup with no first snapshot marker and no recorded range files
+     - None
+   * - Other snapshot evidence, including a possible SST snapshot
+     - Unknown
+
+The range and bulk tasks publish their manifests independently.
+Some older combined-mode writers used the same completion marker for both formats.
+If snapshot rotation leaves the format ambiguous, status reports an unknown restore point and retains the confirmed log end.
+A range snapshot taken at one version can restore at that version without logs.
+The database records the end of the snapshot and can also retain range-file records if a backup stops after publication but before recording the end.
+For a bulk dump, the manifest records the backup start version. Individual SST batches can contain data read at later versions.
+Text and schema 2 show the recorded bulk dump job ID when available.
+In these cases, status can report an unknown restore point alongside a confirmed log end.
 
 Existing clients can continue to use ``--json`` for schema 1. Its ``Restorable`` Boolean and version fields retain their historical metadata-based calculation.
 
