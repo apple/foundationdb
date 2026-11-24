@@ -315,6 +315,40 @@ uint64_t AccumulativeChecksumValidator::getAndClearTotalAddedMutations() {
 	return res;
 }
 
+TEST_CASE("/fdbserver/AccumulativeChecksum/TruncatedMutationTrailer") {
+	for (bool withIndex : { false, true }) {
+		uint8_t type = MutationRef().createTypeWithChecksum(MutationRef::SetValue);
+		if (withIndex) {
+			type = MutationRef().createTypeWithAccumulativeChecksumIndex(type);
+		}
+		const int trailerSize = sizeof(uint32_t) + (withIndex ? sizeof(uint16_t) : 0);
+		for (int size = 0; size < trailerSize; ++size) {
+			BinaryWriter writer(Unversioned());
+			writer << type << "key"_sr << "000000"_sr.substr(0, size);
+			auto record = writer.toValue();
+			ArenaReader reader(record.arena(), record, AssumeVersion(ProtocolVersion::withMutationChecksum()));
+			MutationRef mutation;
+			try {
+				reader >> mutation;
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT(e.code() == error_code_serialization_failed);
+			}
+		}
+		// An empty SetValue has checksum zero. Its trailer may occupy all of param2.
+		BinaryWriter writer(Unversioned());
+		writer << type << ""_sr << "\x00\x00\x00\x00\x00\x00"_sr.substr(0, trailerSize);
+		auto record = writer.toValue();
+		ArenaReader reader(record.arena(), record, AssumeVersion(ProtocolVersion::withMutationChecksum()));
+		MutationRef mutation;
+		reader >> mutation;
+		ASSERT(!mutation.corrupted && mutation.type == MutationRef::SetValue && mutation.param2.empty());
+		ASSERT(mutation.checksum.present() && mutation.checksum.get() == 0);
+		ASSERT(mutation.accumulativeChecksumIndex.present() == withIndex);
+	}
+	return Void();
+}
+
 TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
 	printf("testing MutationRef encoding/decoding\n");
 	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
