@@ -218,8 +218,8 @@ std::vector<KeyRange> ShardsAffectedByTeamFailure::cancelMove(KeyRangeRef keys,
 		it->value().first = replacementTeams;
 		if (retainedTeams.empty()) {
 			it->value().second.clear();
+			restoredRanges.push_back(range);
 		}
-		restoredRanges.push_back(range);
 	}
 	check();
 	return restoredRanges;
