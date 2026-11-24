@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from argparse import ArgumentParser
+from pathlib import Path
 from .TestDirectory import TestDirectory
 
 import logging
@@ -326,6 +327,9 @@ class RestartTestPolicy:
         if old_binary is None:
             _logger.info("No old binary provided")
             return
+        # The phases run in a different directory. Keep bare names on PATH.
+        if os.path.dirname(old_binary) and not os.path.isabs(old_binary):
+            old_binary = str(Path(old_binary).absolute())
         old_binary_version_raw = subprocess.check_output(
             [old_binary, "--version"]
         ).decode("utf-8")
