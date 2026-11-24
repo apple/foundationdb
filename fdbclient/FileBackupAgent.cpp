@@ -808,6 +808,10 @@ Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulk
 // outside isRunnable(), which makes abortRestore() return before reaching its unlockDatabase() call -- so
 // this must release the lock itself, or a failed restore leaves the database locked with no route out
 // through the restore API. The commit retries because an unpersisted ABORTED loses both properties.
+//
+// The restore's queued tasks are dropped only when the tag's aborted flag is set, which is what
+// abortRestore() does for a runnable restore. ABORTED alone leaves them valid, so the task bucket re-runs the
+// failed bulkload task, resubmitting the job over and over.
 Future<Void> abortBulkLoadRestore(Database cx, RestoreConfig restore, std::string message) {
 	co_await restore.logError(cx, restore_bulkload_failed(), message);
 	auto abortTr = makeReference<ReadYourWritesTransaction>(cx);
@@ -818,6 +822,8 @@ Future<Void> abortBulkLoadRestore(Database cx, RestoreConfig restore, std::strin
 			abortTr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			restore.stateEnum().set(abortTr, ERestoreState::ABORTED);
 			restore.clearApplyMutationsKeys(abortTr);
+			std::string tagName = co_await restore.tag().getD(abortTr);
+			co_await makeRestoreTag(tagName).cancel(abortTr);
 			bool unlockDB = co_await restore.unlockDBAfterRestore().getD(abortTr, Snapshot::False, true);
 			if (unlockDB) {
 				co_await unlockDatabase(abortTr, restore.getUid());

@@ -1172,6 +1172,19 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						    co_await backupAgent.waitRestore(cx, restoreTag, Verbose::False);
 						ASSERT(finalState == FileBackupAgent::ERestoreState::ABORTED);
 
+						// The tag's aborted flag is what drops the restore's queued tasks. Without it the task
+						// bucket keeps re-running the failed bulkload task, resubmitting the job.
+						Optional<UidAndAbortedFlagT> tagState = co_await runRYWTransaction(
+						    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<UidAndAbortedFlagT>> {
+							    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							    return makeRestoreTag(restoreTag.toString()).get(tr);
+						    });
+						TraceEvent("BS3BCW_TagStateAfterFailedRestore")
+						    .detail("TagPresent", tagState.present())
+						    .detail("Aborted", tagState.present() ? tagState.get().second : false);
+						ASSERT(tagState.present() && tagState.get().second);
+
 						// The failure must leave the database usable. ABORTED puts the restore outside
 						// isRunnable(), so abortRestore() returns before its own unlockDatabase() and the abort
 						// path has to release the lock itself. Assert on the lock key: unlockDatabase() returns
