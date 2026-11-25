@@ -183,6 +183,8 @@ private:
 	void insert(Entry entry);
 	void erase(std::optional<KeyRangeRef> range = std::nullopt);
 	bool applyHistory(const std::vector<VersionHistory>& history, Optional<Version> snapshotMarker);
+	static bool couldBeLegacyProfilingWrite(const VectorRef<MutationRef>& mutations);
+	static bool snapshotMatchesHistory(const RangeResultRef& rows, const std::vector<VersionHistory>& history);
 
 	Future<GlobalConfigRefreshReply> getSnapshot(const ClientDBInfo* dbInfo, Version lastKnown);
 	Future<Void> updater(const ClientDBInfo* dbInfo);
