@@ -185,7 +185,7 @@ void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageSe
 void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 	auto result = tssMapping.find(ssi.id());
 	if (result != tssMapping.end()) {
-		tssMetrics.erase(ssi.id());
+		tssMetrics.erase(result->second.id());
 		tssMapping.erase(result);
 		queueModel.removeTssEndpoint(ssi.getValue.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKey.getEndpoint().token.first());
