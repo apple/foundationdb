@@ -175,30 +175,32 @@ struct TagsAndMessage {
 	// T can be ArenaReader or BinaryReader.
 	template <class T>
 	void loadFromArena(T* rd, uint32_t* messageVersionSub) {
+		// Wire layout: [body length][subsequence][tag count][tags][payload].
+		// The body length excludes the length field itself.
 		const int32_t fixedHeaderSize = getHeaderSize(0);
 		if (rd->remainingBytes() < fixedHeaderSize) {
 			throw serialization_failed();
 		}
 		const auto* raw = static_cast<const uint8_t*>(rd->peekBytes(fixedHeaderSize));
-		int32_t messageLength;
-		memcpy(&messageLength, raw, sizeof(messageLength));
-		const int64_t rawLength = int64_t(messageLength) + int32_t(sizeof(messageLength));
-		if (rawLength < fixedHeaderSize || rawLength > std::numeric_limits<int32_t>::max() ||
-		    rawLength > rd->remainingBytes()) {
+		int32_t bodyLength;
+		memcpy(&bodyLength, raw, sizeof(bodyLength));
+		const int64_t recordLength = int64_t(bodyLength) + int32_t(sizeof(bodyLength));
+		if (recordLength < fixedHeaderSize || recordLength > std::numeric_limits<int32_t>::max() ||
+		    recordLength > rd->remainingBytes()) {
 			throw serialization_failed();
 		}
 		uint16_t tagCount;
 		memcpy(&tagCount, raw + fixedHeaderSize - sizeof(tagCount), sizeof(tagCount));
-		if (getHeaderSize(tagCount) > rawLength) {
+		if (getHeaderSize(tagCount) > recordLength) {
 			throw serialization_failed();
 		}
 
 		rd->checkpoint();
-		rd->readBytes(rawLength);
-		message = StringRef(raw, rawLength);
+		rd->readBytes(recordLength);
+		message = StringRef(raw, recordLength);
 		tags = VectorRef<Tag>((Tag*)(raw + fixedHeaderSize), tagCount);
 		if (messageVersionSub) {
-			memcpy(messageVersionSub, raw + sizeof(messageLength), sizeof(*messageVersionSub));
+			memcpy(messageVersionSub, raw + sizeof(bodyLength), sizeof(*messageVersionSub));
 		}
 	}
 
