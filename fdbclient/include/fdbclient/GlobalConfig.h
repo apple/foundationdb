@@ -181,12 +181,11 @@ private:
 	static Entry decode(KeyRef key, ValueRef value);
 	using ConfigData = std::unordered_map<KeyRef, Reference<const ConfigValue>>;
 	void notify(KeyRef key, const Reference<const ConfigValue>& value = {});
-	bool replay(const std::vector<VersionHistory>& history, Version after, ConfigData* snapshot = nullptr);
 	bool applyHistory(const std::vector<VersionHistory>& history, Optional<Version> snapshotMarker);
-	static bool couldBeLegacyProfilingWrite(const VectorRef<MutationRef>& mutations);
 	static bool snapshotMatchesFinalMutations(const RangeResultRef& rows, const VectorRef<MutationRef>& mutations);
 
-	Future<Version> getSnapshot(const ClientDBInfo* dbInfo, Version lastKnown, ConfigData& snapshot);
+	struct RefreshState;
+	Future<ConfigData> getSnapshot(const ClientDBInfo* dbInfo, Version lastKnown, RefreshState& state);
 	Future<Void> updater(const ClientDBInfo* dbInfo);
 
 	DatabaseContext* cx;

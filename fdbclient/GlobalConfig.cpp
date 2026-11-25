@@ -175,23 +175,11 @@ bool GlobalConfig::applyHistory(const std::vector<VersionHistory>& history, Opti
 	if (latest <= lastUpdate) {
 		return true;
 	}
-	if (!replay(history, lastUpdate)) {
-		return false;
-	}
-	lastUpdate = latest;
-	return true;
-}
-
-bool GlobalConfig::replay(const std::vector<VersionHistory>& history, Version after, ConfigData* snapshot) {
 	// A later unreadable value must not expose earlier mutations through the cache or callbacks.
 	std::vector<std::variant<Entry, KeyRange>> changes;
 	for (const auto& vh : history) {
-		if (vh.version <= after) {
+		if (vh.version <= lastUpdate) {
 			continue;
-		}
-		// A legacy profiling row can omit other settings written in the same transaction.
-		if (snapshot && couldBeLegacyProfilingWrite(vh.mutations)) {
-			return false;
 		}
 		for (const auto& mutation : vh.mutations) {
 			if (!mutation.corrupted && mutation.type == MutationRef::SetValue) {
@@ -208,53 +196,25 @@ bool GlobalConfig::replay(const std::vector<VersionHistory>& history, Version af
 			}
 		}
 	}
-	auto& target = snapshot ? *snapshot : data;
 	for (const auto& change : changes) {
 		if (const auto* entry = std::get_if<Entry>(&change)) {
 			// Replacing only the value would leave the map key pointing into the old arena.
-			target.erase(entry->first);
-			target.insert(*entry);
-			if (!snapshot) {
-				notify(entry->first, entry->second);
-			}
+			data.erase(entry->first);
+			data.insert(*entry);
+			notify(entry->first, entry->second);
 		} else {
 			const auto& range = std::get<KeyRange>(change);
-			std::erase_if(target, [&](const auto& kv) {
+			std::erase_if(data, [&](const auto& kv) {
 				if (!range.contains(kv.first)) {
 					return false;
 				}
-				if (!snapshot) {
-					notify(kv.first);
-				}
+				notify(kv.first);
 				return true;
 			});
 		}
 	}
+	lastUpdate = latest;
 	return true;
-}
-
-bool GlobalConfig::couldBeLegacyProfilingWrite(const VectorRef<MutationRef>& mutations) {
-	if (mutations.size() > 2 || (mutations.size() == 2 && mutations.front().param1 == mutations.back().param1)) {
-		return false;
-	}
-	return std::all_of(mutations.begin(), mutations.end(), [](const MutationRef& m) {
-		if (m.param1 != fdbClientInfoTxnSizeLimit && m.param1 != fdbClientInfoTxnSampleRate) {
-			return false;
-		}
-		if (m.type != MutationRef::SetValue) {
-			return m.type == MutationRef::ClearRange && equalsKeyAfter(m.param1, m.param2);
-		}
-		auto value = decode(m.param1, m.param2).second;
-		if (!value.isValid()) {
-			return false;
-		}
-		if (m.param1 == fdbClientInfoTxnSizeLimit) {
-			const auto* limit = std::any_cast<int64_t>(&value->getValue());
-			return limit && Tuple::makeTuple(*limit).pack() == m.param2;
-		}
-		const auto* rate = std::any_cast<double>(&value->getValue());
-		return rate && Tuple::makeTuple(*rate).pack() == m.param2;
-	});
 }
 
 bool GlobalConfig::snapshotMatchesFinalMutations(const RangeResultRef& rows, const VectorRef<MutationRef>& mutations) {
@@ -292,16 +252,44 @@ bool GlobalConfig::snapshotMatchesFinalMutations(const RangeResultRef& rows, con
 	return true;
 }
 
-Future<Version> GlobalConfig::getSnapshot(const ClientDBInfo* dbInfo, Version lastKnown, ConfigData& snapshot) {
+struct GlobalConfig::RefreshState {
+	// A singleton may repeat a damaged stamp. Keep its label separate from the confirmed replay version.
+	Optional<Version> snapshotMarker = MAX_VERSION;
+	// A newer publication arrived during this read. Its missing rows could have changed any setting.
+	Optional<Version> pendingReadVersion;
+};
+
+Future<GlobalConfig::ConfigData> GlobalConfig::getSnapshot(const ClientDBInfo* dbInfo,
+                                                           Version lastKnown,
+                                                           RefreshState& state) {
+	auto publishedVersion = [&] { return dbInfo->history.empty() ? 0 : dbInfo->history.back().version; };
+	auto getReadVersion = [this]() -> Future<Version> {
+		GetReadVersionRequest request({}, 0, TransactionPriority::IMMEDIATE, cx->ssVersionVectorCache.getMaxVersion());
+		auto reply = co_await timeoutError(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
+		                                                    &GrvProxyInterface::getConsistentReadVersion,
+		                                                    request),
+		                                   CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT);
+		co_return reply.version;
+	};
+	Version fence = publishedVersion();
+	Optional<Version> readAfterPublication;
 	Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
 	while (true) {
 		Error err;
 		try {
-			GlobalConfigRefreshReply reply =
-			    co_await timeoutError(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
-			                                           &GrvProxyInterface::refreshGlobalConfig,
-			                                           GlobalConfigRefreshRequest{ lastKnown }),
-			                          CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT);
+			auto response =
+			    co_await errorOr(timeoutError(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
+			                                                   &GrvProxyInterface::refreshGlobalConfig,
+			                                                   GlobalConfigRefreshRequest{ lastKnown }),
+			                                  CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT));
+			if (response.isError()) {
+				if (response.getError().code() == error_code_future_version) {
+					// A repaired stamp can be lower than lastKnown even when the rows are from a newer read.
+					lastKnown = invalidVersion;
+				}
+				throw response.getError();
+			}
+			const auto& reply = response.get();
 			const auto& readVersion = reply.snapshotReadVersion;
 			if (reply.result.more || reply.version == MAX_VERSION ||
 			    (readVersion.present() &&
@@ -313,18 +301,37 @@ Future<Version> GlobalConfig::getSnapshot(const ClientDBInfo* dbInfo, Version la
 				    .detail("More", reply.result.more);
 				throw serialization_failed();
 			}
-			// Check the current publication after each RPC, since the controller can replace it during a retry.
 			const auto& history = dbInfo->history;
-			const Version published = history.empty() ? 0 : history.back().version;
-			// These rows cover every write through their transaction's read version, including a lost history row.
-			const bool catchUp = readVersion.present() && history.size() > 1 &&
-			                     readVersion.get() >= std::max(lastUpdate, history.front().version) &&
-			                     readVersion.get() < published && published != MAX_VERSION;
-			if (!catchUp && (reply.version < lastUpdate ||
-			                 (published != MAX_VERSION && reply.version != std::max(lastUpdate, published)))) {
+			const Version published = publishedVersion();
+			// A repair can lower an impossible target. Healthy writes must not move an outstanding fence forward.
+			if (published < fence) {
+				fence = published;
+				readAfterPublication.reset();
+			}
+			const bool matchesPublication =
+			    reply.version >= lastUpdate &&
+			    (published == MAX_VERSION || reply.version == std::max(lastUpdate, published));
+			const bool coversFence =
+			    readVersion.present() && published != MAX_VERSION && readVersion.get() >= std::max(lastUpdate, fence);
+			const bool advanced = published != MAX_VERSION && published > fence;
+			bool accept = matchesPublication;
+			if (!accept && coversFence) {
+				if (!advanced && !readAfterPublication.present()) {
+					// A repair may restore an old stamp after the proxy cached these rows. A read version
+					// obtained after this publication covers the repair even if the labels never match.
+					readAfterPublication = co_await getReadVersion();
+					if (publishedVersion() != published) {
+						continue;
+					}
+				}
+				accept = advanced || readVersion.get() >= readAfterPublication.get();
+			}
+			if (!accept || (state.pendingReadVersion.present() &&
+			                readVersion.orDefault(reply.version) < state.pendingReadVersion.get())) {
 				TraceEvent("GlobalConfigRefreshVersionMismatch")
 				    .suppressFor(1.0)
 				    .detail("ReplayFloor", lastUpdate)
+				    .detail("RefreshFence", fence)
 				    .detail("PublishedVersion", published)
 				    .detail("ReplyVersion", reply.version);
 				co_await delay(0.25);
@@ -340,35 +347,34 @@ Future<Version> GlobalConfig::getSnapshot(const ClientDBInfo* dbInfo, Version la
 			// key as the proxy. An independent read version can rule out an impossible stamp.
 			if (!readVersion.present() && history.size() == 1 &&
 			    reply.version > std::max(lastUpdate, cx->getCachedReadVersion())) {
-				GetReadVersionRequest getVersion(
-				    {}, 0, TransactionPriority::IMMEDIATE, cx->ssVersionVectorCache.getMaxVersion());
-				auto grv = co_await timeoutError(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
-				                                                  &GrvProxyInterface::getConsistentReadVersion,
-				                                                  getVersion),
-				                                 CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT);
-				if (reply.version > grv.version) {
+				const Version grv = co_await getReadVersion();
+				if (reply.version > grv) {
 					TraceEvent("GlobalConfigRefreshFutureSnapshot")
 					    .suppressFor(1.0)
 					    .detail("ReplyVersion", reply.version)
-					    .detail("ReadVersion", grv.version);
+					    .detail("ReadVersion", grv);
 					throw future_version();
 				}
 				if (history.size() != 1 || history.front().version != published) {
 					continue;
 				}
 			}
-			snapshot.clear();
+			ConfigData snapshot;
 			for (const auto& kv : reply.result) {
 				auto entry = decode(kv.key.removePrefix(globalConfigKeysPrefix), kv.value);
 				if (entry.second.isValid()) {
 					snapshot.insert(std::move(entry));
 				}
 			}
-			if (catchUp && !replay(history, readVersion.get(), &snapshot)) {
-				co_await delay(0.25);
-				continue;
+			state.pendingReadVersion = !matchesPublication && advanced ? readVersion : Optional<Version>();
+			if (matchesPublication && !(history.size() == 1 && reply.version > lastUpdate)) {
+				lastUpdate = reply.version;
+				state.snapshotMarker.reset();
+			} else {
+				// A verified read can supply the rows without confirming its stored label as a replay point.
+				state.snapshotMarker = history.size() == 1 ? published : MAX_VERSION;
 			}
-			co_return catchUp ? published : reply.version;
+			co_return snapshot;
 		} catch (Error& e) {
 			err = e;
 		}
@@ -383,10 +389,7 @@ Future<Version> GlobalConfig::getSnapshot(const ClientDBInfo* dbInfo, Version la
 // process receives an updated history.
 Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 	while (true) {
-		// Even a complete snapshot can contain a damaged, plausible stamp. A controller reading that
-		// same stamp as a single marker cannot confirm its label as a replay floor.
-		// MAX_VERSION requires a fresh snapshot, including on entry after a restart.
-		Optional<Version> snapshotMarker = MAX_VERSION;
+		RefreshState state;
 		Error err;
 		try {
 			co_await cx->onConnected();
@@ -396,17 +399,10 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 				Future<Void> nextDbInfoChange = dbInfoChanged.onTrigger();
 				const bool initializing = initialized.canBeSet();
 				const auto& history = dbInfo->history;
-				if (initializing || (!history.empty() && !applyHistory(history, snapshotMarker))) {
-					ConfigData snapshot;
-					const Version version =
-					    co_await getSnapshot(dbInfo, initializing ? invalidVersion : lastUpdate, snapshot);
-					// getSnapshot checked the latest publication. Watch for any change during callbacks.
+				if (initializing || state.pendingReadVersion.present() ||
+				    (!history.empty() && !applyHistory(history, state.snapshotMarker))) {
+					auto snapshot = co_await getSnapshot(dbInfo, initializing ? invalidVersion : lastUpdate, state);
 					nextDbInfoChange = dbInfoChanged.onTrigger();
-					const bool needsMarker = history.size() == 1 && version > lastUpdate;
-					snapshotMarker = needsMarker ? Optional<Version>(history.front().version) : Optional<Version>();
-					if (!needsMarker) {
-						lastUpdate = version;
-					}
 					data.swap(snapshot);
 					for (const auto& [key, _] : snapshot) {
 						notify(key);
@@ -426,6 +422,9 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 				}
 				if (!dbInfo->history.empty()) {
 					configChanged.trigger();
+				}
+				if (state.pendingReadVersion.present()) {
+					continue;
 				}
 				// In case this actor is canceled in the d'tor of GlobalConfig we can exit here.
 				co_await delay(0);
@@ -778,63 +777,73 @@ TEST_CASE("/fdbclient/GlobalConfig/PublicationChangesDuringLegacyVersionCheck") 
 	ASSERT_EQ(callbacks, 0);
 }
 
-TEST_CASE("/fdbclient/GlobalConfig/VerifiedSnapshotCatchesUpDuringInitialization") {
-	auto enabled = Tuple::makeTuple(true).pack();
-	auto history = publishedChange(40, 41, MutationRef(MutationRef::SetValue, "A"_sr, enabled));
+TEST_CASE("/fdbclient/GlobalConfig/VerifiedSnapshotMakesProgressDuringInitialization") {
+	auto snapshotAt = [](Version version) {
+		RangeResult rows;
+		auto counter = Tuple::makeTuple(version).pack();
+		for (auto key : { "B"_sr, "C"_sr }) {
+			rows.push_back_deep(rows.arena(), KeyValueRef(key.withPrefix(globalConfigKeysPrefix), counter));
+		}
+		return rows;
+	};
+	auto changeAt = [](Version version) {
+		VersionHistory change(version);
+		auto counter = Tuple::makeTuple(version).pack();
+		for (auto key : { "B"_sr, "C"_sr }) {
+			change.mutations.emplace_back_deep(change.mutations.arena(),
+			                                   MutationRef(MutationRef::SetValue, key, counter));
+		}
+		return change;
+	};
+	Version published = 41;
+	std::vector<VersionHistory> history{ VersionHistory(30), changeAt(published) };
+	std::vector<Version> observed;
 	GlobalConfigRefreshTest test(history);
 	auto initialized = test.db->globalConfig->onInitialized();
-	int callbacks = 0;
-	Version published = 41;
-	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any>) { ASSERT(false); });
 	test.db->globalConfig->trigger("B"_sr, [&](std::optional<std::any> value) {
-		if (!value.has_value()) {
-			return;
+		if (value.has_value()) {
+			auto counter = std::any_cast<int64_t>(value.value());
+			ASSERT_EQ(test.db->globalConfig->get<int64_t>("C"_sr, 0), counter);
+			observed.push_back(counter);
 		}
-		ASSERT_EQ(std::any_cast<int64_t>(value.value()), published);
-		ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
-		ASSERT(test.db->globalConfig->get<bool>("C"_sr, false));
-		++callbacks;
 	});
 
-	auto rows = snapshotWithSetting("A"_sr);
 	auto request = co_await test.nextRequest();
-	// Each proxy reply is one healthy transaction behind the publication at the time of delivery.
-	for (Version version = 42; version <= 44; ++version) {
-		auto& change = history.emplace_back(version);
-		auto counter = Tuple::makeTuple(version).pack();
-		change.mutations.emplace_back_deep(change.mutations.arena(),
-		                                   MutationRef(MutationRef::SetValue, "B"_sr, counter));
-		change.mutations.emplace_back_deep(change.mutations.arena(),
-		                                   MutationRef(MutationRef::SetValue, "C"_sr, enabled));
-		change.mutations.emplace_back_deep(change.mutations.arena(),
-		                                   MutationRef(MutationRef::ClearRange, "A"_sr, "B"_sr));
+	for (int attempt = 0; attempt < 4; ++attempt) {
+		// Ordinary transactions advance the database between configuration writes. Every reply arrives
+		// after the controller publishes the next write, even though the proxy read covers the initial one.
+		const Version stamp = published;
+		auto rows = snapshotAt(stamp);
+		published += 10;
+		history.push_back(changeAt(published));
 		if (history.size() > 3) {
 			history.erase(history.begin());
 			history.front() = VersionHistory(history.front().version);
 		}
 		test.publish(history);
-		published = version;
-		request.reply.send(GlobalConfigRefreshReply{ rows.arena(), version - 1, rows, version - 1 });
+		request.reply.send(GlobalConfigRefreshReply{ rows.arena(), stamp, rows, stamp + 4 });
 		auto next = co_await race(test.nextRequest(), initialized);
 		if (next.index() == 1) {
 			break;
 		}
 		request = std::get<0>(next);
-		rows = RangeResult();
-		rows.push_back_deep(rows.arena(), KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), counter));
-		rows.push_back_deep(rows.arena(), snapshotWithSetting("C"_sr)[0]);
 	}
 	ASSERT(initialized.isReady());
-	ASSERT_EQ(published, 42);
-	ASSERT_EQ(callbacks, 1);
-	ASSERT_EQ(test.db->globalConfig->get<int64_t>("B"_sr, 0), 42);
+	ASSERT(!observed.empty());
+	ASSERT_LT(observed.front(), published);
 
-	auto changed = test.publish(publishedChange(42, 45, MutationRef(MutationRef::ClearRange, "B"_sr, "C"_sr)));
-	co_await timeoutError(changed, 5.0);
-	ASSERT(!test.db->globalConfig->get("B"_sr).isValid());
+	// Once writes stop, the last publication must reach the cache without a further DBInfo change.
+	auto latest = snapshotAt(published);
+	for (int attempt = 0; attempt < 4 && test.db->globalConfig->get<int64_t>("B"_sr, 0) != published; ++attempt) {
+		auto next = co_await race(test.nextRequest(), test.db->globalConfig->onChange());
+		if (next.index() == 0) {
+			std::get<0>(next).reply.send(GlobalConfigRefreshReply{ latest.arena(), published, latest, published });
+		}
+	}
+	ASSERT_EQ(observed.back(), published);
 }
 
-TEST_CASE("/fdbclient/GlobalConfig/VerifiedSnapshotReplaysOnlyAfterItsReadVersion") {
+TEST_CASE("/fdbclient/GlobalConfig/VerifiedSnapshotMustCoverRefreshFence") {
 	auto enabled = Tuple::makeTuple(true).pack();
 	auto history = publishedChange(41, 42, MutationRef(MutationRef::SetValue, "A"_sr, enabled));
 	auto& final = history.emplace_back(45);
@@ -844,15 +853,57 @@ TEST_CASE("/fdbclient/GlobalConfig/VerifiedSnapshotReplaysOnlyAfterItsReadVersio
 	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any>) { ASSERT(false); });
 	auto request = co_await test.nextRequest();
 	RangeResult empty;
-	// The proxy read before the replay boundary.
+	// Neither read covers the publication at 45.
 	request.reply.send(GlobalConfigRefreshReply{ empty.arena(), 40, empty, 40 });
 	request = co_await test.nextRequest();
 	ASSERT(!initialized.isReady());
-	// A repair restored stamp 41 after A was cleared. The read at 44 already covers the set at 42.
+	// A repair restored stamp 41 after A was cleared. This read still predates the set of B.
 	request.reply.send(GlobalConfigRefreshReply{ empty.arena(), 41, empty, 44 });
+	request = co_await test.nextRequest();
+	ASSERT(!initialized.isReady());
+	auto rows = snapshotWithSetting("B"_sr);
+	request.reply.send(GlobalConfigRefreshReply{ rows.arena(), 45, rows, 45 });
 	co_await timeoutError(initialized, 5.0);
 	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
 	ASSERT(test.db->globalConfig->get<bool>("B"_sr, false));
+}
+
+TEST_CASE("/fdbclient/GlobalConfig/VerifiedSnapshotAfterStampRepair") {
+	auto enabled = Tuple::makeTuple(true).pack();
+	GlobalConfigRefreshTest test(publishedChange(40, 41, MutationRef(MutationRef::SetValue, "A"_sr, enabled)));
+	auto initial = co_await test.nextRequest();
+	auto rows = snapshotWithSetting("A"_sr);
+	initial.reply.send(GlobalConfigRefreshReply{ rows.arena(), 41, rows, 41 });
+	co_await timeoutError(test.db->globalConfig->onInitialized(), 5.0);
+	int removals = 0;
+	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any> value) {
+		ASSERT(!value.has_value());
+		++removals;
+	});
+
+	auto changed = test.publish({ VersionHistory(44) });
+	auto request = co_await test.nextRequest();
+	ASSERT_EQ(request.lastKnown, 41);
+	// The replacement proxy has stamp 40. Its cached read at 50 predates the repair at 51.
+	request.reply.sendError(future_version());
+	request = co_await test.nextRequest();
+	ASSERT_EQ(request.lastKnown, invalidVersion);
+	request.reply.send(GlobalConfigRefreshReply{ rows.arena(), 40, rows, 50 });
+	auto grv = co_await timeoutError(waitAndForward(test.proxy.getConsistentReadVersion.getFuture()), 5.0);
+	GetReadVersionReply afterRepair;
+	afterRepair.version = 52;
+	grv.reply.send(afterRepair);
+	request = co_await test.nextRequest();
+	ASSERT(!changed.isReady());
+	ASSERT(test.db->globalConfig->get<bool>("A"_sr, false));
+	ASSERT_EQ(removals, 0);
+
+	// The label is still 40, but the transaction that supplied these rows covers the repair.
+	RangeResult empty;
+	request.reply.send(GlobalConfigRefreshReply{ empty.arena(), 40, empty, 53 });
+	co_await timeoutError(changed, 5.0);
+	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+	ASSERT_EQ(removals, 1);
 }
 
 TEST_CASE("/fdbclient/GlobalConfig/IncompleteSuffixRequiresNewerSnapshot") {
@@ -946,6 +997,26 @@ TEST_CASE("/fdbclient/GlobalConfig/RepairedPublicationReleasesPendingRefresh") {
 	co_await timeoutError(changed, 5.0);
 	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
 	ASSERT_EQ(callbacks, 1);
+}
+
+TEST_CASE("/fdbclient/GlobalConfig/LowerRefreshFenceSurvivesNextPublication") {
+	GlobalConfigRefreshTest test({ VersionHistory(Version(1) << 62) });
+	auto initialized = test.db->globalConfig->onInitialized();
+	auto request = co_await test.nextRequest();
+	test.publish({ VersionHistory(44) });
+	RangeResult empty;
+	request.reply.send(GlobalConfigRefreshReply{ empty.arena(), 42, empty, 43 });
+	request = co_await test.nextRequest();
+	ASSERT(!initialized.isReady());
+
+	// A healthy write advances the repaired publication before the next reply arrives.
+	auto enabled = Tuple::makeTuple(true).pack();
+	test.publish(publishedChange(44, 54, MutationRef(MutationRef::SetValue, "B"_sr, enabled)));
+	auto rows = snapshotWithSetting("A"_sr);
+	request.reply.send(GlobalConfigRefreshReply{ rows.arena(), 44, rows, 48 });
+	co_await timeoutError(initialized, 5.0);
+	ASSERT(test.db->globalConfig->get<bool>("A"_sr, false));
+	ASSERT(!test.db->globalConfig->get("B"_sr).isValid());
 }
 
 TEST_CASE("/fdbclient/GlobalConfig/MatchingLegacyStampDoesNotSkipRepairedClear") {

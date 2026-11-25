@@ -4291,6 +4291,7 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientInitializesAfterUnseen
 	MutationRef setB(MutationRef::SetValue, "B"_sr, enabled);
 	GlobalConfigHistoryState state;
 	state.update(globalConfigTestStamp(41), globalConfigTestRows({ { 41, clearA } }), 41);
+	auto at42 = state.update(globalConfigTestStamp(42), globalConfigTestRows({ { 41, clearA }, { 42, setA } }), 42);
 
 	// Version 43 cleared A again, but its history row is missing before the controller's next read.
 	auto at44 = state.update(
@@ -4303,12 +4304,26 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientInitializesAfterUnseen
 	MutationRef setC(MutationRef::SetValue, "C"_sr, enabled);
 	auto at45 =
 	    state.update(globalConfigTestStamp(45), globalConfigTestRows({ { 42, setA }, { 44, setB }, { 45, setC } }), 45);
+	RangeResult beforeClear;
+	beforeClear.push_back_deep(beforeClear.arena(), KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), enabled));
 	RangeResult rows;
 	rows.push_back_deep(rows.arena(), KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), enabled));
 	for (bool legacy : { false, true }) {
+		int callbacksToA = 0;
 		GlobalConfigTestClient client(at44);
+		client.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any>) { ++callbacksToA; });
+		auto initialized = client.db->globalConfig->onInitialized();
 		auto initial = co_await client.nextRefresh();
 		ASSERT_EQ(initial.lastKnown, invalidVersion);
+		if (!legacy) {
+			initial.reply.send(GlobalConfigRefreshReply{ beforeClear.arena(), 42, beforeClear, 42 });
+			auto retry = co_await race(client.nextRefresh(), initialized);
+			ASSERT_EQ(callbacksToA, 0);
+			ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
+			ASSERT(!initialized.isReady());
+			ASSERT_EQ(retry.index(), 0);
+			initial = std::get<0>(retry);
+		}
 		GlobalConfigRefreshReply reply{ rows.arena(), 44, rows, 44 };
 		ObjectWriter writer{ AssumeVersion(currentProtocolVersion()) };
 		if (legacy) {
@@ -4323,7 +4338,8 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientInitializesAfterUnseen
 		ASSERT(received.result == rows);
 		ASSERT_EQ(received.snapshotReadVersion.present(), !legacy);
 		initial.reply.send(received);
-		co_await timeoutError(client.db->globalConfig->onInitialized(), 5.0);
+		co_await timeoutError(initialized, 5.0);
+		ASSERT_EQ(callbacksToA, 0);
 		ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
 		ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
 
@@ -4334,6 +4350,30 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientInitializesAfterUnseen
 		ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
 		ASSERT(client.db->globalConfig->get<bool>("C"_sr, false));
 	}
+
+	// The clear can also disappear while a client is fetching the snapshot for publication 42.
+	GlobalConfigTestClient client(at42);
+	auto initialized = client.db->globalConfig->onInitialized();
+	Promise<Void> installedB;
+	client.db->globalConfig->trigger("B"_sr, [&](std::optional<std::any> value) {
+		if (value.has_value()) {
+			ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
+			installedB.send(Void());
+		}
+	});
+	auto initial = co_await client.nextRefresh();
+	client.publish(at44);
+	initial.reply.send(GlobalConfigRefreshReply{ beforeClear.arena(), 42, beforeClear, 42 });
+	auto next = co_await race(client.nextRefresh(), installedB.getFuture());
+	ASSERT_EQ(next.index(), 0);
+	ASSERT(!client.db->globalConfig->get("B"_sr).isValid());
+	auto changed = client.db->globalConfig->onChange();
+	std::get<0>(next).reply.send(GlobalConfigRefreshReply{ rows.arena(), 44, rows, 44 });
+	co_await timeoutError(initialized, 5.0);
+	co_await timeoutError(changed, 5.0);
+	ASSERT(installedB.getFuture().isReady());
+	ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
+	ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
 	co_return;
 }
 

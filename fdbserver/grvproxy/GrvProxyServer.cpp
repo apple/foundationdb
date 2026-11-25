@@ -309,8 +309,8 @@ struct GlobalConfigSnapshot {
 	RangeResult data;
 	Optional<Version> snapshotReadVersion;
 	Versionstamp confirmedStamp;
-	// The controller version that the cached stamp advanced past, or zero if nothing had been published.
-	Version priorPublication = invalidVersion;
+	// The publication seen before a speculative advance, with its observed batch if the proxy read that version.
+	Versionstamp priorPublication;
 
 	GlobalConfigRefreshReply reply() const { return { data.arena(), stamp.version, data, snapshotReadVersion }; }
 
@@ -334,16 +334,19 @@ struct GlobalConfigSnapshot {
 			if (next < stamp) {
 				// A new singleton can repeat the same damaged version key. A marker seen before the
 				// speculative advance is independent of the lower read, but cannot confirm a batch rollback.
-				if (!published || (!hasHistoryRow && next != confirmedStamp && next.version != priorPublication) ||
-				    next.version == stamp.version || next < confirmedStamp ||
+				const bool previouslyPublished = next.version == priorPublication.version;
+				if (!published || (!hasHistoryRow && next != confirmedStamp && !previouslyPublished) ||
+				    (previouslyPublished && next < priorPublication) || next.version == stamp.version ||
+				    next < confirmedStamp ||
 				    (snapshotReadVersion.present() && readVersion <= snapshotReadVersion.get())) {
 					throw serialization_failed();
 				}
 			}
 			if (hasHistoryRow || next < stamp) {
-				priorPublication = invalidVersion;
+				priorPublication = {};
 			} else if (stamp.version <= publicationBeforeRead && publicationBeforeRead < next.version) {
-				priorPublication = publicationBeforeRead;
+				priorPublication =
+				    stamp.version == publicationBeforeRead ? stamp : Versionstamp(publicationBeforeRead, 0);
 			}
 			if (hasHistoryRow) {
 				confirmedStamp = next;
@@ -482,14 +485,24 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsUnconfirmedStamp
 			ASSERT(snapshot.reply().snapshotReadVersion == before.snapshotReadVersion);
 		};
 		reject(Versionstamp(45, 0), 52, published);
-		if (hasHistoryRow) {
-			reject(Versionstamp(44, 0), 52, published);
-		}
+		reject(Versionstamp(44, 0), 52, published);
 		reject(Versionstamp(44, 7), 50, published);
 		// A new marker at 45 cannot become independent evidence by retrying either stamp.
 		reject(Versionstamp(45, 0), 52, { VersionHistory(45) });
 		snapshot.update(at46, rows, 53, { VersionHistory(45) }, 45);
 		reject(Versionstamp(45, 0), 54, { VersionHistory(45) });
+
+		if (!hasHistoryRow) {
+			// A replacement controller can corroborate a lower version if the marker at 44 was also speculative.
+			auto repaired = snapshot;
+			const Versionstamp at43(43, 1);
+			repaired.update(BinaryWriter::toValue(at43, Unversioned()),
+			                RangeResult(),
+			                55,
+			                { VersionHistory(41), VersionHistory(43) },
+			                43);
+			ASSERT(repaired.stamp == at43);
+		}
 
 		snapshot.update(at44, RangeResult(), 55, { VersionHistory(44) }, 44);
 		ASSERT(snapshot.stamp == Versionstamp(44, 7));
