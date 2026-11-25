@@ -14,5 +14,9 @@
     </array>
     <key>KeepAlive</key>
     <true/>
+    <key>StandardOutPath</key>
+    <string>/usr/local/foundationdb/logs/fdbmonitor.log</string>
+    <key>StandardErrorPath</key>
+    <string>/usr/local/foundationdb/logs/fdbmonitor.log</string>
   </dict>
 </plist>
