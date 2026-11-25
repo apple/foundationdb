@@ -434,8 +434,13 @@ public:
 	std::unordered_map<NetworkAddress, ConnectFailedInfo> persistentConnectFailedCount;
 	double persistentConnectFailedLastPrune = 0;
 
-	// FIXME: explain what the std::pair<double, double> represent:
+	// First and last close times in the current streak, by peer address.
 	std::unordered_map<NetworkAddress, std::pair<double, double>> closedPeers;
+	void pruneClosedPeers(double currentTime) {
+		std::erase_if(closedPeers, [currentTime](const auto& peer) {
+			return currentTime - peer.second.second > FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY;
+		});
+	}
 	HealthMonitor healthMonitor;
 	std::set<NetworkAddress> orderedAddresses;
 	Reference<AsyncVar<bool>> degraded;
@@ -2015,6 +2020,7 @@ void TransportData::applyPublicKeySet(StringRef jwkSetString) {
 static Future<Void> multiVersionCleanupWorker(TransportData* self) {
 	while (true) {
 		co_await delay(FLOW_KNOBS->CONNECTION_CLEANUP_DELAY);
+		self->pruneClosedPeers(now());
 		bool foundIncompatible = false;
 		for (auto it = self->incompatiblePeers.begin(); it != self->incompatiblePeers.end();) {
 			if (self->multiVersionConnections.contains(it->second.first)) {
@@ -2639,6 +2645,39 @@ TEST_CASE("noSim/fdbrpc/FlowTransport/DisconnectedPeerOwnership") {
 	co_await keeper;
 	ASSERT(!transport.getPeer(address));
 	ASSERT_EQ(peer->debugGetReferenceCount(), 1);
+}
+
+TEST_CASE("noSim/fdbrpc/FlowTransport/ExpiredClosedPeers") {
+	TransportData transport(1, WLTOKEN_FIRST_AVAILABLE, nullptr);
+	auto* network = INetworkConnections::net();
+	auto listener = network->listen(NetworkAddress::parse("127.0.0.1:0"));
+	constexpr int peerCount = 32;
+	NetworkAddress address(IPAddress(0x7f000002), 0, true, false);
+	for (int i = 0; i < peerCount; ++i) {
+		auto client = co_await network->connect(listener->getListenAddress());
+		auto connection = co_await listener->accept();
+		address.port = 45000 + i;
+		auto peer = transport.getOrOpenPeer(address, false);
+		Promise<Void> reader;
+		peer->onIncomingConnection(peer, connection, reader.getFuture());
+		auto keeper = peer->connect;
+		client->close();
+		reader.sendError(connection_failed());
+		co_await keeper;
+		ASSERT(!transport.getPeer(address));
+		IFailureMonitor::failureMonitor().setStatus(address, FailureStatus());
+	}
+	ASSERT_EQ(transport.closedPeers.size(), peerCount);
+
+	const double resetDelay = FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY;
+	const double cleanupTime = transport.closedPeers.at(address).second + resetDelay + 1;
+	// A close exactly at the reset boundary still contributes to the existing streak.
+	transport.closedPeers.at(address).second = cleanupTime - resetDelay;
+	transport.pruneClosedPeers(cleanupTime);
+	ASSERT_EQ(transport.closedPeers.size(), 1);
+	ASSERT(transport.closedPeers.contains(address));
+	transport.pruneClosedPeers(cleanupTime + 1);
+	ASSERT(transport.closedPeers.empty());
 }
 
 TEST_CASE("noSim/fdbrpc/FlowTransport/PacketLimitOnSend") {
