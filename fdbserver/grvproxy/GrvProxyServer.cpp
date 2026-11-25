@@ -334,12 +334,15 @@ struct GlobalConfigSnapshot {
 			const bool hasHistoryRow = published && history.size() > 1;
 			if (next < stamp) {
 				const bool previouslyPublished = next.version == priorPublication.version;
-				if (!published || (previouslyPublished && next < priorPublication) || next.version == stamp.version ||
-				    next < confirmedStamp ||
+				// A numeric publication alone cannot confirm a batch observed by this proxy.
+				const bool lowerBatch =
+				    next.version == stamp.version || (previouslyPublished && next < priorPublication);
+				const bool hasMarkerProof = !hasHistoryRow && proof.present();
+				if (!published || next < confirmedStamp || (lowerBatch && !hasMarkerProof) ||
 				    (snapshotReadVersion.present() && readVersion <= snapshotReadVersion.get())) {
 					throw serialization_failed();
 				}
-				if (!hasHistoryRow && proof.present()) {
+				if (hasMarkerProof) {
 					if (proof.get().readVersion < next.version || readVersion < proof.get().readVersion) {
 						throw serialization_failed();
 					}
@@ -510,8 +513,17 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsUnconfirmedStamp
 		const std::vector<VersionHistory> marker{ VersionHistory(44) };
 		const GlobalConfigSnapshotProof proof{ 52, {} };
 		reject(Versionstamp(45, 0), 52, marker, proof);
-		reject(Versionstamp(44, 0), 52, marker, proof);
-		reject(Versionstamp(46, 0), 52, { VersionHistory(46) }, proof);
+		if (hasHistoryRow) {
+			reject(Versionstamp(44, 0), 52, marker, proof);
+		} else {
+			// The earlier singleton at 44 did not establish its batch. The later proof covers the repair.
+			auto repaired = snapshot;
+			const Versionstamp lowerBatch(44, 0);
+			repaired.update(BinaryWriter::toValue(lowerBatch, Unversioned()), candidate, 52, marker, 44, proof);
+			ASSERT(repaired.stamp == lowerBatch);
+		}
+		// A bare marker cannot establish that a lower batch has repaired the speculative stamp.
+		reject(Versionstamp(46, 0), 52, { VersionHistory(46) });
 		if (hasHistoryRow) {
 			reject(Versionstamp(43, 0), 52, { VersionHistory(43) }, proof);
 		}
@@ -549,7 +561,7 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsUnconfirmedStamp
 	return Void();
 }
 
-TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsFromMarkerProof") {
+Future<Void> checkGlobalConfigSnapshotRepair(Versionstamp speculativeStamp) {
 	const auto enabled = Tuple::makeTuple(true).pack();
 	RangeResult stale;
 	stale.push_back_deep(stale.arena(), KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), enabled));
@@ -558,11 +570,11 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsFromMarkerProof"
 	const std::vector<VersionHistory> history{ VersionHistory(40), at41 };
 	GlobalConfigSnapshot snapshot;
 	snapshot.update(BinaryWriter::toValue(Versionstamp(41, 7), Unversioned()), stale, 41, history);
-	snapshot.update(BinaryWriter::toValue(Versionstamp(46, 0), Unversioned()), stale, 50, history, 41);
+	snapshot.update(BinaryWriter::toValue(speculativeStamp, Unversioned()), stale, 50, history, 41);
 	ASSERT(snapshot.confirmedStamp == Versionstamp(41, 7));
-	ASSERT_EQ(snapshot.stamp.version, 46);
+	ASSERT(snapshot.stamp == speculativeStamp);
 
-	// The controller missed label 46. Its read at 51 saw the repaired label 44 and only B.
+	// The controller missed the speculative stamp. Its read at 51 saw the repaired label 44 and only B.
 	const auto keyB = "B"_sr.withPrefix(globalConfigKeysPrefix);
 	GlobalConfigSnapshotProof proof{ 51, {} };
 	proof.digest.addKeyValue(keyB, enabled);
@@ -595,14 +607,41 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsFromMarkerProof"
 	tr.setVersion(51);
 	tr.clear(globalConfigDataKeys);
 	tr.set(keyB, enabled);
-	tr.set(globalConfigVersionKey, BinaryWriter::toValue(Versionstamp(44, 1), Unversioned()));
+	tr.set(globalConfigVersionKey, BinaryWriter::toValue(Versionstamp(44, 0), Unversioned()));
 	co_await timeoutError(snapshot.read(tr, 1), 5.0);
-	ASSERT(snapshot.stamp == Versionstamp(44, 1));
+	ASSERT(snapshot.stamp == Versionstamp(44, 0));
 	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 51);
 	std::get<0>(retry).reply.send(snapshot.reply());
 	co_await timeoutError(initialized, 5.0);
 	ASSERT(!db->globalConfig->get("A"_sr).isValid());
 	ASSERT(db->globalConfig->get<bool>("B"_sr, false));
+}
+
+TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsFromMarkerProof") {
+	co_await checkGlobalConfigSnapshotRepair(Versionstamp(46, 0));
+	co_await checkGlobalConfigSnapshotRepair(Versionstamp(44, 7));
+}
+
+TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigMarkerPreservesConfirmedBatch") {
+	GlobalConfigSnapshot snapshot;
+	const std::vector<VersionHistory> history{ VersionHistory(41), VersionHistory(44) };
+	const Versionstamp confirmed(44, 7);
+	snapshot.update(BinaryWriter::toValue(confirmed, Unversioned()), RangeResult(), 50, history, 44);
+	ASSERT(snapshot.confirmedStamp == confirmed);
+	try {
+		snapshot.update(BinaryWriter::toValue(Versionstamp(44, 0), Unversioned()),
+		                RangeResult(),
+		                52,
+		                { VersionHistory(44) },
+		                44,
+		                GlobalConfigSnapshotProof{ 51, {} });
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_serialization_failed);
+	}
+	ASSERT(snapshot.stamp == confirmed);
+	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 50);
+	return Void();
 }
 
 TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotMissingVersion") {

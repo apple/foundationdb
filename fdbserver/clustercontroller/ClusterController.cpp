@@ -2398,6 +2398,96 @@ Future<GlobalConfigSnapshotProof> readGlobalConfigSnapshotProof(ReadYourWritesTr
 	co_return proof;
 }
 
+struct GlobalConfigProxyCapabilities {
+	std::set<UID> datedProxies;
+
+	Future<Void> onUndatedProxy(Reference<AsyncVar<ClientDBInfo>> clientInfo) {
+		while (true) {
+			auto changed = clientInfo->onChange();
+			const auto proxies = clientInfo->get().grvProxies;
+			std::erase_if(datedProxies, [&](UID id) {
+				return std::ranges::none_of(proxies, [&](const auto& proxy) { return proxy.id() == id; });
+			});
+			for (const auto& proxy : proxies) {
+				if (datedProxies.contains(proxy.id())) {
+					continue;
+				}
+				auto reply = co_await errorOr(
+				    timeoutError(proxy.refreshGlobalConfig.getReply(GlobalConfigRefreshRequest{ invalidVersion }),
+				                 CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT));
+				if (clientInfo->get().grvProxies != proxies) {
+					break;
+				}
+				if (reply.isError()) {
+					if (reply.getError().code() == error_code_actor_cancelled) {
+						throw reply.getError();
+					}
+					co_return;
+				}
+				// A missing stamp can produce an undated reply even on an upgraded proxy.
+				if (!reply.get().snapshotReadVersion.present()) {
+					co_return;
+				}
+				datedProxies.insert(proxy.id());
+			}
+			co_await changed;
+		}
+	}
+};
+
+void publishGlobalConfig(ClusterControllerData::DBInfo* db,
+                         std::vector<VersionHistory> history,
+                         Optional<GlobalConfigSnapshotProof> proof) {
+	ServerDBInfo serverInfo = db->serverInfo->get();
+	serverInfo.client.history = std::move(history);
+	serverInfo.client.globalConfigSnapshot = std::move(proof);
+	serverInfo.client.id = deterministicRandom()->randomUniqueID();
+	serverInfo.id = deterministicRandom()->randomUniqueID();
+	serverInfo.infoGeneration = ++db->dbInfoCount;
+	db->serverInfo->set(serverInfo);
+	db->clientInfo->set(serverInfo.client);
+}
+
+Future<Optional<GlobalConfigSnapshotProof>> readMatchingGlobalConfigProof(ReadYourWritesTransaction& tr,
+                                                                          const Value& stamp,
+                                                                          const RangeResult& historyRows) {
+	if (co_await tr.get(globalConfigVersionKey) != stamp) {
+		co_return Optional<GlobalConfigSnapshotProof>();
+	}
+	const auto rows = co_await tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY);
+	if (rows.more || rows != historyRows) {
+		co_return Optional<GlobalConfigSnapshotProof>();
+	}
+	co_return co_await readGlobalConfigSnapshotProof(tr, {}, CLIENT_KNOBS->TOO_MANY);
+}
+
+Future<Void> watchGlobalConfigForLegacyProxy(ClusterControllerData::DBInfo* db,
+                                             GlobalConfigProxyCapabilities& capabilities,
+                                             ReadYourWritesTransaction& tr,
+                                             const Value& stamp,
+                                             const RangeResult& historyRows,
+                                             Future<Void> versionChanged) {
+	co_await capabilities.onUndatedProxy(db->clientInfo);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			auto proof = co_await readMatchingGlobalConfigProof(tr, stamp, historyRows);
+			// A rewritten history row need not fire the version-key watch.
+			if (!proof.present() || versionChanged.isReady()) {
+				co_return;
+			}
+			publishGlobalConfig(db, db->clientInfo->get().history, proof);
+			break;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+	co_await versionChanged;
+}
+
 // Monitors the global configuration version key for changes. When changes are
 // made, the global configuration history is read and any updates are sent to
 // all processes in the system by updating the ClientDBInfo object. The
@@ -2405,6 +2495,7 @@ Future<GlobalConfigSnapshotProof> readGlobalConfigSnapshotProof(ReadYourWritesTr
 // history and update the processes local view.
 Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 	GlobalConfigHistoryState historyState;
+	GlobalConfigProxyCapabilities capabilities;
 	bool watchFired = false;
 	while (true) {
 		ReadYourWritesTransaction tr(db->db);
@@ -2425,27 +2516,32 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				Optional<GlobalConfigSnapshotProof> proof;
 				if (history.size() == 1) {
 					Optional<GlobalConfigSnapshotProof> previous;
-					if (!watchFired && historyState.lastPublishedStamp == nextState.lastPublishedStamp) {
-						previous = db->clientInfo->get().globalConfigSnapshot;
+					const auto& published = db->clientInfo->get();
+					if (!watchFired && published.history.size() == 1 &&
+					    historyState.lastPublishedStamp == nextState.lastPublishedStamp) {
+						previous = published.globalConfigSnapshot;
 					}
 					proof = co_await readGlobalConfigSnapshotProof(tr, previous, CLIENT_KNOBS->TOO_MANY);
 				}
 				historyState = std::move(nextState);
 				watchFired = false;
+				const bool hasChanges = history.size() > 1;
 				if (!history.empty()) {
-					ServerDBInfo serverInfo = db->serverInfo->get();
-					serverInfo.client.history = std::move(history);
-					serverInfo.client.globalConfigSnapshot = std::move(proof);
-					serverInfo.client.id = deterministicRandom()->randomUniqueID();
-					serverInfo.id = deterministicRandom()->randomUniqueID();
-					serverInfo.infoGeneration = ++db->dbInfoCount;
-					db->serverInfo->set(serverInfo);
-					db->clientInfo->set(serverInfo.client);
+					publishGlobalConfig(db, std::move(history), std::move(proof));
 				}
 
 				Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
 				co_await tr.commit();
-				co_await globalConfigFuture;
+				if (hasChanges) {
+					// An undated proxy needs independent evidence for all settings after a repair.
+					// The version watch also fences same-stamp repairs while that evidence is read.
+					ReadYourWritesTransaction proofTr(db->db);
+					co_await race(globalConfigFuture,
+					              watchGlobalConfigForLegacyProxy(
+					                  db, capabilities, proofTr, globalConfigVersion.get(), rows, globalConfigFuture));
+				} else {
+					co_await globalConfigFuture;
+				}
 				watchFired = true;
 				break;
 			} catch (Error& e) {
@@ -4143,10 +4239,11 @@ struct GlobalConfigTestClient {
 		return timeoutError(waitAndForward(grvProxy.refreshGlobalConfig.getFuture()), 5.0);
 	}
 
-	void publish(std::vector<VersionHistory> history) {
+	void publish(std::vector<VersionHistory> history, Optional<GlobalConfigSnapshotProof> proof = {}) {
 		ClientDBInfo info = clientInfo->get();
 		info.id = deterministicRandom()->randomUniqueID();
 		info.history = std::move(history);
+		info.globalConfigSnapshot = std::move(proof);
 		clientInfo->set(info);
 	}
 };
@@ -4265,6 +4362,98 @@ RangeResult globalConfigTestRows(std::initializer_list<std::pair<Version, Mutati
 		                                ObjectWriter::toValue(change, IncludeVersion())));
 	}
 	return rows;
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigProofForLegacyProxy") {
+	ClusterControllerData::DBInfo server;
+	GrvProxyInterface modern, legacy;
+	for (auto* proxy : { &modern, &legacy }) {
+		proxy->provisional = false;
+		proxy->initEndpoints();
+		IFailureMonitor::failureMonitor().setStatus(proxy->address(), FailureStatus(false));
+	}
+	auto info = server.serverInfo->get();
+	info.id = deterministicRandom()->randomUniqueID();
+	info.client.grvProxies = { modern };
+	server.serverInfo->set(info);
+	GlobalConfigTestClient client({});
+	auto enabled = Tuple::makeTuple(true).pack();
+	auto key = "B"_sr.withPrefix(globalConfigKeysPrefix);
+	MutationRef setB(MutationRef::SetValue, "B"_sr, enabled);
+	auto stamp = globalConfigTestStamp(55);
+	auto rows = globalConfigTestRows({ { 44, setB }, { 55, setB } });
+	auto history = globalConfigHistoryAt(44).update(stamp, rows, 56);
+	ASSERT_EQ(history.size(), 2);
+	publishGlobalConfig(&server, history, {});
+	client.publish({ VersionHistory(44) }, GlobalConfigSnapshotProof{ 54, {} });
+	client.publish(history);
+	auto request = co_await client.nextRefresh();
+	auto initialized = client.db->globalConfig->onInitialized();
+	int callbacks = 0;
+	client.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any>) { ++callbacks; });
+
+	ReadYourWritesTransaction tr(client.db);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr.setVersion(56);
+	tr.clear(globalConfigDataKeys);
+	tr.clear(globalConfigHistoryKeys);
+	tr.set(globalConfigVersionKey, stamp);
+	for (const auto& kv : rows) {
+		tr.set(kv.key, kv.value);
+	}
+	tr.set(key, enabled);
+	GlobalConfigProxyCapabilities capabilities;
+	Promise<Void> versionChanged;
+	auto watch = watchGlobalConfigForLegacyProxy(&server, capabilities, tr, stamp, rows, versionChanged.getFuture());
+	auto probe = co_await timeoutError(waitAndForward(modern.refreshGlobalConfig.getFuture()), 5.0);
+	RangeResult current;
+	current.push_back_deep(current.arena(), KeyValueRef(key, enabled));
+	probe.reply.send(GlobalConfigRefreshReply{ current.arena(), 55, current, 56 });
+	co_await delay(0);
+	ASSERT(!watch.isReady());
+	ASSERT(!server.clientInfo->get().globalConfigSnapshot.present());
+
+	// Replacing the only proxy can require a proof even though the configuration stamp did not change.
+	info = server.serverInfo->get();
+	info.client.id = deterministicRandom()->randomUniqueID();
+	info.client.grvProxies = { legacy };
+	info.id = deterministicRandom()->randomUniqueID();
+	server.serverInfo->set(info);
+	server.clientInfo->set(info.client);
+	probe = co_await timeoutError(waitAndForward(legacy.refreshGlobalConfig.getFuture()), 5.0);
+	auto attached = server.clientInfo->onChange();
+	probe.reply.send(GlobalConfigRefreshReply{ current.arena(), 55, current });
+	co_await timeoutError(attached, 5.0);
+	ASSERT(!watch.isReady());
+	versionChanged.send(Void());
+	co_await timeoutError(watch, 5.0);
+	auto published = server.clientInfo->get();
+	ASSERT(published.globalConfigSnapshot.present());
+	ASSERT_EQ(published.globalConfigSnapshot.get().readVersion, 56);
+
+	client.publish(published.history, published.globalConfigSnapshot);
+	RangeResult stale;
+	stale.push_back_deep(stale.arena(), KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), enabled));
+	stale.push_back_deep(stale.arena(), current.front());
+	request.reply.send(GlobalConfigRefreshReply{ stale.arena(), 55, stale });
+	auto retry = co_await race(client.nextRefresh(), initialized);
+	ASSERT_EQ(retry.index(), 0);
+	ASSERT_EQ(callbacks, 0);
+	std::get<0>(retry).reply.send(GlobalConfigRefreshReply{ current.arena(), 55, current });
+	co_await timeoutError(initialized, 5.0);
+	ASSERT_EQ(callbacks, 0);
+	ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
+	ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
+
+	auto otherBatch = BinaryWriter::toValue(Versionstamp(55, 1), Unversioned());
+	ASSERT(!(co_await readMatchingGlobalConfigProof(tr, otherBatch, rows)).present());
+	tr.clear(rows[0].key);
+	// A history-only rewrite must wake the monitor even at a stable stamp.
+	auto recheck = watchGlobalConfigForLegacyProxy(&server, capabilities, tr, stamp, rows, Never());
+	probe = co_await timeoutError(waitAndForward(legacy.refreshGlobalConfig.getFuture()), 5.0);
+	probe.reply.send(GlobalConfigRefreshReply{ current.arena(), 55, current });
+	co_await timeoutError(recheck, 5.0);
+	ASSERT_EQ(server.clientInfo->get().id, published.id);
 }
 
 TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesRefreshPublication") {

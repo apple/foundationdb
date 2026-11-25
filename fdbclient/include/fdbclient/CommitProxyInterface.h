@@ -157,7 +157,7 @@ struct ClientDBInfo {
 	UID clusterId;
 
 	ClusterType clusterType = ClusterType::STANDALONE;
-	// Present when the controller read all settings in the transaction that produced a snapshot marker.
+	// Digest of all settings at the controller's read version for this publication.
 	Optional<GlobalConfigSnapshotProof> globalConfigSnapshot;
 
 	ClientDBInfo() = default;
