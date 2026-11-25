@@ -44,6 +44,7 @@
 #include "DDRelocationQueue.h"
 #include "TCInfo.h"
 #include "flow/CoroUtils.h"
+#include "flow/ScopeExit.h"
 #include "flow/genericactors.h"
 #include "flow/SimpleCounter.h"
 
@@ -401,7 +402,7 @@ void Busyness::removeWork(int prio, int work) {
 	addWork(prio, -work);
 }
 
-std::string Busyness::toString() {
+std::string Busyness::toString() const {
 	std::string result;
 	for (int i = 1; i < ledger.size();) {
 		int j = i + 1;
@@ -470,7 +471,35 @@ int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
 
 int getDestWorkFactor() {
 	// Work of moving a shard is even across destination servers
+	if (SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER <= 0) {
+		return 0;
+	}
 	return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
+}
+
+static const Busyness& getBusyness(const std::map<UID, Busyness>& ledgers, UID id) {
+	static const Busyness idle;
+	auto it = ledgers.find(id);
+	return it == ledgers.end() ? idle : it->second;
+}
+
+static void releaseWork(std::map<UID, Busyness>& ledgers, UID id, int priority, int work) {
+	if (work == 0) {
+		return;
+	}
+	auto it = ledgers.find(id);
+	ASSERT(it != ledgers.end());
+	const auto& ledger = it->second.ledger;
+	ASSERT(priority > 0 && priority < 1000);
+	const size_t level = priority / 100;
+	const int higherPriorityWork = level + 1 < ledger.size() ? ledger[level + 1] : 0;
+	ASSERT_GE(ledger[level] - higherPriorityWork, work);
+	it->second.removeWork(priority, work);
+	// Every priority contributes to level zero.
+	if (it->second.ledger.front() == 0) {
+		ASSERT(std::all_of(it->second.ledger.begin(), it->second.ledger.end(), [](int n) { return n == 0; }));
+		ledgers.erase(it);
+	}
 }
 
 // Data movement's resource control: Do not overload servers used for the RelocateData
@@ -479,7 +508,7 @@ int getDestWorkFactor() {
 bool canLaunchSrc(RelocateData& relocation,
                   int teamSize,
                   int singleRegionTeamSize,
-                  std::map<UID, Busyness>& busymap,
+                  const std::map<UID, Busyness>& busymap,
                   std::vector<RelocateData> cancellableRelocations) {
 	// assert this has not already been launched
 	ASSERT(relocation.workFactor == 0);
@@ -502,7 +531,7 @@ bool canLaunchSrc(RelocateData& relocation,
 	for (int i = 0; i < relocation.src.size(); i++) {
 		// For each source server for this relocation, copy and modify its busyness to reflect work that WOULD be
 		// cancelled
-		auto busyCopy = busymap[relocation.src[i]];
+		auto busyCopy = getBusyness(busymap, relocation.src[i]);
 		for (int j = 0; j < cancellableRelocations.size(); j++) {
 			auto& servers = cancellableRelocations[j].src;
 			if (std::count(servers.begin(), servers.end(), relocation.src[i]))
@@ -522,7 +551,7 @@ bool canLaunchSrc(RelocateData& relocation,
 // candidateTeams is a vector containing one team per datacenter, the team(s) DD is planning on moving the shard to.
 bool canLaunchDest(const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& candidateTeams,
                    int priority,
-                   std::map<UID, Busyness>& busymapDest) {
+                   const std::map<UID, Busyness>& busymapDest) {
 	// fail switch if this is causing issues
 	if (SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER <= 0) {
 		return true;
@@ -530,7 +559,7 @@ bool canLaunchDest(const std::vector<std::pair<Reference<IDataDistributionTeam>,
 	int workFactor = getDestWorkFactor();
 	for (auto& [team, _] : candidateTeams) {
 		for (UID id : team->getServerIDs()) {
-			if (!busymapDest[id].canLaunch(priority, workFactor)) {
+			if (!getBusyness(busymapDest, id).canLaunch(priority, workFactor)) {
 				return false;
 			}
 		}
@@ -542,6 +571,9 @@ bool canLaunchDest(const std::vector<std::pair<Reference<IDataDistributionTeam>,
 void launch(RelocateData& relocation, std::map<UID, Busyness>& busymap, int singleRegionTeamSize) {
 	// if we are here this means that we can launch and should adjust all the work the servers can do
 	relocation.workFactor = getSrcWorkFactor(relocation, singleRegionTeamSize);
+	if (relocation.workFactor == 0) {
+		return;
+	}
 	for (int i = 0; i < relocation.src.size(); i++)
 		busymap[relocation.src[i]].addWork(relocation.priority, relocation.workFactor);
 }
@@ -550,18 +582,19 @@ void launchDest(RelocateData& relocation,
                 const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& candidateTeams,
                 std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.completeDests.empty());
-	int destWorkFactor = getDestWorkFactor();
+	relocation.destWorkFactor = getDestWorkFactor();
 	for (auto& [team, _] : candidateTeams) {
 		for (UID id : team->getServerIDs()) {
 			relocation.completeDests.push_back(id);
-			destBusymap[id].addWork(relocation.priority, destWorkFactor);
+			if (relocation.destWorkFactor != 0) {
+				destBusymap[id].addWork(relocation.priority, relocation.destWorkFactor);
+			}
 		}
 	}
 }
 void completeDest(RelocateData const& relocation, std::map<UID, Busyness>& destBusymap) {
-	int destWorkFactor = getDestWorkFactor();
 	for (UID id : relocation.completeDests) {
-		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
+		releaseWork(destBusymap, id, relocation.priority, relocation.destWorkFactor);
 	}
 }
 
@@ -586,7 +619,7 @@ static void resetDestinationsForRetry(RelocateData& relocation,
 void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.bulkLoadTask.present() || relocation.workFactor > 0);
 	for (int i = 0; i < relocation.src.size(); i++)
-		busymap[relocation.src[i]].removeWork(relocation.priority, relocation.workFactor);
+		releaseWork(busymap, relocation.src[i], relocation.priority, relocation.workFactor);
 
 	completeDest(relocation, destBusymap);
 }
@@ -763,22 +796,10 @@ void DDQueue::validate() {
 		auto inFlightRanges = inFlight.ranges();
 		for (auto it = inFlightRanges.begin(); it != inFlightRanges.end(); ++it) {
 			for (int i = 0; i < it->value().src.size(); i++) {
-				// each server in the inFlight map is in the busymap
-				if (!busymap.contains(it->value().src[i]))
-					TraceEvent(SevError, "DDQueueValidateError8")
-					    .detail("Problem", "each server in the inFlight map is in the busymap");
-
 				// relocate data that is inFlight is not also in the queue
 				if (queue[it->value().src[i]].contains(it->value()))
 					TraceEvent(SevError, "DDQueueValidateError9")
 					    .detail("Problem", "relocate data that is inFlight is not also in the queue");
-			}
-
-			for (int i = 0; i < it->value().completeDests.size(); i++) {
-				// each server in the inFlight map is in the dest busymap
-				if (!destBusymap.contains(it->value().completeDests[i]))
-					TraceEvent(SevError, "DDQueueValidateError10")
-					    .detail("Problem", "each server in the inFlight map is in the destBusymap");
 			}
 
 			// in flight relocates have source servers
@@ -802,6 +823,7 @@ void DDQueue::validate() {
 		}
 
 		for (auto it = busymap.begin(); it != busymap.end(); ++it) {
+			ASSERT_GT(it->second.ledger.front(), 0);
 			for (int i = 0; i < it->second.ledger.size() - 1; i++) {
 				if (it->second.ledger[i] < it->second.ledger[i + 1]) {
 					TraceEvent(SevError, "DDQueueValidateError14")
@@ -820,6 +842,7 @@ void DDQueue::validate() {
 		}
 
 		for (auto it = destBusymap.begin(); it != destBusymap.end(); ++it) {
+			ASSERT_GT(it->second.ledger.front(), 0);
 			for (int i = 0; i < it->second.ledger.size() - 1; i++) {
 				if (it->second.ledger[i] < it->second.ledger[i + 1]) {
 					TraceEvent(SevError, "DDQueueValidateError16")
@@ -1058,7 +1081,7 @@ void DDQueue::completeSourceFetch(const RelocateData& results) {
 void DDQueue::logRelocation(const RelocateData& rd, const char* title) {
 	std::string busyString;
 	for (int i = 0; i < rd.src.size() && i < teamSize * 2; i++)
-		busyString += describe(rd.src[i]) + " - (" + busymap[rd.src[i]].toString() + "); ";
+		busyString += describe(rd.src[i]) + " - (" + getBusyness(busymap, rd.src[i]).toString() + "); ";
 
 	TraceEvent(title, distributorId)
 	    .detail("KeyBegin", rd.keys.begin)
@@ -3470,27 +3493,87 @@ TEST_CASE("/DataDistribution/DDQueue/SourceDiscoveryPreservesReadRebalanceCooldo
 	return Void();
 }
 
+static Reference<IDataDistributionTeam> makeBusynessTestTeam(Reference<LocalitySet> locality, UID id) {
+	StorageServerInterface ssi(id);
+	ssi.locality.set("machineid"_sr, Standalone<StringRef>(id.toString()));
+	ssi.locality.set("zoneid"_sr, Standalone<StringRef>(id.toString()));
+	auto server = makeReference<TCServerInfo>(ssi, nullptr, ProcessClass(), true, locality);
+	return makeReference<TCTeamInfo>(std::vector<Reference<TCServerInfo>>{ server });
+}
+
+TEST_CASE("/DataDistribution/DDQueue/ReleasesIdleBusynessLedgers") {
+	Reference<LocalitySet> locality = makeReference<LocalityMap<UID>>();
+	std::map<UID, Busyness> sources, destinations;
+	for (int i = 1; i <= 1024; ++i) {
+		const UID source(i, 1), destination(i, 2);
+		auto team = makeBusynessTestTeam(locality, destination);
+		RelocateData first;
+		first.priority = SERVER_KNOBS->PRIORITY_TEAM_HEALTHY;
+		first.src = { source };
+		ASSERT(canLaunchSrc(first, 1, 1, sources, {}));
+		ASSERT(canLaunchDest({ { team, false } }, first.priority, destinations));
+		ASSERT(sources.empty() && destinations.empty());
+
+		RelocateData second = first;
+		second.priority = SERVER_KNOBS->PRIORITY_TEAM_2_LEFT;
+		launch(first, sources, 1);
+		launchDest(first, { { team, false } }, destinations);
+		launch(second, sources, 1);
+		launchDest(second, { { team, false } }, destinations);
+		complete(first, sources, destinations);
+		ASSERT_EQ(sources.at(source).ledger.front(), second.workFactor);
+		ASSERT_EQ(destinations.at(destination).ledger.front(), getDestWorkFactor());
+		complete(second, sources, destinations);
+		ASSERT(sources.empty() && destinations.empty());
+
+		RelocateData bulk;
+		bulk.priority = first.priority;
+		bulk.src = { source };
+		bulk.bulkLoadTask = DDBulkLoadEngineTask();
+		launch(bulk, sources, 1);
+		ASSERT_EQ(bulk.workFactor, 0);
+		ASSERT(sources.empty());
+		complete(bulk, sources, destinations);
+		ASSERT(sources.empty());
+	}
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/DDQueue/DisabledDestinationBusyness") {
+	auto setParallelism = [](double value) {
+		setServerKnob("relocation_parallelism_per_dest_server", KnobValueRef::create(value));
+	};
+	const double saved = SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
+	ScopeExit restore([&] { setParallelism(saved); });
+	auto team = makeBusynessTestTeam(makeReference<LocalityMap<UID>>(), UID(1, 1));
+	std::map<UID, Busyness> destinations;
+	RelocateData charged, uncharged;
+	charged.priority = uncharged.priority = SERVER_KNOBS->PRIORITY_TEAM_HEALTHY;
+	setParallelism(1);
+	launchDest(charged, { { team, false } }, destinations);
+	setParallelism(0);
+	ASSERT(canLaunchDest({ { team, false } }, uncharged.priority, destinations));
+	launchDest(uncharged, { { team, false } }, destinations);
+	ASSERT_EQ(uncharged.completeDests, charged.completeDests);
+	completeDest(charged, destinations);
+	ASSERT(destinations.empty());
+	setParallelism(1);
+	completeDest(uncharged, destinations);
+	ASSERT(destinations.empty());
+	return Void();
+}
+
 TEST_CASE("/DataDistribution/DDQueue/DestinationRetryHelperAccounting") {
 	Reference<LocalitySet> locality = makeReference<LocalityMap<UID>>();
-	auto makeTeam = [&locality](UID id) -> Reference<IDataDistributionTeam> {
-		StorageServerInterface ssi(id);
-		ssi.locality.set("machineid"_sr, Standalone<StringRef>(id.toString()));
-		ssi.locality.set("zoneid"_sr, Standalone<StringRef>(id.toString()));
-		auto server = makeReference<TCServerInfo>(ssi, nullptr, ProcessClass(), true, locality);
-		return makeReference<TCTeamInfo>(std::vector<Reference<TCServerInfo>>{ server });
-	};
 
 	const UID firstId(1, 0);
 	const UID secondId(2, 0);
 	const UID sourceId(3, 0);
-	Reference<IDataDistributionTeam> firstTeam = makeTeam(firstId);
-	Reference<IDataDistributionTeam> secondTeam = makeTeam(secondId);
+	Reference<IDataDistributionTeam> firstTeam = makeBusynessTestTeam(locality, firstId);
+	Reference<IDataDistributionTeam> secondTeam = makeBusynessTestTeam(locality, secondId);
 	const int64_t bytes = 100;
 	const int64_t readLoad = 10;
 	const int workFactor = getDestWorkFactor();
-	auto ledgerIsEmpty = [](Busyness const& busyness) {
-		return std::all_of(busyness.ledger.begin(), busyness.ledger.end(), [](int work) { return work == 0; });
-	};
 
 	RelocateData rd;
 	rd.priority = SERVER_KNOBS->PRIORITY_TEAM_HEALTHY;
@@ -3550,7 +3633,7 @@ TEST_CASE("/DataDistribution/DDQueue/DestinationRetryHelperAccounting") {
 	ASSERT(!ownsDestBusyness);
 	ASSERT(rd.completeDests.empty());
 	ASSERT(healthyDestinations.getServerIDs().empty());
-	ASSERT(ledgerIsEmpty(destBusymap[secondId]));
+	ASSERT(!destBusymap.contains(secondId));
 	ASSERT_EQ(secondTeam->getDataInFlightToTeam(), 0);
 	ASSERT_EQ(secondTeam->getReadInFlightToTeam(), 0);
 
@@ -3558,8 +3641,8 @@ TEST_CASE("/DataDistribution/DDQueue/DestinationRetryHelperAccounting") {
 	RelocateData transferComplete = completedTransfers.pop();
 	ASSERT_EQ(transferComplete.completeDests, std::vector<UID>{ firstId });
 	complete(transferComplete, sourceBusymap, destBusymap);
-	ASSERT(ledgerIsEmpty(sourceBusymap[sourceId]));
-	ASSERT(ledgerIsEmpty(destBusymap[firstId]));
+	ASSERT(!sourceBusymap.contains(sourceId));
+	ASSERT(!destBusymap.contains(firstId));
 
 	// A subsequent successful attempt also balances its destination ledger.
 	healthyDestinations.addTeam(secondTeam);
@@ -3572,7 +3655,7 @@ TEST_CASE("/DataDistribution/DDQueue/DestinationRetryHelperAccounting") {
 	healthyDestinations.addDataInFlightToTeam(-bytes);
 	healthyDestinations.addReadInFlightToTeam(-readLoad);
 	ASSERT(!ownsDestBusyness);
-	ASSERT(ledgerIsEmpty(destBusymap[secondId]));
+	ASSERT(!destBusymap.contains(secondId));
 	ASSERT_EQ(secondTeam->getDataInFlightToTeam(), 0);
 	ASSERT_EQ(secondTeam->getReadInFlightToTeam(), 0);
 	co_return;

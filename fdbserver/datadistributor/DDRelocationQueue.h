@@ -51,6 +51,7 @@ public:
 	UID randomId; // inherit from RelocateShard.traceId
 	UID dataMoveId;
 	int workFactor;
+	int destWorkFactor = 0;
 	std::vector<UID> src;
 	std::vector<UID> completeSources;
 	std::vector<UID> completeDests;
@@ -101,7 +102,7 @@ struct Busyness {
 	bool canLaunch(int prio, int work) const;
 	void addWork(int prio, int work);
 	void removeWork(int prio, int work);
-	std::string toString();
+	std::string toString() const;
 };
 
 struct DDQueueInitParams {
