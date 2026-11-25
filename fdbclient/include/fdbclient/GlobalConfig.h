@@ -27,8 +27,6 @@
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
-#include <utility>
-#include <vector>
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
@@ -117,9 +115,6 @@ public:
 	                         const VectorRef<KeyValueRef>& insertions,
 	                         const VectorRef<KeyRangeRef>& clears);
 
-	// Decodes a ten-byte stamp if its commit version is in [1, readVersion].
-	static Optional<Versionstamp> decodeVersionstamp(ValueRef versionstamp, Version readVersion);
-
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.
 	//
@@ -176,16 +171,25 @@ public:
 	void trigger(KeyRef key, std::function<void(std::optional<std::any>)> fn);
 
 private:
-	// The ConfigValue arena owns the key bytes as well as any string value.
-	using Entry = std::pair<KeyRef, Reference<const ConfigValue>>;
-	static Entry decode(KeyRef key, ValueRef value);
-	using ConfigData = std::unordered_map<KeyRef, Reference<const ConfigValue>>;
-	void notify(KeyRef key, const Reference<const ConfigValue>& value = {});
-	bool applyHistory(const std::vector<VersionHistory>& history);
-	static bool snapshotMatchesFinalMutations(const RangeResultRef& rows, const VectorRef<MutationRef>& mutations);
+	// The functions below only affect the local copy of the global
+	// configuration keyspace. To insert or remove values across all nodes you
+	// must use a transaction (see the note above).
 
-	struct RefreshState;
-	Future<ConfigData> getSnapshot(const ClientDBInfo* dbInfo, Version lastKnown, RefreshState& state);
+	// Inserts the given key-value pair into the local copy of the global
+	// configuration keyspace, overwriting the old key-value pair if it exists.
+	// `value` must be encoded using the FDB tuple typecodes.
+	void insert(KeyRef key, ValueRef value);
+	// Removes the given key (and associated value) from the local copy of the
+	// global configuration keyspace.
+	void erase(Key key);
+	// Removes the given key range (and associated values) from the local copy
+	// of the global configuration keyspace.
+	void erase(KeyRangeRef range);
+
+	// Updates local copy of global configuration by reading the entire key-range
+	// from storage (proxied through the GrvProxies). Returns the version of the
+	// refreshed data.
+	Future<Version> refresh(Version lastKnown, Version largestSeen);
 	Future<Void> updater(const ClientDBInfo* dbInfo);
 
 	DatabaseContext* cx;
@@ -194,7 +198,7 @@ private:
 	Future<Void> _updater;
 	Promise<Void> initialized;
 	AsyncTrigger configChanged;
-	ConfigData data;
+	std::unordered_map<StringRef, Reference<const ConfigValue>> data;
 	Version lastUpdate;
 	// The key should be a global config string literal key (see the top of this file).
 	std::unordered_map<KeyRef, std::function<void(std::optional<std::any>)>> callbacks;

@@ -32,7 +32,6 @@
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/IdempotencyId.h"
-#include "fdbclient/RangeDigest.h"
 #include "fdbclient/StorageServerInterface.h"
 
 struct CommitProxyInterface {
@@ -127,18 +126,6 @@ struct CommitProxyInterface {
 	}
 };
 
-struct GlobalConfigSnapshotProof {
-	Version readVersion = invalidVersion;
-	RangeDigest digest;
-
-	bool operator==(const GlobalConfigSnapshotProof&) const = default;
-
-	template <class Archive>
-	void serialize(Archive& ar) {
-		serializer(ar, readVersion, digest.state);
-	}
-};
-
 // ClientDBInfo is all the information needed by a database client to access the database
 // It is returned (and kept up to date) by the OpenDatabaseRequest interface of ClusterInterface
 struct ClientDBInfo {
@@ -157,10 +144,6 @@ struct ClientDBInfo {
 	UID clusterId;
 
 	ClusterType clusterType = ClusterType::STANDALONE;
-	// Digest of all settings at the controller's read version for this publication.
-	Optional<GlobalConfigSnapshotProof> globalConfigSnapshot;
-	// With a verified history tail, an undated snapshot needs a digest. The controller supplies it on demand.
-	Optional<uint16_t> globalConfigHistoryBatch;
 
 	ClientDBInfo() = default;
 
@@ -183,9 +166,7 @@ struct ClientDBInfo {
 			           nativeCdcEnabled,
 			           nativeCdcTagCount,
 			           cdcProxies,
-			           streamToCDCProxyId,
-			           globalConfigSnapshot,
-			           globalConfigHistoryBatch);
+			           streamToCDCProxyId);
 		} else {
 			ASSERT(ar.protocolVersion().isValid());
 			serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
