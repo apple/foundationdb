@@ -318,7 +318,8 @@ struct GlobalConfigSnapshot {
 	            const RangeResult& rows,
 	            Version readVersion,
 	            const std::vector<VersionHistory>& history = {},
-	            Version publicationBeforeRead = 0) {
+	            Version publicationBeforeRead = 0,
+	            const Optional<GlobalConfigSnapshotProof>& proof = {}) {
 		// Clients replace their entire cache with these rows.
 		if (rows.more) {
 			throw serialization_failed();
@@ -332,13 +333,25 @@ struct GlobalConfigSnapshot {
 			const bool published = !history.empty() && history.back().version == next.version;
 			const bool hasHistoryRow = published && history.size() > 1;
 			if (next < stamp) {
-				// A new singleton can repeat the same damaged version key. A marker seen before the
-				// speculative advance is independent of the lower read, but cannot confirm a batch rollback.
 				const bool previouslyPublished = next.version == priorPublication.version;
-				if (!published || (!hasHistoryRow && next != confirmedStamp && !previouslyPublished) ||
-				    (previouslyPublished && next < priorPublication) || next.version == stamp.version ||
+				if (!published || (previouslyPublished && next < priorPublication) || next.version == stamp.version ||
 				    next < confirmedStamp ||
 				    (snapshotReadVersion.present() && readVersion <= snapshotReadVersion.get())) {
+					throw serialization_failed();
+				}
+				if (!hasHistoryRow && proof.present()) {
+					if (proof.get().readVersion < next.version || readVersion < proof.get().readVersion) {
+						throw serialization_failed();
+					}
+					RangeDigest digest;
+					for (const auto& kv : rows) {
+						digest.addKeyValue(kv.key, kv.value);
+					}
+					if (digest != proof.get().digest) {
+						throw serialization_failed();
+					}
+				} else if (!hasHistoryRow && next != confirmedStamp && !previouslyPublished) {
+					// A new bare marker can repeat the same damaged version key.
 					throw serialization_failed();
 				}
 			}
@@ -362,8 +375,8 @@ struct GlobalConfigSnapshot {
 
 	Future<Void> read(ReadYourWritesTransaction& tr, int pageSize) {
 		pageSize = std::max(1, pageSize);
-		const auto& history = tr.getDatabase()->clientInfo->get().history;
-		const Version publicationBeforeRead = history.empty() ? 0 : history.back().version;
+		const auto& info = tr.getDatabase()->clientInfo->get();
+		const Version publicationBeforeRead = info.history.empty() ? 0 : info.history.back().version;
 		auto versionFuture = tr.get(globalConfigVersionKey);
 		auto firstPage = tr.getRange(globalConfigDataKeys, pageSize);
 		Optional<Value> versionstamp = co_await versionFuture;
@@ -378,7 +391,7 @@ struct GlobalConfigSnapshot {
 			rows.readThroughEnd = page.readThroughEnd;
 		}
 		const Version readVersion = co_await tr.getReadVersion();
-		update(versionstamp, rows, readVersion, history, publicationBeforeRead);
+		update(versionstamp, rows, readVersion, info.history, publicationBeforeRead, info.globalConfigSnapshot);
 	}
 };
 
@@ -454,7 +467,7 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValu
 
 TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsUnconfirmedStamp") {
 	const auto at44 = BinaryWriter::toValue(Versionstamp(44, 7), Unversioned());
-	const auto at46 = BinaryWriter::toValue(Versionstamp(46, 0), Unversioned());
+	const auto at46 = BinaryWriter::toValue(Versionstamp(46, 1), Unversioned());
 	RangeResult rows;
 	rows.push_back_deep(rows.arena(),
 	                    KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
@@ -468,25 +481,49 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsUnconfirmedStamp
 		snapshot.update(at44, RangeResult(), 50, published, 44);
 		snapshot.update(at46, rows, 51, published, 44);
 
-		auto reject = [&](Versionstamp stamp, Version readVersion, const std::vector<VersionHistory>& history) {
-			const auto before = snapshot.reply();
+		RangeResult candidate;
+		auto reject = [&](Versionstamp stamp,
+		                  Version readVersion,
+		                  const std::vector<VersionHistory>& history,
+		                  Optional<GlobalConfigSnapshotProof> proof = {}) {
+			const auto before = snapshot;
 			try {
 				snapshot.update(BinaryWriter::toValue(stamp, Unversioned()),
-				                RangeResult(),
+				                candidate,
 				                readVersion,
 				                history,
-				                history.back().version);
+				                history.back().version,
+				                proof);
 				ASSERT(false);
 			} catch (Error& e) {
 				ASSERT_EQ(e.code(), error_code_serialization_failed);
 			}
-			ASSERT_EQ(snapshot.reply().version, 46);
-			ASSERT(snapshot.reply().result == rows);
-			ASSERT(snapshot.reply().snapshotReadVersion == before.snapshotReadVersion);
+			ASSERT(snapshot.stamp == before.stamp);
+			ASSERT(snapshot.data == before.data);
+			ASSERT(snapshot.snapshotReadVersion == before.snapshotReadVersion);
+			ASSERT(snapshot.confirmedStamp == before.confirmedStamp);
+			ASSERT(snapshot.priorPublication == before.priorPublication);
 		};
 		reject(Versionstamp(45, 0), 52, published);
 		reject(Versionstamp(44, 0), 52, published);
 		reject(Versionstamp(44, 7), 50, published);
+		const std::vector<VersionHistory> marker{ VersionHistory(44) };
+		const GlobalConfigSnapshotProof proof{ 52, {} };
+		reject(Versionstamp(45, 0), 52, marker, proof);
+		reject(Versionstamp(44, 0), 52, marker, proof);
+		reject(Versionstamp(46, 0), 52, { VersionHistory(46) }, proof);
+		if (hasHistoryRow) {
+			reject(Versionstamp(43, 0), 52, { VersionHistory(43) }, proof);
+		}
+		// Even a previously published marker must agree with its proof.
+		reject(Versionstamp(44, 7), 52, marker, GlobalConfigSnapshotProof{ 53, {} });
+		reject(Versionstamp(44, 7), 52, marker, GlobalConfigSnapshotProof{ 43, {} });
+		auto differentRows = proof;
+		differentRows.digest.addKeyValue(rows[0].key, rows[0].value);
+		reject(Versionstamp(44, 7), 52, marker, differentRows);
+		candidate.more = true;
+		reject(Versionstamp(44, 7), 52, marker, proof);
+		candidate.more = false;
 		// A new marker at 45 cannot become independent evidence by retrying either stamp.
 		reject(Versionstamp(45, 0), 52, { VersionHistory(45) });
 		snapshot.update(at46, rows, 53, { VersionHistory(45) }, 45);
@@ -510,6 +547,62 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsUnconfirmedStamp
 		ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 55);
 	}
 	return Void();
+}
+
+TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsFromMarkerProof") {
+	const auto enabled = Tuple::makeTuple(true).pack();
+	RangeResult stale;
+	stale.push_back_deep(stale.arena(), KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), enabled));
+	VersionHistory at41(41);
+	at41.mutations.emplace_back_deep(at41.mutations.arena(), MutationRef(MutationRef::SetValue, "A"_sr, enabled));
+	const std::vector<VersionHistory> history{ VersionHistory(40), at41 };
+	GlobalConfigSnapshot snapshot;
+	snapshot.update(BinaryWriter::toValue(Versionstamp(41, 7), Unversioned()), stale, 41, history);
+	snapshot.update(BinaryWriter::toValue(Versionstamp(46, 0), Unversioned()), stale, 50, history, 41);
+	ASSERT(snapshot.confirmedStamp == Versionstamp(41, 7));
+	ASSERT_EQ(snapshot.stamp.version, 46);
+
+	// The controller missed label 46. Its read at 51 saw the repaired label 44 and only B.
+	const auto keyB = "B"_sr.withPrefix(globalConfigKeysPrefix);
+	GlobalConfigSnapshotProof proof{ 51, {} };
+	proof.digest.addKeyValue(keyB, enabled);
+	GrvProxyInterface proxy;
+	proxy.provisional = false;
+	proxy.initEndpoints();
+	IFailureMonitor::failureMonitor().setStatus(proxy.address(), FailureStatus(false));
+	CommitProxyInterface commitProxy;
+	commitProxy.provisional = false;
+	commitProxy.initEndpoints();
+	ClientDBInfo info;
+	info.id = UID(1, 1);
+	info.history = { VersionHistory(44) };
+	info.globalConfigSnapshot = proof;
+	info.grvProxies.push_back(proxy);
+	info.commitProxies.push_back(commitProxy);
+	auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
+	auto db = DatabaseContext::create(clientInfo, Never(), LocalityData(), EnableLocalityLoadBalance::False);
+	db->globalConfig->trigger("A"_sr, [&](std::optional<std::any>) { ASSERT(false); });
+	db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
+	auto initialized = db->globalConfig->onInitialized();
+	auto nextRefresh = [&] { return timeoutError(waitAndForward(proxy.refreshGlobalConfig.getFuture()), 5.0); };
+	auto initial = co_await nextRefresh();
+	initial.reply.send(snapshot.reply());
+	auto retry = co_await race(nextRefresh(), initialized);
+	ASSERT_EQ(retry.index(), 0);
+
+	ReadYourWritesTransaction tr(db);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr.setVersion(51);
+	tr.clear(globalConfigDataKeys);
+	tr.set(keyB, enabled);
+	tr.set(globalConfigVersionKey, BinaryWriter::toValue(Versionstamp(44, 1), Unversioned()));
+	co_await timeoutError(snapshot.read(tr, 1), 5.0);
+	ASSERT(snapshot.stamp == Versionstamp(44, 1));
+	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 51);
+	std::get<0>(retry).reply.send(snapshot.reply());
+	co_await timeoutError(initialized, 5.0);
+	ASSERT(!db->globalConfig->get("A"_sr).isValid());
+	ASSERT(db->globalConfig->get<bool>("B"_sr, false));
 }
 
 TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotMissingVersion") {

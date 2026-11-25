@@ -361,9 +361,9 @@ Future<GlobalConfig::ConfigData> GlobalConfig::getSnapshot(const ClientDBInfo* d
 			const bool originalRowReplaced =
 			    reply.version == fence && fenceRow.present() &&
 			    (!row || !std::ranges::equal(row->mutations, fenceRow.get().mutations, sameMutation));
+			const Version minimum = std::max(lastUpdate, fence == MAX_VERSION ? Version(0) : fence);
 			bool accept;
 			if (readVersion.present()) {
-				const Version minimum = std::max(lastUpdate, fence == MAX_VERSION ? Version(0) : fence);
 				accept = snapshotVersion >= minimum;
 				if (accept && needsMarker && state.proof.present()) {
 					accept = snapshotVersion >= state.proof.get().readVersion;
@@ -387,8 +387,8 @@ Future<GlobalConfig::ConfigData> GlobalConfig::getSnapshot(const ClientDBInfo* d
 				for (const auto& kv : reply.result) {
 					digest.addKeyValue(kv.key, kv.value);
 				}
-				accept = digest == state.proof.get().digest;
 				snapshotVersion = state.proof.get().readVersion;
+				accept = snapshotVersion >= minimum && digest == state.proof.get().digest;
 			} else if (row) {
 				// Only a commit after the controller's repair read can supersede its snapshot.
 				accept = reply.version >= std::max(lastUpdate, fence) && !originalRowReplaced &&
@@ -1022,6 +1022,29 @@ TEST_CASE("/fdbclient/GlobalConfig/VerifiedSnapshotMustCoverRefreshFence") {
 	co_await timeoutError(initialized, 5.0);
 	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
 	ASSERT(test.db->globalConfig->get<bool>("B"_sr, false));
+}
+
+TEST_CASE("/fdbclient/GlobalConfig/LegacyMarkerProofMustCoverRefreshFence") {
+	int callbacks = 0;
+	GlobalConfigRefreshTest test;
+	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any>) { ++callbacks; });
+	auto initialized = test.db->globalConfig->onInitialized();
+	auto stale = snapshotWithSetting("A"_sr);
+	// Both publications arrive before the updater issues its first request.
+	test.publish({ VersionHistory(44) }, snapshotProof(54, stale));
+	test.publish(publishedChange(44, 55, MutationRef(MutationRef::ClearRange, "A"_sr, "B"_sr)));
+	auto request = co_await test.nextRequest();
+	request.reply.send(GlobalConfigRefreshReply{ stale.arena(), 44, stale });
+	auto retry = co_await race(test.nextRequest(), initialized);
+	ASSERT_EQ(retry.index(), 0);
+	ASSERT_EQ(callbacks, 0);
+	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+
+	RangeResult empty;
+	std::get<0>(retry).reply.send(GlobalConfigRefreshReply{ empty.arena(), 55, empty });
+	co_await timeoutError(initialized, 5.0);
+	ASSERT_EQ(callbacks, 0);
+	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
 }
 
 TEST_CASE("/fdbclient/GlobalConfig/StableReplacementFinishesRefresh") {
