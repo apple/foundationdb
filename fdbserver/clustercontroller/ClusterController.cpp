@@ -2244,7 +2244,7 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(Versionstamp committedStam
 			}
 			ArenaObjectReader reader(rows.arena(), kv.value, IncludeVersion());
 			if (reader.protocolVersion() != g_network->protocolVersion()) {
-				return { VersionHistory(committedStamp.version) };
+				return {};
 			}
 
 			const auto rowStamp =
@@ -2278,7 +2278,7 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(Versionstamp committedStam
 			throw;
 		}
 		TraceEvent(SevWarnAlways, "GlobalConfigHistoryDecodeError").errorUnsuppressed(e).suppressFor(60.0);
-		return { VersionHistory(committedStamp.version) };
+		return {};
 	}
 
 	return history;
@@ -2289,11 +2289,43 @@ struct GlobalConfigHistoryState {
 	Versionstamp lastPublishedStamp;
 	// Absent until a snapshot at a newly committed version can cover all potentially missed changes.
 	Optional<Version> oldestReplayVersion;
+	RangeResult lastRows;
+
+	// Both ranges have valid, ordered versionstamps, and the latest stamp cannot go backward.
+	// A client must have passed every lost change before it can replay the remaining rows.
+	Optional<Version> replayBase(const RangeResult& rows, Version previousRead) const {
+		auto stampOf = [this](const KeyValueRef& row) {
+			return GlobalConfig::decodeVersionstamp(row.key.removePrefix(globalConfigHistoryPrefix), lastReadVersion)
+			    .get();
+		};
+		Version base = oldestReplayVersion.get();
+		auto previous = lastRows.begin();
+		for (const auto& row : rows) {
+			while (previous != lastRows.end() && previous->key < row.key) {
+				base = std::max(base, stampOf(*previous).version);
+				++previous;
+			}
+			if (previous != lastRows.end() && previous->key == row.key) {
+				if (previous->value != row.value) {
+					return {};
+				}
+				++previous;
+			} else {
+				const auto stamp = stampOf(row);
+				// After unreadable history we know only the stamp covered by the snapshot.
+				if (stamp.version <= previousRead && (!lastRows.empty() || stamp > lastPublishedStamp)) {
+					return {};
+				}
+			}
+		}
+		return base;
+	}
 
 	std::vector<VersionHistory> update(const Optional<Value>& versionstamp,
 	                                   const RangeResult& rows,
 	                                   Version readVersion,
-	                                   bool forceSnapshot = false) {
+	                                   bool forceSnapshot = false,
+	                                   bool watchFired = false) {
 		const Version previousRead = lastReadVersion;
 		lastReadVersion = std::max(lastReadVersion, readVersion);
 		const auto stamp = versionstamp.present() ? GlobalConfig::decodeVersionstamp(versionstamp.get(), readVersion)
@@ -2315,10 +2347,15 @@ struct GlobalConfigHistoryState {
 		// On startup a stored stamp can predate a missing change. A changed stamp from at or before
 		// the previous read can also be an old stamp written back during repair.
 		const bool newlyCommitted = previousRead == invalidVersion ? latest == readVersion : latest > previousRead;
-		if (forceSnapshot || (stamp.get() != lastPublishedStamp && !newlyCommitted)) {
-			oldestReplayVersion.reset();
-		}
+		// A fired watch can see the original stamp again after an intervening change.
+		const bool continuous = stamp.get() == lastPublishedStamp ? !watchFired : newlyCommitted;
 		auto history = decodeGlobalConfigHistory(stamp.get(), rows, readVersion);
+		if (forceSnapshot || !continuous || history.empty()) {
+			oldestReplayVersion.reset();
+		} else if (oldestReplayVersion.present()) {
+			oldestReplayVersion = replayBase(rows, previousRead);
+		}
+		lastRows = history.empty() ? RangeResult() : rows;
 		lastPublishedStamp = stamp.get();
 		if (!oldestReplayVersion.present()) {
 			if (newlyCommitted) {
@@ -2344,6 +2381,7 @@ struct GlobalConfigHistoryState {
 // history and update the processes local view.
 Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 	GlobalConfigHistoryState historyState;
+	bool watchFired = false;
 	while (true) {
 		ReadYourWritesTransaction tr(db->db);
 		while (true) {
@@ -2358,7 +2396,8 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					rows = co_await tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY);
 				}
 				const Version readVersion = co_await tr.getReadVersion();
-				auto history = historyState.update(globalConfigVersion, rows, readVersion, buggify(0.01));
+				auto history = historyState.update(globalConfigVersion, rows, readVersion, buggify(0.01), watchFired);
+				watchFired = false;
 				if (!history.empty()) {
 					ServerDBInfo serverInfo = db->serverInfo->get();
 					serverInfo.client.history = std::move(history);
@@ -2372,6 +2411,7 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
 				co_await tr.commit();
 				co_await globalConfigFuture;
+				watchFired = true;
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -4073,36 +4113,85 @@ struct GlobalConfigTestClient {
 	}
 };
 
-TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesRefreshPublication") {
-	auto stamp = [](Version version) { return BinaryWriter::toValue(Versionstamp(version, 0), Unversioned()); };
+Future<Void> checkGlobalConfigClientAfterMissedClear(const std::vector<VersionHistory>& history,
+                                                     Version clientVersion,
+                                                     bool expectRefresh) {
 	const KeyRef keyA = "\xff"_sr;
 	auto enabled = Tuple::makeTuple(true).pack();
+	int removals = 0;
+	GlobalConfigTestClient client;
+	auto initial = co_await client.nextRefresh();
+	ASSERT_EQ(initial.lastKnown, -1);
+	RangeResult snapshot;
+	if (clientVersion == 41) {
+		snapshot.push_back_deep(snapshot.arena(), KeyValueRef(keyA.withPrefix(globalConfigKeysPrefix), enabled));
+	}
+	initial.reply.send(GlobalConfigRefreshReply{ snapshot.arena(), clientVersion, snapshot });
+	co_await timeoutError(client.db->globalConfig->onInitialized(), 5.0);
+	ASSERT_EQ(client.db->globalConfig->get<bool>(keyA, false), clientVersion == 41);
+	client.db->globalConfig->trigger(keyA, [&](std::optional<std::any> value) {
+		ASSERT(!value.has_value());
+		++removals;
+	});
+
+	// The only publication the client receives is the one for 50, which sets B.
+	Future<Void> changed = client.db->globalConfig->onChange();
+	client.publish(history);
+	if (expectRefresh) {
+		auto result = co_await race(client.nextRefresh(), changed);
+		ASSERT_EQ(result.index(), 0);
+		auto refresh = std::get<0>(result);
+		ASSERT_EQ(refresh.lastKnown, clientVersion);
+		RangeResult at50;
+		at50.push_back_deep(at50.arena(), KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), enabled));
+		refresh.reply.send(GlobalConfigRefreshReply{ at50.arena(), 50, at50 });
+	}
+	co_await timeoutError(changed, 5.0);
+	ASSERT(!client.db->globalConfig->get(keyA).isValid());
+	ASSERT_EQ(removals, clientVersion == 41 ? 1 : 0);
+	ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
+	co_return;
+}
+
+Value globalConfigTestStamp(Version version) {
+	return BinaryWriter::toValue(Versionstamp(version, 0), Unversioned());
+}
+
+RangeResult globalConfigTestRows(std::initializer_list<std::pair<Version, MutationRef>> changes) {
 	RangeResult rows;
-	rows.push_back_deep(rows.arena(),
-	                    KeyValueRef(stamp(41).withPrefix(globalConfigHistoryPrefix),
-	                                ObjectWriter::toValue(VersionHistory(0), IncludeVersion())));
+	for (const auto& [version, mutation] : changes) {
+		VersionHistory change(0);
+		change.mutations.emplace_back_deep(change.mutations.arena(), mutation);
+		rows.push_back_deep(rows.arena(),
+		                    KeyValueRef(globalConfigTestStamp(version).withPrefix(globalConfigHistoryPrefix),
+		                                ObjectWriter::toValue(change, IncludeVersion())));
+	}
+	return rows;
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesRefreshPublication") {
+	auto enabled = Tuple::makeTuple(true).pack();
+	MutationRef setA(MutationRef::SetValue, "\xff"_sr, enabled);
+	MutationRef setB(MutationRef::SetValue, "B"_sr, enabled);
+	auto rows = globalConfigTestRows({ { 41, setA } });
 	auto state = globalConfigHistoryAt(41);
-	auto first = state.update(stamp(42), rows, 42);
+	auto first = state.update(globalConfigTestStamp(42), rows, 42);
 	ASSERT_EQ(first.size(), 1);
 	ASSERT_EQ(first.front().version, 42);
 	ASSERT(first.front().mutations.empty());
 
 	auto uninterrupted = state;
-	ASSERT(state.update(stamp(41), rows, 45).empty());
+	ASSERT(state.update(globalConfigTestStamp(41), rows, 45).empty());
 	ASSERT_EQ(state.lastPublishedStamp.version, 42);
 
 	// A replacement that first reads the stale stamp cannot see the missing clear at 42.
 	GlobalConfigHistoryState replacement;
-	auto at41 = replacement.update(stamp(41), rows, 45);
+	auto at41 = replacement.update(globalConfigTestStamp(41), rows, 45);
 	ASSERT_EQ(at41.size(), 1);
 	ASSERT_EQ(at41.front().version, 41);
 
-	VersionHistory setB(0);
-	setB.mutations.emplace_back_deep(setB.mutations.arena(), MutationRef(MutationRef::SetValue, "B"_sr, enabled));
-	rows.push_back_deep(
-	    rows.arena(),
-	    KeyValueRef(stamp(50).withPrefix(globalConfigHistoryPrefix), ObjectWriter::toValue(setB, IncludeVersion())));
-	auto second = uninterrupted.update(stamp(50), rows, 52);
+	rows = globalConfigTestRows({ { 41, setA }, { 50, setB } });
+	auto second = uninterrupted.update(globalConfigTestStamp(50), rows, 52);
 	ASSERT_EQ(second.size(), 2);
 	ASSERT_EQ(second.front().version, 42);
 	ASSERT(second.front().mutations.empty());
@@ -4112,8 +4201,8 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesRefreshPublicati
 	ASSERT_EQ(second.back().mutations[0].param1, "B"_sr);
 	ASSERT_EQ(second.back().mutations[0].param2, enabled);
 
-	auto afterRollback = state.update(stamp(50), rows, 52);
-	auto afterReplacement = replacement.update(stamp(50), rows, 52);
+	auto afterRollback = state.update(globalConfigTestStamp(50), rows, 52);
+	auto afterReplacement = replacement.update(globalConfigTestStamp(50), rows, 52);
 	for (const auto* history : { &afterRollback, &afterReplacement }) {
 		ASSERT_EQ(history->size(), 1);
 		ASSERT_EQ(history->front().version, 50);
@@ -4122,37 +4211,72 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesRefreshPublicati
 
 	for (auto [clientVersion, history] :
 	     { std::pair{ 41, &afterRollback }, { 41, &afterReplacement }, { 41, &second }, { 42, &second } }) {
-		int removals = 0;
-		GlobalConfigTestClient client;
-		auto initial = co_await client.nextRefresh();
-		ASSERT_EQ(initial.lastKnown, -1);
-		RangeResult snapshot;
-		if (clientVersion == 41) {
-			snapshot.push_back_deep(snapshot.arena(), KeyValueRef(keyA.withPrefix(globalConfigKeysPrefix), enabled));
-		}
-		initial.reply.send(GlobalConfigRefreshReply{ snapshot.arena(), clientVersion, snapshot });
-		co_await timeoutError(client.db->globalConfig->onInitialized(), 5.0);
-		ASSERT_EQ(client.db->globalConfig->get<bool>(keyA, false), clientVersion == 41);
-		client.db->globalConfig->trigger(keyA, [&](std::optional<std::any> value) {
-			ASSERT(!value.has_value());
-			++removals;
-		});
-
-		// The only publication the client receives is the one for 50, which sets B.
-		Future<Void> changed = client.db->globalConfig->onChange();
-		client.publish(*history);
-		if (clientVersion == 41) {
-			auto refresh = co_await client.nextRefresh();
-			ASSERT_EQ(refresh.lastKnown, 41);
-			RangeResult at50;
-			at50.push_back_deep(at50.arena(), KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), enabled));
-			refresh.reply.send(GlobalConfigRefreshReply{ at50.arena(), 50, at50 });
-		}
-		co_await timeoutError(changed, 5.0);
-		ASSERT(!client.db->globalConfig->get(keyA).isValid());
-		ASSERT_EQ(removals, clientVersion == 41 ? 1 : 0);
-		ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
+		co_await checkGlobalConfigClientAfterMissedClear(*history, clientVersion, clientVersion == 41);
 	}
+	co_return;
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesRestoredStamp") {
+	auto enabled = Tuple::makeTuple(true).pack();
+	MutationRef setA(MutationRef::SetValue, "\xff"_sr, enabled);
+	MutationRef setB(MutationRef::SetValue, "B"_sr, enabled);
+	auto rows = globalConfigTestRows({ { 41, setA } });
+	GlobalConfigHistoryState state;
+	state.update(globalConfigTestStamp(41), rows, 41);
+
+	// An unrecorded clear at 42 fires the watch. Before the next read a repair restores stamp 41.
+	state.update(globalConfigTestStamp(41), rows, 45, false, true);
+	auto at50 = state.update(globalConfigTestStamp(50), globalConfigTestRows({ { 41, setA }, { 50, setB } }), 52);
+	co_await checkGlobalConfigClientAfterMissedClear(at50, 41, true);
+	co_return;
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesChangedHistory") {
+	auto enabled = Tuple::makeTuple(true).pack();
+	MutationRef setA(MutationRef::SetValue, "\xff"_sr, enabled);
+	MutationRef clearA(MutationRef::ClearRange, "\xff"_sr, "\xff\x00"_sr);
+	MutationRef setB(MutationRef::SetValue, "B"_sr, enabled);
+	auto state = globalConfigHistoryAt(41);
+	auto rowsAt42 = globalConfigTestRows({ { 41, setA }, { 42, clearA } });
+	auto at42 = state.update(globalConfigTestStamp(42), rowsAt42, 42);
+	ASSERT_EQ(at42.size(), 2);
+	ASSERT_EQ(at42.back().mutations.size(), 1);
+	ASSERT_EQ(at42.back().mutations[0].type, MutationRef::ClearRange);
+
+	auto missing = state;
+	auto at50 = missing.update(globalConfigTestStamp(50), globalConfigTestRows({ { 41, setA }, { 50, setB } }), 50);
+	co_await checkGlobalConfigClientAfterMissedClear(at50, 41, true);
+	co_await checkGlobalConfigClientAfterMissedClear(at50, 42, false);
+
+	// Losing 42 is still visible if the controller also published a later change at 46.
+	auto at46 = globalConfigHistoryAt(41);
+	MutationRef clearUnused(MutationRef::ClearRange, "X"_sr, "Y"_sr);
+	at46.update(
+	    globalConfigTestStamp(46), globalConfigTestRows({ { 41, setA }, { 42, clearA }, { 46, clearUnused } }), 46);
+	auto lostMiddle = at46;
+	at50 = lostMiddle.update(
+	    globalConfigTestStamp(50), globalConfigTestRows({ { 41, setA }, { 46, clearUnused }, { 50, setB } }), 50);
+	co_await checkGlobalConfigClientAfterMissedClear(at50, 41, true);
+	co_await checkGlobalConfigClientAfterMissedClear(at50, 46, false);
+
+	// The same stamp and mutation type now describe an empty clear. Either publication could be wrong.
+	MutationRef emptyClear(MutationRef::ClearRange, "\xff"_sr, "\xff"_sr);
+	at50 = at46.update(
+	    globalConfigTestStamp(50), globalConfigTestRows({ { 42, emptyClear }, { 46, clearUnused }, { 50, setB } }), 50);
+	co_await checkGlobalConfigClientAfterMissedClear(at50, 41, true);
+	co_await checkGlobalConfigClientAfterMissedClear(at50, 46, true);
+
+	// A retry can read the same stamp even when its watch never fired.
+	state.update(globalConfigTestStamp(42), rowsAt42, 45);
+	// A row dated 44 would already have been visible at read version 45.
+	auto backdated = state;
+	at50 = backdated.update(
+	    globalConfigTestStamp(50), globalConfigTestRows({ { 42, clearA }, { 44, clearUnused }, { 50, setB } }), 50);
+	co_await checkGlobalConfigClientAfterMissedClear(at50, 42, true);
+
+	auto healthy = state.update(
+	    globalConfigTestStamp(50), globalConfigTestRows({ { 41, setA }, { 42, clearA }, { 50, setB } }), 50);
+	co_await checkGlobalConfigClientAfterMissedClear(healthy, 41, false);
 	co_return;
 }
 
