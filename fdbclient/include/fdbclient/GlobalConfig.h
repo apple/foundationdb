@@ -27,6 +27,8 @@
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
@@ -171,20 +173,12 @@ public:
 	void trigger(KeyRef key, std::function<void(std::optional<std::any>)> fn);
 
 private:
-	// The functions below only affect the local copy of the global
-	// configuration keyspace. To insert or remove values across all nodes you
-	// must use a transaction (see the note above).
-
-	// Inserts the given key-value pair into the local copy of the global
-	// configuration keyspace, overwriting the old key-value pair if it exists.
-	// `value` must be encoded using the FDB tuple typecodes.
-	void insert(KeyRef key, ValueRef value);
-	// Removes the given key (and associated value) from the local copy of the
-	// global configuration keyspace.
-	void erase(Key key);
-	// Removes the given key range (and associated values) from the local copy
-	// of the global configuration keyspace.
-	void erase(KeyRangeRef range);
+	// The ConfigValue arena owns the key bytes as well as any string value.
+	using Entry = std::pair<KeyRef, Reference<const ConfigValue>>;
+	static Entry decode(KeyRef key, ValueRef value);
+	void insert(Entry entry);
+	void erase(std::optional<KeyRangeRef> range = std::nullopt);
+	bool applyHistory(const std::vector<VersionHistory>& history);
 
 	// Updates local copy of global configuration by reading the entire key-range
 	// from storage (proxied through the GrvProxies). Returns the version of the

@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <variant>
+
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/SpecialKeySpace.h"
@@ -101,51 +103,60 @@ void GlobalConfig::trigger(KeyRef key, std::function<void(std::optional<std::any
 	callbacks.emplace(key, std::move(fn));
 }
 
-void GlobalConfig::insert(KeyRef key, ValueRef value) {
-	// TraceEvent(SevInfo, "GlobalConfigInsert").detail("Key", key).detail("Value", value);
-	data.erase(key);
-
-	Arena arena(key.expectedSize() + value.expectedSize());
-	KeyRef stableKey = KeyRef(arena, key);
+GlobalConfig::Entry GlobalConfig::decode(KeyRef key, ValueRef value) {
 	try {
+		// Fixed-width tuple accessors require a complete first element.
+		Tuple t = Tuple::unpack(value, /* exclude_incomplete */ true);
+		Arena arena(key.expectedSize() + value.expectedSize());
+		KeyRef stableKey(arena, key);
 		std::any any;
-		Tuple t = Tuple::unpack(value);
-		if (t.getType(0) == Tuple::ElementType::UTF8) {
+		switch (t.getType(0)) {
+		case Tuple::ElementType::UTF8:
 			any = StringRef(arena, t.getString(0).contents());
-		} else if (t.getType(0) == Tuple::ElementType::INT) {
+			break;
+		case Tuple::ElementType::INT:
 			any = t.getInt(0);
-		} else if (t.getType(0) == Tuple::ElementType::BOOL) {
+			break;
+		case Tuple::ElementType::BOOL:
 			any = t.getBool(0);
-		} else if (t.getType(0) == Tuple::ElementType::FLOAT) {
+			break;
+		case Tuple::ElementType::FLOAT:
 			any = t.getFloat(0);
-		} else if (t.getType(0) == Tuple::ElementType::DOUBLE) {
+			break;
+		case Tuple::ElementType::DOUBLE:
 			any = t.getDouble(0);
-		} else if (t.getType(0) == Tuple::ElementType::VERSIONSTAMP) {
+			break;
+		case Tuple::ElementType::VERSIONSTAMP:
 			any = t.getVersionstamp(0);
-		} else {
-			ASSERT(false);
+			break;
+		default:
+			throw invalid_tuple_data_type();
 		}
-		data[stableKey] = makeReference<ConfigValue>(std::move(arena), std::move(any));
-
-		if (callbacks.find(stableKey) != callbacks.end()) {
-			callbacks[stableKey](data[stableKey]->getValue());
-		}
+		return { stableKey, makeReference<ConfigValue>(std::move(arena), std::move(any)) };
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "GlobalConfigTupleParseError").detail("What", e.what());
+		if (e.code() != error_code_invalid_tuple_data_type && e.code() != error_code_invalid_tuple_index) {
+			throw;
+		}
+		TraceEvent(SevWarn, "GlobalConfigTupleParseError").detail("Key", key).detail("What", e.what());
+		return {};
 	}
 }
 
-void GlobalConfig::erase(Key key) {
-	erase(KeyRangeRef(key, keyAfter(key)));
+void GlobalConfig::insert(Entry entry) {
+	// Replacing only the value would leave the map key pointing into the old arena.
+	data.erase(entry.first);
+	data.insert(entry);
+	if (auto callback = callbacks.find(entry.first); callback != callbacks.end()) {
+		callback->second(entry.second->getValue());
+	}
 }
 
-void GlobalConfig::erase(KeyRangeRef range) {
-	// TraceEvent(SevInfo, "GlobalConfigErase").detail("Range", range);
+void GlobalConfig::erase(std::optional<KeyRangeRef> range) {
 	auto it = data.begin();
 	while (it != data.end()) {
-		if (range.contains(it->first)) {
-			if (callbacks.find(it->first) != callbacks.end()) {
-				callbacks[it->first](std::nullopt);
+		if (!range || range->contains(it->first)) {
+			if (auto callback = callbacks.find(it->first); callback != callbacks.end()) {
+				callback->second(std::nullopt);
 			}
 			it = data.erase(it);
 		} else {
@@ -154,10 +165,43 @@ void GlobalConfig::erase(KeyRangeRef range) {
 	}
 }
 
-Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
-	// TraceEvent trace(SevInfo, "GlobalConfigRefresh");
-	erase(KeyRangeRef(""_sr, "\xff"_sr));
+bool GlobalConfig::applyHistory(const std::vector<VersionHistory>& history) {
+	const Version latest = history.back().version;
+	if (latest <= lastUpdate) {
+		return true;
+	}
+	// A later unreadable value must not expose earlier mutations through the cache or callbacks.
+	std::vector<std::variant<Entry, KeyRange>> changes;
+	for (const auto& vh : history) {
+		if (vh.version <= lastUpdate) {
+			continue;
+		}
+		for (const auto& mutation : vh.mutations) {
+			if (mutation.type == MutationRef::SetValue) {
+				auto entry = decode(mutation.param1, mutation.param2);
+				if (!entry.second.isValid()) {
+					return false;
+				}
+				changes.emplace_back(std::move(entry));
+			} else if (mutation.type == MutationRef::ClearRange) {
+				changes.emplace_back(KeyRange(KeyRangeRef(mutation.param1, mutation.param2), vh.mutations.arena()));
+			} else {
+				UNREACHABLE();
+			}
+		}
+	}
+	for (auto& change : changes) {
+		if (auto* entry = std::get_if<Entry>(&change)) {
+			insert(std::move(*entry));
+		} else {
+			erase(std::get<KeyRange>(change));
+		}
+	}
+	lastUpdate = latest;
+	return true;
+}
 
+Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
 	Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
 	while (true) {
 		Error err;
@@ -178,9 +222,12 @@ Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
 				co_await delay(0.25);
 				continue;
 			}
+			erase();
 			for (const auto& kv : reply.result) {
-				KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
-				insert(systemKey, kv.value);
+				auto entry = decode(kv.key.removePrefix(globalConfigKeysPrefix), kv.value);
+				if (entry.second.isValid()) {
+					insert(std::move(entry));
+				}
 			}
 			co_return reply.version;
 		} catch (Error& e) {
@@ -215,10 +262,7 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 				// Subscribe before processing history so a reentrant DB info update cannot be lost.
 				Future<Void> nextDbInfoChange = dbInfoChanged.onTrigger();
 				if (!dbInfo->history.empty()) {
-					if (lastUpdate < dbInfo->history[0].version) {
-						// This process missed too many global configuration
-						// history updates or the protocol version changed, so it
-						// must re-read the entire configuration range.
+					if (lastUpdate < dbInfo->history.front().version || !applyHistory(dbInfo->history)) {
 						lastUpdate = co_await refresh(lastUpdate, dbInfo->history.back().version);
 						// DBInfo could have changed after the wait. If
 						// changes are present, re-run the loop to make
@@ -226,28 +270,6 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 						if (!dbInfo->history.empty() &&
 						    dbInfo->history[0].version != std::numeric_limits<Version>::max()) {
 							continue;
-						}
-					} else {
-						// Apply history in order, from lowest version to highest
-						// version. Mutation history should already be stored in
-						// ascending version order.
-						for (const auto& vh : dbInfo->history) {
-							if (vh.version <= lastUpdate) {
-								continue; // already applied this mutation
-							}
-
-							for (const auto& mutation : vh.mutations.contents()) {
-								if (mutation.type == MutationRef::SetValue) {
-									insert(mutation.param1, mutation.param2);
-								} else if (mutation.type == MutationRef::ClearRange) {
-									erase(KeyRangeRef(mutation.param1, mutation.param2));
-								} else {
-									UNREACHABLE();
-								}
-							}
-
-							ASSERT(vh.version > lastUpdate);
-							lastUpdate = vh.version;
 						}
 					}
 					configChanged.trigger();

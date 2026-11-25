@@ -2249,7 +2249,7 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, con
 			}
 
 			StringRef suffix = kv.key.removePrefix(globalConfigHistoryPrefix);
-			if (suffix.size() < sizeof(Version)) {
+			if (suffix.size() != sizeof(Version) + sizeof(Versionstamp::batchNumber)) {
 				throw serialization_failed();
 			}
 			VersionHistory vh;
@@ -3853,6 +3853,23 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigMalformedHistory") {
 	rows.push_back_deep(rows.arena(), KeyValueRef(globalConfigHistoryPrefix, validValue));
 	checkRefresh();
 
+	// Losing the last byte of version 42 moves its clear before row 41 in key order.
+	auto damagedStamp = version.substr(0, sizeof(Version) - 1).withSuffix(version.substr(sizeof(Version)));
+	VersionHistory clear(0);
+	clear.mutations.emplace_back_deep(clear.mutations.arena(), MutationRef(MutationRef::ClearRange, "a"_sr, "b"_sr));
+	auto v43 = BinaryWriter::toValue(Versionstamp(43, 0), Unversioned());
+	rows = RangeResult();
+	rows.push_back_deep(rows.arena(),
+	                    KeyValueRef(damagedStamp.withPrefix(globalConfigHistoryPrefix),
+	                                ObjectWriter::toValue(clear, IncludeVersion())));
+	rows.push_back_deep(rows.arena(), KeyValueRef(previousKey, validValue));
+	rows.push_back_deep(rows.arena(), KeyValueRef(v43.withPrefix(globalConfigHistoryPrefix), validValue));
+	oldestVersion = 41;
+	auto history = updateGlobalConfigHistory(v43, rows, oldestVersion);
+	ASSERT_EQ(history.size(), 1);
+	ASSERT_EQ(history.front().version, 43);
+	ASSERT(history.front().mutations.empty());
+
 	rows = RangeResult();
 	rows.push_back_deep(rows.arena(), KeyValueRef(key, "a"_sr));
 	checkRefresh();
@@ -3914,8 +3931,43 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigMalformedHistory") {
 	return Void();
 }
 
+struct GlobalConfigTestClient {
+	GrvProxyInterface grvProxy;
+	Reference<AsyncVar<ClientDBInfo>> clientInfo;
+	Database db;
+
+	GlobalConfigTestClient() {
+		grvProxy.provisional = false;
+		grvProxy.initEndpoints();
+		IFailureMonitor::failureMonitor().setStatus(grvProxy.address(), FailureStatus(false));
+		CommitProxyInterface commitProxy;
+		commitProxy.provisional = false;
+		commitProxy.initEndpoints();
+		ClientDBInfo info;
+		info.id = UID(1, 1);
+		info.grvProxies.push_back(grvProxy);
+		info.commitProxies.push_back(commitProxy);
+		clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
+		db = DatabaseContext::create(
+		    clientInfo, Future<Void>(Never()), LocalityData(), EnableLocalityLoadBalance::False);
+		db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
+	}
+
+	Future<GlobalConfigRefreshRequest> nextRefresh() {
+		return timeoutError(waitAndForward(grvProxy.refreshGlobalConfig.getFuture()), 5.0);
+	}
+
+	void publish(std::vector<VersionHistory> history) {
+		ClientDBInfo info = clientInfo->get();
+		info.id = deterministicRandom()->randomUniqueID();
+		info.history = std::move(history);
+		clientInfo->set(info);
+	}
+};
+
 TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesRefreshPublication") {
 	auto stamp = [](Version version) { return BinaryWriter::toValue(Versionstamp(version, 0), Unversioned()); };
+	const KeyRef keyA = "\xff"_sr;
 	auto enabled = Tuple::makeTuple(true).pack();
 	RangeResult rows;
 	rows.push_back_deep(rows.arena(),
@@ -3943,48 +3995,88 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesRefreshPublicati
 	ASSERT_EQ(second.back().mutations[0].param2, enabled);
 
 	for (Version clientVersion : { 41, 42 }) {
-		GrvProxyInterface grvProxy;
-		grvProxy.provisional = false;
-		grvProxy.initEndpoints();
-		IFailureMonitor::failureMonitor().setStatus(grvProxy.address(), FailureStatus(false));
-		CommitProxyInterface commitProxy;
-		commitProxy.provisional = false;
-		commitProxy.initEndpoints();
-		ClientDBInfo info;
-		info.id = UID(1, 1);
-		info.grvProxies.push_back(grvProxy);
-		info.commitProxies.push_back(commitProxy);
-		auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
-		Database db = DatabaseContext::create(
-		    clientInfo, Future<Void>(Never()), LocalityData(), EnableLocalityLoadBalance::False);
-		db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
-
-		auto initial = co_await timeoutError(waitAndForward(grvProxy.refreshGlobalConfig.getFuture()), 5.0);
+		int removals = 0;
+		GlobalConfigTestClient client;
+		auto initial = co_await client.nextRefresh();
 		ASSERT_EQ(initial.lastKnown, -1);
 		RangeResult snapshot;
 		if (clientVersion == 41) {
-			snapshot.push_back_deep(snapshot.arena(), KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), enabled));
+			snapshot.push_back_deep(snapshot.arena(), KeyValueRef(keyA.withPrefix(globalConfigKeysPrefix), enabled));
 		}
 		initial.reply.send(GlobalConfigRefreshReply{ snapshot.arena(), clientVersion, snapshot });
-		co_await timeoutError(db->globalConfig->onInitialized(), 5.0);
-		ASSERT_EQ(db->globalConfig->get<bool>("A"_sr, false), clientVersion == 41);
+		co_await timeoutError(client.db->globalConfig->onInitialized(), 5.0);
+		ASSERT_EQ(client.db->globalConfig->get<bool>(keyA, false), clientVersion == 41);
+		client.db->globalConfig->trigger(keyA, [&](std::optional<std::any> value) {
+			ASSERT(!value.has_value());
+			++removals;
+		});
 
 		// Version 42 cleared A. Both clients receive only the publication for 43, which sets B.
-		Future<Void> changed = db->globalConfig->onChange();
-		info.id = UID(1, 2);
-		info.history = second;
-		clientInfo->set(info);
+		Future<Void> changed = client.db->globalConfig->onChange();
+		client.publish(second);
 		if (clientVersion == 41) {
-			auto refresh = co_await timeoutError(waitAndForward(grvProxy.refreshGlobalConfig.getFuture()), 5.0);
+			auto refresh = co_await client.nextRefresh();
 			ASSERT_EQ(refresh.lastKnown, 41);
 			RangeResult at43;
 			at43.push_back_deep(at43.arena(), KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), enabled));
 			refresh.reply.send(GlobalConfigRefreshReply{ at43.arena(), 43, at43 });
 		}
 		co_await timeoutError(changed, 5.0);
-		ASSERT(!db->globalConfig->get("A"_sr).isValid());
-		ASSERT(db->globalConfig->get<bool>("B"_sr, false));
+		ASSERT(!client.db->globalConfig->get(keyA).isValid());
+		ASSERT_EQ(removals, clientVersion == 41 ? 1 : 0);
+		ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
 	}
+	co_return;
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigClientRefreshesUnreadableSetValue") {
+	const auto enabled = Tuple::makeTuple(true).pack();
+	int changesToB = 0;
+	GlobalConfigTestClient client;
+	auto initial = co_await client.nextRefresh();
+	ASSERT_EQ(initial.lastKnown, -1);
+	RangeResult initialData;
+	initialData.push_back_deep(initialData.arena(),
+	                           KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(false).pack()));
+	initial.reply.send(GlobalConfigRefreshReply{ initialData.arena(), 41, initialData });
+	co_await timeoutError(client.db->globalConfig->onInitialized(), 5.0);
+	client.db->globalConfig->trigger("B"_sr, [&](std::optional<std::any>) { ++changesToB; });
+
+	VersionHistory at42(42);
+	at42.mutations.emplace_back_deep(at42.mutations.arena(), MutationRef(MutationRef::SetValue, "B"_sr, enabled));
+	at42.mutations.emplace_back_deep(at42.mutations.arena(), MutationRef(MutationRef::SetValue, "A"_sr, "\xff"_sr));
+	VersionHistory at43(43);
+	at43.mutations.emplace_back_deep(at43.mutations.arena(), MutationRef(MutationRef::ClearRange, "B"_sr, "C"_sr));
+	Future<Void> changed = client.db->globalConfig->onChange();
+	client.publish({ VersionHistory(41), at42, at43 });
+
+	auto refresh = co_await client.nextRefresh();
+	ASSERT_EQ(refresh.lastKnown, 41);
+	ASSERT(!client.db->globalConfig->get<bool>("A"_sr, true));
+	ASSERT(!client.db->globalConfig->get("B"_sr).isValid());
+	ASSERT_EQ(changesToB, 0);
+	ASSERT(!changed.isReady());
+	refresh.reply.send(GlobalConfigRefreshReply{ initialData.arena(), 42, initialData });
+
+	// A snapshot at the damaged row still falls short of the last advertised version.
+	auto retry = co_await client.nextRefresh();
+	ASSERT_EQ(retry.lastKnown, 41);
+	RangeResult snapshot;
+	snapshot.push_back_deep(snapshot.arena(), KeyValueRef("0"_sr.withPrefix(globalConfigKeysPrefix), "\xff"_sr));
+	snapshot.push_back_deep(snapshot.arena(), KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), enabled));
+	retry.reply.send(GlobalConfigRefreshReply{ snapshot.arena(), 43, snapshot });
+	co_await timeoutError(changed, 5.0);
+	ASSERT(!client.db->globalConfig->get("0"_sr).isValid());
+	ASSERT(client.db->globalConfig->get<bool>("A"_sr, false));
+	ASSERT(!client.db->globalConfig->get("B"_sr).isValid());
+	ASSERT_EQ(changesToB, 0);
+
+	VersionHistory at44(44);
+	at44.mutations.emplace_back_deep(at44.mutations.arena(), MutationRef(MutationRef::ClearRange, "A"_sr, "B"_sr));
+	changed = client.db->globalConfig->onChange();
+	client.publish({ VersionHistory(43), at44 });
+	co_await timeoutError(changed, 5.0);
+	ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
 	co_return;
 }
 
