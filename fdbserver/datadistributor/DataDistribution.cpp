@@ -410,10 +410,9 @@ struct DDBulkDumpJobManager {
 	std::map<Key, BulkLoadManifest> taskManifestMap;
 	BulkDumpSkipTracker skipTracker;
 	bool failed = false; // set once an Error range is seen or written; stops scheduling
-	// Width of the job dumped so far, summed over the tasks that have ended, and its value when pacing last
-	// looked. Held per job rather than per scheduling pass, which restarts whenever scheduling is
-	// interrupted: with the baseline reset each time, every admission looked like the first and none was
-	// ever paced -- one job restarted 63 passes for 32 admissions.
+	// Width of the job dumped so far, summed over ended tasks, and its value when pacing last looked. Per job, not
+	// per scheduling pass: a pass restarts whenever scheduling is interrupted, which would reset the baseline and
+	// leave every admission looking like the first.
 	double completedWidth = 0;
 	double completedWidthAtLastPacing = 0;
 
@@ -2738,15 +2737,10 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 
 // Approximate position of a key as a fraction, by reading its leading bytes as a base-256 value.
 //
-// Pacing needs a measure of progress through the job, and the key range is the only thing a bulkdump
-// knows at submit time. Task counts cannot serve: the metadata counts dump batches, and the number of
-// tasks is not bounded by shards either -- a single-shard job still dispatches one task per batch-bounded
-// portion, so the total is only known once the job is over.
-//
-// The value is used solely for ratios between keys in the same job, and only the bytes after the prefix
-// every key in the job shares carry any information about position: skip them, or a job confined to one
-// subspace would read as zero width throughout and never be paced. Eight bytes past the prefix is ample,
-// since the job's own endpoints already differ at the first of them.
+// The key range is the only measure of job size known at submit time: task counts are not bounded by shards (a
+// single-shard job still dispatches one task per batch-bounded portion), so the total is only known once the job
+// is over. Only ratios between keys of the same job are used, and only the bytes after the prefix every key in
+// the job shares carry position, so `skip` them or a job confined to one subspace reads as zero width.
 double keyPositionFraction(StringRef key, int skip) {
 	double value = 0;
 	double scale = 1.0 / 256.0;
@@ -3022,12 +3016,9 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 						pausedMidPass = true;
 						break;
 					}
-					// Spread admissions across the window the operator asked for. Delaying is the only
-					// lever available: this can hold a job back to the requested pace but cannot make the
-					// cluster finish sooner than it would unpaced, so a target already past just admits.
+					// Spread admissions across the window the operator asked for. Delay is the only lever: a
+					// target already past just admits.
 					if (!control.present() || !control.get().hasTargetEndTime()) {
-						// Logged, not silent: an unpaced admission and a paced one that declined to wait
-						// are different faults, and without this the trace cannot tell them apart.
 						TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobPacingSkipped", self->ddId)
 						    .suppressFor(10.0)
 						    .detail("JobId", jobId)
@@ -3041,17 +3032,10 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 							    .detail("JobId", jobId)
 							    .detail("Reason", "TargetAlreadyPassed")
 							    .detail("TargetEndTime", control.get().targetEndTime);
-						}
-						if (remainingSeconds > 0) {
-							// Spend the remaining window in proportion to the keyspace this task consumes.
-							// A task covering a tenth of what is left should take a tenth of the time that
-							// is left, which needs no count of how many tasks there will be -- the quantity
-							// that defeated every previous attempt, because batches, shards and bytes all
-							// measure something other than the work remaining.
-							// Measure what has been dumped, not what a task was handed. A task's range is not
-							// the work it does: the storage server dumps a bounded slice per request, so where
-							// the keyspace has not split a task can cover a large part of the job and dump a
-							// few percent of it. Crediting the range slept through windows with nothing done.
+						} else {
+							// Credit what has been dumped, not the range a task was handed: the storage server
+							// dumps a bounded slice per request, so an unsplit shard's task can cover much of
+							// the job and dump a few percent of it.
 							double remainingWidth =
 							    keyRangeWidthFraction(jobRange, commonPrefixLength(jobRange.begin, jobRange.end)) -
 							    self->bulkDumpJobManager.completedWidth;
@@ -3060,8 +3044,6 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 							self->bulkDumpJobManager.completedWidthAtLastPacing =
 							    self->bulkDumpJobManager.completedWidth;
 							double waitSeconds = bulkDumpPacingWait(remainingSeconds, consumedWidth, remainingWidth);
-							// Emitted whether or not a wait results, so a run that paced nothing still
-							// records why.
 							TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobPacing", self->ddId)
 							    .suppressFor(10.0)
 							    .detail("JobId", jobId)
@@ -3070,10 +3052,7 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 							    .detail("ConsumedWidth", consumedWidth)
 							    .detail("RemainingWidth", remainingWidth)
 							    .detail("TaskRange", taskRange);
-							// Sliced, not capped. A cap bounded the total spread to admissions times the
-							// cap, which bore no relation to the target and left pacing unable to reach it.
-							// The wait keeps its length; slicing only makes it interruptible, so a pause
-							// issued during one is still seen promptly.
+							// Sliced so a pause issued during a long wait is seen promptly.
 							double waitUntil = now() + waitSeconds;
 							while (waitSeconds > 0 && now() < waitUntil) {
 								co_await delay(
@@ -6526,7 +6505,7 @@ TEST_CASE("/DataDistribution/BulkDump/SkipTracker") {
 }
 
 TEST_CASE("/DataDistribution/BulkDump/PacingWidthMeasuresWithinTheJobRange") {
-	// A job confined to one subspace: every key shares a long prefix, which used to read as zero width.
+	// A job confined to one subspace: every key shares a long prefix, which must not read as zero width.
 	KeyRange job = KeyRangeRef("mytable/users/"_sr, "mytable/users0"_sr);
 	int skip = commonPrefixLength(job.begin, job.end);
 	ASSERT_EQ(skip, 13);
