@@ -4300,24 +4300,40 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientInitializesAfterUnseen
 	ASSERT_EQ(at44[1].version, 42);
 	ASSERT_EQ(at44[1].mutations.size(), 1);
 	ASSERT_EQ(at44[1].mutations[0].param1, "A"_sr);
-	GlobalConfigTestClient client(std::move(at44));
-	auto initial = co_await client.nextRefresh();
-	ASSERT_EQ(initial.lastKnown, invalidVersion);
+	MutationRef setC(MutationRef::SetValue, "C"_sr, enabled);
+	auto at45 =
+	    state.update(globalConfigTestStamp(45), globalConfigTestRows({ { 42, setA }, { 44, setB }, { 45, setC } }), 45);
 	RangeResult rows;
 	rows.push_back_deep(rows.arena(), KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), enabled));
-	initial.reply.send(GlobalConfigRefreshReply{ rows.arena(), 44, rows, 44 });
-	co_await timeoutError(client.db->globalConfig->onInitialized(), 5.0);
-	ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
-	ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
+	for (bool legacy : { false, true }) {
+		GlobalConfigTestClient client(at44);
+		auto initial = co_await client.nextRefresh();
+		ASSERT_EQ(initial.lastKnown, invalidVersion);
+		GlobalConfigRefreshReply reply{ rows.arena(), 44, rows, 44 };
+		ObjectWriter writer{ AssumeVersion(currentProtocolVersion()) };
+		if (legacy) {
+			// The base reply encoded only the rows and version. Its arena occupies no wire bytes.
+			writer.serialize(GlobalConfigRefreshReply::file_identifier, std::pair{ reply.result, reply.version });
+		} else {
+			writer.serialize(reply);
+		}
+		auto received = ObjectReader::fromStringRef<GlobalConfigRefreshReply>(writer.toStringRef(),
+		                                                                      AssumeVersion(currentProtocolVersion()));
+		ASSERT_EQ(received.version, 44);
+		ASSERT(received.result == rows);
+		ASSERT_EQ(received.snapshotReadVersion.present(), !legacy);
+		initial.reply.send(received);
+		co_await timeoutError(client.db->globalConfig->onInitialized(), 5.0);
+		ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
+		ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
 
-	MutationRef setC(MutationRef::SetValue, "C"_sr, enabled);
-	auto changed = client.db->globalConfig->onChange();
-	client.publish(state.update(
-	    globalConfigTestStamp(45), globalConfigTestRows({ { 42, setA }, { 44, setB }, { 45, setC } }), 45));
-	co_await timeoutError(changed, 5.0);
-	ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
-	ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
-	ASSERT(client.db->globalConfig->get<bool>("C"_sr, false));
+		auto changed = client.db->globalConfig->onChange();
+		client.publish(at45);
+		co_await timeoutError(changed, 5.0);
+		ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
+		ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
+		ASSERT(client.db->globalConfig->get<bool>("C"_sr, false));
+	}
 	co_return;
 }
 

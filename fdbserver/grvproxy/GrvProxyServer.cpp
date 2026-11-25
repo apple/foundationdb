@@ -308,28 +308,59 @@ struct GlobalConfigSnapshot {
 	Versionstamp stamp{ 0, 0 };
 	RangeResult data;
 	Optional<Version> snapshotReadVersion;
+	Versionstamp confirmedStamp;
+	// The controller version that the cached stamp advanced past, or zero if nothing had been published.
+	Version priorPublication = invalidVersion;
 
 	GlobalConfigRefreshReply reply() const { return { data.arena(), stamp.version, data, snapshotReadVersion }; }
 
-	void update(const Optional<Value>& versionstamp, const RangeResult& rows, Version readVersion) {
+	void update(const Optional<Value>& versionstamp,
+	            const RangeResult& rows,
+	            Version readVersion,
+	            const std::vector<VersionHistory>& history = {},
+	            Version publicationBeforeRead = 0) {
 		// Clients replace their entire cache with these rows.
 		if (rows.more) {
 			throw serialization_failed();
 		}
 		if (versionstamp.present()) {
-			const auto newStamp = GlobalConfig::decodeVersionstamp(versionstamp.get(), readVersion);
-			if (!newStamp.present() || readVersion == MAX_VERSION || newStamp.get() < stamp) {
+			const auto decoded = GlobalConfig::decodeVersionstamp(versionstamp.get(), readVersion);
+			if (!decoded.present() || readVersion == MAX_VERSION) {
 				throw serialization_failed();
 			}
-			*this = { newStamp.get(), rows, readVersion };
+			const Versionstamp next = decoded.get();
+			const bool published = !history.empty() && history.back().version == next.version;
+			const bool hasHistoryRow = published && history.size() > 1;
+			if (next < stamp) {
+				// A new singleton can repeat the same damaged version key. A marker seen before the
+				// speculative advance is independent of the lower read, but cannot confirm a batch rollback.
+				if (!published || (!hasHistoryRow && next != confirmedStamp && next.version != priorPublication) ||
+				    next.version == stamp.version || next < confirmedStamp ||
+				    (snapshotReadVersion.present() && readVersion <= snapshotReadVersion.get())) {
+					throw serialization_failed();
+				}
+			}
+			if (hasHistoryRow || next < stamp) {
+				priorPublication = invalidVersion;
+			} else if (stamp.version <= publicationBeforeRead && publicationBeforeRead < next.version) {
+				priorPublication = publicationBeforeRead;
+			}
+			if (hasHistoryRow) {
+				confirmedStamp = next;
+			}
+			stamp = next;
+			snapshotReadVersion = readVersion;
 		} else {
 			// Keep the legacy version label, but it does not identify these rows.
-			*this = { stamp, rows, {} };
+			snapshotReadVersion.reset();
 		}
+		data = rows;
 	}
 
 	Future<Void> read(ReadYourWritesTransaction& tr, int pageSize) {
 		pageSize = std::max(1, pageSize);
+		const auto& history = tr.getDatabase()->clientInfo->get().history;
+		const Version publicationBeforeRead = history.empty() ? 0 : history.back().version;
 		auto versionFuture = tr.get(globalConfigVersionKey);
 		auto firstPage = tr.getRange(globalConfigDataKeys, pageSize);
 		Optional<Value> versionstamp = co_await versionFuture;
@@ -344,7 +375,7 @@ struct GlobalConfigSnapshot {
 			rows.readThroughEnd = page.readThroughEnd;
 		}
 		const Version readVersion = co_await tr.getReadVersion();
-		update(versionstamp, rows, readVersion);
+		update(versionstamp, rows, readVersion, history, publicationBeforeRead);
 	}
 };
 
@@ -415,6 +446,56 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValu
 	ASSERT(snapshot.stamp == Versionstamp(43, 7));
 	ASSERT(snapshot.data == at43);
 	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 50);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsUnconfirmedStamp") {
+	const auto at44 = BinaryWriter::toValue(Versionstamp(44, 7), Unversioned());
+	const auto at46 = BinaryWriter::toValue(Versionstamp(46, 0), Unversioned());
+	RangeResult rows;
+	rows.push_back_deep(rows.arena(),
+	                    KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
+	for (bool hasHistoryRow : { false, true }) {
+		GlobalConfigSnapshot snapshot;
+		std::vector<VersionHistory> published{ VersionHistory(44) };
+		if (hasHistoryRow) {
+			published.insert(published.begin(), VersionHistory(41));
+		}
+		snapshot.update(at44, RangeResult(), 49);
+		snapshot.update(at44, RangeResult(), 50, published, 44);
+		snapshot.update(at46, rows, 51, published, 44);
+
+		auto reject = [&](Versionstamp stamp, Version readVersion, const std::vector<VersionHistory>& history) {
+			const auto before = snapshot.reply();
+			try {
+				snapshot.update(BinaryWriter::toValue(stamp, Unversioned()),
+				                RangeResult(),
+				                readVersion,
+				                history,
+				                history.back().version);
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT_EQ(e.code(), error_code_serialization_failed);
+			}
+			ASSERT_EQ(snapshot.reply().version, 46);
+			ASSERT(snapshot.reply().result == rows);
+			ASSERT(snapshot.reply().snapshotReadVersion == before.snapshotReadVersion);
+		};
+		reject(Versionstamp(45, 0), 52, published);
+		if (hasHistoryRow) {
+			reject(Versionstamp(44, 0), 52, published);
+		}
+		reject(Versionstamp(44, 7), 50, published);
+		// A new marker at 45 cannot become independent evidence by retrying either stamp.
+		reject(Versionstamp(45, 0), 52, { VersionHistory(45) });
+		snapshot.update(at46, rows, 53, { VersionHistory(45) }, 45);
+		reject(Versionstamp(45, 0), 54, { VersionHistory(45) });
+
+		snapshot.update(at44, RangeResult(), 55, { VersionHistory(44) }, 44);
+		ASSERT(snapshot.stamp == Versionstamp(44, 7));
+		ASSERT(snapshot.reply().result.empty());
+		ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 55);
+	}
 	return Void();
 }
 

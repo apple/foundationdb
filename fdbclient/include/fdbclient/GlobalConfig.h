@@ -36,7 +36,6 @@
 
 class DatabaseContext;
 struct ClientDBInfo;
-struct GlobalConfigRefreshReply;
 class Transaction;
 
 // Used to store a list of mutations made to the global configuration at a
@@ -180,13 +179,14 @@ private:
 	// The ConfigValue arena owns the key bytes as well as any string value.
 	using Entry = std::pair<KeyRef, Reference<const ConfigValue>>;
 	static Entry decode(KeyRef key, ValueRef value);
-	void insert(Entry entry);
-	void erase(std::optional<KeyRangeRef> range = std::nullopt);
+	using ConfigData = std::unordered_map<KeyRef, Reference<const ConfigValue>>;
+	void notify(KeyRef key, const Reference<const ConfigValue>& value = {});
+	bool replay(const std::vector<VersionHistory>& history, Version after, ConfigData* snapshot = nullptr);
 	bool applyHistory(const std::vector<VersionHistory>& history, Optional<Version> snapshotMarker);
 	static bool couldBeLegacyProfilingWrite(const VectorRef<MutationRef>& mutations);
-	static bool snapshotMatchesHistory(const RangeResultRef& rows, const std::vector<VersionHistory>& history);
+	static bool snapshotMatchesFinalMutations(const RangeResultRef& rows, const VectorRef<MutationRef>& mutations);
 
-	Future<GlobalConfigRefreshReply> getSnapshot(const ClientDBInfo* dbInfo, Version lastKnown);
+	Future<Version> getSnapshot(const ClientDBInfo* dbInfo, Version lastKnown, ConfigData& snapshot);
 	Future<Void> updater(const ClientDBInfo* dbInfo);
 
 	DatabaseContext* cx;
@@ -195,7 +195,7 @@ private:
 	Future<Void> _updater;
 	Promise<Void> initialized;
 	AsyncTrigger configChanged;
-	std::unordered_map<StringRef, Reference<const ConfigValue>> data;
+	ConfigData data;
 	Version lastUpdate;
 	// The key should be a global config string literal key (see the top of this file).
 	std::unordered_map<KeyRef, std::function<void(std::optional<std::any>)>> callbacks;
