@@ -1484,7 +1484,7 @@ Future<RangeResult> getLockedKeyActor(ReadYourWritesTransaction* ryw, KeyRangeRe
 	Optional<Value> val = co_await ryw->getTransaction().get(databaseLockedKey);
 	RangeResult result;
 	if (val.present()) {
-		UID uid = UID::fromString(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString());
+		UID uid = decodeDatabaseLockUID(val.get());
 		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, Value(uid.toString())));
 	}
 	co_return result;
@@ -1516,7 +1516,7 @@ Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction*
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 	Optional<Value> val = co_await ryw->getTransaction().get(databaseLockedKey);
 
-	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != uid) {
+	if (val.present() && decodeDatabaseLockUID(val.get()) != uid) {
 		// check database not locked
 		// if locked already, throw error
 		throw database_locked();

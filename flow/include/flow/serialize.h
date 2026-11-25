@@ -646,7 +646,7 @@ public:
 
 	const void* peekBytes(int bytes) const {
 		ASSERT(bytes >= 0);
-		ASSERT(static_cast<size_t>(bytes) <= remainingBytes());
+		ASSERT(bytes <= end - begin);
 		return begin;
 	}
 

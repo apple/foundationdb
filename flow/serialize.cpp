@@ -41,8 +41,8 @@ _AssumeVersion::_AssumeVersion(ProtocolVersion version) : v(version) {
 }
 
 const void* BinaryReader::readBytes(int bytes) {
-	const auto remaining = remainingBytes();
-	if (bytes < 0 || static_cast<size_t>(bytes) > remaining) {
+	const auto remaining = end - begin;
+	if (bytes < 0 || bytes > remaining) {
 		ASSERT(!g_network || !g_network->isSimulated());
 		TraceEvent("SerializationFailed")
 		    .detail("RequestedBytes", bytes)
@@ -86,6 +86,15 @@ TEST_CASE("flow/serialize/RejectsInvalidReadLengths") {
 	ASSERT_EQ(*static_cast<const uint8_t*>(reader.peekBytes(1)), 42);
 	ASSERT_EQ(*reader.arenaRead(1), 42);
 	ASSERT(reader.empty());
+
+	char buffer[4]{};
+	BinaryReader reversed(buffer + 1, -1, Unversioned());
+	try {
+		reversed.readBytes(1);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_serialization_failed);
+	}
 	return Void();
 }
 

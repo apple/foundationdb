@@ -2324,10 +2324,9 @@ static Future<Void> lockDatabaseImpl(TransactionHandle tr, UID id) {
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
 
 	if (val.present()) {
-		if (BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
+		if (decodeDatabaseLockUID(val.get()) == id) {
 			co_return;
 		} else {
-			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
 			throw database_locked();
 		}
 	}
@@ -2375,8 +2374,7 @@ static Future<Void> unlockDatabaseImpl(TransactionHandle tr, UID id) {
 	if (!val.present())
 		co_return;
 
-	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+	if (decodeDatabaseLockUID(val.get()) != id) {
 		throw database_locked();
 	}
 
@@ -2414,8 +2412,7 @@ static Future<Void> checkDatabaseLockImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
 
-	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
+	if (val.present() && decodeDatabaseLockUID(val.get()) != id) {
 		throw database_locked();
 	}
 }
