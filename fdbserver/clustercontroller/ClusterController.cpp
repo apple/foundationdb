@@ -2237,14 +2237,14 @@ struct GlobalConfigHistoryReader : _ObjectReader<GlobalConfigHistoryReader> {
 	GlobalConfigHistoryReader(Arena arena, StringRef object, ProtocolVersion protocol)
 	  : _ObjectReader(alignForDecode(object, arena), AssumeVersion(protocol)), owner(std::move(arena)) {
 		_checksEnabled = true;
-		checkRange(data(), headerSize);
+		const uint8_t* headerEnd = recordExtent(data(), headerSize, Kind::Header);
 		if (read_file_identifier(data()) != VersionHistory::file_identifier) {
 			throw serialization_failed();
 		}
 
 		// ObjectWriter wraps VersionHistory in a one-field root. Defaulting a missing history
 		// to an empty table would let a client advance past a clear.
-		const auto root = readTable(data(), data() + headerSize, { sizeof(uint32_t) });
+		const auto root = readTable(data(), headerEnd, { sizeof(uint32_t) });
 		const uint8_t* historySlot = root.slots[0];
 		if (!historySlot) {
 			throw serialization_failed();
@@ -2260,6 +2260,30 @@ struct GlobalConfigHistoryReader : _ObjectReader<GlobalConfigHistoryReader> {
 private:
 	static constexpr int headerSize = sizeof(uint32_t) + sizeof(FileIdentifier);
 	Arena owner;
+	enum class Kind { Header, VTable, Table, MutationVector, String };
+	struct Extent {
+		const uint8_t* end;
+		Kind kind;
+	};
+	std::map<const uint8_t*, Extent> extents;
+
+	// Distinct wire objects occupy disjoint bytes. Multiple references can name one complete object.
+	const uint8_t* recordExtent(const uint8_t* begin, uint64_t size, Kind kind) {
+		if (size > uint64_t(_end - begin)) {
+			throw serialization_failed();
+		}
+		const uint8_t* end = begin + size;
+		auto next = extents.lower_bound(begin);
+		if (next != extents.end() && next->first == begin && next->second.end == end && next->second.kind == kind) {
+			return end;
+		}
+		if ((next != extents.end() && next->first < end) ||
+		    (next != extents.begin() && std::prev(next)->second.end > begin)) {
+			throw serialization_failed();
+		}
+		extents.emplace_hint(next, begin, Extent{ end, kind });
+		return end;
+	}
 
 	static StringRef alignForDecode(StringRef object, Arena& arena) {
 		// The generic decoder reads vtable entries through uint16_t pointers.
@@ -2289,7 +2313,7 @@ private:
 
 	// Each known inline field here is a scalar or offset whose wire alignment equals its width.
 	template <size_t N>
-	Table<N> readTable(const uint8_t* slot, const uint8_t* parentEnd, const size_t (&widths)[N]) const {
+	Table<N> readTable(const uint8_t* slot, const uint8_t* parentEnd, const size_t (&widths)[N]) {
 		const uint8_t* body = followOffset(slot, parentEnd);
 		const int64_t offset = (body - _begin) - int64_t(detail::interpret_as<int32_t>(body));
 		constexpr int vtableHeaderSize = 2 * sizeof(uint16_t);
@@ -2302,13 +2326,8 @@ private:
 		if (vtableSize < vtableHeaderSize || vtableSize % sizeof(uint16_t) != 0 || bodySize < sizeof(int32_t)) {
 			throw serialization_failed();
 		}
-		checkRange(vtable, vtableSize);
-		checkRange(body, bodySize);
-		if (vtable < body + bodySize && body < vtable + vtableSize) {
-			throw serialization_failed();
-		}
-
-		Table<N> table{ body + bodySize, {} };
+		recordExtent(vtable, vtableSize, Kind::VTable);
+		Table<N> table{ recordExtent(body, bodySize, Kind::Table), {} };
 		const size_t fields = (vtableSize - vtableHeaderSize) / sizeof(uint16_t);
 		for (size_t i = 0; i < std::min(fields, N); ++i) {
 			const auto entry = detail::interpret_as<uint16_t>(vtable + vtableHeaderSize + i * sizeof(uint16_t));
@@ -2334,16 +2353,24 @@ private:
 		return table;
 	}
 
-	void checkMutations(const uint8_t* vector) const {
+	void checkMutations(const uint8_t* vector) {
+		const uint64_t count = detail::interpret_as<uint32_t>(vector);
+		const uint8_t* end = recordExtent(vector, sizeof(uint32_t) + count * sizeof(uint32_t), Kind::MutationVector);
 		const uint8_t* slots = vector + sizeof(uint32_t);
-		const size_t bytes = size_t(detail::interpret_as<uint32_t>(vector)) * sizeof(uint32_t);
-		checkRange(slots, bytes);
-		const uint8_t* end = slots + bytes;
+		// The writer emits each nonempty payload separately. Bound the work of checksumming and replaying
+		// shared payloads while allowing rows written with a larger value-size limit.
+		uint64_t remaining = std::max<int64_t>(_end - _begin, CLIENT_KNOBS->VALUE_SIZE_LIMIT);
 		for (const uint8_t* slot = slots; slot < end; slot += sizeof(uint32_t)) {
 			const auto mutation = readTable(slot, end, { sizeof(uint8_t), sizeof(uint32_t), sizeof(uint32_t) });
 			for (int param : { 1, 2 }) {
 				if (const uint8_t* stringSlot = mutation.slots[param]) {
-					followOffset(stringSlot, mutation.end);
+					const uint8_t* string = followOffset(stringSlot, mutation.end);
+					const uint64_t length = detail::interpret_as<uint32_t>(string);
+					recordExtent(string, sizeof(uint32_t) + length, Kind::String);
+					if (length > remaining) {
+						throw serialization_failed();
+					}
+					remaining -= length;
 				}
 			}
 		}
@@ -4041,8 +4068,16 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigStoredHistoryFields") {
 		}
 	};
 	auto* knobs = const_cast<ClientKnobs*>(CLIENT_KNOBS);
+	auto* flowKnobs = const_cast<FlowKnobs*>(FLOW_KNOBS);
 	const bool checksumEnabled = knobs->ENABLE_MUTATION_CHECKSUM;
-	auto restore = ScopeExit([&] { knobs->ENABLE_MUTATION_CHECKSUM = checksumEnabled; });
+	const bool boundsEnabled = flowKnobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED;
+	const auto valueSizeLimit = knobs->VALUE_SIZE_LIMIT;
+	auto restore = ScopeExit([&] {
+		knobs->ENABLE_MUTATION_CHECKSUM = checksumEnabled;
+		flowKnobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED = boundsEnabled;
+		knobs->VALUE_SIZE_LIMIT = valueSizeLimit;
+	});
+	flowKnobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED = false;
 	for (bool enabled : { true, false }) {
 		knobs->ENABLE_MUTATION_CHECKSUM = enabled;
 		for (auto end : { "A\x00"_sr, endKey }) {
@@ -4110,6 +4145,9 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigStoredHistoryFields") {
 	checkConfigMarker(publish(replace(elementSlot, uint32_t(0))), 42);
 	const auto* param1 = slotOf(mutation, 1);
 	const auto* param2 = slotOf(mutation, 2);
+	for (const auto* length : { vector, target(param2) }) {
+		checkConfigMarker(publish(replace(length, std::numeric_limits<uint32_t>::max())), 42);
+	}
 	for (const auto* slot : { param1, param2 }) {
 		checkConfigMarker(publish(replace(slot, uint32_t(0))), 42);
 	}
@@ -4119,6 +4157,9 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigStoredHistoryFields") {
 	for (const auto* slot : { mutationsSlot, param1 }) {
 		checkConfigMarker(publish(replace(slot, uint32_t(falseEmpty - slot))), 42);
 	}
+	const auto* alignedEmpty = target(param2) + 8;
+	ASSERT_EQ(detail::interpret_as<uint32_t>(alignedEmpty), 0);
+	checkConfigMarker(publish(replace(param1, uint32_t(alignedEmpty - param1))), 42);
 
 	// Aliased parameter slots would turn the clear into [A, A). A type or version can overlap just part of a slot.
 	const auto param1Offset = uint16_t(param1 - mutation);
@@ -4135,13 +4176,46 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigStoredHistoryFields") {
 
 	// Distinct slots may refer to the same string or table.
 	checkReplay(replace(param2, uint32_t(target(param1) - param2)), 1, "A"_sr);
-	auto repeated = ObjectWriter::toValue(clearHistory(endKey, 2), IncludeVersion());
+	auto redirect = [](const Value& row, const uint8_t* slot, const uint8_t* destination) {
+		ASSERT(destination > slot);
+		Value copy(row.contents());
+		const uint32_t offset = destination - slot;
+		memcpy(mutateString(copy) + (slot - row.begin()), &offset, sizeof(offset));
+		return copy;
+	};
+	auto firstElementSlot = [&](const Value& row) {
+		return target(slotOf(target(historySlotOf(row)), 0)) + sizeof(uint32_t);
+	};
+	const auto repeated = ObjectWriter::toValue(clearHistory(endKey, 2), IncludeVersion());
 	checkReplay(repeated, 2, endKey);
-	const auto* firstSlot = target(slotOf(target(historySlotOf(repeated)), 0)) + sizeof(uint32_t);
+	const auto* firstSlot = firstElementSlot(repeated);
 	const auto* secondSlot = firstSlot + sizeof(uint32_t);
-	const uint32_t shared = target(firstSlot) - secondSlot;
-	memcpy(mutateString(repeated) + (secondSlot - repeated.begin()), &shared, sizeof(shared));
-	checkReplay(repeated, 2, endKey);
+	const auto* first = target(firstSlot);
+	const auto* secondStartSlot = slotOf(target(secondSlot), 1);
+	checkReplay(redirect(repeated, secondSlot, first), 2, endKey);
+	checkReplay(redirect(repeated, secondStartSlot, target(slotOf(first, 1))), 2, endKey);
+	// The first clear's end key and type field each contain a plausible length for the second clear's start key.
+	checkConfigMarker(publish(redirect(repeated, secondStartSlot, target(slotOf(first, 2)) + 8)), 42);
+	const auto* firstType = slotOf(first, 0);
+	ASSERT_EQ(detail::interpret_as<uint32_t>(firstType), 1);
+	checkConfigMarker(publish(redirect(repeated, secondStartSlot, firstType)), 42);
+
+	// Sharing a large checksummed string or its whole table must count the payload for each decoded mutation.
+	knobs->ENABLE_MUTATION_CHECKSUM = true;
+	const Key largeEnd(std::string(1024, 'Z'));
+	auto mixed = clearHistory(endKey, 2);
+	mixed.mutations[0].param2 = largeEnd;
+	const auto large = ObjectWriter::toValue(mixed, IncludeVersion());
+	const auto* firstLarge = target(firstElementSlot(large));
+	const auto* secondLargeSlot = firstElementSlot(large) + sizeof(uint32_t);
+	for (const auto& shared :
+	     { redirect(large, secondLargeSlot, firstLarge),
+	       redirect(large, slotOf(target(secondLargeSlot), 2), target(slotOf(firstLarge, 2))) }) {
+		knobs->VALUE_SIZE_LIMIT = large.size() * 2;
+		checkReplay(shared, 2, largeEnd);
+		knobs->VALUE_SIZE_LIMIT = large.size();
+		checkConfigMarker(publish(shared), 42);
+	}
 	return Void();
 }
 
