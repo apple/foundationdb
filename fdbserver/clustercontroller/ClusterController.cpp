@@ -19,6 +19,7 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -2227,12 +2228,261 @@ Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 	}
 }
 
-VersionHistory globalConfigHistoryForProtocolChange(ValueRef globalConfigVersion) {
-	BinaryReader versionReader(globalConfigVersion, Unversioned());
-	Version committedVersion;
-	versionReader >> committedVersion;
-	return VersionHistory(bigEndian64(committedVersion));
-}
+// Stored history can be damaged independently of the process reading it.
+struct GlobalConfigHistoryReader : _ObjectReader<GlobalConfigHistoryReader> {
+	static constexpr bool ownsUnderlyingMemory = true;
+	static constexpr bool failsFatally = false;
+	[[noreturn]] static void loadFailed(const char*) { throw serialization_failed(); }
+
+	GlobalConfigHistoryReader(Arena arena, StringRef object, ProtocolVersion protocol)
+	  : _ObjectReader(alignForDecode(object, arena), AssumeVersion(protocol)), owner(std::move(arena)) {
+		_checksEnabled = true;
+		const uint8_t* headerEnd = recordExtent(data(), headerSize, Kind::Header);
+		if (read_file_identifier(data()) != VersionHistory::file_identifier) {
+			throw serialization_failed();
+		}
+
+		// ObjectWriter wraps VersionHistory in a one-field root. Defaulting a missing history
+		// to an empty table would let a client advance past a clear.
+		const auto root = readTable(data(), headerEnd, { sizeof(uint32_t) });
+		const uint8_t* historySlot = root.slots[0];
+		if (!historySlot) {
+			throw serialization_failed();
+		}
+		// Older writers stored the version only in the key.
+		const auto history = readTable(historySlot, root.end, { sizeof(uint32_t), sizeof(Version) });
+		if (const uint8_t* mutations = history.slots[0]) {
+			checkMutations(followOffset(mutations, history.end));
+		}
+	}
+	Arena& arena() { return owner; }
+
+private:
+	static constexpr int headerSize = sizeof(uint32_t) + sizeof(FileIdentifier);
+	Arena owner;
+	enum class Kind { Header, VTable, Table, MutationVector, String };
+	struct Extent {
+		const uint8_t* end;
+		Kind kind;
+	};
+	std::map<const uint8_t*, Extent> extents;
+
+	// Distinct wire objects occupy disjoint bytes. Multiple references can name one complete object.
+	const uint8_t* recordExtent(const uint8_t* begin, uint64_t size, Kind kind) {
+		if (size > uint64_t(_end - begin)) {
+			throw serialization_failed();
+		}
+		const uint8_t* end = begin + size;
+		auto next = extents.lower_bound(begin);
+		if (next != extents.end() && next->first == begin && next->second.end == end && next->second.kind == kind) {
+			return end;
+		}
+		if ((next != extents.end() && next->first < end) ||
+		    (next != extents.begin() && std::prev(next)->second.end > begin)) {
+			throw serialization_failed();
+		}
+		extents.emplace_hint(next, begin, Extent{ end, kind });
+		return end;
+	}
+
+	static StringRef alignForDecode(StringRef object, Arena& arena) {
+		// The generic decoder reads vtable entries through uint16_t pointers.
+		if (reinterpret_cast<uintptr_t>(object.begin()) % alignof(uint16_t) == 0) {
+			return object;
+		}
+		auto copy = makeAlignedString(alignof(uint16_t), object.size(), arena);
+		object.copyTo(mutateString(copy));
+		return copy;
+	}
+
+	template <size_t N>
+	struct Table {
+		const uint8_t* end;
+		std::array<const uint8_t*, N> slots;
+	};
+
+	// A table, vector or string starts outside the inline bytes of the object that refers to it.
+	const uint8_t* followOffset(const uint8_t* slot, const uint8_t* parentEnd) const {
+		const uint8_t* target = detail::follow_offset(*this, slot);
+		if (target < parentEnd || (target - _begin) % sizeof(uint32_t) != 0) {
+			throw serialization_failed();
+		}
+		checkRange(target, sizeof(uint32_t));
+		return target;
+	}
+
+	// Each known inline field here is a scalar or offset whose wire alignment equals its width.
+	template <size_t N>
+	Table<N> readTable(const uint8_t* slot, const uint8_t* parentEnd, const size_t (&widths)[N]) {
+		const uint8_t* body = followOffset(slot, parentEnd);
+		const int64_t offset = (body - _begin) - int64_t(detail::interpret_as<int32_t>(body));
+		constexpr int vtableHeaderSize = 2 * sizeof(uint16_t);
+		if (offset < headerSize || offset > (_end - _begin) - vtableHeaderSize || offset % sizeof(uint16_t) != 0) {
+			throw serialization_failed();
+		}
+		const uint8_t* vtable = _begin + offset;
+		const auto vtableSize = detail::interpret_as<uint16_t>(vtable);
+		const auto bodySize = detail::interpret_as<uint16_t>(vtable + sizeof(uint16_t));
+		if (vtableSize < vtableHeaderSize || vtableSize % sizeof(uint16_t) != 0 || bodySize < sizeof(int32_t)) {
+			throw serialization_failed();
+		}
+		recordExtent(vtable, vtableSize, Kind::VTable);
+		Table<N> table{ recordExtent(body, bodySize, Kind::Table), {} };
+		const size_t fields = (vtableSize - vtableHeaderSize) / sizeof(uint16_t);
+		for (size_t i = 0; i < std::min(fields, N); ++i) {
+			const auto entry = detail::interpret_as<uint16_t>(vtable + vtableHeaderSize + i * sizeof(uint16_t));
+			if (entry == 0) {
+				continue;
+			}
+			if (entry < sizeof(int32_t) || entry + widths[i] > bodySize) {
+				throw serialization_failed();
+			}
+			const uint8_t* field = body + entry;
+			if ((field - _begin) % widths[i] != 0) {
+				throw serialization_failed();
+			}
+			// Inline fields own distinct bytes. Their offsets can refer to the same complete object.
+			for (size_t j = 0; j < i; ++j) {
+				const uint8_t* other = table.slots[j];
+				if (other && other < field + widths[i] && field < other + widths[j]) {
+					throw serialization_failed();
+				}
+			}
+			table.slots[i] = field;
+		}
+		return table;
+	}
+
+	void checkMutations(const uint8_t* vector) {
+		const uint64_t count = detail::interpret_as<uint32_t>(vector);
+		const uint8_t* end = recordExtent(vector, sizeof(uint32_t) + count * sizeof(uint32_t), Kind::MutationVector);
+		const uint8_t* slots = vector + sizeof(uint32_t);
+		// The writer emits each nonempty payload separately. Bound the work of checksumming and replaying
+		// shared payloads while allowing rows written with a larger value-size limit.
+		uint64_t remaining = std::max<int64_t>(_end - _begin, CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+		for (const uint8_t* slot = slots; slot < end; slot += sizeof(uint32_t)) {
+			const auto mutation = readTable(slot, end, { sizeof(uint8_t), sizeof(uint32_t), sizeof(uint32_t) });
+			for (int param : { 1, 2 }) {
+				if (const uint8_t* stringSlot = mutation.slots[param]) {
+					const uint8_t* string = followOffset(stringSlot, mutation.end);
+					const uint64_t length = detail::interpret_as<uint32_t>(string);
+					recordExtent(string, sizeof(uint32_t) + length, Kind::String);
+					if (length > remaining) {
+						throw serialization_failed();
+					}
+					remaining -= length;
+				}
+			}
+		}
+	}
+};
+
+struct GlobalConfigHistory {
+	Versionstamp lastStamp;
+	Version replayFrom = 0;
+	RangeResult previousRows;
+
+	static Optional<Versionstamp> readStamp(StringRef bytes, Version readVersion) {
+		if (bytes.size() != sizeof(Version) + sizeof(Versionstamp::batchNumber)) {
+			return {};
+		}
+		const Versionstamp stamp(bytes);
+		if (stamp.version <= 0 || stamp.version > readVersion || stamp.version == MAX_VERSION) {
+			return {};
+		}
+		return stamp;
+	}
+
+	std::vector<VersionHistory> update(const Optional<Value>& value,
+	                                   const RangeResult& rows,
+	                                   Version readVersion,
+	                                   bool watchFired = false,
+	                                   bool forceRefresh = false) {
+		const auto stamp = value.present() ? readStamp(value.get(), readVersion) : Optional<Versionstamp>();
+		if (!stamp.present() || stamp.get() < lastStamp) {
+			if (value.present() || lastStamp.version != invalidVersion) {
+				// No trustworthy label for this observation. Wait for repair and keep the last publication.
+				replayFrom = std::max(replayFrom, readVersion);
+				previousRows = RangeResult();
+				TraceEvent(SevWarn, "GlobalConfigInvalidVersion").suppressFor(60);
+			}
+			return {};
+		}
+		const auto latest = stamp.get().version;
+		if (watchFired && lastStamp == stamp.get()) {
+			// A write followed by a repair can return the watched key to its old value.
+			replayFrom = std::max(replayFrom, readVersion);
+		}
+		lastStamp = stamp.get();
+		std::vector<VersionHistory> history;
+		try {
+			if (rows.empty() || rows.more || rows.back().key.removePrefix(globalConfigHistoryPrefix) != value.get()) {
+				throw serialization_failed();
+			}
+			// Dropping an old prefix is normal. Losing or replacing a retained row invalidates replay across it.
+			auto previous = previousRows.begin();
+			while (previous != previousRows.end() && previous->key < rows.front().key) {
+				++previous;
+			}
+			Versionstamp lastRow;
+			for (const auto& kv : rows) {
+				if (previous != previousRows.end() && previous->key <= kv.key) {
+					if (previous->key != kv.key || previous->value != kv.value) {
+						throw serialization_failed();
+					}
+					++previous;
+				} else if (previous != previousRows.end() && kv.key >= previousRows.front().key) {
+					// A previously complete read did not contain this row.
+					throw serialization_failed();
+				}
+				const auto row = readStamp(kv.key.removePrefix(globalConfigHistoryPrefix), readVersion);
+				if (!row.present() || row.get() <= lastRow || kv.value.size() < sizeof(uint64_t)) {
+					throw serialization_failed();
+				}
+				const ProtocolVersion protocol(detail::interpret_as<uint64_t>(kv.value.begin()));
+				if (!protocol.isValid() || protocol >= minInvalidProtocolVersion) {
+					throw serialization_failed();
+				}
+				if (protocol != g_network->protocolVersion() || forceRefresh) {
+					replayFrom = std::max(replayFrom, latest);
+					previousRows = RangeResult();
+					return { VersionHistory(latest) };
+				}
+				const StringRef object = kv.value.substr(sizeof(uint64_t));
+				GlobalConfigHistoryReader reader(rows.arena(), object, protocol);
+				VersionHistory vh;
+				reader.deserialize(vh);
+				for (const auto& mutation : vh.mutations) {
+					if (mutation.corrupted ||
+					    (mutation.type != MutationRef::SetValue && mutation.type != MutationRef::ClearRange) ||
+					    (mutation.type == MutationRef::ClearRange && mutation.param1 > mutation.param2)) {
+						throw serialization_failed();
+					}
+				}
+				vh.version = row.get().version;
+				lastRow = row.get();
+				history.push_back(std::move(vh));
+			}
+		} catch (Error& e) {
+			if (e.code() != error_code_serialization_failed && e.code() != error_code_incompatible_protocol_version) {
+				throw;
+			}
+			TraceEvent(SevWarn, "GlobalConfigHistoryDecodeError").errorUnsuppressed(e).suppressFor(60);
+			previousRows = RangeResult();
+			replayFrom = std::max(replayFrom, readVersion);
+			return { VersionHistory(latest) };
+		}
+		previousRows = rows;
+		const auto oldest = std::lower_bound(history.begin(), history.end(), VersionHistory(replayFrom));
+		if (oldest == history.end()) {
+			return { VersionHistory(latest) };
+		}
+		history.erase(history.begin(), oldest);
+		replayFrom = history.front().version;
+		history.front().mutations = Standalone<VectorRef<MutationRef>>();
+		return history;
+	}
+};
 
 // Monitors the global configuration version key for changes. When changes are
 // made, the global configuration history is read and any updates are sent to
@@ -2240,9 +2490,10 @@ VersionHistory globalConfigHistoryForProtocolChange(ValueRef globalConfigVersion
 // GlobalConfig actor class contains the functionality to read the latest
 // history and update the processes local view.
 Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
+	GlobalConfigHistory state;
+	bool watchFired = false;
 	while (true) {
 		ReadYourWritesTransaction tr(db->db);
-		ClientDBInfo clientInfo;
 		while (true) {
 			Error err;
 			try {
@@ -2250,77 +2501,27 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Optional<Value> globalConfigVersion = co_await tr.get(globalConfigVersionKey);
 
+				RangeResult rows;
 				if (globalConfigVersion.present()) {
-					// Since the history keys end with versionstamps, they
-					// should be sorted correctly (versionstamps are stored in
-					// big-endian order).
-					RangeResult globalConfigHistory =
-					    co_await tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY);
-					// If the global configuration version key has been set,
-					// the history should contain at least one item.
-					ASSERT(!globalConfigHistory.empty());
-					clientInfo = db->serverInfo->get().client;
-					clientInfo.history.clear();
-
-					for (const auto& kv : globalConfigHistory) {
-						ObjectReader reader(kv.value, IncludeVersion());
-						if (reader.protocolVersion() != g_network->protocolVersion() || buggify(0.01)) {
-							// If the protocol version has changed, the
-							// GlobalConfig actor should refresh its view by
-							// reading the entire global configuration key
-							// range. Preserve the actual committed version so
-							// refresh waits for a GRV proxy that has observed
-							// this configuration change.
-							clientInfo.history.clear();
-							clientInfo.history.push_back(
-							    globalConfigHistoryForProtocolChange(globalConfigVersion.get()));
-							break;
-						}
-
-						VersionHistory vh;
-						reader.deserialize(vh);
-
-						// Read commit version out of versionstamp at end of key.
-						BinaryReader versionReader =
-						    BinaryReader(kv.key.removePrefix(globalConfigHistoryPrefix), Unversioned());
-						Version historyCommitVersion;
-						versionReader >> historyCommitVersion;
-						historyCommitVersion = bigEndian64(historyCommitVersion);
-						vh.version = historyCommitVersion;
-
-						clientInfo.history.push_back(std::move(vh));
-					}
-
-					if (!clientInfo.history.empty()) {
-						// The first item in the historical list of mutations
-						// is only used to:
-						//   a) Recognize that some historical changes may have
-						//      been missed, and the entire global
-						//      configuration keyspace needs to be read, or..
-						//   b) Check which historical updates have already
-						//      been applied. If this is the case, the first
-						//      history item must have a version greater than
-						//      or equal to whatever version the global
-						//      configuration was last updated at, and
-						//      therefore won't need to be applied again.
-						clientInfo.history[0].mutations = Standalone<VectorRef<MutationRef>>();
-					}
-
-					clientInfo.id = deterministicRandom()->randomUniqueID();
-					// Update ServerDBInfo so fdbserver processes receive updated history.
+					rows = co_await tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY);
+				}
+				const Version readVersion = co_await tr.getReadVersion();
+				auto history = state.update(globalConfigVersion, rows, readVersion, watchFired, buggify(0.01));
+				watchFired = false;
+				if (!history.empty()) {
 					ServerDBInfo serverInfo = db->serverInfo->get();
+					serverInfo.client.history = std::move(history);
+					serverInfo.client.id = deterministicRandom()->randomUniqueID();
 					serverInfo.id = deterministicRandom()->randomUniqueID();
 					serverInfo.infoGeneration = ++db->dbInfoCount;
-					serverInfo.client = clientInfo;
 					db->serverInfo->set(serverInfo);
-
-					// Update ClientDBInfo so client processes receive updated history.
-					db->clientInfo->set(clientInfo);
+					db->clientInfo->set(serverInfo.client);
 				}
 
 				Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
 				co_await tr.commit();
 				co_await globalConfigFuture;
+				watchFired = true;
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -3733,15 +3934,425 @@ Future<Void> clusterController(Reference<IClusterConnectionRecord> connRecord,
 
 namespace {
 
-TEST_CASE("/fdbserver/clustercontroller/globalConfigProtocolChangeUsesCommittedVersion") {
-	constexpr Version committedVersion = 0x0102030405060708;
-	BinaryWriter encodedVersion(Unversioned());
-	encodedVersion << bigEndian64(committedVersion) << uint16_t(7);
+Value configStamp(Version version, uint16_t batch = 0) {
+	return BinaryWriter::toValue(Versionstamp(version, batch), Unversioned());
+}
 
-	const VersionHistory history = globalConfigHistoryForProtocolChange(encodedVersion.toValue());
-	ASSERT_EQ(history.version, committedVersion);
-	ASSERT_EQ(history.mutations.size(), 0);
+RangeResult configRows(std::initializer_list<std::pair<Value, Value>> records) {
+	RangeResult rows;
+	for (const auto& [stamp, value] : records) {
+		rows.push_back_deep(rows.arena(), KeyValueRef(stamp.withPrefix(globalConfigHistoryPrefix), value));
+	}
+	return rows;
+}
+
+void checkConfigMarker(const std::vector<VersionHistory>& result, Version expected) {
+	ASSERT_EQ(result.size(), 1);
+	ASSERT_EQ(result.front().version, expected);
+	ASSERT(result.front().mutations.empty());
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigProtocolChangeUsesCommittedVersion") {
+	const auto older =
+	    ObjectWriter::toValue(VersionHistory(0), IncludeVersion(ProtocolVersion::withStorageInterfaceReadiness()));
+	const auto current = ObjectWriter::toValue(VersionHistory(0), IncludeVersion());
+	auto rows = configRows({ { configStamp(41), older }, { configStamp(42, 7), current } });
+	checkConfigMarker(GlobalConfigHistory().update(configStamp(42, 7), rows, 50), 42);
 	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigStoredHistoryBounds") {
+	const auto stamp = configStamp(42);
+	const auto history = ObjectWriter::toValue(VersionHistory(0), IncludeVersion());
+	auto marker = [&](const RangeResult& rows) {
+		checkConfigMarker(GlobalConfigHistory().update(stamp, rows, 50), 42);
+	};
+	auto badValue = [&](ValueRef last) {
+		marker(configRows({ { configStamp(40), history }, { stamp, Value(last) } }));
+	};
+	marker({});
+	const auto healthy = configRows({ { configStamp(40), history }, { stamp, history } });
+	for (int i = 0; i < stamp.size(); ++i) {
+		ASSERT(GlobalConfigHistory().update(Value(stamp.substr(0, i)), healthy, 50).empty());
+		marker(configRows({ { Value(configStamp(40).substr(0, i)), history }, { stamp, history } }));
+	}
+	ASSERT(GlobalConfigHistory().update(stamp.withSuffix("x"_sr), healthy, 50).empty());
+	for (Version invalid : { Version(0), Version(-1), Version(51), Version(MAX_VERSION) }) {
+		ASSERT(GlobalConfigHistory().update(configStamp(invalid), healthy, 50).empty());
+	}
+	marker(configRows({ { configStamp(41), history } }));
+	auto partial = healthy;
+	partial.more = true;
+	marker(partial);
+	marker(configRows({ { configStamp(42, 1), history } }));
+	// Truncate the protocol, header, and root table. The row key remains well formed.
+	for (int n : { 0, 1, 7, 8, 15, 16 }) {
+		ASSERT_LT(n, history.size());
+		badValue(history.substr(0, n));
+	}
+	ObjectWriter wrongWriter{ IncludeVersion() };
+	wrongWriter.serialize(VersionHistory::file_identifier + 1, VersionHistory(0));
+	auto* knobs = const_cast<FlowKnobs*>(FLOW_KNOBS);
+	const bool boundsEnabled = knobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED;
+	knobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED = false;
+	auto restore = ScopeExit([&] { knobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED = boundsEnabled; });
+	// Keep the protocol and file identifier intact. No byte in the fixed header is a root table.
+	constexpr uint32_t headerSize = sizeof(uint32_t) + sizeof(FileIdentifier);
+	auto header = makeString(sizeof(uint64_t) + headerSize);
+	memcpy(mutateString(header), history.begin(), header.size());
+	for (uint32_t offset = 0; offset < headerSize; ++offset) {
+		memcpy(mutateString(header) + sizeof(uint64_t), &offset, sizeof(offset));
+		badValue(header);
+	}
+	// The root must fit in the row even if its known field still fits and decodes.
+	auto oversized = makeString(history.size());
+	memcpy(mutateString(oversized), history.begin(), history.size());
+	auto* object = mutateString(oversized) + sizeof(uint64_t);
+	auto* root = object + detail::interpret_as<uint32_t>(object);
+	auto* vtable = root - detail::interpret_as<int32_t>(root);
+	const uint16_t oversizedTable = std::numeric_limits<uint16_t>::max();
+	memcpy(vtable + sizeof(uint16_t), &oversizedTable, sizeof(oversizedTable));
+	badValue(oversized);
+	// All serialized bytes are physically present. Only the last row's logical length is shortened.
+	auto clipped = configRows({ { configStamp(40), history }, { stamp, history } });
+	clipped.back().value = clipped.back().value.substr(0, 16);
+	marker(clipped);
+	for (uint64_t invalidProtocol : { uint64_t(0), minInvalidProtocolVersion.versionWithFlags() }) {
+		badValue(BinaryWriter::toValue(invalidProtocol, Unversioned()));
+	}
+	auto wrongIdentifier = Value(wrongWriter.toStringRef());
+	badValue(wrongIdentifier);
+	for (auto type : { MutationRef::AddValue, MutationRef::ClearRange }) {
+		VersionHistory bad(0);
+		bad.mutations.emplace_back_deep(bad.mutations.arena(), MutationRef(type, "z"_sr, "a"_sr));
+		badValue(ObjectWriter::toValue(bad, IncludeVersion()));
+	}
+	Standalone<VectorRef<std::pair<uint8_t, StringRef>>> mutations;
+	mutations.emplace_back(mutations.arena(), MutationRef().createTypeWithChecksum(MutationRef::SetValue), "k"_sr);
+	ObjectWriter missing{ IncludeVersion() };
+	missing.serialize(VersionHistory::file_identifier, std::pair{ mutations, Version(0) });
+	badValue(missing.toStringRef());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigStoredHistoryFields") {
+	const auto empty = ObjectWriter::toValue(VersionHistory(0), IncludeVersion());
+	const KeyRef endKey = "Z\0\0\0\0\0\0\0\0"_sr;
+	auto clearHistory = [](KeyRef end, int count = 1) {
+		VersionHistory history(0);
+		for (int i = 0; i < count; ++i) {
+			history.mutations.emplace_back_deep(history.mutations.arena(),
+			                                    MutationRef(MutationRef::ClearRange, "A"_sr, end));
+		}
+		return history;
+	};
+	auto publish = [&](const Value& at42) {
+		auto rows = configRows({ { configStamp(41), empty }, { configStamp(42), Value() } });
+		// A range-read value can start at an odd address even when every wire field is aligned.
+		auto unaligned = makeAlignedString(8, at42.size() + 1, rows.arena()).substr(1);
+		memcpy(mutateString(unaligned), at42.begin(), at42.size());
+		rows.back().value = unaligned;
+		return GlobalConfigHistory().update(configStamp(42), rows, 42);
+	};
+	auto checkReplay = [&](const Value& at42, int clears, KeyRef end = KeyRef()) {
+		const auto result = publish(at42);
+		ASSERT_EQ(result.size(), 2);
+		ASSERT_EQ(result[0].version, 41);
+		ASSERT_EQ(result[1].version, 42);
+		const auto& mutations = result[1].mutations;
+		ASSERT_EQ(mutations.size(), clears);
+		for (const auto& m : mutations) {
+			ASSERT_EQ(m.type, MutationRef::ClearRange);
+			ASSERT_EQ(m.param1, "A"_sr);
+			ASSERT_EQ(m.param2, end);
+		}
+	};
+	auto* knobs = const_cast<ClientKnobs*>(CLIENT_KNOBS);
+	auto* flowKnobs = const_cast<FlowKnobs*>(FLOW_KNOBS);
+	const bool checksumEnabled = knobs->ENABLE_MUTATION_CHECKSUM;
+	const bool boundsEnabled = flowKnobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED;
+	const auto valueSizeLimit = knobs->VALUE_SIZE_LIMIT;
+	auto restore = ScopeExit([&] {
+		knobs->ENABLE_MUTATION_CHECKSUM = checksumEnabled;
+		flowKnobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED = boundsEnabled;
+		knobs->VALUE_SIZE_LIMIT = valueSizeLimit;
+	});
+	flowKnobs->FLATBUFFERS_BOUNDS_CHECKS_ENABLED = false;
+	for (bool enabled : { true, false }) {
+		knobs->ENABLE_MUTATION_CHECKSUM = enabled;
+		for (auto end : { "A\x00"_sr, endKey }) {
+			checkReplay(ObjectWriter::toValue(clearHistory(end), IncludeVersion()), 1, end);
+		}
+	}
+	auto clearA = clearHistory(endKey);
+	const auto clear = ObjectWriter::toValue(clearA, IncludeVersion());
+	checkReplay(empty, 0);
+	// The original VersionHistory table contained only the mutations. The key supplied the version.
+	ObjectWriter oldWriter{ IncludeVersion() };
+	oldWriter.serialize(VersionHistory::file_identifier, detail::fake_root(clearA.mutations));
+	checkReplay(oldWriter.toString(), 1, endKey);
+
+	auto target = [](const uint8_t* slot) { return slot + detail::interpret_as<uint32_t>(slot); };
+	auto vtableOf = [](const uint8_t* table) { return table - detail::interpret_as<int32_t>(table); };
+	auto slotOf = [&](const uint8_t* table, int index) {
+		return table + detail::interpret_as<uint16_t>(vtableOf(table) + (2 + index) * sizeof(uint16_t));
+	};
+	auto historySlotOf = [&](const Value& row) { return slotOf(target(row.begin() + sizeof(uint64_t)), 0); };
+	const auto* historySlot = historySlotOf(clear);
+	const auto* history = target(historySlot);
+	const auto* vtable = vtableOf(history);
+	const auto* mutationsField = vtable + 2 * sizeof(uint16_t);
+	const auto* mutationsSlot = slotOf(history, 0);
+	auto write = [&](Value& bytes, const uint8_t* field, auto value) {
+		memcpy(mutateString(bytes) + (field - clear.begin()), &value, sizeof(value));
+	};
+	auto replace = [&](const uint8_t* field, auto value) {
+		Value bytes(clear.contents());
+		write(bytes, field, value);
+		return bytes;
+	};
+
+	// An optional field can be omitted from the vtable or have a zero entry in it.
+	checkReplay(replace(vtable, uint16_t(4)), 0);
+	checkReplay(replace(vtable, uint16_t(6)), 1, endKey);
+	checkReplay(replace(mutationsField, uint16_t(0)), 0);
+	// A vtable can follow its table at any two-byte boundary.
+	for (int padding : { 1, 2 }) {
+		const auto suffix = clear.withSuffix("xx"_sr.substr(0, padding));
+		auto moved = suffix.withSuffix(StringRef(vtable, detail::interpret_as<uint16_t>(vtable)));
+		const int32_t displacement = (history - clear.begin()) - suffix.size();
+		memcpy(mutateString(moved) + (history - clear.begin()), &displacement, sizeof(displacement));
+		if (padding == 1) {
+			checkConfigMarker(publish(moved), 42);
+		} else {
+			checkReplay(moved, 1, endKey);
+		}
+	}
+	// A present offset into its own slot can make the clear appear to be an empty table or vector.
+	for (uint32_t offset = 0; offset < sizeof(uint32_t); ++offset) {
+		checkConfigMarker(publish(replace(historySlot, offset)), 42);
+		checkConfigMarker(publish(replace(mutationsSlot, offset)), 42);
+	}
+	for (uint16_t size : { 2, 5 }) {
+		checkConfigMarker(publish(replace(vtable, size)), 42);
+	}
+	checkConfigMarker(publish(replace(vtable + sizeof(uint16_t), uint16_t(4))), 42);
+	checkConfigMarker(publish(replace(mutationsField, uint16_t(2))), 42);
+	const auto* vector = target(mutationsSlot);
+	const auto* elementSlot = vector + sizeof(uint32_t);
+	const auto* mutation = target(elementSlot);
+	const auto* mutationVtable = vtableOf(mutation);
+	checkConfigMarker(publish(replace(elementSlot, uint32_t(0))), 42);
+	const auto* param1 = slotOf(mutation, 1);
+	const auto* param2 = slotOf(mutation, 2);
+	for (const auto* length : { vector, target(param2) }) {
+		checkConfigMarker(publish(replace(length, std::numeric_limits<uint32_t>::max())), 42);
+	}
+	for (const auto* slot : { param1, param2 }) {
+		checkConfigMarker(publish(replace(slot, uint32_t(0))), 42);
+	}
+	// Four zero bytes inside the end key look like a complete empty vector or string.
+	const auto* falseEmpty = target(param2) + sizeof(uint32_t) + 1;
+	ASSERT_EQ(detail::interpret_as<uint32_t>(falseEmpty), 0);
+	for (const auto* slot : { mutationsSlot, param1 }) {
+		checkConfigMarker(publish(replace(slot, uint32_t(falseEmpty - slot))), 42);
+	}
+	const auto* alignedEmpty = target(param2) + 8;
+	ASSERT_EQ(detail::interpret_as<uint32_t>(alignedEmpty), 0);
+	checkConfigMarker(publish(replace(param1, uint32_t(alignedEmpty - param1))), 42);
+
+	// Aliased parameter slots would turn the clear into [A, A). A type or version can overlap just part of a slot.
+	const auto param1Offset = uint16_t(param1 - mutation);
+	checkConfigMarker(publish(replace(mutationVtable + 4 * sizeof(uint16_t), param1Offset)), 42);
+	checkConfigMarker(publish(replace(mutationVtable + 2 * sizeof(uint16_t), uint16_t(param1Offset + 1))), 42);
+	const auto* versionSlot = slotOf(history, 1);
+	const auto* overlapsVersion = versionSlot + sizeof(uint32_t);
+	auto overlap = replace(mutationsField, uint16_t(overlapsVersion - history));
+	write(overlap, overlapsVersion, uint32_t(vector - overlapsVersion));
+	checkConfigMarker(publish(overlap), 42);
+	auto misalignedVersion = replace(mutationsField, uint16_t(0));
+	write(misalignedVersion, mutationsField + sizeof(uint16_t), uint16_t(versionSlot - history + 1));
+	checkConfigMarker(publish(misalignedVersion), 42);
+
+	// Distinct slots may refer to the same string or table.
+	checkReplay(replace(param2, uint32_t(target(param1) - param2)), 1, "A"_sr);
+	auto redirect = [](const Value& row, const uint8_t* slot, const uint8_t* destination) {
+		ASSERT(destination > slot);
+		Value copy(row.contents());
+		const uint32_t offset = destination - slot;
+		memcpy(mutateString(copy) + (slot - row.begin()), &offset, sizeof(offset));
+		return copy;
+	};
+	auto firstElementSlot = [&](const Value& row) {
+		return target(slotOf(target(historySlotOf(row)), 0)) + sizeof(uint32_t);
+	};
+	const auto repeated = ObjectWriter::toValue(clearHistory(endKey, 2), IncludeVersion());
+	checkReplay(repeated, 2, endKey);
+	const auto* firstSlot = firstElementSlot(repeated);
+	const auto* secondSlot = firstSlot + sizeof(uint32_t);
+	const auto* first = target(firstSlot);
+	const auto* secondStartSlot = slotOf(target(secondSlot), 1);
+	checkReplay(redirect(repeated, secondSlot, first), 2, endKey);
+	checkReplay(redirect(repeated, secondStartSlot, target(slotOf(first, 1))), 2, endKey);
+	// The first clear's end key and type field each contain a plausible length for the second clear's start key.
+	checkConfigMarker(publish(redirect(repeated, secondStartSlot, target(slotOf(first, 2)) + 8)), 42);
+	const auto* firstType = slotOf(first, 0);
+	ASSERT_EQ(detail::interpret_as<uint32_t>(firstType), 1);
+	checkConfigMarker(publish(redirect(repeated, secondStartSlot, firstType)), 42);
+
+	// Sharing a large checksummed string or its whole table must count the payload for each decoded mutation.
+	knobs->ENABLE_MUTATION_CHECKSUM = true;
+	const Key largeEnd(std::string(1024, 'Z'));
+	auto mixed = clearHistory(endKey, 2);
+	mixed.mutations[0].param2 = largeEnd;
+	const auto large = ObjectWriter::toValue(mixed, IncludeVersion());
+	const auto* firstLarge = target(firstElementSlot(large));
+	const auto* secondLargeSlot = firstElementSlot(large) + sizeof(uint32_t);
+	for (const auto& shared :
+	     { redirect(large, secondLargeSlot, firstLarge),
+	       redirect(large, slotOf(target(secondLargeSlot), 2), target(slotOf(firstLarge, 2))) }) {
+		knobs->VALUE_SIZE_LIMIT = large.size() * 2;
+		checkReplay(shared, 2, largeEnd);
+		knobs->VALUE_SIZE_LIMIT = large.size();
+		checkConfigMarker(publish(shared), 42);
+	}
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigObservedHistoryLoss") {
+	VersionHistory change(0);
+	change.mutations.emplace_back_deep(change.mutations.arena(), MutationRef(MutationRef::SetValue, "k"_sr, "v"_sr));
+	const auto item = ObjectWriter::toValue(change, IncludeVersion());
+	auto rows = [&](std::initializer_list<Version> versions) {
+		RangeResult result;
+		result.arena() = Arena(4096);
+		for (Version v : versions) {
+			result.push_back_deep(result.arena(),
+			                      KeyValueRef(configStamp(v).withPrefix(globalConfigHistoryPrefix), item));
+		}
+		return result;
+	};
+	GlobalConfigHistory state;
+	auto originals = rows({ 40, 41, 42 });
+	auto first = state.update(configStamp(42), originals, 45);
+	ASSERT_EQ(first.size(), 3);
+	ASSERT(first[1].mutations.arena().sameArena(originals.arena()));
+	originals = RangeResult();
+	ASSERT(first.front().mutations.empty());
+	// The previously published change at 41 vanished while 40 remained.
+	checkConfigMarker(state.update(configStamp(47), rows({ 40, 42, 47 }), 48), 47);
+	// A marker is a publication too. A rollback must keep the marker at 47.
+	ASSERT(state.update(configStamp(45), rows({ 40, 42, 45 }), 49).empty());
+	// A client can miss 47. Version 50 is the first retained real config version above the uncertain read at 48.
+	checkConfigMarker(state.update(configStamp(50), rows({ 40, 47, 50 }), 50), 50);
+	auto resumed = state.update(configStamp(60), rows({ 40, 47, 50, 60 }), 61);
+	ASSERT_EQ(resumed.size(), 2);
+	ASSERT_EQ(resumed[0].version, 50);
+	ASSERT_EQ(resumed[1].version, 60);
+	// Pruning an old prefix is healthy. An older row inserted into the retained window is observable damage.
+	auto ordinary = state.update(configStamp(70), rows({ 50, 60, 70 }), 71);
+	ASSERT_EQ(ordinary.size(), 3);
+	ASSERT_EQ(ordinary.front().version, 50);
+	checkConfigMarker(state.update(configStamp(75), rows({ 50, 55, 60, 70, 75 }), 76), 75);
+	// An undersized, future, or backward stamp leaves the published vector untouched.
+	ASSERT(state.update(Value("bad"_sr), rows({ 50, 70 }), 77).empty());
+	ASSERT(state.update(configStamp(90), rows({ 90 }), 77).empty());
+	ASSERT(state.update(configStamp(47), rows({ 47 }), 78).empty());
+	checkConfigMarker(state.update(configStamp(75), rows({ 70, 75 }), 79), 75);
+	// Healthy rows with the same commit version keep their wire order and their mutations.
+	auto batch = configRows({ { configStamp(40), item }, { configStamp(42), item }, { configStamp(42, 7), item } });
+	auto sameVersion = GlobalConfigHistory().update(configStamp(42, 7), batch, 45);
+	ASSERT_EQ(sameVersion.size(), 3);
+	ASSERT_EQ(sameVersion[1].version, 42);
+	ASSERT_EQ(sameVersion[2].version, 42);
+	ASSERT_EQ(sameVersion[2].mutations.size(), 1);
+	// Release the read rows, including the ones the state kept for comparison.
+	state = {};
+	ASSERT_EQ(first[1].mutations[0].param1, "k"_sr);
+	ASSERT_EQ(resumed[1].mutations[0].param2, "v"_sr);
+	return Void();
+}
+
+Future<Void> testGlobalConfigRefreshPublication(bool deliverFirstPublication) {
+	GrvProxyInterface proxy;
+	proxy.provisional = false;
+	proxy.initEndpoints();
+	IFailureMonitor::failureMonitor().setStatus(proxy.address(), FailureStatus(false));
+	CommitProxyInterface commitProxy;
+	commitProxy.provisional = false;
+	commitProxy.initEndpoints();
+	ClientDBInfo info;
+	info.id = deterministicRandom()->randomUniqueID();
+	info.grvProxies.push_back(proxy);
+	info.commitProxies.push_back(commitProxy);
+	auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
+	auto db = DatabaseContext::create(clientInfo, Never(), LocalityData(), EnableLocalityLoadBalance::False);
+	db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
+	auto nextRequest = [&] { return timeoutError(waitAndForward(proxy.refreshGlobalConfig.getFuture()), 5.0); };
+	auto initial = co_await nextRequest();
+	RangeResult at41;
+	const auto enabled = Tuple::makeTuple(true).pack();
+	at41.push_back_deep(at41.arena(), KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), enabled));
+	initial.reply.send(GlobalConfigRefreshReply{ at41.arena(), 41, at41 });
+	co_await timeoutError(db->globalConfig->onInitialized(), 5.0);
+	ASSERT(db->globalConfig->get<bool>("A"_sr, false));
+
+	GlobalConfigHistory controller;
+	const auto empty = ObjectWriter::toValue(VersionHistory(0), IncludeVersion());
+	const auto rows = configRows({ { configStamp(41), empty } });
+	// 42 clears A, but its history row is missing.
+	info.history = controller.update(configStamp(42), rows, 42);
+	checkConfigMarker(info.history, 42);
+	if (deliverFirstPublication) {
+		info.id = deterministicRandom()->randomUniqueID();
+		auto applied = db->globalConfig->onChange();
+		clientInfo->set(info);
+		auto request = co_await nextRequest();
+		ASSERT_EQ(request.lastKnown, 41);
+		RangeResult at42;
+		request.reply.send(GlobalConfigRefreshReply{ at42.arena(), 42, at42 });
+		co_await timeoutError(applied, 5.0);
+		ASSERT(!db->globalConfig->get("A"_sr).isValid());
+	}
+	VersionHistory addB(0);
+	addB.mutations.emplace_back_deep(addB.mutations.arena(), MutationRef(MutationRef::SetValue, "B"_sr, enabled));
+	const auto setB = ObjectWriter::toValue(addB, IncludeVersion());
+	auto at50 = configRows({ { configStamp(41), empty }, { configStamp(50), setB } });
+	info.history = controller.update(configStamp(50), at50, 51);
+	info.id = deterministicRandom()->randomUniqueID();
+	auto applied = db->globalConfig->onChange();
+	clientInfo->set(info);
+	auto result = co_await race(nextRequest(), applied);
+	ASSERT_EQ(result.index(), 0);
+	auto request = std::move(std::get<0>(result));
+	ASSERT_EQ(request.lastKnown, deliverFirstPublication ? 42 : 41);
+	RangeResult canonical;
+	canonical.push_back_deep(canonical.arena(), KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), enabled));
+	request.reply.send(GlobalConfigRefreshReply{ canonical.arena(), 50, canonical });
+	co_await timeoutError(applied, 5.0);
+	ASSERT(!db->globalConfig->get("A"_sr).isValid());
+	ASSERT(db->globalConfig->get<bool>("B"_sr, false));
+
+	// After the snapshot at 50, the client can replay a healthy clear without another snapshot.
+	VersionHistory clearB(0);
+	clearB.mutations.emplace_back_deep(clearB.mutations.arena(), MutationRef(MutationRef::ClearRange, "B"_sr, "C"_sr));
+	auto at51 =
+	    configRows({ { configStamp(50), setB }, { configStamp(51), ObjectWriter::toValue(clearB, IncludeVersion()) } });
+	info.history = controller.update(configStamp(51), at51, 51);
+	info.id = deterministicRandom()->randomUniqueID();
+	auto replayed = db->globalConfig->onChange();
+	clientInfo->set(info);
+	auto replayResult = co_await race(nextRequest(), replayed);
+	ASSERT_EQ(replayResult.index(), 1);
+	ASSERT(!db->globalConfig->get("B"_sr).isValid());
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigClientSeesRefreshPublication") {
+	return testGlobalConfigRefreshPublication(true);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesRefreshPublication") {
+	return testGlobalConfigRefreshPublication(false);
 }
 
 void addProcessesToSameDC(ClusterControllerData& self, const std::vector<NetworkAddress>&& processes) {

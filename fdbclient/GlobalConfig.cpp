@@ -110,6 +110,10 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 	try {
 		std::any any;
 		Tuple t = Tuple::unpack(value);
+		// Fixed-width accessors need a complete first element. UTF8 also accepts end-of-input as its terminator.
+		if (t.getType(0) != Tuple::ElementType::UTF8) {
+			t = Tuple::unpack(t.subTupleRawString(0), /* exclude_incomplete */ true);
+		}
 		if (t.getType(0) == Tuple::ElementType::UTF8) {
 			any = StringRef(arena, t.getString(0).contents());
 		} else if (t.getType(0) == Tuple::ElementType::INT) {
@@ -293,10 +297,7 @@ Future<Void> serveGlobalConfigRefreshSnapshots(GrvProxyInterface grvProxy) {
 	co_return;
 }
 
-} // namespace
-
-TEST_CASE("/fdbclient/GlobalConfig/RejectsStaleRefreshSnapshot") {
-	GrvProxyInterface grvProxy;
+Reference<AsyncVar<ClientDBInfo>> globalConfigTestClientInfo(GrvProxyInterface& grvProxy) {
 	grvProxy.provisional = false;
 	grvProxy.initEndpoints();
 	IFailureMonitor::failureMonitor().setStatus(grvProxy.address(), FailureStatus(false));
@@ -311,7 +312,14 @@ TEST_CASE("/fdbclient/GlobalConfig/RejectsStaleRefreshSnapshot") {
 	initialInfo.grvProxies.push_back(grvProxy);
 	initialInfo.commitProxies.push_back(commitProxy);
 
-	auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>(initialInfo);
+	return makeReference<AsyncVar<ClientDBInfo>>(initialInfo);
+}
+
+} // namespace
+
+TEST_CASE("/fdbclient/GlobalConfig/RejectsStaleRefreshSnapshot") {
+	GrvProxyInterface grvProxy;
+	auto clientInfo = globalConfigTestClientInfo(grvProxy);
 	int callbackCount = 0;
 	Database db =
 	    DatabaseContext::create(clientInfo, Future<Void>(Never()), LocalityData(), EnableLocalityLoadBalance::False);
@@ -331,5 +339,37 @@ TEST_CASE("/fdbclient/GlobalConfig/RejectsStaleRefreshSnapshot") {
 	co_await timeoutError(configChanged, 5.0);
 	ASSERT_EQ(callbackCount, 0);
 	ASSERT(!db->globalConfig->get(fdbClientInfoTxnSampleRate).isValid());
+	co_return;
+}
+
+TEST_CASE("/fdbclient/GlobalConfig/StoredTupleBounds") {
+	GrvProxyInterface grvProxy;
+	auto clientInfo = globalConfigTestClientInfo(grvProxy);
+	auto db = DatabaseContext::create(clientInfo, Never(), LocalityData(), EnableLocalityLoadBalance::False);
+	db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
+	auto request = co_await timeoutError(waitAndForward(grvProxy.refreshGlobalConfig.getFuture()), 5.0);
+	RangeResult snapshot;
+	auto add = [&](KeyRef key, ValueRef value) {
+		snapshot.push_back_deep(snapshot.arena(), KeyValueRef(key.withPrefix(globalConfigKeysPrefix), value));
+	};
+	auto addTruncated = [&](KeyRef key, auto value) {
+		Value packed = Tuple::makeTuple(value).pack();
+		add(key, packed.substr(0, 1));
+	};
+	addTruncated("stamp"_sr, TupleVersionstamp());
+	addTruncated("int"_sr, int64_t(42));
+	addTruncated("float"_sr, 1.0f);
+	addTruncated("double"_sr, 2.0);
+	add("firstInt"_sr, Tuple::makeTuple(42, StringRef(std::string(128, 'x'))).pack());
+	add("firstString"_sr, "\x02text\x00\x20"_sr);
+	add("emptyString"_sr, "\x02"_sr);
+	request.reply.send(GlobalConfigRefreshReply{ snapshot.arena(), 42, snapshot });
+	co_await timeoutError(db->globalConfig->onInitialized(), 5.0);
+	for (auto key : { "stamp"_sr, "int"_sr, "float"_sr, "double"_sr }) {
+		ASSERT(!db->globalConfig->get(key).isValid());
+	}
+	ASSERT_EQ(db->globalConfig->get<int64_t>("firstInt"_sr, -1), 42);
+	ASSERT_EQ(std::any_cast<StringRef>(db->globalConfig->get("firstString"_sr)->getValue()), "text"_sr);
+	ASSERT(std::any_cast<StringRef>(db->globalConfig->get("emptyString"_sr)->getValue()).empty());
 	co_return;
 }
