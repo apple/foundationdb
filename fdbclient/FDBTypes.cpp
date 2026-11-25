@@ -23,6 +23,65 @@
 #include "fdbclient/NativeAPI.h"
 #include <boost/algorithm/string.hpp>
 
+TEST_CASE("/fdbclient/FDBTypes/TaggedLogMessageBounds") {
+	const int32_t fixedBodySize = TagsAndMessage::getHeaderSize(0) - sizeof(int32_t);
+	BinaryWriter bodyWriter(Unversioned());
+	const Tag tag(1, 23);
+	bodyWriter << uint32_t(17) << uint16_t(1) << tag;
+	auto body = bodyWriter.toValue();
+	BinaryWriter nextWriter(Unversioned());
+	nextWriter << int32_t(fixedBodySize + 4) << uint32_t(29) << uint16_t(0);
+	nextWriter.serializeBytes("next"_sr);
+	auto next = nextWriter.toValue();
+
+	auto checkRejected = [](StringRef bytes) {
+		BinaryReader reader(bytes, Unversioned());
+		TagsAndMessage message("unchanged"_sr, {});
+		uint32_t sub = 99;
+		try {
+			message.loadFromArena(&reader, &sub);
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_serialization_failed);
+		}
+		ASSERT(reader.remainingBytes() == bytes.size() && message.message == "unchanged"_sr && sub == 99);
+	};
+	for (int size = 0; size < body.size(); ++size) {
+		BinaryWriter writer(Unversioned());
+		writer << int32_t(size);
+		writer.serializeBytes(body.substr(0, size));
+		writer.serializeBytes(next);
+		checkRejected(writer.toValue());
+	}
+	for (int32_t size : { int32_t(-1), std::numeric_limits<int32_t>::max() }) {
+		BinaryWriter writer(Unversioned());
+		writer << size;
+		writer.serializeBytes(body);
+		checkRejected(writer.toValue());
+	}
+	for (int size = 0; size < next.size(); ++size) {
+		checkRejected(next.substr(0, size));
+	}
+
+	BinaryWriter writer(Unversioned());
+	writer << int32_t(body.size());
+	writer.serializeBytes(body);
+	writer.serializeBytes(next);
+	auto records = writer.toValue();
+	ArenaReader reader(records.arena(), records, Unversioned());
+	TagsAndMessage message;
+	uint32_t sub;
+	message.loadFromArena(&reader, &sub);
+	ASSERT(sub == 17 && message.tags.size() == 1 && message.tags[0] == tag);
+	ASSERT(message.getMessageWithoutTags().empty());
+	reader.rewind();
+	ASSERT(reader.readBytes(message.getRawMessage().size()) == records.begin());
+	message.loadFromArena(&reader, &sub);
+	ASSERT(sub == 29 && message.tags.empty() && message.getMessageWithoutTags() == "next"_sr);
+	ASSERT(reader.empty());
+	return Void();
+}
+
 KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, Optional<KeyRef> prefix) {
 	if (!prefix.present() || prefix.get().empty()) {
 		return range;

@@ -35,6 +35,7 @@ public:
 	Version poppedVersion;
 	TagsAndMessage messageAndTags;
 	bool hasMsg;
+	Error decodeError;
 	Future<Void> more;
 	UID randomID;
 	bool returnIfBlocked;
