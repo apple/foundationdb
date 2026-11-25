@@ -3827,7 +3827,8 @@ namespace {
 GlobalConfigHistoryState globalConfigHistoryAt(Version version) {
 	return { .lastReadVersion = version,
 		     .lastPublishedStamp = Versionstamp(version, 0),
-		     .oldestReplayVersion = version };
+		     .oldestReplayVersion = version,
+		     .lastRows = {} };
 }
 
 TEST_CASE("/fdbserver/clustercontroller/globalConfigProtocolChangeUsesCommittedVersion") {
@@ -4069,6 +4070,7 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigMalformedHistory") {
 		state = globalConfigHistoryAt(39);
 		auto repaired = state.update(version, rows, 42);
 		rows = RangeResult();
+		state = GlobalConfigHistoryState();
 		ASSERT_EQ(repaired.size(), 2);
 		ASSERT_EQ(repaired.front().version, 39);
 		ASSERT_EQ(repaired.back().version, 42);
