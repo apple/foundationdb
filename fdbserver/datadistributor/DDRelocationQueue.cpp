@@ -769,7 +769,7 @@ void DDQueue::validate() {
 					    .detail("Problem", "each server in the inFlight map is in the busymap");
 
 				// relocate data that is inFlight is not also in the queue
-				if (queue[it->value().src[i]].contains(it->value()))
+				if (isQueuedOnSource(it->value().src[i], it->value()))
 					TraceEvent(SevError, "DDQueueValidateError9")
 					    .detail("Problem", "relocate data that is inFlight is not also in the queue");
 			}
@@ -863,6 +863,22 @@ void DDQueue::processRelocationComplete(const RelocateData& done) {
 	}
 }
 
+bool DDQueue::isQueuedOnSource(UID source, const RelocateData& relocation) const {
+	auto it = queue.find(source);
+	return it != queue.end() && it->second.contains(relocation);
+}
+
+bool DDQueue::removeFromSourceQueue(UID source, const RelocateData& relocation) {
+	auto it = queue.find(source);
+	if (it == queue.end() || !it->second.erase(relocation)) {
+		return false;
+	}
+	if (it->second.empty()) {
+		queue.erase(it);
+	}
+	return true;
+}
+
 void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFrom) {
 	PipelineMutation mutation(*this);
 	//TraceEvent("QueueRelocationBegin").detail("Begin", rd.keys.begin).detail("End", rd.keys.end);
@@ -880,8 +896,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 
 			bool active = fetchingSourcesQueue.contains(queued);
 			if (!active && !queued.src.empty()) {
-				auto sourceQueue = queue.find(queued.src.front());
-				active = sourceQueue != queue.end() && sourceQueue->second.contains(queued);
+				active = isQueuedOnSource(queued.src.front(), queued);
 			}
 			if (active) {
 				TraceEvent(SevInfo, "DestinationFailureRetryYieldedToQueuedSplit", distributorId)
@@ -902,15 +917,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 
 		auto fetchingSourcesItr = fetchingSourcesQueue.find(rrs);
 		bool foundActiveFetching = fetchingSourcesItr != fetchingSourcesQueue.end();
-		std::set<RelocateData, std::greater<RelocateData>>* firstQueue;
-		std::set<RelocateData, std::greater<RelocateData>>::iterator firstRelocationItr;
-		bool foundActiveRelocation = false;
-
-		if (!foundActiveFetching && !rrs.src.empty()) {
-			firstQueue = &queue[rrs.src[0]];
-			firstRelocationItr = firstQueue->find(rrs);
-			foundActiveRelocation = firstRelocationItr != firstQueue->end();
-		}
+		bool foundActiveRelocation = !foundActiveFetching && !rrs.src.empty() && isQueuedOnSource(rrs.src.front(), rrs);
 
 		// If there is a queued job that wants data relocation which we are about to cancel/modify,
 		//  make sure that we keep the relocation intent for the job that we queue up
@@ -930,9 +937,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 			if (foundActiveFetching) {
 				fetchingSourcesQueue.erase(fetchingSourcesItr);
 			} else if (foundActiveRelocation) {
-				firstQueue->erase(firstRelocationItr);
-				for (int i = 1; i < rrs.src.size(); i++)
-					queue[rrs.src[i]].erase(rrs);
+				for (UID source : rrs.src) {
+					removeFromSourceQueue(source, rrs);
+				}
 			}
 		}
 
@@ -999,9 +1006,8 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 
 			bool foundActiveRelocation = false;
 			for (int i = 0; i < rrs.src.size(); i++) {
-				auto& serverQueue = queue[rrs.src[i]];
-
-				if (serverQueue.erase(rrs) > 0) {
+				auto serverQueue = queue.find(rrs.src[i]);
+				if (serverQueue != queue.end() && serverQueue->second.erase(rrs) > 0) {
 					if (!foundActiveRelocation) {
 						newData.interval = TraceInterval("QueuedRelocation", rrs.randomId); // inherit the old randomId
 
@@ -1020,7 +1026,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 						foundActiveRelocation = true;
 					}
 
-					serverQueue.insert(newData);
+					serverQueue->second.insert(newData);
 				} else {
 					break;
 				}
@@ -1075,7 +1081,7 @@ void DDQueue::launchQueuedWork(KeyRange keys, const DDEnabledState* ddEnabledSta
 	std::set<RelocateData, std::greater<RelocateData>> combined;
 	auto f = queueMap.intersectingRanges(keys);
 	for (auto it = f.begin(); it != f.end(); ++it) {
-		if (!it->value().src.empty() && queue[it->value().src[0]].contains(it->value()))
+		if (!it->value().src.empty() && isQueuedOnSource(it->value().src.front(), it->value()))
 			combined.insert(it->value());
 	}
 	launchQueuedWork(combined, ddEnabledState);
@@ -1085,9 +1091,12 @@ void DDQueue::launchQueuedWork(const std::set<UID>& serversToLaunchFrom, const D
 	// combine all work from the source servers to see if there is anything new to launch
 	std::set<RelocateData, std::greater<RelocateData>> combined;
 	for (auto id : serversToLaunchFrom) {
-		auto& queuedWork = queue[id];
-		auto it = queuedWork.begin();
-		for (int j = 0; j < teamSize && it != queuedWork.end(); j++) {
+		auto queuedWork = queue.find(id);
+		if (queuedWork == queue.end()) {
+			continue;
+		}
+		auto it = queuedWork->second.begin();
+		for (int j = 0; j < teamSize && it != queuedWork->second.end(); j++) {
 			combined.insert(*it);
 			++it;
 		}
@@ -1249,9 +1258,9 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			finishRelocation(rd.priority, rd.healthPriority);
 
 			// now we are launching: remove this entry from the queue of all the src servers
-			for (size_t i = 0; i < rd.src.size(); i++) {
-				const auto result = queue[rd.src[i]].erase(rd);
-				ASSERT(result);
+			for (UID source : rd.src) {
+				const bool removed = removeFromSourceQueue(source, rd);
+				ASSERT(removed);
 			}
 		}
 
@@ -3414,6 +3423,45 @@ TEST_CASE("/DataDistribution/DDQueue/ReplacementPreservesPipelineCapacity") {
 	ASSERT_EQ(self.pipelineSize(), SERVER_KNOBS->DD_MAX_PIPELINE_MOVES - 1);
 	ASSERT(!self.pipelineFull->get());
 	ASSERT(capacityChanged.isReady());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/DDQueue/ReleasesEmptySourceQueues") {
+	DDQueue self;
+	self.activeRelocations = self.queuedRelocations = self.pendingGateRelocations = self.unhealthyRelocations = 0;
+	self.teamSize = 2;
+	self.pipelineFull = makeReference<AsyncVar<bool>>(false);
+	self.rawProcessingUnhealthy = makeReference<AsyncVar<bool>>(false);
+	self.rawProcessingWiggle = makeReference<AsyncVar<bool>>(false);
+	self.fetchSourceLock = makeReference<FlowLock>(0);
+	const int priority = SERVER_KNOBS->PRIORITY_TEAM_HEALTHY;
+	std::set<UID> serversToLaunchFrom;
+	const UID sharedSource(1, 1);
+	auto finishFetch = [&](std::vector<UID> sources) {
+		ASSERT_EQ(self.fetchingSourcesQueue.size(), 1);
+		RelocateData fetched = *self.fetchingSourcesQueue.begin();
+		fetched.src = std::move(sources);
+		self.completeSourceFetch(fetched);
+	};
+
+	RelocateShard adjacent(KeyRangeRef("b"_sr, "c"_sr), priority, RelocateReason::OTHER, UID(2, 1));
+	self.queueRelocation(adjacent, serversToLaunchFrom);
+	finishFetch({ sharedSource });
+	RelocateShard replacement(KeyRangeRef("a"_sr, "b"_sr), priority, RelocateReason::OTHER, UID(3, 1));
+	self.queueRelocation(replacement, serversToLaunchFrom);
+	std::set<UID> retiredSources;
+	for (int i = 1; i <= 64; ++i) {
+		const UID source(i, 0);
+		finishFetch({ source, sharedSource });
+		retiredSources.insert(source);
+		replacement.traceId = UID(i, 2);
+		self.queueRelocation(replacement, serversToLaunchFrom);
+	}
+
+	ASSERT_EQ(self.queue.at(sharedSource).size(), 1);
+	ASSERT(self.queue.at(sharedSource).contains(RelocateData(adjacent)));
+	self.launchQueuedWork(retiredSources, nullptr);
+	ASSERT_EQ(self.queue.size(), 1);
 	return Void();
 }
 

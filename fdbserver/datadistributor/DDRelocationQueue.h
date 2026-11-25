@@ -423,6 +423,8 @@ public:
 	explicit DDQueue(DDQueueInitParams const& params);
 
 private:
+	bool isQueuedOnSource(UID source, const RelocateData& relocation) const;
+	bool removeFromSourceQueue(UID source, const RelocateData& relocation);
 	int pipelineMutationDepth = 0;
 };
 
