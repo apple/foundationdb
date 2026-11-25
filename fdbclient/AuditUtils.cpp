@@ -378,6 +378,11 @@ Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState, Move
 				TraceEvent(SevVerbose, "AuditUtilPersistedNewAuditStateIdSelected", auditId)
 				    .detail("AuditKey", auditKey(auditState.getType(), auditId));
 				tr.set(auditKey(auditState.getType(), auditId), auditStorageStateValue(auditState));
+				if (auditState.getType() == AuditType::RangeDigest) {
+					// An empty value means no progress. This boundary keeps the first KRM
+					// predecessor lookups from scanning unrelated system-key shards.
+					tr.set(auditRangeBasedProgressPrefixFor(auditState.getType(), auditId), ValueRef());
+				}
 				co_await tr.commit();
 				TraceEvent(SevDebug, "AuditUtilPersistedNewAuditState", auditId)
 				    .detail("AuditKey", auditKey(auditState.getType(), auditId));
