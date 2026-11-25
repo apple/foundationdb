@@ -148,18 +148,11 @@ public:
 		return getRangeForKey(*this, tr, key, snapshot);
 	}
 
-	// Update the range from begin to end by either applying valueUpdate to it, or if replace is true then replace
-	// the the range with the given value.
-	// Adjacent ranges that are identical will be coalesced in the update transaction.
+	// Transform each value in [begin, end) and coalesce adjacent ranges with equal values.
 	// Since the transaction type may not be RYW, this method must take care to not rely on reading its own updates.
-	template <class Transaction>
-	static Future<Void> updateRangeActor(KeyBackedRangeMap self,
-	                                     Transaction tr,
-	                                     KeyType begin,
-	                                     KeyType end,
-	                                     ValueType valueUpdate,
-	                                     bool replace) {
-		kbt_debug("RANGEMAP updateRange start {} to {} value {}\n", begin, end, valueUpdate);
+	template <class Transaction, class Update>
+	static Future<Void> modifyRange(KeyBackedRangeMap self, Transaction tr, KeyType begin, KeyType end, Update update) {
+		kbt_debug("RANGEMAP updateRange start {} to {}\n", begin, end);
 
 		// In order to update and coalesce the range, we need all range boundaries from
 		//   lastLessThan(begin) inclusive
@@ -208,7 +201,7 @@ public:
 					if (!beginDone) {
 						kbt_debug("RANGEMAP updateRange !beginDone\n");
 						// Begin was not found and we've passed it.
-						ValueType val = replace ? valueUpdate : previous.orDefault(ValueType()).apply(valueUpdate);
+						ValueType val = update(previous.orDefault(ValueType()));
 						// Set begin if the new val is different from the previous range value if it exists
 						if (previous != val) {
 							self.kvMap.set(tr, begin, val);
@@ -219,7 +212,7 @@ public:
 					if (bv.first < end) {
 						// Case C
 						kbt_debug("RANGEMAP updateRange Case C\n");
-						ValueType val = replace ? valueUpdate : bv.second.apply(valueUpdate);
+						ValueType val = update(bv.second);
 						if (previous == val) {
 							self.kvMap.erase(tr, bv.first);
 						} else {
@@ -239,7 +232,7 @@ public:
 				} else if (bv.first == begin) {
 					// Case B
 					kbt_debug("RANGEMAP updateRange Case B\n");
-					ValueType val = replace ? valueUpdate : bv.second.apply(valueUpdate);
+					ValueType val = update(bv.second);
 					if (previous == val) {
 						self.kvMap.erase(tr, begin);
 					} else {
@@ -271,10 +264,10 @@ public:
 
 		// If begin was never found or passed/created
 		if (!beginDone) {
-			ValueType val = replace ? valueUpdate : previous.orDefault(ValueType()).apply(valueUpdate);
+			ValueType val = update(previous.orDefault(ValueType()));
 			if (previous != val) {
 				kbt_debug("RANGEMAP updateRange set begin\n");
-				self.kvMap.set(tr, begin, valueUpdate);
+				self.kvMap.set(tr, begin, val);
 				previous = val;
 			}
 		}
@@ -300,7 +293,9 @@ public:
 				return self.updateRange(tr, begin, end, valueUpdate, replace);
 			});
 		} else {
-			return updateRangeActor(*this, tr, begin, end, valueUpdate, replace);
+			return modifyRange(*this, tr, begin, end, [valueUpdate, replace](ValueType const& value) {
+				return replace ? valueUpdate : value.apply(valueUpdate);
+			});
 		}
 	}
 

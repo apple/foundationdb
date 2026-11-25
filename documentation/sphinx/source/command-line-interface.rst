@@ -688,6 +688,8 @@ The ``rangeconfig`` command shows or changes the configuration options of key ra
 
 Use it to give a key range more replicas than the rest of the database, for example a small range that is read heavily or needs extra durability, or to keep two ranges on different storage teams. A range with a replication factor above the cluster's replication level is placed on a larger storage team, and data distribution does not merge shards across the boundaries of a configured range. The ``DD_MAX_SHARDS_ON_LARGE_TEAMS`` knob limits how many shards can be placed on larger teams.
 
+Writing range configuration restarts the data distributor so it can reload the configuration and resume shard placement. The write can complete before additional replicas are readable. Frequent updates can repeatedly interrupt data movement.
+
 ``rangeconfig show [includeDefault]``
 
 Prints the range configuration as JSON. Ranges with no configured options are not shown, unless ``includeDefault`` is given.

@@ -42,6 +42,8 @@ class ApiVersion {
 public:
 	// Static members.
 	constexpr static int LATEST_VERSION = @FDB_AV_LATEST_VERSION@;
+	constexpr static int LATEST_C_VERSION = @FDB_AV_LATEST_C_VERSION@;
+	static_assert(LATEST_C_VERSION <= LATEST_VERSION);
 
 	constexpr explicit ApiVersion(int version) : _version(version) {}
 	constexpr ApiVersion() : _version(0) {}
@@ -84,6 +86,7 @@ public: // introduced features
     API_VERSION_FEATURE(@FDB_AV_INITIALIZE_TRACE_ON_SETUP@, InitializeTraceOnSetup);
     API_VERSION_FEATURE(@FDB_AV_TENANT_GET_ID@, TenantGetId);
     API_VERSION_FEATURE(@FDB_AV_NATIVE_CDC_API@, NativeCdcApi);
+    API_VERSION_FEATURE(@FDB_AV_RANGE_REPLICATION@, RangeReplication);
 };
 
 #endif // FLOW_CODE_API_VERSION_H

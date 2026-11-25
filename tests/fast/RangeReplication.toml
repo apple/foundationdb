@@ -1,0 +1,18 @@
+[[test]]
+testTitle = 'RangeReplication'
+
+    [[test.workload]]
+    testName = 'RangeReplication'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    keyPrefix = 'r2'
+    transactionsPerSecond = 2500.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
