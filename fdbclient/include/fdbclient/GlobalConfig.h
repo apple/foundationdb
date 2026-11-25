@@ -181,7 +181,7 @@ private:
 	static Entry decode(KeyRef key, ValueRef value);
 	using ConfigData = std::unordered_map<KeyRef, Reference<const ConfigValue>>;
 	void notify(KeyRef key, const Reference<const ConfigValue>& value = {});
-	bool applyHistory(const std::vector<VersionHistory>& history, Optional<Version> snapshotMarker);
+	bool applyHistory(const std::vector<VersionHistory>& history);
 	static bool snapshotMatchesFinalMutations(const RangeResultRef& rows, const VectorRef<MutationRef>& mutations);
 
 	struct RefreshState;

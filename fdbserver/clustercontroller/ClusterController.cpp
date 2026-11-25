@@ -1561,6 +1561,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.cdcProxies = req.cdcProxies;
 		clientInfo.streamToCDCProxyId = db->clientInfo->get().streamToCDCProxyId;
 		clientInfo.history = db->clientInfo->get().history;
+		clientInfo.globalConfigSnapshot = db->clientInfo->get().globalConfigSnapshot;
 		clientInfo.clusterId = db->serverInfo->get().client.clusterId;
 		clientInfo.clusterType = db->clusterType;
 		db->clientInfo->set(clientInfo);
@@ -2374,6 +2375,29 @@ struct GlobalConfigHistoryState {
 	}
 };
 
+Future<GlobalConfigSnapshotProof> readGlobalConfigSnapshotProof(ReadYourWritesTransaction& tr,
+                                                                Optional<GlobalConfigSnapshotProof> previous,
+                                                                int pageSize) {
+	pageSize = std::max(1, pageSize);
+	GlobalConfigSnapshotProof proof{ co_await tr.getReadVersion(), {} };
+	KeySelector begin = firstGreaterOrEqual(globalConfigDataKeys.begin);
+	while (true) {
+		auto page = co_await tr.getRange(begin, firstGreaterOrEqual(globalConfigDataKeys.end), pageSize);
+		for (const auto& kv : page) {
+			proof.digest.addKeyValue(kv.key, kv.value);
+		}
+		if (!page.more) {
+			break;
+		}
+		begin = page.nextBeginKeySelector();
+	}
+	// A retry of an unchanged marker is still the same observation for clients.
+	if (previous.present() && previous.get().digest == proof.digest) {
+		co_return previous.get();
+	}
+	co_return proof;
+}
+
 // Monitors the global configuration version key for changes. When changes are
 // made, the global configuration history is read and any updates are sent to
 // all processes in the system by updating the ClientDBInfo object. The
@@ -2396,11 +2420,22 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					rows = co_await tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY);
 				}
 				const Version readVersion = co_await tr.getReadVersion();
-				auto history = historyState.update(globalConfigVersion, rows, readVersion, buggify(0.01), watchFired);
+				auto nextState = historyState;
+				auto history = nextState.update(globalConfigVersion, rows, readVersion, buggify(0.01), watchFired);
+				Optional<GlobalConfigSnapshotProof> proof;
+				if (history.size() == 1) {
+					Optional<GlobalConfigSnapshotProof> previous;
+					if (!watchFired && historyState.lastPublishedStamp == nextState.lastPublishedStamp) {
+						previous = db->clientInfo->get().globalConfigSnapshot;
+					}
+					proof = co_await readGlobalConfigSnapshotProof(tr, previous, CLIENT_KNOBS->TOO_MANY);
+				}
+				historyState = std::move(nextState);
 				watchFired = false;
 				if (!history.empty()) {
 					ServerDBInfo serverInfo = db->serverInfo->get();
 					serverInfo.client.history = std::move(history);
+					serverInfo.client.globalConfigSnapshot = std::move(proof);
 					serverInfo.client.id = deterministicRandom()->randomUniqueID();
 					serverInfo.id = deterministicRandom()->randomUniqueID();
 					serverInfo.infoGeneration = ++db->dbInfoCount;
@@ -4115,6 +4150,65 @@ struct GlobalConfigTestClient {
 		clientInfo->set(info);
 	}
 };
+
+// ClientDBInfo's FlatBuffer layout before the controller published snapshot proofs.
+struct ClientDBInfoWithoutSnapshotProof : ClientDBInfo {
+	template <class Archive>
+	void serialize(Archive& ar) {
+		serializer(ar,
+		           grvProxies,
+		           commitProxies,
+		           id,
+		           forward,
+		           history,
+		           clusterId,
+		           clusterType,
+		           nativeCdcEnabled,
+		           nativeCdcTagCount,
+		           cdcProxies,
+		           streamToCDCProxyId);
+	}
+};
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigSnapshotProof") {
+	GlobalConfigTestClient client({});
+	ReadYourWritesTransaction tr(client.db);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr.setVersion(52);
+	tr.clear(globalConfigDataKeys);
+	RangeDigest expected;
+	for (auto key : { "A"_sr, "B"_sr, "\xff"_sr }) {
+		auto fullKey = key.withPrefix(globalConfigKeysPrefix);
+		tr.set(fullKey, key);
+		expected.addKeyValue(fullKey, key);
+	}
+	auto proof = co_await timeoutError(readGlobalConfigSnapshotProof(tr, {}, 1), 5.0);
+	ASSERT_EQ(proof.readVersion, 52);
+	ASSERT(proof.digest == expected);
+
+	auto previous = proof;
+	previous.readVersion = 50;
+	ASSERT(previous == co_await readGlobalConfigSnapshotProof(tr, previous, 2));
+	tr.clear("B"_sr.withPrefix(globalConfigKeysPrefix));
+	auto changed = co_await readGlobalConfigSnapshotProof(tr, previous, 2);
+	ASSERT_EQ(changed.readVersion, 52);
+	ASSERT(changed.digest != previous.digest);
+
+	ClientDBInfo info;
+	info.history.emplace_back(44);
+	info.globalConfigSnapshot = proof;
+	auto encoded = ObjectWriter::toValue(info, IncludeVersion());
+	auto current = ObjectReader::fromStringRef<ClientDBInfo>(encoded, IncludeVersion());
+	ASSERT(current.globalConfigSnapshot == info.globalConfigSnapshot);
+	auto legacy = ObjectReader::fromStringRef<ClientDBInfoWithoutSnapshotProof>(encoded, IncludeVersion());
+	ASSERT_EQ(legacy.history.size(), 1);
+	ASSERT_EQ(legacy.history.front().version, 44);
+	current =
+	    ObjectReader::fromStringRef<ClientDBInfo>(ObjectWriter::toValue(legacy, IncludeVersion()), IncludeVersion());
+	ASSERT(!current.globalConfigSnapshot.present());
+	ASSERT_EQ(current.history.size(), 1);
+	ASSERT_EQ(current.history.front().version, 44);
+}
 
 Future<Void> checkGlobalConfigClientAfterMissedClear(const std::vector<VersionHistory>& history,
                                                      Version clientVersion,
