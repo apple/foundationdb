@@ -130,7 +130,9 @@ struct dynamic_size_traits : std::false_type {
 	template <class Context>
 	static size_t size(const T&, Context&);
 
-	// Guaranteed to be called only once during serialization
+	// For an expensive size(), a specialization can also provide saveWithSize(out, size, value, context).
+	// The writer then passes the size from the allocation pass directly to saveWithSize.
+	// Otherwise save is called once during serialization.
 	template <class Context>
 	static void save(uint8_t*, const T&, Context&);
 

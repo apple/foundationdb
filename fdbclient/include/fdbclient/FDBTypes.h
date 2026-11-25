@@ -513,7 +513,7 @@ struct KeyValueRef {
 template <>
 struct string_serialized_traits<KeyValueRef> : std::true_type {
 	static constexpr size_t minSize = 2 * sizeof(uint32_t);
-	int32_t getSize(const KeyValueRef& item) const { return minSize + item.key.size() + item.value.size(); }
+	size_t getSize(const KeyValueRef& item) const { return minSize + item.key.size() + item.value.size(); }
 
 	uint32_t save(uint8_t* out, const KeyValueRef& item) const {
 		auto begin = out;

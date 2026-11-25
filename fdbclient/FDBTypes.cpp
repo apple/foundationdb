@@ -23,11 +23,13 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/StorageServerInterface.h"
 #include <boost/algorithm/string.hpp>
+#include <algorithm>
+#include <initializer_list>
 #include <memory>
 
-TEST_CASE("/fdbclient/FDBTypes/PackedRangeReplyFirstAppend") {
-	GetKeyValuesReply reply;
-	reply.data.push_back_deep(reply.arena, KeyValueRef("a"_sr, "b"_sr));
+namespace {
+
+void checkPackedRangeReply(const GetKeyValuesReply& reply, std::initializer_list<KeyValueRef> expected) {
 	// Allocate exactly the requested size so ASan can detect an underestimated reply size.
 	std::unique_ptr<uint8_t[]> buffer;
 	auto allocate = [](size_t size, void* context) {
@@ -38,8 +40,48 @@ TEST_CASE("/fdbclient/FDBTypes/PackedRangeReplyFirstAppend") {
 	ObjectWriter writer(allocate, &buffer, Unversioned());
 	writer.serialize(reply);
 	const auto decoded = ObjectReader::fromStringRef<GetKeyValuesReply>(writer.toStringRef(), Unversioned());
-	ASSERT_EQ(decoded.data.size(), 1);
-	ASSERT(decoded.data[0] == KeyValueRef("a"_sr, "b"_sr));
+	ASSERT(std::equal(decoded.data.begin(), decoded.data.end(), expected.begin(), expected.end()));
+}
+
+} // namespace
+
+TEST_CASE("/fdbclient/FDBTypes/PackedRangeReplyFirstAppend") {
+	GetKeyValuesReply reply;
+	KeyValueRef row("a"_sr, "b"_sr);
+	reply.data.push_back_deep(reply.arena, row);
+	checkPackedRangeReply(reply, { row });
+	reply.data.resize(reply.arena, 0);
+	checkPackedRangeReply(reply, {});
+	return Void();
+}
+
+TEST_CASE("/fdbclient/FDBTypes/PackedRangeReplyMutations") {
+	GetKeyValuesReply reply;
+	KeyValueRef rows[] = { { "a"_sr, "short"_sr }, { "b"_sr, "second"_sr } };
+	KeyValueRef longer("a"_sr, "a much longer value than before"_sr);
+	reply.data.reserve(reply.arena, 2);
+	auto& first = reply.data.emplace_back_deep(reply.arena, rows[0]);
+	reply.data.push_back(reply.arena, rows[1]);
+	reply.data.resize(reply.arena, 1);
+	checkPackedRangeReply(reply, { rows[0] });
+	first = longer;
+	checkPackedRangeReply(reply, { longer });
+	reply.data.append(reply.arena, rows + 1, 1);
+	checkPackedRangeReply(reply, { longer, rows[1] });
+	first = rows[0];
+	checkPackedRangeReply(reply, { rows[0], rows[1] });
+
+	using Rows = decltype(reply.data);
+	reply.data = Rows(rows, 1, 2);
+	checkPackedRangeReply(reply, { rows[0] });
+	reply.data.extendUnsafeNoReallocNoInit(1);
+	checkPackedRangeReply(reply, { rows[0], rows[1] });
+	VectorRef<KeyValueRef> view = reply.data;
+	reply.data = view.slice(1, 2);
+	checkPackedRangeReply(reply, { rows[1] });
+
+	reply.data = Rows(reply.arena, rows, rows + 2);
+	checkPackedRangeReply(reply, { rows[0], rows[1] });
 	return Void();
 }
 

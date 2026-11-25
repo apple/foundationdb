@@ -525,6 +525,11 @@ struct _SizeOf {
 // Re-use this intermediate memory to avoid frequent new/delete
 void swapWithThreadLocalGlobal(std::vector<int>& writeToOffsets);
 
+template <class T, class Context>
+concept saves_with_size = requires(uint8_t* out, uint32_t size, const T& t, Context& context) {
+	dynamic_size_traits<T>::saveWithSize(out, size, t, context.context());
+};
+
 template <class Context>
 struct PrecomputeSize : Context {
 	explicit PrecomputeSize(const Context& context) : Context(context) {
@@ -540,6 +545,9 @@ struct PrecomputeSize : Context {
 	    requires(is_dynamic_size<T>)
 	bool visitDynamicSize(const T& t) {
 		uint32_t size = dynamic_size_traits<T>::size(t, this->context());
+		if constexpr (saves_with_size<T, Context>) {
+			writeToOffsets.push_back(size);
+		}
 		if (size == 0 && emptyVector.value != -1) {
 			return true;
 		}
@@ -573,6 +581,7 @@ struct PrecomputeSize : Context {
 
 	const int buffer_length = -1; // Dummy, the value of this should not affect anything.
 	const int vtable_start = -1; // Dummy, the value of this should not affect anything.
+	// Both passes visit fields in the same order. Store message offsets and requested field sizes in that order.
 	std::vector<int> writeToOffsets;
 
 	// We only need to write an empty vector once, then we can re-use the relative offset.
@@ -639,7 +648,12 @@ struct WriteToBuffer : Context {
 	template <class T>
 	    requires(is_dynamic_size<T>)
 	bool visitDynamicSize(const T& t) {
-		uint32_t size = dynamic_size_traits<T>::size(t, this->context());
+		uint32_t size;
+		if constexpr (saves_with_size<T, Context>) {
+			size = *writeToOffsetsIter++;
+		} else {
+			size = dynamic_size_traits<T>::size(t, this->context());
+		}
 		if (size == 0 && emptyVector.value != -1) {
 			return true;
 		}
@@ -647,7 +661,12 @@ struct WriteToBuffer : Context {
 		int start = RightAlign(current_buffer_size + size + 4, 4, &padding);
 		write(&size, start, 4);
 		start -= 4;
-		dynamic_size_traits<T>::save(&buffer[buffer_length - start], t, this->context());
+		auto* out = &buffer[buffer_length - start];
+		if constexpr (saves_with_size<T, Context>) {
+			dynamic_size_traits<T>::saveWithSize(out, size, t, this->context());
+		} else {
+			dynamic_size_traits<T>::save(out, t, this->context());
+		}
 		start -= size;
 		memset(&buffer[buffer_length - start], 0, padding);
 		if (size == 0) {
