@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <array>
+
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/Knobs.h"
@@ -305,9 +307,9 @@ struct GlobalConfigSnapshot {
 	Version version = 0;
 	RangeResult data;
 
-	void update(const Optional<Value>& versionstamp, const RangeResult& rows) {
+	void update(const Optional<Value>& versionstamp, const RangeResult& rows, Version readVersion) {
 		if (versionstamp.present()) {
-			const auto committedVersion = GlobalConfig::decodeVersion(versionstamp.get());
+			const auto committedVersion = GlobalConfig::decodeVersion(versionstamp.get(), readVersion);
 			if (!committedVersion.present()) {
 				throw serialization_failed();
 			}
@@ -329,7 +331,8 @@ Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, GlobalConfigSnapsho
 				Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
 				Optional<Value> globalConfigVersion = co_await globalConfigVersionFuture;
 				RangeResult tmpCachedData = co_await tmpCachedDataFuture;
-				snapshot->update(globalConfigVersion, tmpCachedData);
+				const Version readVersion = co_await tr->getReadVersion();
+				snapshot->update(globalConfigVersion, tmpCachedData, readVersion);
 				co_return;
 			} catch (Error& e) {
 				err = e;
@@ -350,13 +353,13 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValu
 	RangeResult at41;
 	at41.push_back_deep(at41.arena(),
 	                    KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
-	snapshot.update(BinaryWriter::toValue(Versionstamp(41, 0), Unversioned()), at41);
+	snapshot.update(BinaryWriter::toValue(Versionstamp(41, 0), Unversioned()), at41, 41);
 	ASSERT_EQ(snapshot.version, 41);
 	ASSERT(snapshot.data == at41);
 
 	auto checkRejected = [&](const Value& damaged) {
 		try {
-			snapshot.update(damaged, RangeResult());
+			snapshot.update(damaged, RangeResult(), 42);
 			ASSERT(false);
 		} catch (Error& e) {
 			ASSERT_EQ(e.code(), error_code_serialization_failed);
@@ -371,11 +374,14 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValu
 	}
 	checkRejected(Value());
 	checkRejected(stamp.withSuffix("\x00"_sr));
+	for (Version invalid : std::array<Version, 3>{ (Version(1) << 62) + 42, 0, invalidVersion }) {
+		checkRejected(BinaryWriter::toValue(Versionstamp(invalid, 0), Unversioned()));
+	}
 
 	RangeResult at43;
 	at43.push_back_deep(at43.arena(),
 	                    KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
-	snapshot.update(BinaryWriter::toValue(Versionstamp(43, 7), Unversioned()), at43);
+	snapshot.update(BinaryWriter::toValue(Versionstamp(43, 7), Unversioned()), at43, 50);
 	ASSERT_EQ(snapshot.version, 43);
 	ASSERT(snapshot.data == at43);
 	return Void();
@@ -386,17 +392,17 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotMissingVersion") {
 	RangeResult rows;
 	rows.push_back_deep(rows.arena(),
 	                    KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
-	snapshot.update({}, rows);
+	snapshot.update({}, rows, 1);
 	ASSERT_EQ(snapshot.version, 0);
 	ASSERT(snapshot.data == rows);
-	snapshot.update(BinaryWriter::toValue(Versionstamp(41, 0), Unversioned()), RangeResult());
-	ASSERT_EQ(snapshot.version, 41);
+	snapshot.update(BinaryWriter::toValue(Versionstamp(1, 0), Unversioned()), RangeResult(), 41);
+	ASSERT_EQ(snapshot.version, 1);
 	ASSERT(snapshot.data.empty());
-	snapshot.update({}, rows);
-	ASSERT_EQ(snapshot.version, 41);
+	snapshot.update({}, rows, 42);
+	ASSERT_EQ(snapshot.version, 1);
 	ASSERT(snapshot.data == rows);
-	snapshot.update({}, RangeResult());
-	ASSERT_EQ(snapshot.version, 41);
+	snapshot.update({}, RangeResult(), 42);
+	ASSERT_EQ(snapshot.version, 1);
 	ASSERT(snapshot.data.empty());
 	return Void();
 }

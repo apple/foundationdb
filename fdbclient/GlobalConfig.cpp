@@ -69,11 +69,15 @@ void GlobalConfig::applyChanges(Transaction& tr,
 	            MutationRef::SetVersionstampedValue);
 }
 
-Optional<Version> GlobalConfig::decodeVersion(ValueRef versionstamp) {
+Optional<Version> GlobalConfig::decodeVersion(ValueRef versionstamp, Version readVersion) {
 	if (versionstamp.size() != sizeof(Version) + sizeof(Versionstamp::batchNumber)) {
 		return {};
 	}
-	return BinaryReader::fromStringRef<Versionstamp>(versionstamp, Unversioned()).version;
+	const Version version = BinaryReader::fromStringRef<Versionstamp>(versionstamp, Unversioned()).version;
+	if (version <= 0 || version > readVersion) {
+		return {};
+	}
+	return version;
 }
 
 Key GlobalConfig::prefixedKey(KeyRef key) {
