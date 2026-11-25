@@ -4100,6 +4100,7 @@ struct GlobalConfigTestClient {
 		clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
 		db = DatabaseContext::create(
 		    clientInfo, Future<Void>(Never()), LocalityData(), EnableLocalityLoadBalance::False);
+		db->updateCachedReadVersion(now(), 50);
 		db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
 	}
 

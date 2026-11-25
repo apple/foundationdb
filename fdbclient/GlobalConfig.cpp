@@ -216,6 +216,8 @@ bool GlobalConfig::applyHistory(const std::vector<VersionHistory>& history) {
 }
 
 Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
+	// Older controllers use MAX_VERSION to request a refresh without specifying a new version.
+	const Version minimumVersion = largestSeen == MAX_VERSION ? lastKnown : largestSeen;
 	Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
 	while (true) {
 		Error err;
@@ -225,9 +227,14 @@ Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
 			                                           &GrvProxyInterface::refreshGlobalConfig,
 			                                           GlobalConfigRefreshRequest{ lastKnown }),
 			                          CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT);
-			// TODO: Remove this max-version exception and the corresponding check in updater()
-			// once compatibility with older cluster controllers that emit the sentinel is no longer required.
-			if (reply.version < largestSeen && largestSeen != std::numeric_limits<Version>::max()) {
+			if (reply.result.more || reply.version == MAX_VERSION) {
+				TraceEvent("GlobalConfigRefreshInvalidSnapshot")
+				    .suppressFor(1.0)
+				    .detail("ReplyVersion", reply.version)
+				    .detail("More", reply.result.more);
+				throw serialization_failed();
+			}
+			if (reply.version < minimumVersion) {
 				TraceEvent("GlobalConfigRefreshStaleSnapshot")
 				    .suppressFor(1.0)
 				    .detail("LastKnownVersion", lastKnown)
@@ -235,6 +242,23 @@ Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
 				    .detail("ReplyVersion", reply.version);
 				co_await delay(0.25);
 				continue;
+			}
+			// Older proxies can decode a damaged versionstamp as a future commit. A proxy can also
+			// legitimately be ahead of the controller, so use a database read version as the upper bound.
+			if (reply.version > cx->getCachedReadVersion()) {
+				GetReadVersionRequest getVersion(
+				    {}, 0, TransactionPriority::IMMEDIATE, cx->ssVersionVectorCache.getMaxVersion());
+				auto grv = co_await timeoutError(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
+				                                                  &GrvProxyInterface::getConsistentReadVersion,
+				                                                  getVersion),
+				                                 CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT);
+				if (reply.version > grv.version) {
+					TraceEvent("GlobalConfigRefreshFutureSnapshot")
+					    .suppressFor(1.0)
+					    .detail("ReplyVersion", reply.version)
+					    .detail("ReadVersion", grv.version);
+					throw future_version();
+				}
 			}
 			erase();
 			for (const auto& kv : reply.result) {
@@ -308,64 +332,159 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 
 namespace {
 
-Future<Void> serveGlobalConfigRefreshSnapshots(GrvProxyInterface grvProxy) {
-	GlobalConfigRefreshRequest initialRequest = co_await grvProxy.refreshGlobalConfig.getFuture();
-	ASSERT_EQ(initialRequest.lastKnown, -1);
-	RangeResult initialData;
-	initialRequest.reply.send(GlobalConfigRefreshReply{ initialData.arena(), 1, initialData });
+struct GlobalConfigRefreshTest {
+	GrvProxyInterface proxy;
+	Reference<AsyncVar<ClientDBInfo>> clientInfo;
+	Database db;
 
-	GlobalConfigRefreshRequest staleRequest = co_await grvProxy.refreshGlobalConfig.getFuture();
-	ASSERT_EQ(staleRequest.lastKnown, 1);
-	RangeResult staleData;
-	staleData.push_back_deep(
-	    staleData.arena(),
-	    KeyValueRef(fdbClientInfoTxnSampleRate.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(0.5).pack()));
-	staleRequest.reply.send(GlobalConfigRefreshReply{ staleData.arena(), 2, staleData });
+	GlobalConfigRefreshTest() {
+		proxy.provisional = false;
+		proxy.initEndpoints();
+		IFailureMonitor::failureMonitor().setStatus(proxy.address(), FailureStatus(false));
+		CommitProxyInterface commitProxy;
+		commitProxy.provisional = false;
+		commitProxy.initEndpoints();
+		ClientDBInfo info;
+		info.id = UID(1, 1);
+		info.grvProxies.push_back(proxy);
+		info.commitProxies.push_back(commitProxy);
+		clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
+		db = DatabaseContext::create(clientInfo, Never(), LocalityData(), EnableLocalityLoadBalance::False);
+		db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
+	}
 
-	GlobalConfigRefreshRequest currentRequest = co_await grvProxy.refreshGlobalConfig.getFuture();
-	ASSERT_EQ(currentRequest.lastKnown, 1);
-	RangeResult currentData;
-	currentRequest.reply.send(GlobalConfigRefreshReply{ currentData.arena(), 3, currentData });
-	co_return;
+	Future<GlobalConfigRefreshRequest> nextRequest() {
+		return timeoutError(waitAndForward(proxy.refreshGlobalConfig.getFuture()), 5.0);
+	}
+
+	Future<Void> serveReadVersions(Version version) {
+		while (true) {
+			auto request = co_await proxy.getConsistentReadVersion.getFuture();
+			GetReadVersionReply reply;
+			reply.version = version;
+			request.reply.send(reply);
+		}
+	}
+
+	Future<Void> publish(Version version) {
+		auto changed = db->globalConfig->onChange();
+		auto info = clientInfo->get();
+		info.id = deterministicRandom()->randomUniqueID();
+		info.history = { VersionHistory(version) };
+		clientInfo->set(info);
+		return changed;
+	}
+};
+
+RangeResult snapshotWithSetting(KeyRef key) {
+	RangeResult rows;
+	rows.push_back_deep(rows.arena(),
+	                    KeyValueRef(key.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
+	return rows;
 }
 
 } // namespace
 
+TEST_CASE("/fdbclient/GlobalConfig/RejectsInvalidInitialSnapshot") {
+	int callbacks = 0;
+	GlobalConfigRefreshTest test;
+	auto grvs = test.serveReadVersions(50);
+	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any>) { ++callbacks; });
+	auto initialized = test.db->globalConfig->onInitialized();
+	auto rows = snapshotWithSetting("A"_sr);
+	auto request = co_await test.nextRequest();
+	for (auto [version, more] : { std::pair<Version, bool>{ 0, true },
+	                              { MAX_VERSION, false },
+	                              { invalidVersion, false },
+	                              { (Version(1) << 62) + 42, false } }) {
+		ASSERT_EQ(request.lastKnown, -1);
+		rows.more = more;
+		request.reply.send(GlobalConfigRefreshReply{ rows.arena(), version, rows });
+		auto retry = co_await race(test.nextRequest(), initialized);
+		ASSERT_EQ(callbacks, 0);
+		ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+		ASSERT_EQ(retry.index(), 0);
+		request = std::get<0>(retry);
+	}
+	ASSERT_EQ(request.lastKnown, -1);
+	rows.more = false;
+	request.reply.send(GlobalConfigRefreshReply{ rows.arena(), 0, rows });
+	co_await timeoutError(initialized, 5.0);
+	ASSERT(test.db->globalConfig->get<bool>("A"_sr, false));
+	ASSERT_EQ(callbacks, 1);
+}
+
+TEST_CASE("/fdbclient/GlobalConfig/CancelDuringSnapshotVersionCheck") {
+	int callbacks = 0;
+	GlobalConfigRefreshTest test;
+	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any>) { ++callbacks; });
+	auto initialized = test.db->globalConfig->onInitialized();
+	auto snapshot = co_await test.nextRequest();
+	auto rows = snapshotWithSetting("A"_sr);
+	snapshot.reply.send(GlobalConfigRefreshReply{ rows.arena(), 41, rows });
+	auto grv = co_await timeoutError(waitAndForward(test.proxy.getConsistentReadVersion.getFuture()), 5.0);
+	ASSERT(!initialized.isReady());
+	test.db = Database();
+	ASSERT(initialized.isError());
+	GetReadVersionReply reply;
+	reply.version = 50;
+	grv.reply.send(reply);
+	co_await delay(0);
+	ASSERT_EQ(callbacks, 0);
+}
+
 TEST_CASE("/fdbclient/GlobalConfig/RejectsStaleRefreshSnapshot") {
-	GrvProxyInterface grvProxy;
-	grvProxy.provisional = false;
-	grvProxy.initEndpoints();
-	IFailureMonitor::failureMonitor().setStatus(grvProxy.address(), FailureStatus(false));
-	ASSERT(IFailureMonitor::failureMonitor().getState(grvProxy.address()).isAvailable());
+	const KeyRef tail = "\xff"_sr;
+	int callbacks = 0;
+	GlobalConfigRefreshTest test;
+	auto grvs = test.serveReadVersions(50);
+	auto initial = co_await test.nextRequest();
+	auto rows = snapshotWithSetting(tail);
+	initial.reply.send(GlobalConfigRefreshReply{ rows.arena(), 41, rows });
+	co_await timeoutError(test.db->globalConfig->onInitialized(), 5.0);
+	test.db->globalConfig->trigger(tail, [&](std::optional<std::any>) { ++callbacks; });
+	auto changed = test.publish(44);
+	auto request = co_await test.nextRequest();
+	auto firstPage = snapshotWithSetting("A"_sr);
+	for (auto [version, more] :
+	     { std::pair<Version, bool>{ 43, false }, { (Version(1) << 62) + 44, false }, { 44, true } }) {
+		ASSERT_EQ(request.lastKnown, 41);
+		firstPage.more = more;
+		request.reply.send(GlobalConfigRefreshReply{ firstPage.arena(), version, firstPage });
+		auto retry = co_await race(test.nextRequest(), changed);
+		ASSERT(test.db->globalConfig->get<bool>(tail, false));
+		ASSERT_EQ(callbacks, 0);
+		ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+		ASSERT_EQ(retry.index(), 0);
+		request = std::get<0>(retry);
+	}
+	ASSERT_EQ(request.lastKnown, 41);
+	firstPage.more = false;
+	firstPage.push_back_deep(firstPage.arena(), rows[0]);
+	request.reply.send(GlobalConfigRefreshReply{ firstPage.arena(), 44, firstPage });
+	co_await timeoutError(changed, 5.0);
+	ASSERT(test.db->globalConfig->get<bool>(tail, false));
+	ASSERT(test.db->globalConfig->get<bool>("A"_sr, false));
+	ASSERT_EQ(callbacks, 2);
 
-	CommitProxyInterface commitProxy;
-	commitProxy.provisional = false;
-	commitProxy.initEndpoints();
+	changed = test.publish(45);
+	request = co_await test.nextRequest();
+	ASSERT_EQ(request.lastKnown, 44);
+	request.reply.send(GlobalConfigRefreshReply{ rows.arena(), 46, rows });
+	co_await timeoutError(changed, 5.0);
+	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
 
-	ClientDBInfo initialInfo;
-	initialInfo.id = UID(1, 1);
-	initialInfo.grvProxies.push_back(grvProxy);
-	initialInfo.commitProxies.push_back(commitProxy);
-
-	auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>(initialInfo);
-	int callbackCount = 0;
-	Database db =
-	    DatabaseContext::create(clientInfo, Future<Void>(Never()), LocalityData(), EnableLocalityLoadBalance::False);
-	Future<Void> refreshes = serveGlobalConfigRefreshSnapshots(grvProxy);
-	db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
-	co_await timeoutError(db->globalConfig->onInitialized(), 5.0);
-
-	db->globalConfig->trigger(fdbClientInfoTxnSampleRate,
-	                          [&callbackCount](std::optional<std::any>) { ++callbackCount; });
-	Future<Void> configChanged = db->globalConfig->onChange();
-	ClientDBInfo currentInfo = clientInfo->get();
-	currentInfo.id = UID(1, 2);
-	currentInfo.history.emplace_back(3);
-	clientInfo->set(currentInfo);
-
-	co_await timeoutError(refreshes, 5.0);
-	co_await timeoutError(configChanged, 5.0);
-	ASSERT_EQ(callbackCount, 0);
-	ASSERT(!db->globalConfig->get(fdbClientInfoTxnSampleRate).isValid());
-	co_return;
+	changed = test.publish(MAX_VERSION);
+	request = co_await test.nextRequest();
+	ASSERT_EQ(request.lastKnown, 46);
+	RangeResult empty;
+	request.reply.send(GlobalConfigRefreshReply{ empty.arena(), 45, empty });
+	auto retry = co_await race(test.nextRequest(), changed);
+	ASSERT(test.db->globalConfig->get<bool>(tail, false));
+	ASSERT_EQ(retry.index(), 0);
+	request = std::get<0>(retry);
+	ASSERT_EQ(request.lastKnown, 46);
+	request.reply.send(GlobalConfigRefreshReply{ empty.arena(), 46, empty });
+	co_await timeoutError(changed, 5.0);
+	ASSERT(!test.db->globalConfig->get(tail).isValid());
 }
