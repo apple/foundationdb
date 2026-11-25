@@ -105,29 +105,30 @@ void GlobalConfig::trigger(KeyRef key, std::function<void(std::optional<std::any
 
 GlobalConfig::Entry GlobalConfig::decode(KeyRef key, ValueRef value) {
 	try {
-		// Fixed-width tuple accessors require a complete first element.
-		Tuple t = Tuple::unpack(value, /* exclude_incomplete */ true);
+		// Even an incomplete second element marks the end of the configuration value.
+		const Tuple tuple = Tuple::unpack(value);
+		const Tuple first = Tuple::unpack(tuple.subTupleRawString(0), /* exclude_incomplete */ true);
 		Arena arena(key.expectedSize() + value.expectedSize());
 		KeyRef stableKey(arena, key);
 		std::any any;
-		switch (t.getType(0)) {
+		switch (first.getType(0)) {
 		case Tuple::ElementType::UTF8:
-			any = StringRef(arena, t.getString(0).contents());
+			any = StringRef(arena, first.getString(0).contents());
 			break;
 		case Tuple::ElementType::INT:
-			any = t.getInt(0);
+			any = first.getInt(0);
 			break;
 		case Tuple::ElementType::BOOL:
-			any = t.getBool(0);
+			any = first.getBool(0);
 			break;
 		case Tuple::ElementType::FLOAT:
-			any = t.getFloat(0);
+			any = first.getFloat(0);
 			break;
 		case Tuple::ElementType::DOUBLE:
-			any = t.getDouble(0);
+			any = first.getDouble(0);
 			break;
 		case Tuple::ElementType::VERSIONSTAMP:
-			any = t.getVersionstamp(0);
+			any = first.getVersionstamp(0);
 			break;
 		default:
 			throw invalid_tuple_data_type();

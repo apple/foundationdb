@@ -2229,8 +2229,11 @@ Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 }
 
 std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, const RangeResult& rows) {
-	if (versionstamp.size() < sizeof(Version)) {
-		TraceEvent(SevWarnAlways, "GlobalConfigVersionTooShort").suppressFor(60.0).detail("Size", versionstamp.size());
+	constexpr int versionstampSize = sizeof(Version) + sizeof(Versionstamp::batchNumber);
+	if (versionstamp.size() != versionstampSize) {
+		TraceEvent(SevWarnAlways, "GlobalConfigInvalidVersionstampSize")
+		    .suppressFor(60.0)
+		    .detail("Size", versionstamp.size());
 		return {};
 	}
 	Version committedVersion = bigEndian64(BinaryReader::fromStringRef<Version>(versionstamp, Unversioned()));
@@ -2249,7 +2252,7 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, con
 			}
 
 			StringRef suffix = kv.key.removePrefix(globalConfigHistoryPrefix);
-			if (suffix.size() != sizeof(Version) + sizeof(Versionstamp::batchNumber)) {
+			if (suffix.size() != versionstampSize) {
 				throw serialization_failed();
 			}
 			VersionHistory vh;
@@ -3870,6 +3873,18 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigMalformedHistory") {
 	ASSERT_EQ(history.front().version, 43);
 	ASSERT(history.front().mutations.empty());
 
+	// Removing a leading zero from the version value would shift 42 to 10752.
+	rows = RangeResult();
+	rows.push_back_deep(rows.arena(), KeyValueRef(key, validValue));
+	oldestVersion = 41;
+	ASSERT(updateGlobalConfigHistory(version.substr(1), rows, oldestVersion).empty());
+	ASSERT(!oldestVersion.present());
+	rows.push_back_deep(rows.arena(), KeyValueRef(v43.withPrefix(globalConfigHistoryPrefix), validValue));
+	history = updateGlobalConfigHistory(v43, rows, oldestVersion);
+	ASSERT_EQ(history.size(), 1);
+	ASSERT_EQ(history.front().version, 43);
+	ASSERT(history.front().mutations.empty());
+
 	rows = RangeResult();
 	rows.push_back_deep(rows.arena(), KeyValueRef(key, "a"_sr));
 	checkRefresh();
@@ -4036,15 +4051,17 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientRefreshesUnreadableSet
 	auto initial = co_await client.nextRefresh();
 	ASSERT_EQ(initial.lastKnown, -1);
 	RangeResult initialData;
+	// The 128 bytes after the integer tag include a second tuple element.
+	auto integerWithSuffix = Tuple::makeTuple(1, Tuple::UnicodeStr(std::string(125, 'x'))).pack();
 	initialData.push_back_deep(initialData.arena(),
-	                           KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(false).pack()));
+	                           KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), integerWithSuffix));
 	initial.reply.send(GlobalConfigRefreshReply{ initialData.arena(), 41, initialData });
 	co_await timeoutError(client.db->globalConfig->onInitialized(), 5.0);
 	client.db->globalConfig->trigger("B"_sr, [&](std::optional<std::any>) { ++changesToB; });
 
 	VersionHistory at42(42);
 	at42.mutations.emplace_back_deep(at42.mutations.arena(), MutationRef(MutationRef::SetValue, "B"_sr, enabled));
-	at42.mutations.emplace_back_deep(at42.mutations.arena(), MutationRef(MutationRef::SetValue, "A"_sr, "\xff"_sr));
+	at42.mutations.emplace_back_deep(at42.mutations.arena(), MutationRef(MutationRef::SetValue, "A"_sr, "\x21"_sr));
 	VersionHistory at43(43);
 	at43.mutations.emplace_back_deep(at43.mutations.arena(), MutationRef(MutationRef::ClearRange, "B"_sr, "C"_sr));
 	Future<Void> changed = client.db->globalConfig->onChange();
@@ -4052,7 +4069,7 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientRefreshesUnreadableSet
 
 	auto refresh = co_await client.nextRefresh();
 	ASSERT_EQ(refresh.lastKnown, 41);
-	ASSERT(!client.db->globalConfig->get<bool>("A"_sr, true));
+	ASSERT_EQ(client.db->globalConfig->get<int64_t>("A"_sr, 0), 1);
 	ASSERT(!client.db->globalConfig->get("B"_sr).isValid());
 	ASSERT_EQ(changesToB, 0);
 	ASSERT(!changed.isReady());
@@ -4073,10 +4090,17 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientRefreshesUnreadableSet
 
 	VersionHistory at44(44);
 	at44.mutations.emplace_back_deep(at44.mutations.arena(), MutationRef(MutationRef::ClearRange, "A"_sr, "B"_sr));
+	// The UTF-8 string "a" is complete even though the double that follows it is truncated.
+	at44.mutations.emplace_back_deep(at44.mutations.arena(),
+	                                 MutationRef(MutationRef::SetValue, "B"_sr, "\x02\x61\x00\x21"_sr));
 	changed = client.db->globalConfig->onChange();
 	client.publish({ VersionHistory(43), at44 });
 	co_await timeoutError(changed, 5.0);
 	ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
+	auto value = client.db->globalConfig->get("B"_sr);
+	ASSERT(value.isValid());
+	ASSERT_EQ(std::any_cast<StringRef>(value->getValue()), "a"_sr);
+	ASSERT_EQ(changesToB, 1);
 	co_return;
 }
 
