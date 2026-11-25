@@ -21,7 +21,27 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/StorageServerInterface.h"
 #include <boost/algorithm/string.hpp>
+#include <memory>
+
+TEST_CASE("/fdbclient/FDBTypes/PackedRangeReplyFirstAppend") {
+	GetKeyValuesReply reply;
+	reply.data.push_back_deep(reply.arena, KeyValueRef("a"_sr, "b"_sr));
+	// Allocate exactly the requested size so ASan can detect an underestimated reply size.
+	std::unique_ptr<uint8_t[]> buffer;
+	auto allocate = [](size_t size, void* context) {
+		auto& storage = *static_cast<std::unique_ptr<uint8_t[]>*>(context);
+		storage = std::make_unique<uint8_t[]>(size);
+		return storage.get();
+	};
+	ObjectWriter writer(allocate, &buffer, Unversioned());
+	writer.serialize(reply);
+	const auto decoded = ObjectReader::fromStringRef<GetKeyValuesReply>(writer.toStringRef(), Unversioned());
+	ASSERT_EQ(decoded.data.size(), 1);
+	ASSERT(decoded.data[0] == KeyValueRef("a"_sr, "b"_sr));
+	return Void();
+}
 
 TEST_CASE("/fdbclient/FDBTypes/PackedRangeReplyBounds") {
 	using Rows = VectorRef<KeyValueRef, VecSerStrategy::String>;
@@ -59,6 +79,10 @@ TEST_CASE("/fdbclient/FDBTypes/PackedRangeReplyBounds") {
 		for (int length = 0; length < bytes.size(); ++length) {
 			expectInvalid(bytes.substr(0, length));
 		}
+		// The first row differs from the destination. The second value is missing its only byte.
+		BinaryWriter truncated(Unversioned());
+		truncated << uint32_t(2) << "other"_sr << ""_sr << ""_sr << uint32_t(1);
+		expectInvalid(truncated.toValue());
 		expectInvalid(bytes.withSuffix("x"_sr));
 		expectInvalid("\xff\xff\xff\xff"_sr);
 		auto badKeyLength = makeString(bytes.size());
