@@ -85,10 +85,19 @@ public:
 					TraceEvent("RatekeeperReadThrottledTags", id)
 					    .detail("NumThrottledTags", throttledTagKeys.get().size());
 					for (auto entry : throttledTagKeys.get()) {
-						TagThrottleKey tagKey = TagThrottleKey::fromKey(entry.key);
-						TagThrottleValue tagValue = TagThrottleValue::fromValue(entry.value);
-
-						ASSERT(tagKey.tags.size() == 1); // Currently, only 1 tag per throttle is supported
+						auto key = TagThrottleKey::tryFromKey(entry.key);
+						Optional<TagThrottleValue> value;
+						if (key.present()) {
+							value = TagThrottleValue::tryFromValue(entry.value, key.get().throttleType);
+						}
+						if (!value.present()) {
+							TraceEvent(SevWarnAlways, "InvalidTagThrottleEntry", id)
+							    .suppressFor(5.0)
+							    .detail("Key", entry.key);
+							continue;
+						}
+						const auto& tagKey = key.get();
+						auto& tagValue = value.get();
 
 						if (tagValue.expirationTime == 0 ||
 						    tagValue.expirationTime > now() + tagValue.initialDuration) {
