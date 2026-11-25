@@ -26,6 +26,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "flow/DebugTrace.h"
 #include "flow/CoroUtils.h"
+#include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 
 // Returns a timeout future for peek reply detection. Used by both the non-parallel
@@ -1681,8 +1682,15 @@ TEST_CASE("/LogSystem/PeekCursor/MalformedPrefetch") {
 		TLogInterface tlog{ LocalityData() };
 		auto interf = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(OptionalInterface<TLogInterface>(tlog));
 		auto newEpoch = makeReference<ServerPeekCursor>(interf, tag, 50, 100, false, parallel);
-		auto replay = makeReference<ReplayMultiCursor>(std::vector<Reference<IReplayPeekCursor>>{ newEpoch, oldEpoch },
-		                                               std::vector<LogMessageVersion>{ LogMessageVersion(50) });
+		Reference<ReplayMultiCursor> replay;
+		{
+			auto& prefetchLimit = const_cast<ServerKnobs*>(SERVER_KNOBS)->MULTI_CURSOR_PRE_FETCH_LIMIT;
+			const int previousLimit = prefetchLimit;
+			ScopeExit restoreLimit([&]() { prefetchLimit = previousLimit; });
+			prefetchLimit = 2;
+			replay = makeReference<ReplayMultiCursor>(std::vector<Reference<IReplayPeekCursor>>{ newEpoch, oldEpoch },
+			                                          std::vector<LogMessageVersion>{ LogMessageVersion(50) });
+		}
 		auto requests = tlog.peekMessages.getFuture();
 		ASSERT(requests.isReady());
 		Future<Void> prefetch = newEpoch->getMore();
