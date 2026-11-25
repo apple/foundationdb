@@ -27,12 +27,14 @@ struct RangeReplicationWorkload : TestWorkload {
 	static constexpr auto NAME = "RangeReplication";
 	using TestWorkload::TestWorkload;
 
-	Future<Void> start(Database const& db) override {
+	const KeyRange range = KeyRangeRef("r0"_sr, "r4"_sr);
+	const KeyRange cut = KeyRangeRef("r2"_sr, doubleToTestKey(0.5, "r2"_sr));
+
+	Future<Void> setup(Database const& db) override {
 		if (clientId != 0) {
 			co_return;
 		}
 		Database cx = db;
-		KeyRange range = KeyRangeRef("r0"_sr, "r4"_sr);
 		KeyRange middle = KeyRangeRef("r1"_sr, "r3"_sr);
 		Database old = cx->clone();
 		old->apiVersion = ApiVersion(899);
@@ -51,31 +53,45 @@ struct RangeReplicationWorkload : TestWorkload {
 		KeyRange filter = KeyRangeRef("r11"_sr, "r35"_sr);
 		auto filtered = co_await getRangeReplicationOverrides(cx, filter);
 		ASSERT(filtered.size() == 1 && filtered[0] == (RangeReplicationOverride{ filter, 4 }));
+	}
 
+	Future<Void> start(Database const& db) override {
+		if (clientId != 0) {
+			co_return;
+		}
+		Database cx = db;
+		co_await delay(5.0);
+		co_await clearRangeReplication(cx, cut);
+
+		auto sys = SystemDBWriteLockedNow(cx.getReference());
 		auto configVersion = [&] {
 			return runTransaction(sys, [](auto tr) { return DDConfiguration().trigger.get(tr); });
 		};
 		auto before = co_await configVersion();
-		co_await setRangeReplication(cx, range, 4);
+		co_await setRangeReplication(cx, KeyRangeRef(range.begin, cut.begin), 4);
 		ASSERT((co_await configVersion()) == before);
-
-		KeyRange cut = KeyRangeRef("r2"_sr, "r25"_sr);
-		co_await clearRangeReplication(cx, cut);
-		before = co_await configVersion();
 		co_await clearRangeReplication(cx, cut);
 		ASSERT((co_await configVersion()) == before);
+	}
 
-		std::vector<RangeReplicationOverride> expected{ { KeyRangeRef("r0"_sr, "r2"_sr), 4 },
-			                                            { KeyRangeRef("r25"_sr, "r4"_sr), 4 } };
+	Future<bool> check(Database const& db) override {
+		if (clientId != 0) {
+			co_return true;
+		}
+		Database cx = db;
+		std::vector<RangeReplicationOverride> expected{ { KeyRangeRef(range.begin, cut.begin), 4 },
+			                                            { KeyRangeRef(cut.end, range.end), 4 } };
 		ASSERT((co_await getRangeReplicationOverrides(cx, range)) == expected);
+		auto sys = SystemDBWriteLockedNow(cx.getReference());
+		auto config = DDConfiguration().userRangeConfig();
 		auto snapshot = co_await config.getSnapshot(sys, range.begin, range.end);
 		ASSERT(snapshot->rangeContaining("r1"_sr).value() == DDRangeConfig(4, 7));
 		ASSERT(snapshot->rangeContaining("r2"_sr).value() == DDRangeConfig({}, 7));
 		co_await clearRangeReplication(cx, range);
 		ASSERT((co_await getRangeReplicationOverrides(cx, range)).empty());
+		co_return true;
 	}
 
-	Future<bool> check(Database const&) override { return true; }
 	void getMetrics(std::vector<PerfMetric>&) override {}
 };
 
