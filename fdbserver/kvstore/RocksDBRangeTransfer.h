@@ -112,6 +112,8 @@ public:
 	int64_t getKeyCount() const { return keyCount; }
 	uint64_t getFileBytes() const { return fileBytes; } // Set by finish().
 
+	uint64_t getCurrentFileBytes() { return writer.FileSize(); }
+
 private:
 	rocksdb::SstFileWriter writer;
 	const std::string path;
@@ -120,6 +122,48 @@ private:
 	std::string lastKey;
 	int64_t keyCount = 0;
 	uint64_t fileBytes = 0;
+};
+
+// Builds several SST files from key-values given in increasing key order. Before each block, it checks the current
+// file: if it is already `targetFileBytes` or bigger, it finishes that file and starts a new one. So a file can be at
+// most about one block bigger than `targetFileBytes`.
+// Files are named "<basePath>.0", "<basePath>.1", and so on. Like IngestSSTFileBuilder, use it on the RocksDB writer
+// thread.
+class IngestSSTFileSetBuilder {
+public:
+	struct FileInfo {
+		std::string path;
+		std::string firstKey;
+		std::string lastKey;
+		int64_t keyCount = 0;
+		uint64_t fileBytes = 0;
+	};
+
+	// A targetFileBytes of 0 means: put everything in one file.
+	IngestSSTFileSetBuilder(const rocksdb::Options& options,
+	                        rocksdb::ColumnFamilyHandle* cf,
+	                        std::string basePath,
+	                        uint64_t targetFileBytes)
+	  : options(options), cf(cf), basePath(std::move(basePath)), targetFileBytes(targetFileBytes) {}
+
+	// Adds a block of key-values. Keys must be strictly increasing, within the block and across calls.
+	rocksdb::Status add(VectorRef<KeyValueRef> kvs);
+
+	// Finishes the last file.
+	rocksdb::Status finish();
+
+	// The finished files, in key order.
+	const std::vector<FileInfo>& getFiles() const { return files; }
+
+private:
+	rocksdb::Status finishCurrentFile();
+
+	const rocksdb::Options options;
+	rocksdb::ColumnFamilyHandle* const cf;
+	const std::string basePath;
+	const uint64_t targetFileBytes;
+	std::unique_ptr<IngestSSTFileBuilder> current; // The file being written now, if any.
+	std::vector<FileInfo> files; // Finished files.
 };
 
 } // namespace RocksDBRangeTransfer

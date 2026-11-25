@@ -120,6 +120,41 @@ rocksdb::Status IngestSSTFileBuilder::finish() {
 	return s;
 }
 
+rocksdb::Status IngestSSTFileSetBuilder::add(VectorRef<KeyValueRef> kvs) {
+	if (kvs.empty()) {
+		return rocksdb::Status::OK();
+	}
+	// The current file is full: finish it, so this block goes into a new file.
+	if (current && targetFileBytes > 0 && current->getCurrentFileBytes() >= targetFileBytes) {
+		rocksdb::Status s = finishCurrentFile();
+		if (!s.ok()) {
+			return s;
+		}
+	}
+	if (!current) {
+		current = std::make_unique<IngestSSTFileBuilder>(options, cf, basePath + "." + std::to_string(files.size()));
+	}
+	return current->add(kvs);
+}
+
+rocksdb::Status IngestSSTFileSetBuilder::finish() {
+	return current ? finishCurrentFile() : rocksdb::Status::OK();
+}
+
+// Finishes the current file and adds its info to `files`.
+rocksdb::Status IngestSSTFileSetBuilder::finishCurrentFile() {
+	rocksdb::Status s = current->finish();
+	if (s.ok()) {
+		files.push_back(FileInfo{ current->getPath(),
+		                          current->getFirstKey(),
+		                          current->getLastKey(),
+		                          current->getKeyCount(),
+		                          current->getFileBytes() });
+		current.reset();
+	}
+	return s;
+}
+
 } // namespace RocksDBRangeTransfer
 
 #endif // WITH_ROCKSDB
