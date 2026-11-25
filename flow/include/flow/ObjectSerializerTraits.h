@@ -28,6 +28,26 @@
 #include <vector>
 #include <variant>
 
+namespace detail {
+// Throws serialization_failed, after asserting in simulation where a malformed buffer is a bug. |reason| must be a
+// string literal.
+[[noreturn]] void flat_buffer_load_failed(const char* reason);
+
+// Traces and aborts the process. |reason| must be a string literal.
+[[noreturn]] void flat_buffer_load_fatal(const char* reason);
+
+// Reports a malformed buffer through the loading context, which picks between the two above. Contexts that cannot
+// bound the buffer throw.
+template <class Context>
+[[noreturn]] void load_failed(const Context& context, const char* reason) {
+	if constexpr (requires { context.loadFailed(reason); }) {
+		context.loadFailed(reason);
+	} else {
+		flat_buffer_load_failed(reason);
+	}
+}
+} // namespace detail
+
 template <class T, typename = void>
 struct is_fb_function_t : std::false_type {};
 
@@ -110,7 +130,9 @@ struct dynamic_size_traits : std::false_type {
 	template <class Context>
 	static size_t size(const T&, Context&);
 
-	// Guaranteed to be called only once during serialization
+	// For an expensive size(), a specialization can also provide saveWithSize(out, size, value, context).
+	// The writer then passes the size from the allocation pass directly to saveWithSize.
+	// Otherwise save is called once during serialization.
 	template <class Context>
 	static void save(uint8_t*, const T&, Context&);
 

@@ -868,74 +868,21 @@ struct flow_ref<std::pair<A, B>> : std::integral_constant<bool, false> {};
 
 template <class T>
 struct string_serialized_traits : std::false_type {
+	static constexpr size_t minSize = 0;
 	int32_t getSize(const T& item) const { return 0; }
 
 	uint32_t save(uint8_t* out, const T& t) const { return 0; }
 
 	template <class Context>
-	uint32_t load(const uint8_t* data, T& t, Context& context) {
-		return 0;
-	}
+	void load(const uint8_t*& data, const uint8_t* end, T& t, Context& context) {}
 };
 
 enum class VecSerStrategy { FlatBuffers, String };
 
-template <class T, VecSerStrategy>
-struct VectorRefPreserializer {
-	VectorRefPreserializer() = default;
-	explicit(false) VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {
-		return *this;
-	}
-	explicit(false) VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>&) noexcept {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>&) noexcept {
-		return *this;
-	}
-
-	void invalidate() {}
-	void add(const T& item) {}
-	void remove(const T& item) {}
-	void reset() {}
-};
-
-template <class T>
-struct VectorRefPreserializer<T, VecSerStrategy::String> {
-	mutable int32_t _cached_size; // -1 means unknown
-	string_serialized_traits<T> _string_traits;
-
-	VectorRefPreserializer() : _cached_size(0) {}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept
-	  : _cached_size(other._cached_size) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept {
-		_cached_size = other._cached_size;
-		return *this;
-	}
-	explicit(false) VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept
-	  : _cached_size(-1) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {
-		_cached_size = -1;
-		return *this;
-	}
-
-	void invalidate() { _cached_size = -1; }
-	void add(const T& item) {
-		if (_cached_size > 0) {
-			_cached_size += _string_traits.getSize(item);
-		}
-	}
-	void remove(const T& item) {
-		if (_cached_size > 0) {
-			_cached_size -= _string_traits.getSize(item);
-		}
-	}
-	void reset() { _cached_size = 0; }
-};
-
 // FIXME: consider whether methods in this class should be instrumented to
 // count calls, bytes processed, etc.
 template <class T, VecSerStrategy SerStrategy = VecSerStrategy::FlatBuffers>
-class VectorRef : public ComposedIdentifier<T, 3>, public VectorRefPreserializer<T, SerStrategy> {
-	using VPS = VectorRefPreserializer<T, SerStrategy>;
+class VectorRef : public ComposedIdentifier<T, 3> {
 	friend class VectorRef<T,
 	                       SerStrategy == VecSerStrategy::FlatBuffers ? VecSerStrategy::String
 	                                                                  : VecSerStrategy::FlatBuffers>;
@@ -951,10 +898,9 @@ public:
 
 	template <VecSerStrategy S>
 	explicit(false) VectorRef(const VectorRef<T, S>& other)
-	  : VPS(other), data(other.data), m_size(other.m_size), m_capacity(other.m_capacity) {}
+	  : data(other.data), m_size(other.m_size), m_capacity(other.m_capacity) {}
 	template <VecSerStrategy S>
 	VectorRef& operator=(const VectorRef<T, S>& other) {
-		*static_cast<VPS*>(this) = other;
 		data = other.data;
 		m_size = other.m_size;
 		m_capacity = other.m_capacity;
@@ -965,8 +911,7 @@ public:
 	template <class T2 = T, VecSerStrategy S>
 	    requires(!flow_ref<T2>::value)
 	VectorRef(Arena& p, const VectorRef<T, S>& toCopy)
-	  : VPS(toCopy), data((T*)new(p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
-	    m_capacity(toCopy.size()) {
+	  : data((T*)new(p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
 		if (m_size > 0) {
 			std::copy(toCopy.data, toCopy.data + m_size, data);
 		}
@@ -976,15 +921,14 @@ public:
 	template <class T2 = T, VecSerStrategy S>
 	    requires(flow_ref<T2>::value)
 	VectorRef(Arena& p, const VectorRef<T, S>& toCopy)
-	  : VPS(), data((T*)new(p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
+	  : data((T*)new(p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
 		for (int i = 0; i < m_size; i++) {
-			auto ptr = new (&data[i]) T(p, toCopy[i]);
-			VPS::add(*ptr);
+			new (&data[i]) T(p, toCopy[i]);
 		}
 	}
 
 	template <class It>
-	VectorRef(Arena& arena, It first, It last) {
+	VectorRef(Arena& arena, It first, It last) : VectorRef() {
 		if constexpr (flow_ref<T>::value) {
 			append_deep(arena, first, std::distance(first, last));
 		} else {
@@ -1000,15 +944,15 @@ public:
 	template <VecSerStrategy S = SerStrategy>
 	    requires(S == VecSerStrategy::String)
 	uint32_t serializedSize() const {
-		uint32_t result = sizeof(uint32_t);
+		// A mutable row reference can outlive a write. Only reuse this size within one serialization.
+		uint64_t result = sizeof(uint32_t);
 		string_serialized_traits<T> t;
-		if (VPS::_cached_size >= 0) {
-			return result + VPS::_cached_size;
-		}
 		for (const auto& v : *this) {
 			result += t.getSize(v);
 		}
-		VPS::_cached_size = result - sizeof(uint32_t);
+		if (result > std::numeric_limits<int32_t>::max()) {
+			throw serialization_failed();
+		}
 		return result;
 	}
 
@@ -1051,31 +995,15 @@ public:
 
 	// Warning: Do not mutate a VectorRef that has previously been copy constructed or assigned,
 	// since copies will share data
-	T* begin() {
-		VPS::invalidate();
-		return data;
-	}
-	T* end() {
-		VPS::invalidate();
-		return data + m_size;
-	}
-	T& front() {
-		VPS::invalidate();
-		return *begin();
-	}
-	T& back() {
-		VPS::invalidate();
-		return end()[-1];
-	}
-	T& operator[](int i) {
-		VPS::invalidate();
-		return data[i];
-	}
+	T* begin() { return data; }
+	T* end() { return data + m_size; }
+	T& front() { return *begin(); }
+	T& back() { return end()[-1]; }
+	T& operator[](int i) { return data[i]; }
 	void push_back(Arena& p, const T& value) {
 		if (m_size + 1 > m_capacity)
 			reallocate(p, m_size + 1);
-		auto ptr = new (&data[m_size]) T(value);
-		VPS::add(*ptr);
+		new (&data[m_size]) T(value);
 		m_size++;
 	}
 
@@ -1084,7 +1012,6 @@ public:
 		if (m_size + 1 > m_capacity)
 			reallocate(p, m_size + 1);
 		auto ptr = new (&data[m_size]) T(std::forward<Us>(args)...);
-		VPS::add(*ptr);
 		m_size++;
 		return *ptr;
 	}
@@ -1093,8 +1020,7 @@ public:
 	void push_back_deep(Arena& p, const T& value) {
 		if (m_size + 1 > m_capacity)
 			reallocate(p, m_size + 1);
-		auto ptr = new (&data[m_size]) T(p, value);
-		VPS::add(*ptr);
+		new (&data[m_size]) T(p, value);
 		m_size++;
 	}
 
@@ -1104,7 +1030,6 @@ public:
 		if (m_size + 1 > m_capacity)
 			reallocate(p, m_size + 1);
 		auto ptr = new (&data[m_size]) T(p, std::forward<Us>(args)...);
-		VPS::add(*ptr);
 		m_size++;
 		return *ptr;
 	}
@@ -1113,7 +1038,6 @@ public:
 	void append(Arena& p, It begin, int count) {
 		if (m_size + count > m_capacity)
 			reallocate(p, m_size + count);
-		VPS::invalidate();
 		if (count > 0) {
 			std::copy(begin, begin + count, data + m_size);
 		}
@@ -1124,18 +1048,13 @@ public:
 		if (m_size + count > m_capacity)
 			reallocate(p, m_size + count);
 		for (int i = 0; i < count; i++) {
-			auto ptr = new (&data[m_size + i]) T(p, *begin++);
-			VPS::add(*ptr);
+			new (&data[m_size + i]) T(p, *begin++);
 		}
 		m_size += count;
 	}
-	void pop_back() {
-		VPS::remove(back());
-		m_size--;
-	}
+	void pop_back() { m_size--; }
 
 	void pop_front(int count = 1) {
-		VPS::invalidate();
 		count = std::min(m_size, count);
 
 		data += count;
@@ -1147,16 +1066,12 @@ public:
 		if (size > m_capacity)
 			reallocate(p, size);
 		for (int i = m_size; i < size; i++) {
-			auto ptr = new (&data[i]) T();
-			VPS::add(*ptr);
+			new (&data[i]) T();
 		}
 		m_size = size;
 	}
 
-	void clear() {
-		VPS::reset();
-		m_size = 0;
-	}
+	void clear() { m_size = 0; }
 
 	void reserve(Arena& p, int size) {
 		if (size > m_capacity)
@@ -1519,24 +1434,27 @@ struct vector_like_traits<VectorRef<T, VecSerStrategy::FlatBuffers>> : std::true
 template <class V>
 struct dynamic_size_traits<VectorRef<V, VecSerStrategy::String>> : std::true_type {
 	using T = VectorRef<V, VecSerStrategy::String>;
-	// May be called multiple times during one serialization
 	template <class Context>
 	static size_t size(const T& t, Context&) {
 		return t.serializedSize();
 	}
 
-	// Guaranteed to be called only once during serialization
 	template <class Context>
-	static void save(uint8_t* out, const T& t, Context&) {
+	static void save(uint8_t* out, const T& t, Context& context) {
+		saveWithSize(out, t.serializedSize(), t, context);
+	}
+
+	template <class Context>
+	static void saveWithSize(uint8_t* out, uint32_t size, const T& t, Context&) {
 		string_serialized_traits<V> traits;
 		auto* p = out;
 		uint32_t length = t.size();
-		*reinterpret_cast<decltype(length)*>(out) = length;
+		memcpy(out, &length, sizeof(length));
 		out += sizeof(length);
 		for (const auto& item : t) {
 			out += traits.save(out, item);
 		}
-		ASSERT(out - p == t._cached_size + sizeof(uint32_t));
+		ASSERT(out - p == size);
 	}
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
@@ -1544,16 +1462,27 @@ struct dynamic_size_traits<VectorRef<V, VecSerStrategy::String>> : std::true_typ
 	template <class Context>
 	static void load(const uint8_t* data, size_t size, T& t, Context& context) {
 		string_serialized_traits<V> traits;
-		auto* p = data;
 		uint32_t num_elements;
+		if (size < sizeof(num_elements) || size > std::numeric_limits<int32_t>::max()) {
+			detail::load_failed(context, "invalid packed vector size");
+		}
+		const uint8_t* end = data + size;
 		memcpy(&num_elements, data, sizeof(num_elements));
 		data += sizeof(num_elements);
-		t.resize(context.arena(), num_elements);
-		for (unsigned i = 0; i < num_elements; ++i) {
-			data += traits.load(data, t[i], context);
+		constexpr size_t maxAllocation = std::numeric_limits<int>::max() - sizeof(ArenaBlock) - sizeof(ArenaBlockRef);
+		if (num_elements > maxAllocation / sizeof(V) ||
+		    uint64_t(num_elements) * traits.minSize > size - sizeof(num_elements)) {
+			detail::load_failed(context, "invalid packed vector count");
 		}
-		ASSERT(data - p == size);
-		t._cached_size = size - sizeof(uint32_t);
+		T decoded;
+		decoded.resize(context.arena(), num_elements);
+		for (unsigned i = 0; i < num_elements; ++i) {
+			traits.load(data, end, decoded[i], context);
+		}
+		if (data != end) {
+			detail::load_failed(context, "trailing bytes in packed vector");
+		}
+		t = decoded;
 	}
 };
 
