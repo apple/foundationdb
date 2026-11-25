@@ -2229,14 +2229,13 @@ Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 }
 
 std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, const RangeResult& rows) {
-	constexpr int versionstampSize = sizeof(Version) + sizeof(Versionstamp::batchNumber);
-	if (versionstamp.size() != versionstampSize) {
+	const auto committedVersion = GlobalConfig::decodeVersion(versionstamp);
+	if (!committedVersion.present()) {
 		TraceEvent(SevWarnAlways, "GlobalConfigInvalidVersionstampSize")
 		    .suppressFor(60.0)
 		    .detail("Size", versionstamp.size());
 		return {};
 	}
-	Version committedVersion = bigEndian64(BinaryReader::fromStringRef<Version>(versionstamp, Unversioned()));
 	std::vector<VersionHistory> history;
 	try {
 		if (rows.empty() || rows.more) {
@@ -2248,11 +2247,11 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, con
 			}
 			ArenaObjectReader reader(rows.arena(), kv.value, IncludeVersion());
 			if (reader.protocolVersion() != g_network->protocolVersion()) {
-				return { VersionHistory(committedVersion) };
+				return { VersionHistory(committedVersion.get()) };
 			}
 
-			StringRef suffix = kv.key.removePrefix(globalConfigHistoryPrefix);
-			if (suffix.size() != versionstampSize) {
+			const auto rowVersion = GlobalConfig::decodeVersion(kv.key.removePrefix(globalConfigHistoryPrefix));
+			if (!rowVersion.present()) {
 				throw serialization_failed();
 			}
 			VersionHistory vh;
@@ -2264,7 +2263,7 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, con
 					throw serialization_failed();
 				}
 			}
-			vh.version = bigEndian64(BinaryReader::fromStringRef<Version>(suffix, Unversioned()));
+			vh.version = rowVersion.get();
 			if (!history.empty() && vh.version < history.back().version) {
 				throw serialization_failed();
 			}
@@ -2283,7 +2282,7 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, con
 			throw;
 		}
 		TraceEvent(SevWarnAlways, "GlobalConfigHistoryDecodeError").errorUnsuppressed(e).suppressFor(60.0);
-		return { VersionHistory(committedVersion) };
+		return { VersionHistory(committedVersion.get()) };
 	}
 
 	return history;
@@ -4081,9 +4080,13 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientRefreshesUnreadableSet
 	RangeResult snapshot;
 	snapshot.push_back_deep(snapshot.arena(), KeyValueRef("0"_sr.withPrefix(globalConfigKeysPrefix), "\xff"_sr));
 	snapshot.push_back_deep(snapshot.arena(), KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), enabled));
+	snapshot.push_back_deep(snapshot.arena(), KeyValueRef("empty"_sr.withPrefix(globalConfigKeysPrefix), "\x02"_sr));
 	retry.reply.send(GlobalConfigRefreshReply{ snapshot.arena(), 43, snapshot });
 	co_await timeoutError(changed, 5.0);
 	ASSERT(!client.db->globalConfig->get("0"_sr).isValid());
+	auto empty = client.db->globalConfig->get("empty"_sr);
+	ASSERT(empty.isValid());
+	ASSERT(std::any_cast<StringRef>(empty->getValue()).empty());
 	ASSERT(client.db->globalConfig->get<bool>("A"_sr, false));
 	ASSERT(!client.db->globalConfig->get("B"_sr).isValid());
 	ASSERT_EQ(changesToB, 0);

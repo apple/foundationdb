@@ -69,6 +69,13 @@ void GlobalConfig::applyChanges(Transaction& tr,
 	            MutationRef::SetVersionstampedValue);
 }
 
+Optional<Version> GlobalConfig::decodeVersion(ValueRef versionstamp) {
+	if (versionstamp.size() != sizeof(Version) + sizeof(Versionstamp::batchNumber)) {
+		return {};
+	}
+	return BinaryReader::fromStringRef<Versionstamp>(versionstamp, Unversioned()).version;
+}
+
 Key GlobalConfig::prefixedKey(KeyRef key) {
 	return key.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin);
 }
@@ -105,30 +112,32 @@ void GlobalConfig::trigger(KeyRef key, std::function<void(std::optional<std::any
 
 GlobalConfig::Entry GlobalConfig::decode(KeyRef key, ValueRef value) {
 	try {
-		// Even an incomplete second element marks the end of the configuration value.
-		const Tuple tuple = Tuple::unpack(value);
-		const Tuple first = Tuple::unpack(tuple.subTupleRawString(0), /* exclude_incomplete */ true);
+		Tuple tuple = Tuple::unpack(value);
+		// getString accepts end-of-input as its terminator. Fixed-width accessors need a complete, bounded element.
+		if (tuple.getType(0) != Tuple::ElementType::UTF8) {
+			tuple = Tuple::unpack(tuple.subTupleRawString(0), /* exclude_incomplete */ true);
+		}
 		Arena arena(key.expectedSize() + value.expectedSize());
 		KeyRef stableKey(arena, key);
 		std::any any;
-		switch (first.getType(0)) {
+		switch (tuple.getType(0)) {
 		case Tuple::ElementType::UTF8:
-			any = StringRef(arena, first.getString(0).contents());
+			any = StringRef(arena, tuple.getString(0).contents());
 			break;
 		case Tuple::ElementType::INT:
-			any = first.getInt(0);
+			any = tuple.getInt(0);
 			break;
 		case Tuple::ElementType::BOOL:
-			any = first.getBool(0);
+			any = tuple.getBool(0);
 			break;
 		case Tuple::ElementType::FLOAT:
-			any = first.getFloat(0);
+			any = tuple.getFloat(0);
 			break;
 		case Tuple::ElementType::DOUBLE:
-			any = first.getDouble(0);
+			any = tuple.getDouble(0);
 			break;
 		case Tuple::ElementType::VERSIONSTAMP:
-			any = first.getVersionstamp(0);
+			any = tuple.getVersionstamp(0);
 			break;
 		default:
 			throw invalid_tuple_data_type();

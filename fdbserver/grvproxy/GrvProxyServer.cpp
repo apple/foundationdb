@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/GlobalConfig.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/TransactionLineage.h"
@@ -300,8 +301,24 @@ Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 	}
 }
 
+struct GlobalConfigSnapshot {
+	Version version = 0;
+	RangeResult data;
+
+	void update(const Optional<Value>& versionstamp, const RangeResult& rows) {
+		if (versionstamp.present()) {
+			const auto committedVersion = GlobalConfig::decodeVersion(versionstamp.get());
+			if (!committedVersion.present()) {
+				throw serialization_failed();
+			}
+			version = committedVersion.get();
+		}
+		data = rows;
+	}
+};
+
 // Periodically refresh local copy of global configuration.
-Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cachedVersion, RangeResult* cachedData) {
+Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, GlobalConfigSnapshot* snapshot) {
 	auto tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
 	try {
 		while (true) {
@@ -312,13 +329,7 @@ Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cachedVers
 				Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
 				Optional<Value> globalConfigVersion = co_await globalConfigVersionFuture;
 				RangeResult tmpCachedData = co_await tmpCachedDataFuture;
-				// Update together: these are served to clients as a matched pair.
-				if (globalConfigVersion.present()) {
-					Version parsedVersion =
-					    BinaryReader::fromStringRef<Version>(globalConfigVersion.get(), Unversioned());
-					*cachedVersion = bigEndian64(parsedVersion);
-				}
-				*cachedData = tmpCachedData;
+				snapshot->update(globalConfigVersion, tmpCachedData);
 				co_return;
 			} catch (Error& e) {
 				err = e;
@@ -335,35 +346,58 @@ Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cachedVers
 }
 
 TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValue") {
-	if (!g_network->isSimulated()) {
-		for (int size = 0; size < sizeof(Version); ++size) {
-			Standalone<StringRef> tooShort(std::string(size, '\x01'));
-			try {
-				BinaryReader::fromStringRef<Version>(tooShort, Unversioned());
-				ASSERT(false);
-			} catch (Error& e) {
-				ASSERT_EQ(e.code(), error_code_serialization_failed);
-			}
-		}
+	GlobalConfigSnapshot snapshot;
+	RangeResult at41;
+	at41.push_back_deep(at41.arena(),
+	                    KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
+	snapshot.update(BinaryWriter::toValue(Versionstamp(41, 0), Unversioned()), at41);
+	ASSERT_EQ(snapshot.version, 41);
+	ASSERT(snapshot.data == at41);
 
-		// StringRef's default constructor is data(nullptr), length(0) -- distinct
-		// from the size-0 case above, whose backing std::string::c_str() is a
-		// valid non-null pointer even when empty. A genuinely null data pointer
-		// must not be dereferenced before the length check rejects the read.
-		StringRef nullValue;
-		ASSERT(nullValue.begin() == nullptr);
+	auto checkRejected = [&](const Value& damaged) {
 		try {
-			BinaryReader::fromStringRef<Version>(nullValue, Unversioned());
+			snapshot.update(damaged, RangeResult());
 			ASSERT(false);
 		} catch (Error& e) {
 			ASSERT_EQ(e.code(), error_code_serialization_failed);
 		}
+		ASSERT_EQ(snapshot.version, 41);
+		ASSERT(snapshot.data == at41);
+	};
+	// The clear at 42 removes A. Dropping one leading zero would mislabel the empty snapshot as version 10752.
+	auto stamp = BinaryWriter::toValue(Versionstamp(42, 0), Unversioned());
+	for (int i = 1; i <= stamp.size(); ++i) {
+		checkRejected(stamp.substr(i));
 	}
+	checkRejected(Value());
+	checkRejected(stamp.withSuffix("\x00"_sr));
 
-	// A versionstamp is 10 bytes; only the leading sizeof(Version) are used.
-	Standalone<StringRef> versionstamp("\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00"_sr);
-	ASSERT_EQ(BinaryReader::fromStringRef<Version>(versionstamp, Unversioned()), bigEndian64(Version(1)));
+	RangeResult at43;
+	at43.push_back_deep(at43.arena(),
+	                    KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
+	snapshot.update(BinaryWriter::toValue(Versionstamp(43, 7), Unversioned()), at43);
+	ASSERT_EQ(snapshot.version, 43);
+	ASSERT(snapshot.data == at43);
+	return Void();
+}
 
+TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotMissingVersion") {
+	GlobalConfigSnapshot snapshot;
+	RangeResult rows;
+	rows.push_back_deep(rows.arena(),
+	                    KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
+	snapshot.update({}, rows);
+	ASSERT_EQ(snapshot.version, 0);
+	ASSERT(snapshot.data == rows);
+	snapshot.update(BinaryWriter::toValue(Versionstamp(41, 0), Unversioned()), RangeResult());
+	ASSERT_EQ(snapshot.version, 41);
+	ASSERT(snapshot.data.empty());
+	snapshot.update({}, rows);
+	ASSERT_EQ(snapshot.version, 41);
+	ASSERT(snapshot.data == rows);
+	snapshot.update({}, RangeResult());
+	ASSERT_EQ(snapshot.version, 41);
+	ASSERT(snapshot.data.empty());
 	return Void();
 }
 
@@ -373,16 +407,14 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValu
 Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInterface grvProxy) {
 	ActorCollection actors(false);
 	Future<Void> refreshFuture; // so there is only one running attempt
-	Version cachedVersion = 0;
-	RangeResult cachedData;
+	GlobalConfigSnapshot snapshot;
 
 	// Attempt to refresh the global configuration while the migration is
 	// ongoing. This is a small optimization to avoid waiting for the migration
 	// actor to complete.
-	refreshFuture = timeout(globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData),
-	                        SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT,
-	                        Void()) &&
-	                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
+	refreshFuture =
+	    timeout(globalConfigRefresh(grvProxyData, &snapshot), SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT, Void()) &&
+	    delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
 
 	// Run one-time migration to support upgrades.
 	co_await timeout(globalConfigMigrate(grvProxyData), SERVER_KNOBS->GLOBAL_CONFIG_MIGRATE_TIMEOUT);
@@ -396,14 +428,14 @@ Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInter
 			// order to serve it to the client (up to date from the clients
 			// point of view. The client learns the version through a
 			// ClientDBInfo update).
-			if (refresh.lastKnown <= cachedVersion) {
-				refresh.reply.send(GlobalConfigRefreshReply{ cachedData.arena(), cachedVersion, cachedData });
+			if (refresh.lastKnown <= snapshot.version) {
+				refresh.reply.send(GlobalConfigRefreshReply{ snapshot.data.arena(), snapshot.version, snapshot.data });
 			} else {
 				refresh.reply.sendError(future_version());
 			}
 		} else if (res.index() == 1) {
 			// refreshFuture fired
-			refreshFuture = timeout(globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData),
+			refreshFuture = timeout(globalConfigRefresh(grvProxyData, &snapshot),
 			                        SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT,
 			                        Void()) &&
 			                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);

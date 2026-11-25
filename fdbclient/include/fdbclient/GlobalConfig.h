@@ -117,6 +117,9 @@ public:
 	                         const VectorRef<KeyValueRef>& insertions,
 	                         const VectorRef<KeyRangeRef>& clears);
 
+	// Returns the commit version of a ten-byte versionstamp, or an empty optional for any other length.
+	static Optional<Version> decodeVersion(ValueRef versionstamp);
+
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.
 	//
