@@ -2237,6 +2237,9 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, con
 	Version committedVersion = bigEndian64(BinaryReader::fromStringRef<Version>(versionstamp, Unversioned()));
 	std::vector<VersionHistory> history;
 	try {
+		if (rows.empty() || rows.more) {
+			throw serialization_failed();
+		}
 		for (const auto& kv : rows) {
 			if (kv.value.size() < sizeof(uint64_t)) {
 				throw serialization_failed();
@@ -2252,10 +2255,18 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, con
 			}
 			VersionHistory vh;
 			reader.deserialize(vh);
+			for (const auto& mutation : vh.mutations) {
+				if (mutation.corrupted ||
+				    (mutation.type != MutationRef::SetValue && mutation.type != MutationRef::ClearRange) ||
+				    (mutation.type == MutationRef::ClearRange && mutation.param1 > mutation.param2)) {
+					throw serialization_failed();
+				}
+			}
 			vh.version = bigEndian64(BinaryReader::fromStringRef<Version>(suffix, Unversioned()));
 			history.push_back(std::move(vh));
 		}
-		if (history.empty()) {
+		// The writer stamps the latest row and the version key in the same transaction.
+		if (history.back().version != committedVersion) {
 			throw serialization_failed();
 		}
 	} catch (Error& e) {
@@ -3716,28 +3727,30 @@ Future<Void> clusterController(Reference<IClusterConnectionRecord> connRecord,
 namespace {
 
 TEST_CASE("/fdbserver/clustercontroller/globalConfigProtocolChangeUsesCommittedVersion") {
-	constexpr Version committedVersion = 0x0102030405060708;
-	BinaryWriter encodedVersion(Unversioned());
-	encodedVersion << bigEndian64(committedVersion) << uint16_t(7);
-
-	BinaryWriter olderHistory(IncludeVersion(ProtocolVersion::withStorageInterfaceReadiness()));
+	auto previous = BinaryWriter::toValue(Versionstamp(41, 0), Unversioned());
+	auto latest = BinaryWriter::toValue(Versionstamp(42, 7), Unversioned());
+	auto olderHistory =
+	    ObjectWriter::toValue(VersionHistory(0), IncludeVersion(ProtocolVersion::withStorageInterfaceReadiness()));
+	auto currentHistory = ObjectWriter::toValue(VersionHistory(0), IncludeVersion());
 	RangeResult rows;
-	rows.push_back_deep(rows.arena(), KeyValueRef(globalConfigHistoryPrefix, olderHistory.toValue()));
-	auto history = decodeGlobalConfigHistory(encodedVersion.toValue(), rows);
+	rows.push_back_deep(rows.arena(), KeyValueRef(previous.withPrefix(globalConfigHistoryPrefix), olderHistory));
+	rows.push_back_deep(rows.arena(), KeyValueRef(latest.withPrefix(globalConfigHistoryPrefix), currentHistory));
+	auto history = decodeGlobalConfigHistory(latest, rows);
 	ASSERT_EQ(history.size(), 1);
-	ASSERT_EQ(history.front().version, committedVersion);
+	ASSERT_EQ(history.front().version, 42);
 	ASSERT_EQ(history.front().mutations.size(), 0);
 	return Void();
 }
 
 TEST_CASE("/fdbserver/clustercontroller/globalConfigMalformedHistory") {
-	BinaryWriter version(Unversioned());
-	version << bigEndian64(Version(42)) << uint16_t(0);
+	auto version = BinaryWriter::toValue(Versionstamp(42, 0), Unversioned());
+	auto key = version.withPrefix(globalConfigHistoryPrefix);
+	auto previousKey = BinaryWriter::toValue(Versionstamp(41, 0), Unversioned()).withPrefix(globalConfigHistoryPrefix);
 	RangeResult rows;
 	ASSERT(decodeGlobalConfigHistory("short"_sr, rows).empty());
 
 	auto checkRefresh = [&] {
-		auto history = decodeGlobalConfigHistory(version.toValue(), rows);
+		auto history = decodeGlobalConfigHistory(version, rows);
 		ASSERT_EQ(history.size(), 1);
 		ASSERT_EQ(history.front().version, 42);
 		ASSERT(history.front().mutations.empty());
@@ -3750,11 +3763,34 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigMalformedHistory") {
 	checkRefresh();
 
 	rows = RangeResult();
-	auto key = version.toValue().withPrefix(globalConfigHistoryPrefix);
 	rows.push_back_deep(rows.arena(), KeyValueRef(key, "a"_sr));
 	checkRefresh();
 
+	rows = RangeResult();
+	rows.push_back_deep(rows.arena(), KeyValueRef(previousKey, validValue));
+	checkRefresh();
+
+	for (const auto& invalid :
+	     { MutationRef(MutationRef::AddValue, "k"_sr, "v"_sr), MutationRef(MutationRef::ClearRange, "z"_sr, "a"_sr) }) {
+		VersionHistory update(0);
+		update.mutations.emplace_back_deep(update.mutations.arena(), invalid);
+		auto value = ObjectWriter::toValue(update, IncludeVersion());
+		rows.push_back_deep(rows.arena(), KeyValueRef(key, value));
+		checkRefresh();
+		rows.pop_back();
+	}
+
 	if (!g_network->isSimulated()) {
+		// Encode only type and param1 so the mutation table has no param2 field.
+		Standalone<VectorRef<std::pair<uint8_t, StringRef>>> mutations;
+		mutations.emplace_back(mutations.arena(), MutationRef().createTypeWithChecksum(MutationRef::SetValue), "k"_sr);
+		ObjectWriter missingParam2{ IncludeVersion() };
+		missingParam2.serialize(VersionHistory::file_identifier, std::pair{ mutations, Version(0) });
+		rows = RangeResult();
+		rows.push_back_deep(rows.arena(), KeyValueRef(previousKey, validValue));
+		rows.push_back_deep(rows.arena(), KeyValueRef(key, missingParam2.toStringRef()));
+		checkRefresh();
+
 		// The object reader deliberately asserts on corrupt FlatBuffers in simulation.
 		BinaryWriter truncated(IncludeVersion(currentProtocolVersion()));
 		rows = RangeResult();
@@ -3764,19 +3800,24 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigMalformedHistory") {
 		VersionHistory update(0);
 		update.mutations.emplace_back_deep(update.mutations.arena(),
 		                                   MutationRef(MutationRef::SetValue, "k"_sr, "value"_sr));
+		update.mutations.emplace_back_deep(update.mutations.arena(),
+		                                   MutationRef(MutationRef::ClearRange, "a"_sr, "b"_sr));
 		auto encodedUpdate = ObjectWriter::toValue(update, IncludeVersion());
-		BinaryWriter previous(Unversioned());
-		previous << bigEndian64(Version(41)) << uint16_t(0);
+		auto olderKey = BinaryWriter::toValue(Versionstamp(39, 0), Unversioned()).withPrefix(globalConfigHistoryPrefix);
 		rows = RangeResult();
-		rows.push_back_deep(rows.arena(),
-		                    KeyValueRef(previous.toValue().withPrefix(globalConfigHistoryPrefix), validValue));
+		rows.push_back_deep(rows.arena(), KeyValueRef(olderKey, validValue));
 		rows.push_back_deep(rows.arena(), KeyValueRef(key, encodedUpdate));
-		auto repaired = decodeGlobalConfigHistory(version.toValue(), rows);
+		rows.more = true;
+		checkRefresh();
+		rows.more = false;
+		auto repaired = decodeGlobalConfigHistory(version, rows);
 		rows = RangeResult();
 		ASSERT_EQ(repaired.size(), 2);
+		ASSERT_EQ(repaired.front().version, 39);
 		ASSERT_EQ(repaired.back().version, 42);
-		ASSERT_EQ(repaired.back().mutations.size(), 1);
+		ASSERT_EQ(repaired.back().mutations.size(), 2);
 		ASSERT_EQ(repaired.back().mutations[0].param2, "value"_sr);
+		ASSERT_EQ(repaired.back().mutations[1].type, MutationRef::ClearRange);
 	}
 	return Void();
 }
