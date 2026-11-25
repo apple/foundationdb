@@ -127,7 +127,7 @@ public:
 				if constexpr (ReaderImpl::failsFatally) {
 					ASSERT(false);
 				} else {
-					detail::flat_buffer_load_failed("file identifier mismatch");
+					ReaderImpl::loadFailed("file identifier mismatch");
 				}
 			}
 		}

@@ -321,7 +321,8 @@ struct GlobalConfigSnapshot {
 	            const std::vector<VersionHistory>& history = {},
 	            Version publicationBeforeRead = 0,
 	            const Optional<GlobalConfigSnapshotProof>& proof = {},
-	            Optional<uint16_t> historyBatch = {}) {
+	            Optional<uint16_t> historyBatch = {},
+	            Optional<uint16_t> batchBeforeRead = {}) {
 		// Clients replace their entire cache with these rows.
 		if (rows.more) {
 			throw serialization_failed();
@@ -335,10 +336,14 @@ struct GlobalConfigSnapshot {
 			const bool published = !history.empty() && history.back().version == next.version;
 			const Version rowVersion = history.size() > 1 ? history.back().version : invalidVersion;
 			const bool hasHistoryRow = next.version == rowVersion;
-			const Versionstamp rowStamp = history.size() > 1 && historyBatch.present()
+			const Versionstamp rowStamp = history.size() > 1 && rowVersion <= readVersion && historyBatch.present()
 			                                  ? Versionstamp(rowVersion, historyBatch.get())
 			                                  : Versionstamp();
-			const Versionstamp knownStamp = std::max(confirmedStamp, rowStamp);
+			// A publication can advance while the proxy reads the remaining pages at readVersion.
+			const Versionstamp previousRow = batchBeforeRead.present() && publicationBeforeRead <= readVersion
+			                                     ? Versionstamp(publicationBeforeRead, batchBeforeRead.get())
+			                                     : Versionstamp();
+			const Versionstamp knownStamp = std::max({ confirmedStamp, previousRow, rowStamp });
 			if (next.version < confirmedVersion || next < knownStamp) {
 				throw serialization_failed();
 			}
@@ -380,8 +385,8 @@ struct GlobalConfigSnapshot {
 			confirmedStamp = knownStamp;
 			stamp = next;
 			snapshotReadVersion = readVersion;
-		} else {
-			// Keep the legacy version label, but it does not identify these rows.
+		} else if (snapshotReadVersion.present() && rows != data) {
+			// The last dated read still identifies the snapshot only while all raw rows match.
 			snapshotReadVersion.reset();
 		}
 		data = rows;
@@ -391,6 +396,7 @@ struct GlobalConfigSnapshot {
 		pageSize = std::max(1, pageSize);
 		const auto& info = tr.getDatabase()->clientInfo->get();
 		const Version publicationBeforeRead = info.history.empty() ? 0 : info.history.back().version;
+		const auto batchBeforeRead = info.history.size() > 1 ? info.globalConfigHistoryBatch : Optional<uint16_t>();
 		auto versionFuture = tr.get(globalConfigVersionKey);
 		auto firstPage = tr.getRange(globalConfigDataKeys, pageSize);
 		Optional<Value> versionstamp = co_await versionFuture;
@@ -411,7 +417,8 @@ struct GlobalConfigSnapshot {
 		       info.history,
 		       publicationBeforeRead,
 		       info.globalConfigSnapshot,
-		       info.globalConfigHistoryBatch);
+		       info.globalConfigHistoryBatch,
+		       batchBeforeRead);
 	}
 };
 
@@ -709,6 +716,12 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotMissingVersion") {
 	snapshot.update(BinaryWriter::toValue(Versionstamp(1, 0), Unversioned()), rows, 43);
 	ASSERT(snapshot.reply().result == rows);
 	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 43);
+	RangeResult differentValue;
+	differentValue.push_back_deep(differentValue.arena(),
+	                              KeyValueRef(rows.front().key, Tuple::makeTuple(false).pack()));
+	snapshot.update({}, differentValue, 44);
+	ASSERT(snapshot.reply().result == differentValue);
+	ASSERT(!snapshot.reply().snapshotReadVersion.present());
 	return Void();
 }
 
@@ -722,6 +735,7 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
 	ClientDBInfo info;
 	info.id = UID(1, 1);
 	info.history = { VersionHistory(40), VersionHistory(41) };
+	info.globalConfigHistoryBatch = 0;
 	info.grvProxies.push_back(proxy);
 	info.commitProxies.push_back(commitProxy);
 	auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
@@ -740,13 +754,25 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
 		    KeyValueRef(key.withPrefix(globalConfigKeysPrefix), key == "A"_sr ? "\xff"_sr : enabled.contents()));
 	}
 	GlobalConfigSnapshot snapshot;
-	snapshot.data.append_deep(snapshot.data.arena(), rows.begin() + 2, 2);
-	snapshot.stamp = Versionstamp(41, 0);
+	RangeResult initialRows;
+	initialRows.append_deep(initialRows.arena(), rows.begin() + 2, 2);
+	snapshot.update(BinaryWriter::toValue(Versionstamp(41, 0), Unversioned()), initialRows, 41);
+	// Only the version key disappeared. A joining client still needs the read date from this same proxy.
+	ReadYourWritesTransaction unlabeled(db);
+	unlabeled.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	unlabeled.setVersion(42);
+	unlabeled.clear(globalConfigVersionKey);
+	unlabeled.clear(globalConfigDataKeys);
+	for (const auto& kv : initialRows) {
+		unlabeled.set(kv.key, kv.value);
+	}
+	co_await timeoutError(snapshot.read(unlabeled, 1), 5.0);
 	db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
 	auto nextRefresh = [&] { return timeoutError(waitAndForward(proxy.refreshGlobalConfig.getFuture()), 5.0); };
 	auto initial = co_await nextRefresh();
 	initial.reply.send(snapshot.reply());
 	co_await timeoutError(db->globalConfig->onInitialized(), 5.0);
+	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 41);
 	ASSERT(db->globalConfig->get<bool>("Z"_sr, false));
 
 	VersionHistory at42(42);
@@ -754,6 +780,7 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
 	at42.mutations.emplace_back_deep(at42.mutations.arena(), MutationRef(MutationRef::SetValue, "B"_sr, enabled));
 	info.id = UID(1, 2);
 	info.history = { VersionHistory(41), at42 };
+	info.globalConfigHistoryBatch = 7;
 	auto changed = db->globalConfig->onChange();
 	clientInfo->set(info);
 	auto recovery = co_await nextRefresh();
@@ -764,7 +791,8 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
 		ReadYourWritesTransaction tr(db);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setVersion(version);
-		tr.set(globalConfigVersionKey, BinaryWriter::toValue(Versionstamp(version, 0), Unversioned()));
+		tr.set(globalConfigVersionKey,
+		       BinaryWriter::toValue(Versionstamp(version, version == 42 ? 7 : 0), Unversioned()));
 		auto read = snapshot.read(tr, 3);
 		auto first = co_await timeoutError(waitAndForward(storage.getKeyValues.getFuture()), 5.0);
 		ASSERT_EQ(first.version, version);
@@ -798,6 +826,12 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
 				ASSERT(snapshot.snapshotReadVersion == previous.snapshotReadVersion);
 				co_return;
 			}
+			if (version == 42) {
+				info.id = UID(1, 3);
+				info.history.emplace_back(43);
+				info.globalConfigHistoryBatch = 0;
+				clientInfo->set(info);
+			}
 			GetKeyValuesReply tail;
 			tail.version = version;
 			tail.data.push_back_deep(tail.arena, rows[3]);
@@ -807,7 +841,9 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
 		ASSERT(!lastPageError.isValid());
 	};
 	co_await readPages(42);
+	ASSERT_EQ(clientInfo->get().history.back().version, 43);
 	ASSERT_EQ(snapshot.stamp.version, 42);
+	ASSERT(snapshot.confirmedStamp == Versionstamp(42, 7));
 	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 42);
 	recovery.reply.send(snapshot.reply());
 	co_await timeoutError(changed, 5.0);
