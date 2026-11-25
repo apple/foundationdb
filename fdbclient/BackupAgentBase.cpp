@@ -250,8 +250,19 @@ TEST_CASE("/backup/logversion") {
 }
 } // namespace
 
+Version getLogKeyVersion(KeyRef key, int prefixSize) {
+	if (prefixSize < 0 || key.size() - prefixSize < static_cast<int>(sizeof(Version))) {
+		throw restore_corrupted_data();
+	}
+	uint64_t version;
+	memcpy(&version, key.begin() + prefixSize, sizeof(version));
+	return bigEndian64(version);
+}
+
+static constexpr int logKeyVersionOffset = backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t);
+
 Version getLogKeyVersion(Key key) {
-	return bigEndian64(*(int64_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t)));
+	return getLogKeyVersion(key, logKeyVersionOffset);
 }
 
 // Given a key from one of the ranges returned by get_log_ranges,
@@ -259,10 +270,39 @@ Version getLogKeyVersion(Key key) {
 // the transaction log data in the value, and part is 0 for the first such
 // data for a given version, 1 for the second block of data, etc.
 std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key) {
-	return std::make_pair(
-	    getLogKeyVersion(key),
-	    bigEndian32(*(int32_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t) + sizeof(int64_t))));
+	constexpr int partOffset = logKeyVersionOffset + sizeof(Version);
+	if (key.size() < partOffset + static_cast<int>(sizeof(uint32_t))) {
+		throw restore_corrupted_data();
+	}
+	uint32_t part;
+	memcpy(&part, key.begin() + partOffset, sizeof(part));
+	return { getLogKeyVersion(key, logKeyVersionOffset), bigEndian32(part) };
 }
+
+namespace {
+TEST_CASE("/backup/log-key/truncation") {
+	Key uid = BinaryWriter::toValue(UID(1, 2), Unversioned());
+	Key prefix = getLogKey(0x123456, uid);
+	Key key = prefix.withSuffix(BinaryWriter::toValue(bigEndian32(0x1234), Unversioned()));
+	ASSERT_EQ(getLogKeyVersion(prefix), 0x123456);
+	auto [version, part] = decodeBKMutationLogKey(key);
+	ASSERT_EQ(version, 0x123456);
+	ASSERT_EQ(part, 0x1234);
+	for (int length = logKeyVersionOffset; length < key.size(); ++length) {
+		try {
+			if (length < prefix.size()) {
+				getLogKeyVersion(key.substr(0, length));
+			} else {
+				decodeBKMutationLogKey(key.substr(0, length));
+			}
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_restore_corrupted_data);
+		}
+	}
+	return Void();
+}
+} // namespace
 
 void _addResult(VectorRef<MutationRef>* result, int* mutationSize, Arena* arena, MutationRef logValue) {
 	result->push_back_deep(*arena, logValue);
@@ -288,6 +328,9 @@ static Future<Void> decodeBackupLogValue(Arena* arena,
                                          bool provisionalProxy) {
 	try {
 		uint64_t offset(0);
+		if (value.size() < sizeof(uint64_t) + sizeof(uint32_t)) {
+			throw restore_missing_data();
+		}
 		uint64_t protocolVersion = 0;
 		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
 		offset += sizeof(uint64_t);
@@ -316,6 +359,9 @@ static Future<Void> decodeBackupLogValue(Arena* arena,
 		int originalOffset = offset;
 
 		while (consumed < totalBytes) {
+			if (totalBytes - consumed < BackupAgentBase::logHeaderSize) {
+				throw restore_missing_data();
+			}
 			uint32_t type = 0;
 			// encoding format: type|kLen|vLen|Key|Value
 			memcpy(&type, value.begin() + offset, sizeof(uint32_t));
@@ -327,7 +373,12 @@ static Future<Void> decodeBackupLogValue(Arena* arena,
 			memcpy(&len2, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
 
-			ASSERT(offset + len1 + len2 <= value.size() && isValidMutationType(type));
+			if (uint64_t(len1) + len2 > totalBytes - consumed - BackupAgentBase::logHeaderSize) {
+				throw restore_missing_data();
+			}
+			if (!isValidMutationType(type)) {
+				throw restore_corrupted_data();
+			}
 
 			// Construct MutationRef from StringRef
 			MutationRef logValue;
@@ -410,6 +461,48 @@ static Future<Void> decodeBackupLogValue(Arena* arena,
 	}
 	return Void();
 }
+
+namespace {
+TEST_CASE("/backup/apply-log/truncation") {
+	Arena arena;
+	VectorRef<MutationRef> mutations;
+	int size = 0;
+	auto keyVersions = makeReference<KeyRangeMap<Version>>();
+	keyVersions->insert(allKeys, 0);
+	auto decode = [&](Value value) {
+		decodeBackupLogValue(&arena, &mutations, &size, value, {}, {}, 1, keyVersions, {}, false).get();
+	};
+	auto expectMissing = [&](Value value) {
+		try {
+			decode(value);
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_restore_missing_data);
+		}
+	};
+	BinaryWriter mutation(Unversioned());
+	mutation << uint32_t(MutationRef::SetValue) << uint32_t(1) << uint32_t(1);
+	mutation.serializeBytes("kv"_sr);
+	Value body = mutation.toValue();
+	for (int length = 1; length <= body.size(); ++length) {
+		BinaryWriter record(IncludeVersion(ProtocolVersion::withBackupMutations()));
+		record << uint32_t(length);
+		record.serializeBytes(body.substr(0, length));
+		Value encoded = record.toValue();
+		if (length == body.size()) {
+			for (int i = 0; i < sizeof(uint64_t) + sizeof(uint32_t); ++i) {
+				expectMissing(encoded.substr(0, i));
+			}
+			decode(encoded);
+		} else {
+			expectMissing(encoded);
+		}
+	}
+	ASSERT_EQ(mutations.size(), 1);
+	ASSERT(mutations.front().param1 == "k"_sr && mutations.front().param2 == "v"_sr);
+	return Void();
+}
+} // namespace
 
 static double lastErrorTime = 0;
 
@@ -645,6 +738,10 @@ Future<Void> readCommitted(Database cx,
 			err = e;
 		}
 
+		if (err.code() == error_code_restore_corrupted_data) {
+			results.sendError(err);
+			throw err;
+		}
 		if (err.code() == error_code_transaction_too_old) {
 			// We are using this transaction until it's too old and then resetting to a fresh one,
 			// so we don't need to delay.

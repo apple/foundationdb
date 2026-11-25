@@ -16,12 +16,15 @@ struct VersionedMutation {
 };
 
 class PartitionedLogIterator : public ReferenceCounted<PartitionedLogIterator> {
+	// Returns true when the version might continue in the next block.
+	virtual bool consumeBlock(Version version, Standalone<VectorRef<VersionedMutation>>* mutations) = 0;
+
 public:
-	virtual bool hasNext() = 0;
+	// Select the authoritative file and return its next version, or empty at end of stream.
+	virtual Future<Optional<Version>> peekNextVersion() = 0;
 
-	virtual Future<Version> peekNextVersion() = 0;
-
-	virtual Future<Standalone<VectorRef<VersionedMutation>>> getNext() = 0;
+	// Consume the version returned by peekNextVersion. A null output skips the framed mutation bodies.
+	Future<Void> consumeVersion(Version version, Standalone<VectorRef<VersionedMutation>>* mutations);
 
 	virtual ~PartitionedLogIterator() = default;
 };

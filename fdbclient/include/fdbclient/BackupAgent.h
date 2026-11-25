@@ -595,6 +595,7 @@ Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
 Key getApplyKey(Version version, Key backupUid);
 Key getLogKey(Version version, Key backupUid, int blockSize = CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 Version getLogKeyVersion(Key key);
+Version getLogKeyVersion(KeyRef key, int prefixSize);
 std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key);
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message);
