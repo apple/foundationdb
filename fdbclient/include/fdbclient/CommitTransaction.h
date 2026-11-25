@@ -230,8 +230,10 @@ public:
 			this->corrupted = true;
 		}
 		this->type &= ~CHECKSUM_FLAG_MASK;
-		int index = this->param2.size() - 4;
-		this->checksum = *(const uint32_t*)(this->param2.substr(index, 4).begin());
+		uint32_t decoded;
+		int index = this->param2.size() - sizeof(decoded);
+		std::memcpy(&decoded, this->param2.begin() + index, sizeof(decoded));
+		this->checksum = decoded;
 		this->param2 = this->param2.substr(0, index);
 	}
 
@@ -250,8 +252,10 @@ public:
 			return;
 		}
 		this->type &= ~ACCUMULATIVE_CHECKSUM_INDEX_FLAG_MASK;
-		int index = this->param2.size() - 2;
-		this->accumulativeChecksumIndex = *(const uint16_t*)(this->param2.substr(index, 2).begin());
+		uint16_t decoded;
+		int index = this->param2.size() - sizeof(decoded);
+		std::memcpy(&decoded, this->param2.begin() + index, sizeof(decoded));
+		this->accumulativeChecksumIndex = decoded;
 		this->param2 = this->param2.substr(0, index);
 	}
 
@@ -259,31 +263,6 @@ public:
 	void clearChecksumAndAccumulativeIndex() {
 		this->checksum.reset();
 		this->accumulativeChecksumIndex.reset();
-	}
-
-	// Validate param2 correctness
-	void validateParam2() {
-		if (withChecksum() && withAccumulativeChecksumIndex()) {
-			if (this->param2.size() < 6) { // 4 bytes for checksum, 2 bytes for accumulative index
-				TraceEvent(SevError, "MutationRefUnexpectedError")
-				    .setMaxFieldLength(-1)
-				    .setMaxEventLength(-1)
-				    .detail("Reason", "Param2 size is wrong with both checksum and acs index")
-				    .detail("Param2", this->param2)
-				    .detail("Mutation", toString());
-				this->corrupted = true;
-			}
-		} else if (withChecksum() && !withAccumulativeChecksumIndex()) {
-			if (this->param2.size() < 4) { // 4 bytes for checksum
-				TraceEvent(SevError, "MutationRefUnexpectedError")
-				    .setMaxFieldLength(-1)
-				    .setMaxEventLength(-1)
-				    .detail("Reason", "Param2 size is wrong with checksum and without acs index")
-				    .detail("Param2", this->param2)
-				    .detail("Mutation", toString());
-				this->corrupted = true;
-			}
-		}
 	}
 
 	// Generate 32 bits checksum and set it to this->checksum
@@ -381,15 +360,17 @@ public:
 		}
 
 		if (ar.isDeserializing) {
-			validateParam2();
 			if (withChecksum()) {
+				const int trailerSize = sizeof(uint32_t) + (withAccumulativeChecksumIndex() ? sizeof(uint16_t) : 0);
+				if (param2.size() < trailerSize) {
+					throw serialization_failed();
+				}
 				// Remove acs index at first, then remove checksum
 				if (withAccumulativeChecksumIndex()) {
 					offloadAccumulativeChecksumIndex();
 				}
 				offloadChecksum();
 			}
-			validateParam2();
 			if (type == ClearRange && param2.empty() && !param1.empty()) {
 				if (param1[param1.size() - 1] != '\x00') {
 					TraceEvent(SevError, "MutationRefUnexpectedError")
