@@ -788,6 +788,12 @@ MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> cons
 	sortedVersions.resize(serverCursors.size());
 }
 
+// Only a locked TLog can serve as the sole source of a finite unicast recovery read.
+static bool missingFromLockQuorum(int server, Version end, const std::vector<uint16_t>& lockedIds) {
+	return end != std::numeric_limits<Version>::max() &&
+	       !std::binary_search(lockedIds.begin(), lockedIds.end(), server);
+}
+
 MergedPeekCursor::MergedPeekCursor(Reference<LogSet> const& logSet,
                                    int bestServerLogId,
                                    Tag tag,
@@ -804,6 +810,8 @@ MergedPeekCursor::MergedPeekCursor(Reference<LogSet> const& logSet,
 		if (end != std::numeric_limits<Version>::max() && logSet->tLogWriteAntiQuorum > 0) {
 			antiQuorumPeekEnd = end;
 			readQuorum += logSet->tLogWriteAntiQuorum;
+			bestServer = -1;
+		} else if (knownLockedTLogIds.present() && missingFromLockQuorum(bestServer, end, knownLockedTLogIds.get())) {
 			bestServer = -1;
 		} else {
 			resetBestServerIfNotAvailable(logServers, bestServer, end);
@@ -1135,17 +1143,32 @@ static int finiteReadAntiQuorum(LogSet const& logSet, Optional<Version> end) {
 }
 
 SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
-                             int bestSet,
+                             int preferredSet,
                              int bestServerLogId,
                              Tag tag,
                              Version begin,
                              Version end,
                              bool parallelGetMore,
                              const Optional<std::vector<std::vector<uint16_t>>>& knownLockedTLogIds)
-  : logSets(logSets), tag(tag), bestSet(bestSet), bestServer(bestServerLogId), currentSet(bestSet), currentCursor(0),
+  : logSets(logSets), tag(tag), bestSet(preferredSet), bestServer(bestServerLogId), currentSet(preferredSet), currentCursor(0),
     messageVersion(begin), hasNextMessage(false), useBestSet(true), randomID(deterministicRandom()->randomUniqueID()),
     end(end) {
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && bestSet >= 0) {
+		if (end != std::numeric_limits<Version>::max() && knownLockedTLogIds.present()) {
+			const auto& locked = knownLockedTLogIds.get();
+			ASSERT_EQ(locked.size(), logSets.size());
+			// Another eligible local set can have the only lock quorum.
+			if (locked[bestSet].empty()) {
+				auto available = std::find_if(locked.begin(), locked.end(), [](const auto& ids) { return !ids.empty(); });
+				if (available != locked.end()) {
+					bestSet = currentSet = available - locked.begin();
+					bestServer = logSets[bestSet]->bestLocationFor(tag);
+				}
+			}
+			if (missingFromLockQuorum(bestServer, end, locked[bestSet])) {
+				bestServer = -1;
+			}
+		}
 		if (finiteReadAntiQuorum(*logSets[bestSet], end) > 0) {
 			bestServer = -1;
 		} else {

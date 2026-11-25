@@ -22,6 +22,7 @@
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/CoroUtils.h"
+#include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 
 namespace {
@@ -531,6 +532,34 @@ TEST_CASE("/LogSystem/PeekLogRouter/EmptyOldRangeIsExhausted") {
 	auto cursor = consumer.peekLogRouter(router.id(), old.epochEnd, Tag(tagLocalityLogRouter, 0), false);
 	ASSERT(cursor->isExhausted());
 	ASSERT(cursor->version().version == old.epochEnd);
+	return Void();
+}
+
+TEST_CASE("/LogSystem/UnicastRecovery/PeekWhenOnlySatelliteLocked") {
+	auto* knobs = const_cast<ServerKnobs*>(SERVER_KNOBS);
+	const bool wasUnicast = std::exchange(knobs->ENABLE_VERSION_VECTOR_TLOG_UNICAST, true);
+	ScopeExit restore([&]() { knobs->ENABLE_VERSION_VECTOR_TLOG_UNICAST = wasUnicast; });
+
+	LocalityData locality;
+	auto logSystem = makeReference<LogSystem>(UID(), locality, LogEpoch(1));
+	logSystem->stopped = true;
+	auto primary = makeRemotePrefixLogSet({ TLogInterface(locality), TLogInterface(locality) }, true, 0, 1);
+	primary->tLogReplicationFactor = 2;
+	primary->tLogWriteAntiQuorum = 1;
+	auto satelliteLog = makeRemotePrefixRouterClient(TLogInterface(locality));
+	auto satellite = makeRemotePrefixLogSet({ satelliteLog }, true, tagLocalitySatellite, 1);
+	satellite->satelliteTagLocations = { { 0 } };
+	logSystem->tLogs = { primary, satellite };
+	logSystem->knownLockedTLogIds[1] = { 0 };
+
+	LogSystemConsumer consumer(logSystem);
+	auto txs = consumer.peekAll(UID(), 1, 10, Tag(tagLocalityTxs, 0), false);
+	ASSERT(txs->getCurrentPeekLocation() == satelliteLog.id());
+
+	// A primary-only tag still requires multiple replicas. No single primary log may prove an empty tail.
+	auto local = consumer.peekLocal(UID(), Tag(0, 0), 1, 10, false);
+	ASSERT(!local->getPrimaryPeekLocation().present());
+	ASSERT(!logSystem->knownLockedTLogIds.contains(0));
 	return Void();
 }
 

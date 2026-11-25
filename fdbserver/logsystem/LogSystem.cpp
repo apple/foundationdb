@@ -944,29 +944,6 @@ Future<Version> LogSystem::push(const LogPushVersionSet& versionSet,
 	return minVersionWhenReady(waitForAll(quorumResults), allReplies);
 }
 
-// Version vector/unicast specific: If the best server is not known to have been locked/stopped
-// then is not guaranteed to have received all versions that are relevant to a tag(s) that it is
-// buddy of, hence do not treat such a server as the best server. Note that this reset logic gets
-// invoked only in the context of peeks that get done during recovery, and the best server should
-// always be available for peeking after recovery is done.
-void LogSystem::resetBestServerIfNotLocked(
-    int bestSet,
-    int& bestServer,
-    Optional<Version> end,
-    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownLockedTLogIds) {
-	ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST);
-	if (bestSet >= 0 && bestServer >= 0 && end.present() && end.get() != std::numeric_limits<Version>::max()) {
-		ASSERT_WE_THINK(knownLockedTLogIds.present() && !knownLockedTLogIds.get().empty());
-		ASSERT_WE_THINK(knownLockedTLogIds.get().contains(bestSet));
-		if (std::find(knownLockedTLogIds.get().at(bestSet).begin(),
-		              knownLockedTLogIds.get().at(bestSet).end(),
-		              bestServer) == knownLockedTLogIds.get().at(bestSet).end()) {
-			bestServer = -1;
-			return;
-		}
-	}
-}
-
 Version LogSystem::getKnownCommittedVersion() {
 	Version result = invalidVersion;
 	for (auto& it : lockResults) {
@@ -2166,7 +2143,10 @@ Future<Void> LogSystem::epochEnd(Reference<AsyncVar<Reference<LogSystem>>> outLo
 		    maxEnd >= lastEnd.get()) {
 			// Are the locked servers that were available in the previous iteration still available? If not,
 			// restart recovery (as there is a chance that the recovery of the previous iteration would stall).
-			knownLockedTLogIdsChanged = !isSubset(lastKnownLockedTLogIds, currentKnownLockedTLogIds);
+			// A finite read restricted to one set may also be waiting for that set's first lock quorum.
+			knownLockedTLogIdsChanged =
+			    !isSubset(lastKnownLockedTLogIds, currentKnownLockedTLogIds) ||
+			    (hasUnicastAntiQuorum && currentKnownLockedTLogIds.size() > lastKnownLockedTLogIds.size());
 			if (knownLockedTLogIdsChanged) {
 				// @todo dump the contents of "lastKnownLockedTLogIds" and "currentKnownLockedTLogIds" here
 				TraceEvent("KnownLockedTLogIdsChanged")

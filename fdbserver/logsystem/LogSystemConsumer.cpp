@@ -14,6 +14,12 @@ bool shouldPopFromLogSet(Reference<LogSet> const& logSet, Tag tag, int8_t popLoc
 	       tag.locality == tagLocalityCDC ||
 	       (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == logSet->isLocal));
 }
+
+std::vector<uint16_t> lockedIdsForSet(std::map<uint8_t, std::vector<uint16_t>> const& lockedIds, int set) {
+	auto ids = lockedIds.find(set);
+	return ids == lockedIds.end() ? std::vector<uint16_t>{} : ids->second;
+}
+
 // Lock replies use log-system indices; a peek can contain only a subset of those sets.
 std::vector<std::vector<uint16_t>> lockedIdsForPeek(std::vector<Reference<LogSet>> const& sets,
                                                     std::vector<Reference<LogSet>> const& peekSets,
@@ -22,8 +28,7 @@ std::vector<std::vector<uint16_t>> lockedIdsForPeek(std::vector<Reference<LogSet
 	for (auto const& peekSet : peekSets) {
 		auto set = std::find(sets.begin(), sets.end(), peekSet);
 		ASSERT(set != sets.end());
-		auto ids = lockedIds.find(set - sets.begin());
-		result.push_back(ids == lockedIds.end() ? std::vector<uint16_t>{} : ids->second);
+		result.push_back(lockedIdsForSet(lockedIds, set - sets.begin()));
 	}
 	return result;
 }
@@ -39,8 +44,6 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
 	std::vector<Reference<LogSet>> localSets;
 	Version lastBegin = 0;
 	bool foundSpecial = false;
-	int logIdx = 0;
-	int bestSetIdx = 0;
 	for (auto& log : ls.tLogs) {
 		if (log->locality == tagLocalitySpecial) {
 			foundSpecial = true;
@@ -52,10 +55,8 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
 			localSets.push_back(log);
 			if (log->locality != tagLocalitySatellite) {
 				bestSet = localSets.size() - 1;
-				bestSetIdx = logIdx;
 			}
 		}
-		logIdx++;
 	}
 
 	if (localSets.empty()) {
@@ -71,8 +72,6 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
 		int bestServer = localSets[bestSet]->bestLocationFor(tag);
 		Optional<std::vector<std::vector<uint16_t>>> knownLockedTLogIds;
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			ls.resetBestServerIfNotLocked(bestSetIdx, bestServer, end, ls.knownLockedTLogIds);
-			ASSERT_WE_THINK(ls.knownLockedTLogIds.contains(bestSetIdx));
 			knownLockedTLogIds = lockedIdsForPeek(ls.tLogs, localSets, ls.knownLockedTLogIds);
 		}
 		return makeReference<SetPeekCursor>(
@@ -90,8 +89,6 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
 			int bestServer = localSets[bestSet]->bestLocationFor(tag);
 			Optional<std::vector<std::vector<uint16_t>>> knownLockedTLogIds;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				ls.resetBestServerIfNotLocked(bestSetIdx, bestServer, end, ls.knownLockedTLogIds);
-				ASSERT_WE_THINK(ls.knownLockedTLogIds.contains(bestSetIdx));
 				knownLockedTLogIds = lockedIdsForPeek(ls.tLogs, localSets, ls.knownLockedTLogIds);
 			}
 			cursors.push_back(makeReference<SetPeekCursor>(
@@ -395,9 +392,7 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekLocal(UID dbgid,
 			int bestServer = ls.tLogs[bestSet]->bestLocationFor(tag);
 			Optional<std::vector<uint16_t>> bestKnownLockedTLogIds;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				ls.resetBestServerIfNotLocked(bestSet, bestServer, end, ls.knownLockedTLogIds);
-				ASSERT_WE_THINK(ls.knownLockedTLogIds.contains(bestSet));
-				bestKnownLockedTLogIds = ls.knownLockedTLogIds[bestSet];
+				bestKnownLockedTLogIds = lockedIdsForSet(ls.knownLockedTLogIds, bestSet);
 			}
 			return makeReference<MergedPeekCursor>(
 			    ls.tLogs[bestSet], bestServer, tag, begin, end, true, bestKnownLockedTLogIds);
@@ -422,9 +417,7 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekLocal(UID dbgid,
 				int bestServer = ls.tLogs[bestSet]->bestLocationFor(tag);
 				Optional<std::vector<uint16_t>> bestKnownLockedTLogIds;
 				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-					ls.resetBestServerIfNotLocked(bestSet, bestServer, end, ls.knownLockedTLogIds);
-					ASSERT_WE_THINK(ls.knownLockedTLogIds.contains(bestSet));
-					bestKnownLockedTLogIds = ls.knownLockedTLogIds[bestSet];
+					bestKnownLockedTLogIds = lockedIdsForSet(ls.knownLockedTLogIds, bestSet);
 				}
 				cursors.push_back(makeReference<MergedPeekCursor>(ls.tLogs[bestSet],
 				                                                  bestServer,
@@ -681,10 +674,6 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekLogRouter(
 			// indexes into "localSets"
 			int bestPrimarySet = 0;
 			int bestSatelliteSet = -1;
-			// indexes into "ls.tLogs"
-			int logIdx = 0;
-			int bestPrimarySetIdx = -1;
-			int bestSatelliteSetIdx = -1;
 			for (auto& log : ls.tLogs) {
 				if (log->isLocal && !log->logServers.empty()) {
 					TraceEvent("TLogPeekLogRouterLocalSet", dbgid)
@@ -694,29 +683,21 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekLogRouter(
 					localSets.push_back(log);
 					if (log->locality == tagLocalitySatellite) {
 						bestSatelliteSet = localSets.size() - 1;
-						bestSatelliteSetIdx = logIdx;
 					} else {
 						bestPrimarySet = localSets.size() - 1;
-						bestPrimarySetIdx = logIdx;
 					}
 				}
-				logIdx++;
 			}
 			int bestSet = bestPrimarySet;
-			int bestSetIdx = bestPrimarySetIdx;
-			if (useSatellite && bestSatelliteSet != -1 && ls.tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
+			if (useSatellite && bestSatelliteSet != -1 && localSets[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
 				bestSet = bestSatelliteSet;
-				bestSetIdx = bestSatelliteSetIdx;
 			}
 
 			int bestServer = localSets[bestSet]->bestLocationFor(tag);
 			Optional<std::vector<std::vector<uint16_t>>> lockedTLogIds;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				ls.resetBestServerIfNotLocked(bestSetIdx, bestServer, end, knownStoppedTLogIds);
-				ASSERT_WE_THINK(!knownStoppedTLogIds.present() || knownStoppedTLogIds.get().contains(bestSetIdx));
-				if (knownStoppedTLogIds.present()) {
-					lockedTLogIds = lockedIdsForPeek(ls.tLogs, localSets, knownStoppedTLogIds.get());
-				}
+				const auto& ids = knownStoppedTLogIds.present() ? knownStoppedTLogIds.get() : ls.knownLockedTLogIds;
+				lockedTLogIds = lockedIdsForPeek(ls.tLogs, localSets, ids);
 			}
 
 			TraceEvent("TLogPeekLogRouterSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
