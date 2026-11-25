@@ -24,6 +24,7 @@
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/Platform.h"
 #include "BackupContainerLocalDirectory.h"
 #include "BackupContainerBlobStore.h"
@@ -34,6 +35,7 @@
 #include <algorithm>
 #include <cinttypes>
 #include <tuple>
+#include <utility>
 
 namespace IBackupFile_impl {
 
@@ -262,14 +264,20 @@ std::vector<std::string> IBackupContainer::getURLFormats() {
 	};
 }
 
+namespace {
+using BackupContainerCacheKey = std::tuple<std::string, Optional<std::string>, Optional<std::string>, int>;
+
+auto& backupContainerCache() {
+	static std::map<BackupContainerCacheKey, Reference<IBackupContainer>> cache;
+	return cache;
+}
+} // namespace
+
 // Get an IBackupContainer based on a container URL string
 Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& url,
                                                             const Optional<std::string>& proxy,
                                                             const Optional<std::string>& encryptionKeyFileName,
                                                             int encryptionBlockSize) {
-	using CacheKey = std::tuple<std::string, Optional<std::string>, Optional<std::string>, int>;
-	static std::map<CacheKey, Reference<IBackupContainer>> m_cache;
-
 	Optional<std::string> blobstoreProxy;
 	if (isBlobstoreUrl(url)) {
 		// The backup-agent fallback is part of the effective connection configuration.
@@ -292,13 +300,16 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 	// Note: This only affects simulation; production always uses the cache for performance.
 	bool skipCache = g_network && g_network->isSimulated() && (isBlobstoreUrl(url) || url.find("file://") == 0);
 
-	// Use a reference to the cache entry (for automatic cache population) unless we're skipping cache
-	Reference<IBackupContainer> r_local;
-	Reference<IBackupContainer>& r =
-	    skipCache ? r_local : m_cache[{ url, blobstoreProxy, encryptionKeyFileName, encryptionBlockSize }];
-	if (r) {
-		return r;
+	auto& cache = backupContainerCache();
+	BackupContainerCacheKey cacheKey{ url, blobstoreProxy, encryptionKeyFileName, encryptionBlockSize };
+	if (!skipCache) {
+		auto it = cache.find(cacheKey);
+		if (it != cache.end()) {
+			return it->second;
+		}
 	}
+
+	Reference<IBackupContainer> r;
 
 	try {
 		StringRef u(url);
@@ -322,6 +333,9 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 
 		r->encryptionKeyFileName = encryptionKeyFileName;
 		r->URL = url;
+		if (!skipCache) {
+			cache.emplace(std::move(cacheKey), r);
+		}
 		return r;
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -336,6 +350,30 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 
 		throw;
 	}
+}
+
+TEST_CASE("/backup/containers/cache/successfulOpensRespectConfiguration") {
+	const std::string url = "file://" + abspath("backup-cache-test");
+	auto first = IBackupContainer::openContainer(url, {}, {}, 0);
+	auto second = IBackupContainer::openContainer(url, {}, {}, 0);
+	auto differentBlockSize = IBackupContainer::openContainer(url, {}, {}, 4096);
+	ASSERT_EQ(first.getPtr() == second.getPtr(), !g_network->isSimulated());
+	ASSERT(first.getPtr() != differentBlockSize.getPtr());
+	return Void();
+}
+
+TEST_CASE("/backup/containers/cache/failedOpensLeaveNoEntries") {
+	const auto initialSize = backupContainerCache().size();
+	for (int i = 0; i < 32; ++i) {
+		try {
+			IBackupContainer::openContainer(format("invalid://backup-%d", i), {}, {}, 0);
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+		}
+	}
+	ASSERT_EQ(backupContainerCache().size(), initialSize);
+	return Void();
 }
 
 // Get a list of URLS to backup containers based on some a shorter URL.  This function knows about some set of supported
