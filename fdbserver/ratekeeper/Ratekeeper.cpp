@@ -592,6 +592,16 @@ static std::string getIgnoredZonesReasons(
 	return !ignoredZoneReasons.empty() ? ignoredZoneReasons : "None";
 }
 
+// As for storage servers, leave room for writes when disk headroom caps the target.
+// Otherwise the spring can equal the target and the MVCC bandwidth limit falls to zero.
+static constexpr int64_t tlogSpringBytes(int64_t scaledSpring, int64_t availableAboveMin) {
+	return std::max<int64_t>(1, std::min(scaledSpring, availableAboveMin / 5));
+}
+
+static_assert(tlogSpringBytes(400'000'000, 375'000'000) == 75'000'000);
+static_assert(tlogSpringBytes(50, 375) == 50);
+static_assert(tlogSpringBytes(0, -1) == 1);
+
 void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	double actualTps = smoothReleasedTransactions.smoothRate();
 	actualTpsMetric = (int64_t)actualTps;
@@ -913,8 +923,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		worstFreeSpaceTLog = std::min(worstFreeSpaceTLog, std::max(availableAboveMinBytes, int64_t{ 0 }));
 
 		const auto scaledSpringBytes = static_cast<int64_t>(limits->logSpringBytes * diskBudgetRatio);
-		const auto springBytes =
-		    std::max(int64_t{ 1 }, std::min(std::max(int64_t{ 1 }, scaledSpringBytes), availableAboveMinBytes));
+		const auto springBytes = tlogSpringBytes(scaledSpringBytes, availableAboveMinBytes);
 		const auto scaledTargetBytes = static_cast<int64_t>(limits->logTargetBytes * diskBudgetRatio);
 		const auto targetBytes =
 		    std::max(int64_t{ 1 }, std::min(std::max(int64_t{ 1 }, scaledTargetBytes), availableAboveMinBytes));
