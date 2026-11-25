@@ -304,16 +304,16 @@ Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 }
 
 struct GlobalConfigSnapshot {
-	Version version = 0;
+	Versionstamp stamp{ 0, 0 };
 	RangeResult data;
 
 	void update(const Optional<Value>& versionstamp, const RangeResult& rows, Version readVersion) {
 		if (versionstamp.present()) {
-			const auto committedVersion = GlobalConfig::decodeVersion(versionstamp.get(), readVersion);
-			if (!committedVersion.present()) {
+			const auto newStamp = GlobalConfig::decodeVersionstamp(versionstamp.get(), readVersion);
+			if (!newStamp.present() || newStamp.get() < stamp) {
 				throw serialization_failed();
 			}
-			version = committedVersion.get();
+			stamp = newStamp.get();
 		}
 		data = rows;
 	}
@@ -353,8 +353,9 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValu
 	RangeResult at41;
 	at41.push_back_deep(at41.arena(),
 	                    KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
-	snapshot.update(BinaryWriter::toValue(Versionstamp(41, 0), Unversioned()), at41, 41);
-	ASSERT_EQ(snapshot.version, 41);
+	const Versionstamp stampAt41(41, 7);
+	snapshot.update(BinaryWriter::toValue(stampAt41, Unversioned()), at41, 41);
+	ASSERT(snapshot.stamp == stampAt41);
 	ASSERT(snapshot.data == at41);
 
 	auto checkRejected = [&](const Value& damaged) {
@@ -364,7 +365,7 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValu
 		} catch (Error& e) {
 			ASSERT_EQ(e.code(), error_code_serialization_failed);
 		}
-		ASSERT_EQ(snapshot.version, 41);
+		ASSERT(snapshot.stamp == stampAt41);
 		ASSERT(snapshot.data == at41);
 	};
 	// The clear at 42 removes A. Dropping one leading zero would mislabel the empty snapshot as version 10752.
@@ -377,12 +378,14 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValu
 	for (Version invalid : std::array<Version, 3>{ (Version(1) << 62) + 42, 0, invalidVersion }) {
 		checkRejected(BinaryWriter::toValue(Versionstamp(invalid, 0), Unversioned()));
 	}
+	checkRejected(BinaryWriter::toValue(Versionstamp(40, 0), Unversioned()));
+	checkRejected(BinaryWriter::toValue(Versionstamp(41, 0), Unversioned()));
 
 	RangeResult at43;
 	at43.push_back_deep(at43.arena(),
 	                    KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
 	snapshot.update(BinaryWriter::toValue(Versionstamp(43, 7), Unversioned()), at43, 50);
-	ASSERT_EQ(snapshot.version, 43);
+	ASSERT(snapshot.stamp == Versionstamp(43, 7));
 	ASSERT(snapshot.data == at43);
 	return Void();
 }
@@ -393,16 +396,16 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotMissingVersion") {
 	rows.push_back_deep(rows.arena(),
 	                    KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
 	snapshot.update({}, rows, 1);
-	ASSERT_EQ(snapshot.version, 0);
+	ASSERT(snapshot.stamp == Versionstamp(0, 0));
 	ASSERT(snapshot.data == rows);
 	snapshot.update(BinaryWriter::toValue(Versionstamp(1, 0), Unversioned()), RangeResult(), 41);
-	ASSERT_EQ(snapshot.version, 1);
+	ASSERT(snapshot.stamp == Versionstamp(1, 0));
 	ASSERT(snapshot.data.empty());
 	snapshot.update({}, rows, 42);
-	ASSERT_EQ(snapshot.version, 1);
+	ASSERT(snapshot.stamp == Versionstamp(1, 0));
 	ASSERT(snapshot.data == rows);
 	snapshot.update({}, RangeResult(), 42);
-	ASSERT_EQ(snapshot.version, 1);
+	ASSERT(snapshot.stamp == Versionstamp(1, 0));
 	ASSERT(snapshot.data.empty());
 	return Void();
 }
@@ -434,8 +437,9 @@ Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInter
 			// order to serve it to the client (up to date from the clients
 			// point of view. The client learns the version through a
 			// ClientDBInfo update).
-			if (refresh.lastKnown <= snapshot.version) {
-				refresh.reply.send(GlobalConfigRefreshReply{ snapshot.data.arena(), snapshot.version, snapshot.data });
+			if (refresh.lastKnown <= snapshot.stamp.version) {
+				refresh.reply.send(
+				    GlobalConfigRefreshReply{ snapshot.data.arena(), snapshot.stamp.version, snapshot.data });
 			} else {
 				refresh.reply.sendError(future_version());
 			}

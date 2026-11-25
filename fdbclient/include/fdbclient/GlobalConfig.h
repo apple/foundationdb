@@ -117,8 +117,8 @@ public:
 	                         const VectorRef<KeyValueRef>& insertions,
 	                         const VectorRef<KeyRangeRef>& clears);
 
-	// Returns the commit version of a ten-byte stamp if it is in [1, readVersion].
-	static Optional<Version> decodeVersion(ValueRef versionstamp, Version readVersion);
+	// Decodes a ten-byte stamp if its commit version is in [1, readVersion].
+	static Optional<Versionstamp> decodeVersionstamp(ValueRef versionstamp, Version readVersion);
 
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.
