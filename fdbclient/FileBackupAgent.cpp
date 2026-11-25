@@ -1421,28 +1421,61 @@ void TwoBuffers::fillBufferIfAbsent(int index) {
 
 struct PartitionedLogRecord {
 	static constexpr size_t headerSize = sizeof(Version) + 2 * sizeof(uint32_t);
-	Version version;
 	int32_t subsequence;
 	StringRef mutation;
 };
+
+// An overlapping file can be skipped as soon as its version is known.
+static Version peekPartitionedLogVersion(const char* buffer, size_t size, size_t offset) {
+	uint64_t version;
+	if (offset > size || size - offset < sizeof(version)) {
+		throw restore_corrupted_data();
+	}
+	std::memcpy(&version, buffer + offset, sizeof(version));
+	return static_cast<Version>(bigEndian64(version));
+}
 
 static PartitionedLogRecord readPartitionedLogRecord(const char* buffer, size_t size, size_t offset) {
 	if (offset > size || size - offset < PartitionedLogRecord::headerSize) {
 		throw restore_corrupted_data();
 	}
 	const char* record = buffer + offset;
-	uint64_t version;
 	uint32_t subsequence, mutationSize;
-	std::memcpy(&version, record, sizeof(version));
-	std::memcpy(&subsequence, record + sizeof(version), sizeof(subsequence));
-	std::memcpy(&mutationSize, record + sizeof(version) + sizeof(subsequence), sizeof(mutationSize));
+	std::memcpy(&subsequence, record + sizeof(Version), sizeof(subsequence));
+	std::memcpy(&mutationSize, record + sizeof(Version) + sizeof(subsequence), sizeof(mutationSize));
 	mutationSize = bigEndian32(mutationSize);
-	if (mutationSize > size - offset - PartitionedLogRecord::headerSize) {
+	if (mutationSize > INT_MAX || mutationSize > size - offset - PartitionedLogRecord::headerSize) {
 		throw restore_corrupted_data();
 	}
-	return { static_cast<Version>(bigEndian64(version)),
-		     static_cast<int32_t>(bigEndian32(subsequence)),
+	return { static_cast<int32_t>(bigEndian32(subsequence)),
 		     StringRef(reinterpret_cast<const uint8_t*>(record + PartitionedLogRecord::headerSize), mutationSize) };
+}
+
+static void decodePartitionedLogMutation(ArenaReader& reader, MutationRef& mutation) {
+	// Check the unsigned wire lengths before StringRef deserialization narrows them to int.
+	if (reader.remainingBytes() < sizeof(mutation.type) + 2 * sizeof(uint32_t)) {
+		throw restore_corrupted_data();
+	}
+	reader.checkpoint();
+	uint32_t param1Size, param2Size;
+	reader >> mutation.type;
+	reader.serializeBytes(&param1Size, sizeof(param1Size));
+	if (param1Size > reader.remainingBytes() - sizeof(param2Size)) {
+		throw restore_corrupted_data();
+	}
+	reader.readBytes(param1Size);
+	reader.serializeBytes(&param2Size, sizeof(param2Size));
+	const size_t suffixSize = (mutation.withChecksum() ? sizeof(uint32_t) : 0) +
+	                          (mutation.withAccumulativeChecksumIndex() ? sizeof(uint16_t) : 0);
+	if (param2Size != reader.remainingBytes() || param2Size < suffixSize ||
+	    (mutation.withAccumulativeChecksumIndex() && !mutation.withChecksum())) {
+		throw restore_corrupted_data();
+	}
+	reader.rewind();
+	reader >> mutation;
+	if (mutation.corrupted) {
+		throw restore_corrupted_data();
+	}
 }
 
 static Standalone<VectorRef<VersionedMutation>> consumePartitionedLogBlock(const char* buffer,
@@ -1459,16 +1492,16 @@ static Standalone<VectorRef<VersionedMutation>> consumePartitionedLogBlock(const
 		if (offset % blockSize == 0) {
 			offset += sizeof(uint32_t);
 		}
-		auto record = readPartitionedLogRecord(buffer, size, offset);
-		if (record.version != firstVersion) {
+		if (peekPartitionedLogVersion(buffer, size, offset) != firstVersion) {
 			break;
 		}
+		auto record = readPartitionedLogRecord(buffer, size, offset);
 		Standalone<StringRef> mutationData(record.mutation);
 		ArenaReader reader(mutationData.arena(), mutationData, AssumeVersion(g_network->protocolVersion()));
 		VersionedMutation vm;
-		vm.version = record.version;
+		vm.version = firstVersion;
 		vm.subsequence = record.subsequence;
-		reader >> vm.mutation;
+		decodePartitionedLogMutation(reader, vm.mutation);
 		mutations.push_back_deep(mutations.arena(), vm);
 		offset += PartitionedLogRecord::headerSize + record.mutation.size();
 	}
@@ -1476,31 +1509,72 @@ static Standalone<VectorRef<VersionedMutation>> consumePartitionedLogBlock(const
 }
 
 namespace {
+Value partitionedLogTestBlock(Version version, StringRef payload) {
+	BinaryWriter writer(Unversioned());
+	writer << PARTITIONED_MLOG_VERSION << bigEndian64(version) << bigEndian32(7) << bigEndian32(payload.size());
+	writer.serializeBytes(payload);
+	return writer.toValue();
+}
+
+void expectCorruptPartitionedLogBlock(StringRef bytes) {
+	size_t offset = 0;
+	try {
+		consumePartitionedLogBlock(reinterpret_cast<const char*>(bytes.begin()), bytes.size(), offset, 4096, 123);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_restore_corrupted_data);
+	}
+}
+
 TEST_CASE("/backup/partitioned-log/truncated-record") {
 	MutationRef mutation(MutationRef::SetValue, "k"_sr, "v"_sr);
-	BinaryWriter payload(AssumeVersion(g_network->protocolVersion()));
-	payload << mutation;
-	BinaryWriter writer(Unversioned());
-	writer << PARTITIONED_MLOG_VERSION << bigEndian64(123) << bigEndian32(7) << bigEndian32(payload.getLength());
-	writer.serializeBytes(payload.toValue());
-	Value block = writer.toValue();
-	const char* buffer = reinterpret_cast<const char*>(block.begin());
+	Value payload = BinaryWriter::toValue(mutation, AssumeVersion(g_network->protocolVersion()));
+	Value block = partitionedLogTestBlock(123, payload);
 	for (int length = 1; length < block.size(); ++length) {
-		size_t offset = 0;
-		try {
-			consumePartitionedLogBlock(buffer, length, offset, 4096, 123);
-			ASSERT(false);
-		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_restore_corrupted_data);
-		}
+		expectCorruptPartitionedLogBlock(block.substr(0, length));
 	}
+	BinaryWriter badKey(Unversioned());
+	badKey << uint8_t(MutationRef::SetValue) << uint32_t(0xfffffff8);
+	expectCorruptPartitionedLogBlock(partitionedLogTestBlock(123, badKey.toValue()));
+	badKey << uint32_t(0);
+	expectCorruptPartitionedLogBlock(partitionedLogTestBlock(123, badKey.toValue()));
+	BinaryWriter badValue(Unversioned());
+	badValue << uint8_t(MutationRef::SetValue) << "k"_sr << uint32_t(0xfffffff8);
+	expectCorruptPartitionedLogBlock(partitionedLogTestBlock(123, badValue.toValue()));
+	expectCorruptPartitionedLogBlock(partitionedLogTestBlock(123, payload.withSuffix("x"_sr)));
+
 	size_t offset = 0;
-	auto decoded = consumePartitionedLogBlock(buffer, block.size(), offset, 4096, 123);
+	auto decoded =
+	    consumePartitionedLogBlock(reinterpret_cast<const char*>(block.begin()), block.size(), offset, 4096, 123);
 	ASSERT_EQ(decoded.size(), 1);
 	ASSERT_EQ(decoded[0].version, 123);
 	ASSERT_EQ(decoded[0].subsequence, 7);
 	ASSERT(decoded[0].mutation.param1 == "k"_sr && decoded[0].mutation.param2 == "v"_sr);
 	ASSERT_EQ(offset, block.size());
+	return Void();
+}
+
+TEST_CASE("/backup/partitioned-log/checksum-suffix") {
+	auto blockWithSuffix = [](uint8_t flags, StringRef suffix) {
+		BinaryWriter payload(Unversioned());
+		payload << uint8_t(MutationRef::SetValue | flags) << ""_sr << suffix;
+		return partitionedLogTestBlock(123, payload.toValue());
+	};
+	const uint8_t checksum = MutationRef::CHECKSUM_FLAG_MASK;
+	const uint8_t index = MutationRef::ACCUMULATIVE_CHECKSUM_INDEX_FLAG_MASK;
+	expectCorruptPartitionedLogBlock(blockWithSuffix(index, "\1\0"_sr));
+	// SetValue on an empty key and value has checksum zero.
+	for (uint8_t flags : { checksum, uint8_t(checksum | index) }) {
+		StringRef suffix = flags == checksum ? "\0\0\0\0"_sr : "\0\0\0\0\1\0"_sr;
+		expectCorruptPartitionedLogBlock(blockWithSuffix(flags, suffix.substr(0, suffix.size() - 1)));
+		Value block = blockWithSuffix(flags, suffix);
+		size_t offset = 0;
+		auto decoded =
+		    consumePartitionedLogBlock(reinterpret_cast<const char*>(block.begin()), block.size(), offset, 4096, 123);
+		ASSERT_EQ(decoded.size(), 1);
+		ASSERT_EQ(decoded[0].mutation.type, MutationRef::SetValue);
+		ASSERT(decoded[0].mutation.param1.empty() && decoded[0].mutation.param2.empty());
+	}
 	return Void();
 }
 } // namespace
@@ -1620,8 +1694,7 @@ Future<Version> PartitionedLogIteratorSimple::peekNextVersion(Reference<Partitio
 	}
 	co_await self->loadNextBlock();
 	self->removeBlockHeader();
-	Version version{ 0 };
-	version = readPartitionedLogRecord(self->buffer.get(), self->bufferSize, self->bufferOffset).version;
+	Version version = peekPartitionedLogVersion(self->buffer.get(), self->bufferSize, self->bufferOffset);
 
 	while (self->fileIndex < self->endVersions.size() - 1 && version >= self->endVersions[self->fileIndex]) {
 		TraceEvent("SimpleIteratorFindOverlapAndSkip")
@@ -1634,7 +1707,7 @@ Future<Version> PartitionedLogIteratorSimple::peekNextVersion(Reference<Partitio
 		self->fileIndex += 1;
 		co_await self->loadNextBlock();
 		self->removeBlockHeader();
-		version = readPartitionedLogRecord(self->buffer.get(), self->bufferSize, self->bufferOffset).version;
+		version = peekPartitionedLogVersion(self->buffer.get(), self->bufferSize, self->bufferOffset);
 	}
 	co_return version;
 }
@@ -1775,7 +1848,7 @@ Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(Reference<Part
 	co_await self->twobuffer->ready();
 	start = self->twobuffer->peek();
 	self->removeBlockHeader();
-	version = readPartitionedLogRecord(start.get(), self->twobuffer->getBufferSize(), self->bufferOffset).version;
+	version = peekPartitionedLogVersion(start.get(), self->twobuffer->getBufferSize(), self->bufferOffset);
 	fileIndex = self->twobuffer->getFileIndex();
 	while (fileIndex < self->endVersions.size() - 1 && version >= self->endVersions[fileIndex]) {
 		TraceEvent("RestoreLogFilesFoundOverlapAndSkip")
@@ -1789,7 +1862,7 @@ Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(Reference<Part
 		co_await self->twobuffer->ready();
 		start = self->twobuffer->peek();
 		self->removeBlockHeader();
-		version = readPartitionedLogRecord(start.get(), self->twobuffer->getBufferSize(), self->bufferOffset).version;
+		version = peekPartitionedLogVersion(start.get(), self->twobuffer->getBufferSize(), self->bufferOffset);
 		fileIndex = self->twobuffer->getFileIndex();
 	}
 	co_return version;
@@ -1834,6 +1907,49 @@ Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffer
 Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffers::getNext() {
 	return getNext(Reference<PartitionedLogIteratorTwoBuffers>::addRef(this));
 }
+
+namespace {
+TEST_CASE("/backup/partitioned-log/overlapping-files") {
+	const int blockSize = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+	auto container = IBackupContainer::openContainer(
+	    "file://" + joinPath(params.getDataDir(), deterministicRandom()->randomUniqueID().toString()), {}, {}, 0);
+	co_await container->create();
+	std::vector<RestoreConfig::RestoreFile> files;
+	MutationRef clear(MutationRef::ClearRange, "k"_sr, "k\0"_sr);
+	Value payload = BinaryWriter::toValue(clear, AssumeVersion(g_network->protocolVersion()));
+	for (auto [begin, end, version] : { std::tuple{ 10, 20, 17 }, std::tuple{ 18, 30, 18 } }) {
+		auto file = co_await container->writeTaggedLogFile(begin, end, blockSize, 0, 1);
+		Value block = partitionedLogTestBlock(version, payload);
+		co_await file->append(block.begin(), block.size());
+		if (version == 17) {
+			uint64_t duplicate = bigEndian64(18);
+			co_await file->append(&duplicate, sizeof(duplicate));
+		}
+		co_await file->finish();
+		files.push_back({ begin, file->getFileName(), false, blockSize, file->size(), end, 0, 1 });
+	}
+
+	std::vector<Version> endVersions{ 18, 30 };
+	std::vector<Reference<PartitionedLogIterator>> iterators{
+		makeReference<PartitionedLogIteratorSimple>(container, 0, files, endVersions),
+		makeReference<PartitionedLogIteratorTwoBuffers>(container, 0, files, endVersions)
+	};
+	for (const auto& iter : iterators) {
+		for (Version version : { 17, 18 }) {
+			ASSERT(iter->hasNext());
+			Version next = co_await iter->peekNextVersion();
+			ASSERT_EQ(next, version);
+			auto batch = co_await iter->getNext();
+			ASSERT_EQ(batch.size(), 1);
+			ASSERT_EQ(batch[0].version, version);
+			ASSERT_EQ(batch[0].mutation.type, MutationRef::ClearRange);
+			ASSERT(batch[0].mutation.param1 == clear.param1 && batch[0].mutation.param2 == clear.param2);
+		}
+		ASSERT(!iter->hasNext());
+	}
+	co_await container->deleteContainer();
+}
+} // namespace
 
 FileBackupAgent::FileBackupAgent()
   : subspace(Subspace(fileBackupPrefixRange.begin))
