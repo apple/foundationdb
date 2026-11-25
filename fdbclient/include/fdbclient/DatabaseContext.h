@@ -362,11 +362,13 @@ public:
 		Promise<GetReadVersionReply> reply;
 		TagSet tags;
 		Optional<UID> debugID;
+		Optional<int64_t> maxGrvQueueDelayMS;
 
 		explicit VersionRequest(SpanContext spanContext,
 		                        TagSet tags = TagSet(),
-		                        Optional<UID> debugID = Optional<UID>())
-		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
+		                        Optional<UID> debugID = Optional<UID>(),
+		                        Optional<int64_t> maxGrvQueueDelayMS = Optional<int64_t>())
+		  : spanContext(spanContext), tags(std::move(tags)), debugID(debugID), maxGrvQueueDelayMS(maxGrvQueueDelayMS) {}
 	};
 
 	// Transaction start request batching
@@ -374,16 +376,8 @@ public:
 		PromiseStream<VersionRequest> stream;
 		Future<Void> actor;
 	};
-	struct VersionBatcherKey {
-		uint32_t flags;
-		Optional<int64_t> maxGrvQueueDelayMS;
-
-		VersionBatcherKey(uint32_t flags, Optional<int64_t> maxGrvQueueDelayMS)
-		  : flags(flags), maxGrvQueueDelayMS(maxGrvQueueDelayMS) {}
-
-		std::strong_ordering operator<=>(VersionBatcherKey const& rhs) const = default;
-	};
-	std::map<VersionBatcherKey, VersionBatcher> versionBatcher;
+	// Requests without a queue-delay limit keep their own adaptive batching interval.
+	std::map<std::pair<uint32_t, bool>, VersionBatcher> versionBatcher;
 
 	AsyncTrigger connectionFileChangedTrigger;
 
