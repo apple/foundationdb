@@ -182,7 +182,7 @@ public:
 
 		// As we walk through the range boundaries, keep two values about the last visited boundary
 		ValueType original{}; // value prior to modification
-		Optional<ValueType> previous; // value after modification
+		ValueType previous{}; // value after modification, initially the implicit default before the first boundary
 		// Indicates that begin has been either seen/updated or created.
 		bool beginDone = false;
 		// Indicates that end was found
@@ -208,8 +208,7 @@ public:
 					if (!beginDone) {
 						kbt_debug("RANGEMAP updateRange !beginDone\n");
 						// Begin was not found and we've passed it.
-						ValueType val = replace ? valueUpdate : previous.orDefault(ValueType()).apply(valueUpdate);
-						// Set begin if the new val is different from the previous range value if it exists
+						ValueType val = replace ? valueUpdate : previous.apply(valueUpdate);
 						if (previous != val) {
 							self.kvMap.set(tr, begin, val);
 							previous = val;
@@ -271,7 +270,7 @@ public:
 
 		// If begin was never found or passed/created
 		if (!beginDone) {
-			ValueType val = replace ? valueUpdate : previous.orDefault(ValueType()).apply(valueUpdate);
+			ValueType val = replace ? valueUpdate : previous.apply(valueUpdate);
 			if (previous != val) {
 				kbt_debug("RANGEMAP updateRange set begin\n");
 				self.kvMap.set(tr, begin, valueUpdate);

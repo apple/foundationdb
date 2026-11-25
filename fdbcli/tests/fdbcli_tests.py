@@ -715,6 +715,26 @@ def datadistribution(logger):
     time.sleep(1)
 
 
+def rangeconfig_coalesces_first_boundary():
+    def show():
+        return json.loads(run_fdbcli_command("rangeconfig show"))
+
+    initial = show()
+    run_fdbcli_command("rangeconfig set a b default")
+    assert show() == initial
+    run_fdbcli_command("rangeconfig set b c teamID 7")
+    with_team = show()
+    assert with_team["ranges"] == [
+        {"begin": "b", "end": "c", "configuration": {"teamID": 7}}
+    ]
+    run_fdbcli_command("rangeconfig set a b replication 4")
+    assert show()["numConfiguredRanges"] == 2
+    run_fdbcli_command("rangeconfig set a b default")
+    assert show() == with_team
+    run_fdbcli_command("rangeconfig set b c default")
+    assert show() == initial
+
+
 @enable_logging()
 def transaction(logger):
     """This test will cover the transaction related fdbcli commands.
@@ -1586,6 +1606,7 @@ if __name__ == "__main__":
         # advanceversion()
         consistencycheck()
         datadistribution()
+        rangeconfig_coalesces_first_boundary()
         expensive_data_check_empty_all()
         kill()
         lockAndUnlock()
