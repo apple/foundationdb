@@ -2236,36 +2236,95 @@ struct GlobalConfigHistoryReader : _ObjectReader<GlobalConfigHistoryReader> {
 	GlobalConfigHistoryReader(const Arena& arena, StringRef object, ProtocolVersion protocol)
 	  : _ObjectReader(object, AssumeVersion(protocol)), owner(arena) {
 		_checksEnabled = true;
-		constexpr int headerSize = sizeof(uint32_t) + sizeof(FileIdentifier);
 		checkRange(data(), headerSize);
 		if (read_file_identifier(data()) != VersionHistory::file_identifier) {
 			throw serialization_failed();
 		}
 
-		// The outer table must contain the offset of the stored VersionHistory. The generic reader
-		// supplies a default value for an absent field, which would silently drop the mutations.
-		const uint8_t* root = detail::follow_offset(*this, data());
-		if (root < data() + headerSize) {
+		// ObjectWriter wraps VersionHistory in a one-field root. Defaulting a missing history
+		// to an empty table would let a client advance past a clear.
+		const auto root = readTable(data(), data() + headerSize);
+		const uint8_t* historySlot = root.field(0, sizeof(uint32_t));
+		if (!historySlot) {
 			throw serialization_failed();
 		}
-		checkRange(root, sizeof(int32_t));
-		const int64_t vtableOffset = (root - data()) - int64_t(detail::interpret_as<int32_t>(root));
-		constexpr int minVtableSize = 3 * sizeof(uint16_t); // vtable size, table size, first field
-		if (vtableOffset < headerSize || vtableOffset > object.size() - minVtableSize) {
+		const auto history = readTable(historySlot, root.body.end());
+		history.field(1, sizeof(Version)); // Older writers stored the version only in the key.
+		if (const uint8_t* mutations = history.field(0, sizeof(uint32_t))) {
+			checkMutations(followOffset(mutations, history.body.end()));
+		}
+	}
+	Arena& arena() { return owner; }
+
+private:
+	static constexpr int headerSize = sizeof(uint32_t) + sizeof(FileIdentifier);
+	Arena owner;
+
+	struct Table {
+		StringRef body;
+		StringRef fields;
+
+		const uint8_t* field(int index, int width) const {
+			if (index >= fields.size() / sizeof(uint16_t)) {
+				return nullptr;
+			}
+			const auto offset = detail::interpret_as<uint16_t>(fields.begin() + index * sizeof(uint16_t));
+			if (offset == 0) {
+				return nullptr;
+			}
+			if (offset < sizeof(int32_t) || offset + width > body.size()) {
+				throw serialization_failed();
+			}
+			return body.begin() + offset;
+		}
+	};
+
+	// A table, vector or string starts outside the inline bytes of the object that refers to it.
+	const uint8_t* followOffset(const uint8_t* slot, const uint8_t* parentEnd) const {
+		const uint8_t* target = detail::follow_offset(*this, slot);
+		if (target < parentEnd) {
 			throw serialization_failed();
 		}
-		const uint8_t* vtable = data() + vtableOffset;
+		checkRange(target, sizeof(uint32_t));
+		return target;
+	}
+
+	Table readTable(const uint8_t* slot, const uint8_t* parentEnd) const {
+		const uint8_t* body = followOffset(slot, parentEnd);
+		const int64_t offset = (body - _begin) - int64_t(detail::interpret_as<int32_t>(body));
+		constexpr int vtableHeaderSize = 2 * sizeof(uint16_t);
+		if (offset < headerSize || offset > (_end - _begin) - vtableHeaderSize) {
+			throw serialization_failed();
+		}
+		const uint8_t* vtable = _begin + offset;
 		const auto vtableSize = detail::interpret_as<uint16_t>(vtable);
-		const auto tableSize = detail::interpret_as<uint16_t>(vtable + sizeof(uint16_t));
-		const auto fieldOffset = detail::interpret_as<uint16_t>(vtable + 2 * sizeof(uint16_t));
-		if (vtableSize < minVtableSize || fieldOffset < sizeof(int32_t) || fieldOffset + sizeof(uint32_t) > tableSize) {
+		const auto bodySize = detail::interpret_as<uint16_t>(vtable + sizeof(uint16_t));
+		if (vtableSize < vtableHeaderSize || vtableSize % sizeof(uint16_t) != 0 || bodySize < sizeof(int32_t)) {
 			throw serialization_failed();
 		}
 		checkRange(vtable, vtableSize);
-		checkRange(root, tableSize);
+		checkRange(body, bodySize);
+		if (vtable < body + bodySize && body < vtable + vtableSize) {
+			throw serialization_failed();
+		}
+		return { StringRef(body, bodySize), StringRef(vtable + vtableHeaderSize, vtableSize - vtableHeaderSize) };
 	}
-	Arena& arena() { return owner; }
-	Arena owner;
+
+	void checkMutations(const uint8_t* vector) const {
+		const uint8_t* slots = vector + sizeof(uint32_t);
+		const size_t bytes = size_t(detail::interpret_as<uint32_t>(vector)) * sizeof(uint32_t);
+		checkRange(slots, bytes);
+		const uint8_t* end = slots + bytes;
+		for (const uint8_t* slot = slots; slot < end; slot += sizeof(uint32_t)) {
+			const auto mutation = readTable(slot, end);
+			mutation.field(0, sizeof(uint8_t)); // type
+			for (int param : { 1, 2 }) {
+				if (const uint8_t* stringSlot = mutation.field(param, sizeof(uint32_t))) {
+					followOffset(stringSlot, mutation.body.end());
+				}
+			}
+		}
+	}
 };
 
 struct GlobalConfigHistory {
@@ -3923,6 +3982,77 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigStoredHistoryBounds") {
 	ObjectWriter missing{ IncludeVersion() };
 	missing.serialize(VersionHistory::file_identifier, std::pair{ mutations, Version(0) });
 	badValue(missing.toStringRef());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigStoredHistoryFields") {
+	const auto empty = ObjectWriter::toValue(VersionHistory(0), IncludeVersion());
+	VersionHistory clearA(0);
+	clearA.mutations.emplace_back_deep(clearA.mutations.arena(),
+	                                   MutationRef(MutationRef::ClearRange, "A"_sr, "A\x00"_sr));
+	const auto clear = ObjectWriter::toValue(clearA, IncludeVersion());
+	auto publish = [&](const Value& at42) {
+		const auto rows = configRows({ { configStamp(41), empty }, { configStamp(42), at42 } });
+		return GlobalConfigHistory().update(configStamp(42), rows, 42);
+	};
+	auto checkReplay = [&](const Value& at42, bool clearsA) {
+		const auto result = publish(at42);
+		ASSERT_EQ(result.size(), 2);
+		ASSERT_EQ(result[0].version, 41);
+		ASSERT_EQ(result[1].version, 42);
+		const auto& mutations = result[1].mutations;
+		ASSERT_EQ(mutations.size(), clearsA ? 1 : 0);
+		if (clearsA) {
+			ASSERT_EQ(mutations[0].type, MutationRef::ClearRange);
+			ASSERT_EQ(mutations[0].param1, "A"_sr);
+			ASSERT_EQ(mutations[0].param2, "A\x00"_sr);
+		}
+	};
+	checkReplay(clear, true);
+	checkReplay(empty, false);
+
+	auto vtableOf = [](const uint8_t* table) { return table - detail::interpret_as<int32_t>(table); };
+	const auto* object = clear.begin() + sizeof(uint64_t);
+	const auto* root = object + detail::interpret_as<uint32_t>(object);
+	const auto* historySlot = root + detail::interpret_as<uint16_t>(vtableOf(root) + 2 * sizeof(uint16_t));
+	const auto* history = historySlot + detail::interpret_as<uint32_t>(historySlot);
+	const auto* vtable = vtableOf(history);
+	const auto* mutationsField = vtable + 2 * sizeof(uint16_t);
+	const auto* mutationsSlot = history + detail::interpret_as<uint16_t>(mutationsField);
+	auto replace = [&](const uint8_t* field, auto value) {
+		Value bytes(clear.contents());
+		memcpy(mutateString(bytes) + (field - clear.begin()), &value, sizeof(value));
+		return bytes;
+	};
+
+	// An optional field can be omitted from the vtable or have a zero entry in it.
+	checkReplay(replace(vtable, uint16_t(4)), false);
+	checkReplay(replace(vtable, uint16_t(6)), true);
+	checkReplay(replace(mutationsField, uint16_t(0)), false);
+	// A shared vtable can follow the table that refers to it.
+	auto movedVtable = clear.withSuffix(StringRef(vtable, detail::interpret_as<uint16_t>(vtable)));
+	const int32_t displacement = (history - clear.begin()) - clear.size();
+	memcpy(mutateString(movedVtable) + (history - clear.begin()), &displacement, sizeof(displacement));
+	checkReplay(movedVtable, true);
+	// A present offset into its own slot can make the clear appear to be an empty table or vector.
+	for (uint32_t offset = 0; offset < sizeof(uint32_t); ++offset) {
+		checkConfigMarker(publish(replace(historySlot, offset)), 42);
+		checkConfigMarker(publish(replace(mutationsSlot, offset)), 42);
+	}
+	for (uint16_t size : { 2, 5 }) {
+		checkConfigMarker(publish(replace(vtable, size)), 42);
+	}
+	checkConfigMarker(publish(replace(vtable + sizeof(uint16_t), uint16_t(4))), 42);
+	checkConfigMarker(publish(replace(mutationsField, uint16_t(2))), 42);
+	const auto* vector = mutationsSlot + detail::interpret_as<uint32_t>(mutationsSlot);
+	const auto* elementSlot = vector + sizeof(uint32_t);
+	const auto* mutation = elementSlot + detail::interpret_as<uint32_t>(elementSlot);
+	const auto* mutationVtable = vtableOf(mutation);
+	checkConfigMarker(publish(replace(elementSlot, uint32_t(0))), 42);
+	for (int field : { 3, 4 }) { // param1 and param2 follow the mutation type.
+		const auto* slot = mutation + detail::interpret_as<uint16_t>(mutationVtable + field * sizeof(uint16_t));
+		checkConfigMarker(publish(replace(slot, uint32_t(0))), 42);
+	}
 	return Void();
 }
 
