@@ -32,6 +32,7 @@
 #include "fdbserver/core/NativeCdcMetadata.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/Tuple.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/core/Knobs.h"
@@ -2227,8 +2228,6 @@ Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 	}
 }
 
-// A single entry with no mutations tells stale clients to refresh from a GRV proxy
-// that has observed this configuration version.
 std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, const RangeResult& rows) {
 	if (versionstamp.size() < sizeof(Version)) {
 		TraceEvent(SevWarnAlways, "GlobalConfigVersionTooShort").suppressFor(60.0).detail("Size", versionstamp.size());
@@ -2245,7 +2244,7 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, con
 				throw serialization_failed();
 			}
 			ArenaObjectReader reader(rows.arena(), kv.value, IncludeVersion());
-			if (reader.protocolVersion() != g_network->protocolVersion() || buggify(0.01)) {
+			if (reader.protocolVersion() != g_network->protocolVersion()) {
 				return { VersionHistory(committedVersion) };
 			}
 
@@ -2263,10 +2262,17 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, con
 				}
 			}
 			vh.version = bigEndian64(BinaryReader::fromStringRef<Version>(suffix, Unversioned()));
+			if (!history.empty() && vh.version < history.back().version) {
+				throw serialization_failed();
+			}
+			if (!history.empty() && vh.version == history.back().version) {
+				// Clients track only the commit version and would skip the second transaction in this batch.
+				history.clear();
+			}
 			history.push_back(std::move(vh));
 		}
-		// The writer stamps the latest row and the version key in the same transaction.
-		if (history.back().version != committedVersion) {
+		// The writer stamps both keys with the same commit version and batch number.
+		if (rows.back().key.removePrefix(globalConfigHistoryPrefix) != versionstamp) {
 			throw serialization_failed();
 		}
 	} catch (Error& e) {
@@ -2277,8 +2283,26 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, con
 		return { VersionHistory(committedVersion) };
 	}
 
-	// Clients use the oldest entry only to decide whether they missed updates.
-	history.front().mutations = Standalone<VectorRef<MutationRef>>();
+	return history;
+}
+
+std::vector<VersionHistory> updateGlobalConfigHistory(ValueRef versionstamp,
+                                                      const RangeResult& rows,
+                                                      Optional<Version>& oldestVersion) {
+	auto history = decodeGlobalConfigHistory(versionstamp, rows);
+	if (history.empty()) {
+		oldestVersion.reset();
+		return history;
+	}
+
+	// A client can miss a refresh publication. Keep its version as a lower bound even if older rows reappear.
+	// A new controller cannot know which refreshes its predecessor published.
+	const Version base =
+	    std::clamp(oldestVersion.orDefault(history.back().version), history.front().version, history.back().version);
+	auto firstChange = std::upper_bound(history.begin(), history.end(), VersionHistory(base));
+	history.erase(history.begin(), std::prev(firstChange));
+	history.front() = VersionHistory(base);
+	oldestVersion = base;
 	return history;
 }
 
@@ -2288,6 +2312,7 @@ std::vector<VersionHistory> decodeGlobalConfigHistory(ValueRef versionstamp, con
 // GlobalConfig actor class contains the functionality to read the latest
 // history and update the processes local view.
 Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
+	Optional<Version> oldestVersion;
 	while (true) {
 		ReadYourWritesTransaction tr(db->db);
 		while (true) {
@@ -2297,9 +2322,12 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Optional<Value> globalConfigVersion = co_await tr.get(globalConfigVersionKey);
 
+				if (!globalConfigVersion.present() || buggify(0.01)) {
+					oldestVersion.reset();
+				}
 				if (globalConfigVersion.present()) {
 					RangeResult rows = co_await tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY);
-					auto history = decodeGlobalConfigHistory(globalConfigVersion.get(), rows);
+					auto history = updateGlobalConfigHistory(globalConfigVersion.get(), rows, oldestVersion);
 					if (!history.empty()) {
 						ServerDBInfo serverInfo = db->serverInfo->get();
 						serverInfo.client.history = std::move(history);
@@ -3735,10 +3763,70 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigProtocolChangeUsesCommittedV
 	RangeResult rows;
 	rows.push_back_deep(rows.arena(), KeyValueRef(previous.withPrefix(globalConfigHistoryPrefix), olderHistory));
 	rows.push_back_deep(rows.arena(), KeyValueRef(latest.withPrefix(globalConfigHistoryPrefix), currentHistory));
-	auto history = decodeGlobalConfigHistory(latest, rows);
+	Optional<Version> oldestVersion = 41;
+	auto history = updateGlobalConfigHistory(latest, rows, oldestVersion);
 	ASSERT_EQ(history.size(), 1);
 	ASSERT_EQ(history.front().version, 42);
 	ASSERT_EQ(history.front().mutations.size(), 0);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigHistoryAfterControllerReplacement") {
+	RangeResult rows;
+	VersionHistory update(0);
+	update.mutations.emplace_back_deep(update.mutations.arena(), MutationRef(MutationRef::SetValue, "k"_sr, "v"_sr));
+	auto value = ObjectWriter::toValue(update, IncludeVersion());
+	auto addRow = [&](Version version, uint16_t batch) {
+		auto stamp = BinaryWriter::toValue(Versionstamp(version, batch), Unversioned());
+		rows.push_back_deep(rows.arena(), KeyValueRef(stamp.withPrefix(globalConfigHistoryPrefix), value));
+		return stamp;
+	};
+
+	addRow(39, 0);
+	auto v41 = addRow(41, 0);
+	Optional<Version> oldestVersion;
+	auto history = updateGlobalConfigHistory(v41, rows, oldestVersion);
+	ASSERT_EQ(history.size(), 1);
+	ASSERT_EQ(history.front().version, 41);
+	ASSERT(history.front().mutations.empty());
+
+	auto v42 = addRow(42, 0);
+	history = updateGlobalConfigHistory(v42, rows, oldestVersion);
+	ASSERT_EQ(history.size(), 2);
+	ASSERT_EQ(history.front().version, 41);
+	ASSERT_EQ(history.back().version, 42);
+	ASSERT_EQ(history.back().mutations.size(), 1);
+
+	auto v42Batch1 = BinaryWriter::toValue(Versionstamp(42, 1), Unversioned());
+	history = updateGlobalConfigHistory(v42Batch1, rows, oldestVersion);
+	ASSERT_EQ(history.size(), 1);
+	ASSERT_EQ(history.front().version, 42);
+	ASSERT(history.front().mutations.empty());
+
+	// An existing controller can see both transactions in one read.
+	oldestVersion = 41;
+	addRow(42, 1);
+	history = updateGlobalConfigHistory(v42Batch1, rows, oldestVersion);
+	ASSERT_EQ(history.size(), 1);
+	ASSERT_EQ(history.front().version, 42);
+	ASSERT(history.front().mutations.empty());
+
+	auto v47 = addRow(47, 0);
+	history = updateGlobalConfigHistory(v47, rows, oldestVersion);
+	ASSERT_EQ(history.size(), 2);
+	ASSERT_EQ(history.front().version, 42);
+	ASSERT_EQ(history.back().version, 47);
+	ASSERT_EQ(history.back().mutations.size(), 1);
+
+	rows = RangeResult();
+	addRow(49, 0);
+	auto v55 = addRow(55, 0);
+	history = updateGlobalConfigHistory(v55, rows, oldestVersion);
+	ASSERT_EQ(history.size(), 2);
+	ASSERT_EQ(history.front().version, 49);
+	ASSERT(history.front().mutations.empty());
+	ASSERT_EQ(history.back().version, 55);
+	ASSERT_EQ(history.back().mutations.size(), 1);
 	return Void();
 }
 
@@ -3747,10 +3835,13 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigMalformedHistory") {
 	auto key = version.withPrefix(globalConfigHistoryPrefix);
 	auto previousKey = BinaryWriter::toValue(Versionstamp(41, 0), Unversioned()).withPrefix(globalConfigHistoryPrefix);
 	RangeResult rows;
-	ASSERT(decodeGlobalConfigHistory("short"_sr, rows).empty());
+	Optional<Version> oldestVersion = 39;
+	ASSERT(updateGlobalConfigHistory("short"_sr, rows, oldestVersion).empty());
+	ASSERT(!oldestVersion.present());
 
 	auto checkRefresh = [&] {
-		auto history = decodeGlobalConfigHistory(version, rows);
+		oldestVersion = 39;
+		auto history = updateGlobalConfigHistory(version, rows, oldestVersion);
 		ASSERT_EQ(history.size(), 1);
 		ASSERT_EQ(history.front().version, 42);
 		ASSERT(history.front().mutations.empty());
@@ -3810,7 +3901,8 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigMalformedHistory") {
 		rows.more = true;
 		checkRefresh();
 		rows.more = false;
-		auto repaired = decodeGlobalConfigHistory(version, rows);
+		oldestVersion = 39;
+		auto repaired = updateGlobalConfigHistory(version, rows, oldestVersion);
 		rows = RangeResult();
 		ASSERT_EQ(repaired.size(), 2);
 		ASSERT_EQ(repaired.front().version, 39);
@@ -3820,6 +3912,80 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigMalformedHistory") {
 		ASSERT_EQ(repaired.back().mutations[1].type, MutationRef::ClearRange);
 	}
 	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesRefreshPublication") {
+	auto stamp = [](Version version) { return BinaryWriter::toValue(Versionstamp(version, 0), Unversioned()); };
+	auto enabled = Tuple::makeTuple(true).pack();
+	RangeResult rows;
+	rows.push_back_deep(rows.arena(),
+	                    KeyValueRef(stamp(41).withPrefix(globalConfigHistoryPrefix),
+	                                ObjectWriter::toValue(VersionHistory(0), IncludeVersion())));
+	Optional<Version> oldestVersion(41);
+	auto first = updateGlobalConfigHistory(stamp(42), rows, oldestVersion);
+	ASSERT_EQ(first.size(), 1);
+	ASSERT_EQ(first.front().version, 42);
+	ASSERT(first.front().mutations.empty());
+
+	VersionHistory setB(0);
+	setB.mutations.emplace_back_deep(setB.mutations.arena(), MutationRef(MutationRef::SetValue, "B"_sr, enabled));
+	rows.push_back_deep(
+	    rows.arena(),
+	    KeyValueRef(stamp(43).withPrefix(globalConfigHistoryPrefix), ObjectWriter::toValue(setB, IncludeVersion())));
+	auto second = updateGlobalConfigHistory(stamp(43), rows, oldestVersion);
+	ASSERT_EQ(second.size(), 2);
+	ASSERT_EQ(second.front().version, 42);
+	ASSERT(second.front().mutations.empty());
+	ASSERT_EQ(second.back().version, 43);
+	ASSERT_EQ(second.back().mutations.size(), 1);
+	ASSERT_EQ(second.back().mutations[0].type, MutationRef::SetValue);
+	ASSERT_EQ(second.back().mutations[0].param1, "B"_sr);
+	ASSERT_EQ(second.back().mutations[0].param2, enabled);
+
+	for (Version clientVersion : { 41, 42 }) {
+		GrvProxyInterface grvProxy;
+		grvProxy.provisional = false;
+		grvProxy.initEndpoints();
+		IFailureMonitor::failureMonitor().setStatus(grvProxy.address(), FailureStatus(false));
+		CommitProxyInterface commitProxy;
+		commitProxy.provisional = false;
+		commitProxy.initEndpoints();
+		ClientDBInfo info;
+		info.id = UID(1, 1);
+		info.grvProxies.push_back(grvProxy);
+		info.commitProxies.push_back(commitProxy);
+		auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
+		Database db = DatabaseContext::create(
+		    clientInfo, Future<Void>(Never()), LocalityData(), EnableLocalityLoadBalance::False);
+		db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
+
+		auto initial = co_await timeoutError(waitAndForward(grvProxy.refreshGlobalConfig.getFuture()), 5.0);
+		ASSERT_EQ(initial.lastKnown, -1);
+		RangeResult snapshot;
+		if (clientVersion == 41) {
+			snapshot.push_back_deep(snapshot.arena(), KeyValueRef("A"_sr.withPrefix(globalConfigKeysPrefix), enabled));
+		}
+		initial.reply.send(GlobalConfigRefreshReply{ snapshot.arena(), clientVersion, snapshot });
+		co_await timeoutError(db->globalConfig->onInitialized(), 5.0);
+		ASSERT_EQ(db->globalConfig->get<bool>("A"_sr, false), clientVersion == 41);
+
+		// Version 42 cleared A. Both clients receive only the publication for 43, which sets B.
+		Future<Void> changed = db->globalConfig->onChange();
+		info.id = UID(1, 2);
+		info.history = second;
+		clientInfo->set(info);
+		if (clientVersion == 41) {
+			auto refresh = co_await timeoutError(waitAndForward(grvProxy.refreshGlobalConfig.getFuture()), 5.0);
+			ASSERT_EQ(refresh.lastKnown, 41);
+			RangeResult at43;
+			at43.push_back_deep(at43.arena(), KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), enabled));
+			refresh.reply.send(GlobalConfigRefreshReply{ at43.arena(), 43, at43 });
+		}
+		co_await timeoutError(changed, 5.0);
+		ASSERT(!db->globalConfig->get("A"_sr).isValid());
+		ASSERT(db->globalConfig->get<bool>("B"_sr, false));
+	}
+	co_return;
 }
 
 void addProcessesToSameDC(ClusterControllerData& self, const std::vector<NetworkAddress>&& processes) {
