@@ -170,6 +170,21 @@ private:
 	std::vector<FileInfo> files; // Finished files.
 };
 
+struct IngestSSTOptions {
+	bool verifyChecksums = true;
+	bool lastLevelOnly = false;
+};
+
+// Adds SST files to the database: either all of them are added, or none. On success, the files are moved into the
+// database folder, so they are gone from their old paths. On failure, they stay where they were. The files should be
+// sorted by key and their key ranges should not overlap; if they overlap, RocksDB can't put them all in the last level.
+// If `lastLevelOnly` is set and a file can't go to the last level, nothing is added and the status is TryAgain. If
+// `paths` is empty, does nothing. Ingesting takes disk time, so use it on the RocksDB writer thread.
+rocksdb::Status ingestSSTFiles(rocksdb::DB* db,
+                               rocksdb::ColumnFamilyHandle* cf,
+                               const std::vector<std::string>& paths,
+                               const IngestSSTOptions& options);
+
 } // namespace RocksDBRangeTransfer
 
 #endif // WITH_ROCKSDB

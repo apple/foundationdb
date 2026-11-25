@@ -176,6 +176,21 @@ rocksdb::Status IngestSSTFileSetBuilder::abort() {
 	return firstError;
 }
 
+rocksdb::Status ingestSSTFiles(rocksdb::DB* db,
+                               rocksdb::ColumnFamilyHandle* cf,
+                               const std::vector<std::string>& paths,
+                               const IngestSSTOptions& options) {
+	if (paths.empty()) {
+		return rocksdb::Status::OK();
+	}
+	rocksdb::IngestExternalFileOptions ingestOptions;
+	ingestOptions.move_files = true;
+	ingestOptions.verify_checksums_before_ingest = options.verifyChecksums;
+	ingestOptions.allow_blocking_flush = true;
+	ingestOptions.fail_if_not_bottommost_level = options.lastLevelOnly;
+	return db->IngestExternalFile(cf, paths, ingestOptions);
+}
+
 } // namespace RocksDBRangeTransfer
 
 #endif // WITH_ROCKSDB
