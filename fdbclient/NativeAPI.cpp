@@ -5365,14 +5365,20 @@ Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpan,
 Future<Void> readVersionBatcher(DatabaseContext* cx,
                                 FutureStream<DatabaseContext::VersionRequest> versionStreamInput,
                                 TransactionPriority priority,
-                                uint32_t flags,
-                                Optional<int64_t> maxGrvQueueDelayMS) {
+                                uint32_t flags) {
 	FutureStream<DatabaseContext::VersionRequest> versionStream(std::move(versionStreamInput));
-	std::vector<Promise<GetReadVersionReply>> requests;
+	struct Batch {
+		std::vector<Promise<GetReadVersionReply>> requests;
+		TransactionTagMap<uint32_t> tags;
+		Optional<UID> debugID;
+		Span span{ "NAPI:readVersionBatcher"_loc };
+	};
+	Batch defaultBatch;
+	std::map<int64_t, Batch> thresholdBatches;
+	int pendingRequests = 0;
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> collection = actorCollection(addActor.getFuture());
 	Future<Void> timeout;
-	Optional<UID> debugID;
 	Reference<Histogram> batchSizeDist = Histogram::getHistogram(
 	    "GrvBatcher"_sr, "ClientGrvBatchSize"_sr, Histogram::Unit::countLinear, 0, CLIENT_KNOBS->MAX_BATCH_SIZE * 2);
 	Reference<Histogram> batchIntervalDist = Histogram::getHistogram("GrvBatcher"_sr,
@@ -5384,12 +5390,25 @@ Future<Void> readVersionBatcher(DatabaseContext* cx,
 	    Histogram::getHistogram("GrvBatcher"_sr, "ClientGrvReplyLatency"_sr, Histogram::Unit::milliseconds);
 	double lastRequestTime = now();
 
-	TransactionTagMap<uint32_t> tags;
-
 	// dynamic batching
 	PromiseStream<double> replyTimes;
 	double batchTime = 0;
-	Span span("NAPI:readVersionBatcher"_loc);
+
+	auto dispatch = [&](Batch& batch, Optional<int64_t> maxDelay) {
+		const int count = batch.requests.size();
+		batchSizeDist->sampleRecordCounter(count);
+		const double requestTime = now();
+		batchIntervalDist->sampleSeconds(requestTime - lastRequestTime);
+		lastRequestTime = requestTime;
+		Promise<GetReadVersionReply> timedReply;
+		batch.requests.push_back(timedReply);
+		addActor.send(ready(timeReply(timedReply.getFuture(), replyTimes)));
+		addActor.send(incrementalBroadcastWithError(
+		    getConsistentReadVersion(
+		        batch.span.context, cx, count, priority, flags, std::move(batch.tags), batch.debugID, maxDelay),
+		    std::move(batch.requests),
+		    CLIENT_KNOBS->BROADCAST_BATCH_SIZE));
+	};
 	while (true) {
 		bool send_batch = false;
 		{
@@ -5399,31 +5418,32 @@ Future<Void> readVersionBatcher(DatabaseContext* cx,
 			if (res.index() == 0) {
 				DatabaseContext::VersionRequest req = std::get<0>(std::move(res));
 
+				// Keep delay-specific groups only until the current batch is sent. Unset delays skip the map.
+				auto& batch =
+				    req.maxGrvQueueDelayMS.present() ? thresholdBatches[req.maxGrvQueueDelayMS.get()] : defaultBatch;
 				if (req.debugID.present()) {
-					if (!debugID.present()) {
-						debugID = nondeterministicRandom()->randomUniqueID();
+					if (!batch.debugID.present()) {
+						batch.debugID = nondeterministicRandom()->randomUniqueID();
 					}
 					g_traceBatch.addAttach("TransactionAttachID",
 					                       req.debugID.get().first(),
-					                       debugID.get().first(),
+					                       batch.debugID.get().first(),
 					                       req.spanContext.traceID,
 					                       req.spanContext.spanID);
 				}
-				span.addLink(req.spanContext);
-				requests.push_back(req.reply);
+				batch.span.addLink(req.spanContext);
+				batch.requests.push_back(req.reply);
 				for (auto tag : req.tags) {
-					++tags[tag];
+					++batch.tags[tag];
 				}
 
-				if (requests.size() == CLIENT_KNOBS->MAX_BATCH_SIZE) {
+				if (++pendingRequests == CLIENT_KNOBS->MAX_BATCH_SIZE) {
 					send_batch = true;
-					++cx->transactionGrvFullBatches;
 				} else if (!timeout.isValid()) {
 					timeout = delay(batchTime, TaskPriority::GetConsistentReadVersion);
 				}
 			} else if (res.index() == 1) {
 				send_batch = true;
-				++cx->transactionGrvTimedOutBatches;
 			} else if (res.index() == 2) {
 				// Dynamic batching monitors reply latencies.
 				double reply_latency = std::get<2>(std::move(res));
@@ -5434,30 +5454,18 @@ Future<Void> readVersionBatcher(DatabaseContext* cx,
 			} // collection is included for errors
 		}
 		if (send_batch) {
-			int count = requests.size();
-			ASSERT(count);
-
-			batchSizeDist->sampleRecordCounter(count);
-			auto requestTime = now();
-			batchIntervalDist->sampleSeconds(requestTime - lastRequestTime);
-			lastRequestTime = requestTime;
-
-			// dynamic batching
-			Promise<GetReadVersionReply> GRVReply;
-			requests.push_back(GRVReply);
-			addActor.send(ready(timeReply(GRVReply.getFuture(), replyTimes)));
-
-			Future<Void> batch = incrementalBroadcastWithError(
-			    getConsistentReadVersion(
-			        span.context, cx, count, priority, flags, std::move(tags), debugID, maxGrvQueueDelayMS),
-			    std::move(requests),
-			    CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
-
-			span = Span("NAPI:readVersionBatcher"_loc);
-			tags.clear();
-			debugID = Optional<UID>();
-			requests.clear();
-			addActor.send(batch);
+			auto& batches = pendingRequests == CLIENT_KNOBS->MAX_BATCH_SIZE ? cx->transactionGrvFullBatches
+			                                                                : cx->transactionGrvTimedOutBatches;
+			batches += thresholdBatches.size() + !defaultBatch.requests.empty();
+			if (!defaultBatch.requests.empty()) {
+				dispatch(defaultBatch, Optional<int64_t>());
+				defaultBatch = Batch();
+			}
+			for (auto& [maxDelay, batch] : thresholdBatches) {
+				dispatch(batch, maxDelay);
+			}
+			thresholdBatches.clear();
+			pendingRequests = 0;
 			timeout = Future<Void>();
 		}
 	}
@@ -5718,15 +5726,13 @@ Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 	SpanContext derivedSpanContext = generateSpanID(cx->transactionTracingSample, spanContext);
 	Optional<UID> versionDebugID = readOptions.present() ? readOptions.get().debugID : Optional<UID>();
 
-	// Include the max GRV queue delay in the batcher key so coalesced requests
-	// share the same proxy-side admission threshold.
-	auto& batcher = cx->versionBatcher[DatabaseContext::VersionBatcherKey(flags, options.maxGrvQueueDelayMS)];
+	auto& batcher = cx->versionBatcher[{ flags, options.maxGrvQueueDelayMS.present() }];
 	if (!batcher.actor.isValid()) {
-		batcher.actor = readVersionBatcher(
-		    cx.getPtr(), batcher.stream.getFuture(), options.priority, flags, options.maxGrvQueueDelayMS);
+		batcher.actor = readVersionBatcher(cx.getPtr(), batcher.stream.getFuture(), options.priority, flags);
 	}
 
-	auto const req = DatabaseContext::VersionRequest(derivedSpanContext, options.tags, versionDebugID);
+	auto const req =
+	    DatabaseContext::VersionRequest(derivedSpanContext, options.tags, versionDebugID, options.maxGrvQueueDelayMS);
 	batcher.stream.send(req);
 	startTime = now();
 	return extractReadVersion(
@@ -6544,6 +6550,105 @@ TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/multipleShards") {
 	       unlimitedResults[6] == "C"_sr && unlimitedResults[7] == "Z"_sr);
 
 	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/grvQueueDelay/boundsBatchers") {
+	GrvProxyInterface grvProxy;
+	grvProxy.provisional = false;
+	grvProxy.initEndpoints();
+	IFailureMonitor::failureMonitor().setStatus(grvProxy.address(), FailureStatus(false));
+	CommitProxyInterface commitProxy;
+	commitProxy.provisional = false;
+	commitProxy.initEndpoints();
+	ClientDBInfo info;
+	info.id = UID(1, 1);
+	info.grvProxies.push_back(grvProxy);
+	info.commitProxies.push_back(commitProxy);
+	Database cx = DatabaseContext::create(makeReference<AsyncVar<ClientDBInfo>>(info),
+	                                      Future<Void>(Never()),
+	                                      LocalityData(),
+	                                      EnableLocalityLoadBalance::False);
+
+	auto read = [&](Optional<int64_t> maxDelay, StringRef tag, bool batchPriority = false) {
+		Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::SKIP_GRV_CACHE);
+		tr.setOption(FDBTransactionOptions::TAG, tag);
+		if (batchPriority) {
+			tr.setOption(FDBTransactionOptions::PRIORITY_BATCH);
+		}
+		if (maxDelay.present()) {
+			tr.setOption(FDBTransactionOptions::MAX_GRV_QUEUE_DELAY,
+			             StringRef(reinterpret_cast<const uint8_t*>(&maxDelay.get()), sizeof(int64_t)));
+		}
+		return tr.getReadVersion();
+	};
+	auto nextRequest = [&]() { return timeoutError(waitAndForward(grvProxy.getConsistentReadVersion.getFuture()), 5); };
+	GetReadVersionReply reply;
+	reply.version = 123;
+	for (int64_t threshold = 0; threshold < 64; ++threshold) {
+		auto version = read(threshold, "cold"_sr);
+		auto request = co_await nextRequest();
+		ASSERT(request.maxGrvQueueDelayMS.present() && request.maxGrvQueueDelayMS.get() == threshold);
+		request.reply.send(reply);
+		ASSERT_EQ(co_await timeoutError(version, 5), reply.version);
+	}
+	ASSERT_EQ(cx->versionBatcher.size(), 1);
+
+	constexpr int burst = 64;
+	std::vector<Future<Version>> hotReads;
+	for (int i = 0; i < burst; ++i) {
+		hotReads.push_back(read(64, "hot"_sr));
+	}
+	int served = 0;
+	int rpcCount = 0;
+	while (served < burst) {
+		auto request = co_await nextRequest();
+		ASSERT(request.maxGrvQueueDelayMS.present() && request.maxGrvQueueDelayMS.get() == 64);
+		ASSERT(request.transactionCount > 0 && request.transactionCount <= burst - served);
+		ASSERT_EQ(request.tags.at("hot"_sr), request.transactionCount);
+		served += request.transactionCount;
+		++rpcCount;
+		request.reply.send(reply);
+	}
+	ASSERT_EQ(rpcCount, (burst - 1) / CLIENT_KNOBS->MAX_BATCH_SIZE + 1);
+	for (auto& version : hotReads) {
+		ASSERT_EQ(co_await timeoutError(version, 5), reply.version);
+	}
+
+	auto noLimit = read(Optional<int64_t>(), "none"_sr);
+	auto zero = read(0, "zero"_sr);
+	auto limited = read(9, "nine"_sr);
+	auto lowPriority = read(9, "low"_sr, true);
+	std::vector<GetReadVersionRequest> requests;
+	for (int i = 0; i < 4; ++i) {
+		requests.push_back(co_await nextRequest());
+	}
+	for (auto& request : requests) {
+		ASSERT_EQ(request.transactionCount, 1);
+		if (!request.maxGrvQueueDelayMS.present()) {
+			ASSERT(request.priority == TransactionPriority::DEFAULT && request.tags.contains("none"_sr));
+			reply.version = 200;
+		} else if (request.maxGrvQueueDelayMS.get() == 0) {
+			ASSERT(request.priority == TransactionPriority::DEFAULT && request.tags.contains("zero"_sr));
+			request.reply.sendError(transaction_grv_queue_rejected());
+			continue;
+		} else {
+			ASSERT_EQ(request.maxGrvQueueDelayMS.get(), 9);
+			bool isBatch = request.priority == TransactionPriority::BATCH;
+			ASSERT(request.tags.contains(isBatch ? "low"_sr : "nine"_sr));
+			reply.version = isBatch ? 202 : 201;
+		}
+		request.reply.send(reply);
+	}
+	ASSERT_EQ(co_await timeoutError(noLimit, 5), 200);
+	auto rejected = co_await errorOr(timeoutError(zero, 5));
+	ASSERT(rejected.isError() && rejected.getError().code() == error_code_transaction_grv_queue_rejected);
+	ASSERT_EQ(co_await timeoutError(limited, 5), 201);
+	ASSERT_EQ(co_await timeoutError(lowPriority, 5), 202);
+	ASSERT_EQ(cx->versionBatcher.size(), 3);
+	ASSERT_EQ(cx->transactionGrvFullBatches.getValue() + cx->transactionGrvTimedOutBatches.getValue(),
+	          cx->transactionReadVersionBatches.getValue());
+	co_return;
 }
 
 TEST_CASE("/fdbclient/NativeAPI/sameVersionWatch/preservesInstalledWatch") {
