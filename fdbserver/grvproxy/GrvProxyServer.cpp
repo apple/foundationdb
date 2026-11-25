@@ -308,6 +308,7 @@ struct GlobalConfigSnapshot {
 	Versionstamp stamp{ 0, 0 };
 	RangeResult data;
 	Optional<Version> snapshotReadVersion;
+	Version confirmedVersion = invalidVersion;
 	Versionstamp confirmedStamp;
 	// The publication seen before a speculative advance, with its observed batch if the proxy read that version.
 	Versionstamp priorPublication;
@@ -319,7 +320,8 @@ struct GlobalConfigSnapshot {
 	            Version readVersion,
 	            const std::vector<VersionHistory>& history = {},
 	            Version publicationBeforeRead = 0,
-	            const Optional<GlobalConfigSnapshotProof>& proof = {}) {
+	            const Optional<GlobalConfigSnapshotProof>& proof = {},
+	            Optional<uint16_t> historyBatch = {}) {
 		// Clients replace their entire cache with these rows.
 		if (rows.more) {
 			throw serialization_failed();
@@ -331,18 +333,25 @@ struct GlobalConfigSnapshot {
 			}
 			const Versionstamp next = decoded.get();
 			const bool published = !history.empty() && history.back().version == next.version;
-			const bool hasHistoryRow = published && history.size() > 1;
+			const Version rowVersion = history.size() > 1 ? history.back().version : invalidVersion;
+			const bool hasHistoryRow = next.version == rowVersion;
+			const Versionstamp rowStamp = history.size() > 1 && historyBatch.present()
+			                                  ? Versionstamp(rowVersion, historyBatch.get())
+			                                  : Versionstamp();
+			const Versionstamp knownStamp = std::max(confirmedStamp, rowStamp);
+			if (next.version < confirmedVersion || next < knownStamp) {
+				throw serialization_failed();
+			}
 			if (next < stamp) {
 				const bool previouslyPublished = next.version == priorPublication.version;
 				// A numeric publication alone cannot confirm a batch observed by this proxy.
 				const bool lowerBatch =
 				    next.version == stamp.version || (previouslyPublished && next < priorPublication);
-				const bool hasMarkerProof = !hasHistoryRow && proof.present();
-				if (!published || next < confirmedStamp || (lowerBatch && !hasMarkerProof) ||
+				if (!published || (hasHistoryRow && historyBatch.present() && next != rowStamp) ||
 				    (snapshotReadVersion.present() && readVersion <= snapshotReadVersion.get())) {
 					throw serialization_failed();
 				}
-				if (hasMarkerProof) {
+				if (proof.present()) {
 					if (proof.get().readVersion < next.version || readVersion < proof.get().readVersion) {
 						throw serialization_failed();
 					}
@@ -353,8 +362,9 @@ struct GlobalConfigSnapshot {
 					if (digest != proof.get().digest) {
 						throw serialization_failed();
 					}
-				} else if (!hasHistoryRow && next != confirmedStamp && !previouslyPublished) {
-					// A new bare marker can repeat the same damaged version key.
+				} else if ((lowerBatch && next != rowStamp) ||
+				           (!hasHistoryRow && next != confirmedStamp && !previouslyPublished)) {
+					// Only the current validated row can corroborate a lower batch without a digest.
 					throw serialization_failed();
 				}
 			}
@@ -365,8 +375,9 @@ struct GlobalConfigSnapshot {
 				    stamp.version == publicationBeforeRead ? stamp : Versionstamp(publicationBeforeRead, 0);
 			}
 			if (hasHistoryRow) {
-				confirmedStamp = next;
+				confirmedVersion = next.version;
 			}
+			confirmedStamp = knownStamp;
 			stamp = next;
 			snapshotReadVersion = readVersion;
 		} else {
@@ -394,7 +405,13 @@ struct GlobalConfigSnapshot {
 			rows.readThroughEnd = page.readThroughEnd;
 		}
 		const Version readVersion = co_await tr.getReadVersion();
-		update(versionstamp, rows, readVersion, info.history, publicationBeforeRead, info.globalConfigSnapshot);
+		update(versionstamp,
+		       rows,
+		       readVersion,
+		       info.history,
+		       publicationBeforeRead,
+		       info.globalConfigSnapshot,
+		       info.globalConfigHistoryBatch);
 	}
 };
 
@@ -461,7 +478,12 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValu
 	RangeResult at43;
 	at43.push_back_deep(at43.arena(),
 	                    KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), Tuple::makeTuple(true).pack()));
-	snapshot.update(BinaryWriter::toValue(Versionstamp(43, 7), Unversioned()), at43, 50);
+	// A legacy history key can contain an unrelated future version.
+	snapshot.update(BinaryWriter::toValue(Versionstamp(43, 7), Unversioned()),
+	                at43,
+	                50,
+	                { VersionHistory(41), VersionHistory(1000) },
+	                1000);
 	ASSERT(snapshot.stamp == Versionstamp(43, 7));
 	ASSERT(snapshot.data == at43);
 	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 50);
@@ -504,6 +526,7 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsUnconfirmedStamp
 			ASSERT(snapshot.stamp == before.stamp);
 			ASSERT(snapshot.data == before.data);
 			ASSERT(snapshot.snapshotReadVersion == before.snapshotReadVersion);
+			ASSERT_EQ(snapshot.confirmedVersion, before.confirmedVersion);
 			ASSERT(snapshot.confirmedStamp == before.confirmedStamp);
 			ASSERT(snapshot.priorPublication == before.priorPublication);
 		};
@@ -513,15 +536,11 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsUnconfirmedStamp
 		const std::vector<VersionHistory> marker{ VersionHistory(44) };
 		const GlobalConfigSnapshotProof proof{ 52, {} };
 		reject(Versionstamp(45, 0), 52, marker, proof);
-		if (hasHistoryRow) {
-			reject(Versionstamp(44, 0), 52, marker, proof);
-		} else {
-			// The earlier singleton at 44 did not establish its batch. The later proof covers the repair.
-			auto repaired = snapshot;
-			const Versionstamp lowerBatch(44, 0);
-			repaired.update(BinaryWriter::toValue(lowerBatch, Unversioned()), candidate, 52, marker, 44, proof);
-			ASSERT(repaired.stamp == lowerBatch);
-		}
+		// Neither a marker nor a legacy history row at 44 established the batch seen by the proxy.
+		auto repaired = snapshot;
+		const Versionstamp lowerBatch(44, 0);
+		repaired.update(BinaryWriter::toValue(lowerBatch, Unversioned()), candidate, 52, marker, 44, proof);
+		ASSERT(repaired.stamp == lowerBatch);
 		// A bare marker cannot establish that a lower batch has repaired the speculative stamp.
 		reject(Versionstamp(46, 0), 52, { VersionHistory(46) });
 		if (hasHistoryRow) {
@@ -569,8 +588,12 @@ Future<Void> checkGlobalConfigSnapshotRepair(Versionstamp speculativeStamp) {
 	at41.mutations.emplace_back_deep(at41.mutations.arena(), MutationRef(MutationRef::SetValue, "A"_sr, enabled));
 	const std::vector<VersionHistory> history{ VersionHistory(40), at41 };
 	GlobalConfigSnapshot snapshot;
-	snapshot.update(BinaryWriter::toValue(Versionstamp(41, 7), Unversioned()), stale, 41, history);
-	snapshot.update(BinaryWriter::toValue(speculativeStamp, Unversioned()), stale, 50, history, 41);
+	snapshot.update(BinaryWriter::toValue(Versionstamp(41, 7), Unversioned()), stale, 41, history, 41, {}, 7);
+	const std::vector<VersionHistory> at44{ at41, VersionHistory(44) };
+	const auto& publication = speculativeStamp.version == 44 ? at44 : history;
+	snapshot.update(
+	    BinaryWriter::toValue(speculativeStamp, Unversioned()), stale, 50, publication, publication.back().version);
+	ASSERT_EQ(snapshot.confirmedVersion, publication.back().version);
 	ASSERT(snapshot.confirmedStamp == Versionstamp(41, 7));
 	ASSERT(snapshot.stamp == speculativeStamp);
 
@@ -623,24 +646,42 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotRepairsFromMarkerProof"
 }
 
 TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigMarkerPreservesConfirmedBatch") {
-	GlobalConfigSnapshot snapshot;
 	const std::vector<VersionHistory> history{ VersionHistory(41), VersionHistory(44) };
-	const Versionstamp confirmed(44, 7);
-	snapshot.update(BinaryWriter::toValue(confirmed, Unversioned()), RangeResult(), 50, history, 44);
-	ASSERT(snapshot.confirmedStamp == confirmed);
-	try {
-		snapshot.update(BinaryWriter::toValue(Versionstamp(44, 0), Unversioned()),
-		                RangeResult(),
-		                52,
-		                { VersionHistory(44) },
-		                44,
-		                GlobalConfigSnapshotProof{ 51, {} });
-		ASSERT(false);
-	} catch (Error& e) {
-		ASSERT_EQ(e.code(), error_code_serialization_failed);
+	const std::vector<VersionHistory> marker{ VersionHistory(44) };
+	const auto damaged = BinaryWriter::toValue(Versionstamp(44, 7), Unversioned());
+	const auto repair = BinaryWriter::toValue(Versionstamp(44, 0), Unversioned());
+	const GlobalConfigSnapshotProof proof{ 51, {} };
+	for (Optional<uint16_t> batch : { Optional<uint16_t>(), Optional<uint16_t>(0), Optional<uint16_t>(7) }) {
+		GlobalConfigSnapshot snapshot;
+		snapshot.update(damaged, RangeResult(), 49, history, 44, {}, batch);
+		snapshot.update(damaged, RangeResult(), 50, history, 44); // A later numeric row preserves any known batch.
+		ASSERT_EQ(snapshot.confirmedVersion, 44);
+		ASSERT(snapshot.confirmedStamp == (batch.present() ? Versionstamp(44, batch.get()) : Versionstamp()));
+		auto check = [&](const std::vector<VersionHistory>& publication,
+		                 Optional<uint16_t> currentBatch,
+		                 Optional<GlobalConfigSnapshotProof> currentProof,
+		                 bool shouldRepair) {
+			auto candidate = snapshot;
+			try {
+				candidate.update(repair, RangeResult(), 52, publication, 44, currentProof, currentBatch);
+				ASSERT(shouldRepair);
+				ASSERT(candidate.stamp == Versionstamp(44, 0));
+				ASSERT_EQ(candidate.snapshotReadVersion.get(), 52);
+			} catch (Error& e) {
+				ASSERT_EQ(e.code(), error_code_serialization_failed);
+				ASSERT(!shouldRepair);
+				ASSERT(candidate.stamp == Versionstamp(44, 7));
+				ASSERT_EQ(candidate.snapshotReadVersion.get(), 50);
+			}
+		};
+		const bool belowFloor = batch.present() && batch.get() == 7;
+		for (const auto& publication : { marker, history }) {
+			check(publication, {}, {}, false);
+			check(publication, {}, proof, !belowFloor);
+		}
+		check(history, 0, {}, !belowFloor);
+		check(history, 7, proof, false);
 	}
-	ASSERT(snapshot.stamp == confirmed);
-	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 50);
 	return Void();
 }
 

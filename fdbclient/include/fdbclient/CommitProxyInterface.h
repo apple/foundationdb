@@ -159,6 +159,8 @@ struct ClientDBInfo {
 	ClusterType clusterType = ClusterType::STANDALONE;
 	// Digest of all settings at the controller's read version for this publication.
 	Optional<GlobalConfigSnapshotProof> globalConfigSnapshot;
+	// With a verified history tail, an undated snapshot needs a digest. The controller supplies it on demand.
+	Optional<uint16_t> globalConfigHistoryBatch;
 
 	ClientDBInfo() = default;
 
@@ -182,7 +184,8 @@ struct ClientDBInfo {
 			           nativeCdcTagCount,
 			           cdcProxies,
 			           streamToCDCProxyId,
-			           globalConfigSnapshot);
+			           globalConfigSnapshot,
+			           globalConfigHistoryBatch);
 		} else {
 			ASSERT(ar.protocolVersion().isValid());
 			serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
