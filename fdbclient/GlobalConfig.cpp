@@ -300,14 +300,17 @@ Future<GlobalConfigRefreshReply> GlobalConfig::getSnapshot(const ClientDBInfo* d
 			                                           &GrvProxyInterface::refreshGlobalConfig,
 			                                           GlobalConfigRefreshRequest{ lastKnown }),
 			                          CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT);
-			if (reply.result.more || reply.version == MAX_VERSION) {
+			const auto& readVersion = reply.snapshotReadVersion;
+			if (reply.result.more || reply.version == MAX_VERSION ||
+			    (readVersion.present() &&
+			     (reply.version <= 0 || reply.version > readVersion.get() || readVersion.get() == MAX_VERSION))) {
 				TraceEvent("GlobalConfigRefreshInvalidSnapshot")
 				    .suppressFor(1.0)
 				    .detail("ReplyVersion", reply.version)
+				    .detail("SnapshotReadVersion", readVersion)
 				    .detail("More", reply.result.more);
 				throw serialization_failed();
 			}
-			// A legacy proxy can cache a damaged stamp ahead of the transaction that read its rows.
 			// Check the current publication after each RPC, since the controller can replace it during a retry.
 			const Version published = dbInfo->history.empty() ? 0 : dbInfo->history.back().version;
 			if (reply.version < lastUpdate ||
@@ -319,6 +322,10 @@ Future<GlobalConfigRefreshReply> GlobalConfig::getSnapshot(const ClientDBInfo* d
 				    .detail("ReplyVersion", reply.version);
 				co_await delay(0.25);
 				continue;
+			}
+			// A complete transaction read includes changes whose history rows were lost before publication.
+			if (readVersion.present()) {
+				co_return reply;
 			}
 			if (dbInfo->history.size() > 1 && reply.version == published &&
 			    !snapshotMatchesHistory(reply.result, dbInfo->history)) {
@@ -361,8 +368,8 @@ Future<GlobalConfigRefreshReply> GlobalConfig::getSnapshot(const ClientDBInfo* d
 // process receives an updated history.
 Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 	while (true) {
-		// A single marker can come from the same version key as the proxy reply. Keep the last
-		// independently corroborated replay floor until a multi-row publication confirms a snapshot.
+		// Even a complete snapshot can contain a damaged, plausible stamp. A controller reading that
+		// same stamp as a single marker cannot confirm its label as a replay floor.
 		// MAX_VERSION requires a fresh snapshot, including on entry after a restart.
 		Optional<Version> snapshotMarker = MAX_VERSION;
 		Error err;
@@ -516,6 +523,11 @@ TEST_CASE("/fdbclient/GlobalConfig/RejectsInvalidInitialSnapshot") {
 	}
 	ASSERT_EQ(request.lastKnown, -1);
 	RangeResult empty;
+	// An absent versionstamp can yield a snapshot at zero, but never a verified one.
+	request.reply.send(GlobalConfigRefreshReply{ rows.arena(), 0, rows, 50 });
+	request = co_await test.nextRequest();
+	ASSERT_EQ(callbacks, 0);
+	ASSERT(!initialized.isReady());
 	request.reply.send(GlobalConfigRefreshReply{ empty.arena(), 0, empty });
 	co_await timeoutError(initialized, 5.0);
 	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
@@ -752,6 +764,36 @@ TEST_CASE("/fdbclient/GlobalConfig/PublicationChangesDuringLegacyVersionCheck") 
 	ASSERT_EQ(callbacks, 0);
 }
 
+TEST_CASE("/fdbclient/GlobalConfig/VerifiedSnapshotWithSingleMarker") {
+	GlobalConfigRefreshTest test({ VersionHistory(46) });
+	auto initialized = test.db->globalConfig->onInitialized();
+	auto request = co_await test.nextRequest();
+	auto rows = snapshotWithSetting("A"_sr);
+	for (auto [readVersion, more] :
+	     { std::pair<Version, bool>{ 45, false }, { MAX_VERSION, false }, { 50, true } }) {
+		rows.more = more;
+		request.reply.send(GlobalConfigRefreshReply{ rows.arena(), 46, rows, readVersion });
+		auto retry = co_await race(test.nextRequest(), initialized);
+		ASSERT_EQ(retry.index(), 0);
+		ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+		request = std::get<0>(retry);
+	}
+	rows.more = false;
+	request.reply.send(GlobalConfigRefreshReply{ rows.arena(), 46, rows, 50 });
+	// No proxy serves a separate read-version request.
+	co_await timeoutError(initialized, 5.0);
+	ASSERT(test.db->globalConfig->get<bool>("A"_sr, false));
+
+	// The transaction saw stamp 46, but a repair can still replace that label with 44.
+	auto changed = test.publish(publishedChange(41, 44, MutationRef(MutationRef::ClearRange, "A"_sr, "B"_sr)));
+	auto repair = co_await test.nextRequest();
+	ASSERT_EQ(repair.lastKnown, 0);
+	RangeResult empty;
+	repair.reply.send(GlobalConfigRefreshReply{ empty.arena(), 44, empty, 51 });
+	co_await timeoutError(changed, 5.0);
+	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+}
+
 TEST_CASE("/fdbclient/GlobalConfig/RepairedPublicationReleasesPendingRefresh") {
 	int callbacks = 0;
 	auto enabled = Tuple::makeTuple(true).pack();
@@ -842,4 +884,55 @@ TEST_CASE("/fdbclient/GlobalConfig/LegacySentinelDoesNotSkipRepairedPublication"
 	co_await timeoutError(changed, 5.0);
 	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
 	ASSERT_EQ(removals, 1);
+}
+
+namespace {
+
+struct LegacyGlobalConfigRefreshReply {
+	constexpr static FileIdentifier file_identifier = 12680327;
+	Arena arena;
+	Version version;
+	RangeResultRef result;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, result, version, arena);
+	}
+};
+
+template <class To, class From>
+To readGlobalConfigReply(const From& reply) {
+	auto protocol = AssumeVersion(currentProtocolVersion());
+	auto bytes = ObjectWriter::toValue(ErrorOr<NetworkSenderTableT<From>>(reply), protocol);
+	ArenaObjectReader reader(bytes.arena(), bytes, protocol);
+	ErrorOr<EnsureTable<To>> received;
+	reader.deserialize(received);
+	return received.get().asUnderlyingType();
+}
+
+} // namespace
+
+TEST_CASE("/fdbclient/GlobalConfig/RefreshReplyWireCompatibility") {
+	auto rows = snapshotWithSetting("B"_sr);
+	auto checkRows = [&](const auto& reply) {
+		ASSERT_EQ(reply.version, 44);
+		ASSERT(!reply.result.more);
+		ASSERT_EQ(reply.result.size(), 1);
+		ASSERT(reply.result[0] == rows[0]);
+	};
+
+	const LegacyGlobalConfigRefreshReply old{ rows.arena(), 44, rows };
+	const auto fromOld = readGlobalConfigReply<GlobalConfigRefreshReply>(old);
+	checkRows(fromOld);
+	ASSERT(!fromOld.snapshotReadVersion.present());
+
+	GlobalConfigRefreshReply current{ rows.arena(), 44, rows };
+	for (auto readVersion : { Optional<Version>(), Optional<Version>(50) }) {
+		current.snapshotReadVersion = readVersion;
+		checkRows(readGlobalConfigReply<LegacyGlobalConfigRefreshReply>(current));
+		const auto fromCurrent = readGlobalConfigReply<GlobalConfigRefreshReply>(current);
+		checkRows(fromCurrent);
+		ASSERT(fromCurrent.snapshotReadVersion == readVersion);
+	}
+	return Void();
 }

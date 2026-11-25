@@ -186,14 +186,19 @@ struct GlobalConfigRefreshReply {
 	Arena arena;
 	Version version;
 	RangeResultRef result;
+	// Present only when one transaction read the complete range and validated the versionstamp.
+	Optional<Version> snapshotReadVersion;
 
 	GlobalConfigRefreshReply() = default;
-	GlobalConfigRefreshReply(Arena const& arena, Version version, RangeResultRef result)
-	  : arena(arena), version(version), result(result) {}
+	GlobalConfigRefreshReply(Arena const& arena,
+	                         Version version,
+	                         RangeResultRef result,
+	                         Optional<Version> snapshotReadVersion = {})
+	  : arena(arena), version(version), result(result), snapshotReadVersion(snapshotReadVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, result, version, arena);
+		serializer(ar, result, version, snapshotReadVersion, arena);
 	}
 };
 

@@ -307,6 +307,9 @@ Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 struct GlobalConfigSnapshot {
 	Versionstamp stamp{ 0, 0 };
 	RangeResult data;
+	Optional<Version> snapshotReadVersion;
+
+	GlobalConfigRefreshReply reply() const { return { data.arena(), stamp.version, data, snapshotReadVersion }; }
 
 	void update(const Optional<Value>& versionstamp, const RangeResult& rows, Version readVersion) {
 		// Clients replace their entire cache with these rows.
@@ -315,12 +318,14 @@ struct GlobalConfigSnapshot {
 		}
 		if (versionstamp.present()) {
 			const auto newStamp = GlobalConfig::decodeVersionstamp(versionstamp.get(), readVersion);
-			if (!newStamp.present() || newStamp.get() < stamp) {
+			if (!newStamp.present() || readVersion == MAX_VERSION || newStamp.get() < stamp) {
 				throw serialization_failed();
 			}
-			stamp = newStamp.get();
+			*this = { newStamp.get(), rows, readVersion };
+		} else {
+			// Keep the legacy version label, but it does not identify these rows.
+			*this = { stamp, rows, {} };
 		}
-		data = rows;
 	}
 
 	Future<Void> read(ReadYourWritesTransaction& tr, int pageSize) {
@@ -376,16 +381,18 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValu
 	snapshot.update(BinaryWriter::toValue(stampAt41, Unversioned()), at41, 41);
 	ASSERT(snapshot.stamp == stampAt41);
 	ASSERT(snapshot.data == at41);
+	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 41);
 
-	auto checkRejected = [&](const Value& damaged) {
+	auto checkRejected = [&](const Value& damaged, Version readVersion = 42) {
 		try {
-			snapshot.update(damaged, RangeResult(), 42);
+			snapshot.update(damaged, RangeResult(), readVersion);
 			ASSERT(false);
 		} catch (Error& e) {
 			ASSERT_EQ(e.code(), error_code_serialization_failed);
 		}
 		ASSERT(snapshot.stamp == stampAt41);
 		ASSERT(snapshot.data == at41);
+		ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 41);
 	};
 	// The clear at 42 removes A. Dropping one leading zero would mislabel the empty snapshot as version 10752.
 	auto stamp = BinaryWriter::toValue(Versionstamp(42, 0), Unversioned());
@@ -399,6 +406,7 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValu
 	}
 	checkRejected(BinaryWriter::toValue(Versionstamp(40, 0), Unversioned()));
 	checkRejected(BinaryWriter::toValue(Versionstamp(41, 0), Unversioned()));
+	checkRejected(stamp, MAX_VERSION);
 
 	RangeResult at43;
 	at43.push_back_deep(at43.arena(),
@@ -406,6 +414,7 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValu
 	snapshot.update(BinaryWriter::toValue(Versionstamp(43, 7), Unversioned()), at43, 50);
 	ASSERT(snapshot.stamp == Versionstamp(43, 7));
 	ASSERT(snapshot.data == at43);
+	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 50);
 	return Void();
 }
 
@@ -417,15 +426,22 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotMissingVersion") {
 	snapshot.update({}, rows, 1);
 	ASSERT(snapshot.stamp == Versionstamp(0, 0));
 	ASSERT(snapshot.data == rows);
+	ASSERT(!snapshot.reply().snapshotReadVersion.present());
 	snapshot.update(BinaryWriter::toValue(Versionstamp(1, 0), Unversioned()), RangeResult(), 41);
 	ASSERT(snapshot.stamp == Versionstamp(1, 0));
 	ASSERT(snapshot.data.empty());
+	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 41);
 	snapshot.update({}, rows, 42);
 	ASSERT(snapshot.stamp == Versionstamp(1, 0));
 	ASSERT(snapshot.data == rows);
+	ASSERT(!snapshot.reply().snapshotReadVersion.present());
 	snapshot.update({}, RangeResult(), 42);
 	ASSERT(snapshot.stamp == Versionstamp(1, 0));
 	ASSERT(snapshot.data.empty());
+	ASSERT(!snapshot.reply().snapshotReadVersion.present());
+	snapshot.update(BinaryWriter::toValue(Versionstamp(1, 0), Unversioned()), rows, 43);
+	ASSERT(snapshot.reply().result == rows);
+	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 43);
 	return Void();
 }
 
@@ -462,7 +478,7 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
 	db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
 	auto nextRefresh = [&] { return timeoutError(waitAndForward(proxy.refreshGlobalConfig.getFuture()), 5.0); };
 	auto initial = co_await nextRefresh();
-	initial.reply.send(GlobalConfigRefreshReply{ snapshot.data.arena(), snapshot.stamp.version, snapshot.data });
+	initial.reply.send(snapshot.reply());
 	co_await timeoutError(db->globalConfig->onInitialized(), 5.0);
 	ASSERT(db->globalConfig->get<bool>("Z"_sr, false));
 
@@ -500,6 +516,7 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
 			ASSERT_EQ(last.begin.getKey(), keyAfter(rows[2].key));
 			ASSERT(snapshot.stamp == previous.stamp);
 			ASSERT(snapshot.data == previous.data);
+			ASSERT(snapshot.snapshotReadVersion == previous.snapshotReadVersion);
 			if (lastPageError.isValid()) {
 				if (lastPageError.code() == error_code_actor_cancelled) {
 					read.cancel();
@@ -511,6 +528,7 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
 				ASSERT_EQ(result.getError().code(), lastPageError.code());
 				ASSERT(snapshot.stamp == previous.stamp);
 				ASSERT(snapshot.data == previous.data);
+				ASSERT(snapshot.snapshotReadVersion == previous.snapshotReadVersion);
 				co_return;
 			}
 			GetKeyValuesReply tail;
@@ -523,7 +541,8 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
 	};
 	co_await readPages(42);
 	ASSERT_EQ(snapshot.stamp.version, 42);
-	recovery.reply.send(GlobalConfigRefreshReply{ snapshot.data.arena(), snapshot.stamp.version, snapshot.data });
+	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 42);
+	recovery.reply.send(snapshot.reply());
 	co_await timeoutError(changed, 5.0);
 	ASSERT(!db->globalConfig->get("A"_sr).isValid());
 	ASSERT(db->globalConfig->get<bool>("B"_sr, false));
@@ -531,6 +550,9 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
 	ASSERT(db->globalConfig->get<bool>("Z"_sr, false));
 	co_await readPages(43, transaction_too_old());
 	co_await readPages(44, actor_cancelled());
+	co_await readPages(45);
+	ASSERT_EQ(snapshot.reply().version, 45);
+	ASSERT_EQ(snapshot.reply().snapshotReadVersion.get(), 45);
 }
 
 // Handle common GlobalConfig transactions on the server side, because not all
@@ -561,8 +583,7 @@ Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInter
 			// point of view. The client learns the version through a
 			// ClientDBInfo update).
 			if (refresh.lastKnown <= snapshot.stamp.version) {
-				refresh.reply.send(
-				    GlobalConfigRefreshReply{ snapshot.data.arena(), snapshot.stamp.version, snapshot.data });
+				refresh.reply.send(snapshot.reply());
 			} else {
 				refresh.reply.sendError(future_version());
 			}

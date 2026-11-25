@@ -4086,7 +4086,7 @@ struct GlobalConfigTestClient {
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 	Database db;
 
-	explicit GlobalConfigTestClient(Version initialVersion) {
+	explicit GlobalConfigTestClient(std::vector<VersionHistory> history) {
 		grvProxy.provisional = false;
 		grvProxy.initEndpoints();
 		IFailureMonitor::failureMonitor().setStatus(grvProxy.address(), FailureStatus(false));
@@ -4095,7 +4095,7 @@ struct GlobalConfigTestClient {
 		commitProxy.initEndpoints();
 		ClientDBInfo info;
 		info.id = UID(1, 1);
-		info.history = { VersionHistory(initialVersion - 1), VersionHistory(initialVersion) };
+		info.history = std::move(history);
 		info.grvProxies.push_back(grvProxy);
 		info.commitProxies.push_back(commitProxy);
 		clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
@@ -4122,7 +4122,7 @@ Future<Void> checkGlobalConfigClientAfterMissedClear(const std::vector<VersionHi
 	const KeyRef keyA = "\xff"_sr;
 	auto enabled = Tuple::makeTuple(true).pack();
 	int removals = 0;
-	GlobalConfigTestClient client(clientVersion);
+	GlobalConfigTestClient client({ VersionHistory(clientVersion - 1), VersionHistory(clientVersion) });
 	auto initial = co_await client.nextRefresh();
 	ASSERT_EQ(initial.lastKnown, -1);
 	RangeResult snapshot;
@@ -4284,10 +4284,47 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesChangedHistory")
 	co_return;
 }
 
+TEST_CASE("/fdbserver/clustercontroller/globalConfigClientInitializesAfterUnseenClear") {
+	auto enabled = Tuple::makeTuple(true).pack();
+	MutationRef clearA(MutationRef::ClearRange, "A"_sr, "B"_sr);
+	MutationRef setA(MutationRef::SetValue, "A"_sr, enabled);
+	MutationRef setB(MutationRef::SetValue, "B"_sr, enabled);
+	GlobalConfigHistoryState state;
+	state.update(globalConfigTestStamp(41), globalConfigTestRows({ { 41, clearA } }), 41);
+
+	// Version 43 cleared A again, but its history row is missing before the controller's next read.
+	auto at44 = state.update(
+	    globalConfigTestStamp(44), globalConfigTestRows({ { 41, clearA }, { 42, setA }, { 44, setB } }), 44);
+	ASSERT_EQ(at44.size(), 3);
+	ASSERT_EQ(at44.front().version, 41);
+	ASSERT_EQ(at44[1].version, 42);
+	ASSERT_EQ(at44[1].mutations.size(), 1);
+	ASSERT_EQ(at44[1].mutations[0].param1, "A"_sr);
+	GlobalConfigTestClient client(std::move(at44));
+	auto initial = co_await client.nextRefresh();
+	ASSERT_EQ(initial.lastKnown, invalidVersion);
+	RangeResult rows;
+	rows.push_back_deep(rows.arena(), KeyValueRef("B"_sr.withPrefix(globalConfigKeysPrefix), enabled));
+	initial.reply.send(GlobalConfigRefreshReply{ rows.arena(), 44, rows, 44 });
+	co_await timeoutError(client.db->globalConfig->onInitialized(), 5.0);
+	ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
+	ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
+
+	MutationRef setC(MutationRef::SetValue, "C"_sr, enabled);
+	auto changed = client.db->globalConfig->onChange();
+	client.publish(state.update(
+	    globalConfigTestStamp(45), globalConfigTestRows({ { 42, setA }, { 44, setB }, { 45, setC } }), 45));
+	co_await timeoutError(changed, 5.0);
+	ASSERT(!client.db->globalConfig->get("A"_sr).isValid());
+	ASSERT(client.db->globalConfig->get<bool>("B"_sr, false));
+	ASSERT(client.db->globalConfig->get<bool>("C"_sr, false));
+	co_return;
+}
+
 TEST_CASE("/fdbserver/clustercontroller/globalConfigClientRefreshesUnreadableSetValue") {
 	const auto enabled = Tuple::makeTuple(true).pack();
 	int changesToB = 0;
-	GlobalConfigTestClient client(41);
+	GlobalConfigTestClient client({ VersionHistory(40), VersionHistory(41) });
 	auto initial = co_await client.nextRefresh();
 	ASSERT_EQ(initial.lastKnown, -1);
 	RangeResult initialData;
