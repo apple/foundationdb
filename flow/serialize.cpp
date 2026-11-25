@@ -40,13 +40,19 @@ _AssumeVersion::_AssumeVersion(ProtocolVersion version) : v(version) {
 	}
 }
 
-void detail::invalidReadLength(int requested, size_t remaining) {
-	ASSERT(!g_network || !g_network->isSimulated());
-	TraceEvent("SerializationFailed")
-	    .detail("RequestedBytes", requested)
-	    .detail("RemainingBytes", remaining)
-	    .backtrace();
-	throw serialization_failed();
+const void* BinaryReader::readBytes(int bytes) {
+	const auto remaining = remainingBytes();
+	if (bytes < 0 || static_cast<size_t>(bytes) > remaining) {
+		ASSERT(!g_network || !g_network->isSimulated());
+		TraceEvent("SerializationFailed")
+		    .detail("RequestedBytes", bytes)
+		    .detail("RemainingBytes", remaining)
+		    .backtrace();
+		throw serialization_failed();
+	}
+	const char* result = begin;
+	begin += bytes;
+	return result;
 }
 
 namespace {
@@ -59,40 +65,27 @@ TEST_CASE("flow/serialize/RejectsInvalidReadLengths") {
 	BinaryWriter writer(Unversioned());
 	writer << uint32_t(0x80000000) << uint8_t(42);
 	auto bytes = writer.toValue();
-	auto check = [&](auto& reader) {
-		StringRef value;
+	BinaryReader reader(bytes, Unversioned());
+	StringRef value;
+	try {
+		reader >> value;
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_serialization_failed);
+	}
+	ASSERT_EQ(reader.remainingBytes(), 1);
+	for (int length : { -1, 2, std::numeric_limits<int>::max() }) {
 		try {
-			reader >> value;
+			reader.arenaRead(length);
 			ASSERT(false);
 		} catch (Error& e) {
 			ASSERT_EQ(e.code(), error_code_serialization_failed);
 		}
 		ASSERT_EQ(reader.remainingBytes(), 1);
-		for (int length : { -1, 2, std::numeric_limits<int>::max() }) {
-			try {
-				reader.peekBytes(length);
-				ASSERT(false);
-			} catch (Error& e) {
-				ASSERT_EQ(e.code(), error_code_serialization_failed);
-			}
-			try {
-				reader.arenaRead(length);
-				ASSERT(false);
-			} catch (Error& e) {
-				ASSERT_EQ(e.code(), error_code_serialization_failed);
-			}
-			ASSERT_EQ(reader.remainingBytes(), 1);
-		}
-		ASSERT_EQ(*static_cast<const uint8_t*>(reader.peekBytes(1)), 42);
-		uint8_t last;
-		reader >> last;
-		ASSERT_EQ(last, 42);
-		ASSERT(reader.empty());
-	};
-	BinaryReader copied(bytes, Unversioned());
-	check(copied);
-	ArenaReader borrowed(bytes.arena(), bytes, Unversioned());
-	check(borrowed);
+	}
+	ASSERT_EQ(*static_cast<const uint8_t*>(reader.peekBytes(1)), 42);
+	ASSERT_EQ(*reader.arenaRead(1), 42);
+	ASSERT(reader.empty());
 	return Void();
 }
 

@@ -637,10 +637,6 @@ private:
 	}
 };
 
-namespace detail {
-[[noreturn]] void invalidReadLength(int requested, size_t remaining);
-}
-
 template <class Impl>
 class _Reader {
 public:
@@ -649,16 +645,9 @@ public:
 	using READER = Impl;
 
 	const void* peekBytes(int bytes) const {
-		if (bytes < 0 || static_cast<size_t>(bytes) > remainingBytes()) {
-			detail::invalidReadLength(bytes, remainingBytes());
-		}
+		ASSERT(bytes >= 0);
+		ASSERT(static_cast<size_t>(bytes) <= remainingBytes());
 		return begin;
-	}
-
-	const void* readBytes(int bytes) {
-		const void* result = peekBytes(bytes);
-		begin += bytes;
-		return result;
 	}
 
 	void serializeBytes(void* data, int bytes) {
@@ -706,6 +695,12 @@ class ArenaReader : public _Reader<ArenaReader> {
 	Optional<ArenaObjectReader> arenaObjectReader;
 
 public:
+	const void* readBytes(int bytes) {
+		const void* result = peekBytes(bytes);
+		begin += bytes;
+		return result;
+	}
+
 	const uint8_t* arenaRead(int bytes) { return (const uint8_t*)readBytes(bytes); }
 
 	StringRef arenaReadAll() const { return StringRef(reinterpret_cast<const uint8_t*>(begin), end - begin); }
@@ -737,6 +732,8 @@ class BinaryReader : public _Reader<BinaryReader> {
 	Optional<ObjectReader> objectReader;
 
 public:
+	const void* readBytes(int bytes);
+
 	const uint8_t* arenaRead(int bytes) {
 		// Reads and returns the next bytes.
 		// The returned pointer has the lifetime of this.arena()
