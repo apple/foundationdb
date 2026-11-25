@@ -28,6 +28,7 @@
 #include "fdbclient/Tuple.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GrvProxyInterface.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbserver/grvproxy/GrvProxyServer.h"
 #include "HealthMetricsRequestServer.h"
@@ -308,6 +309,10 @@ struct GlobalConfigSnapshot {
 	RangeResult data;
 
 	void update(const Optional<Value>& versionstamp, const RangeResult& rows, Version readVersion) {
+		// Clients replace their entire cache with these rows.
+		if (rows.more) {
+			throw serialization_failed();
+		}
 		if (versionstamp.present()) {
 			const auto newStamp = GlobalConfig::decodeVersionstamp(versionstamp.get(), readVersion);
 			if (!newStamp.present() || newStamp.get() < stamp) {
@@ -316,6 +321,25 @@ struct GlobalConfigSnapshot {
 			stamp = newStamp.get();
 		}
 		data = rows;
+	}
+
+	Future<Void> read(ReadYourWritesTransaction& tr, int pageSize) {
+		pageSize = std::max(1, pageSize);
+		auto versionFuture = tr.get(globalConfigVersionKey);
+		auto firstPage = tr.getRange(globalConfigDataKeys, pageSize);
+		Optional<Value> versionstamp = co_await versionFuture;
+		RangeResult rows = co_await firstPage;
+		while (rows.more) {
+			RangeResult page = co_await tr.getRange(
+			    rows.nextBeginKeySelector(), firstGreaterOrEqual(globalConfigDataKeys.end), pageSize);
+			rows.arena().dependsOn(page.arena());
+			rows.append(rows.arena(), page.begin(), page.size());
+			rows.more = page.more;
+			rows.readThrough = page.readThrough;
+			rows.readThroughEnd = page.readThroughEnd;
+		}
+		const Version readVersion = co_await tr.getReadVersion();
+		update(versionstamp, rows, readVersion);
 	}
 };
 
@@ -327,12 +351,7 @@ Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, GlobalConfigSnapsho
 			Error err;
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Future<Optional<Value>> globalConfigVersionFuture = tr->get(globalConfigVersionKey);
-				Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
-				Optional<Value> globalConfigVersion = co_await globalConfigVersionFuture;
-				RangeResult tmpCachedData = co_await tmpCachedDataFuture;
-				const Version readVersion = co_await tr->getReadVersion();
-				snapshot->update(globalConfigVersion, tmpCachedData, readVersion);
+				co_await snapshot->read(*tr, CLIENT_KNOBS->TOO_MANY);
 				co_return;
 			} catch (Error& e) {
 				err = e;
@@ -408,6 +427,109 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotMissingVersion") {
 	ASSERT(snapshot.stamp == Versionstamp(1, 0));
 	ASSERT(snapshot.data.empty());
 	return Void();
+}
+
+TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
+	GrvProxyInterface proxy;
+	proxy.provisional = false;
+	proxy.initEndpoints();
+	CommitProxyInterface commitProxy;
+	commitProxy.provisional = false;
+	commitProxy.initEndpoints();
+	ClientDBInfo info;
+	info.id = UID(1, 1);
+	info.grvProxies.push_back(proxy);
+	info.commitProxies.push_back(commitProxy);
+	auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
+	auto db = DatabaseContext::create(clientInfo, Never(), LocalityData(), EnableLocalityLoadBalance::False);
+	StorageServerInterface storage;
+	storage.initEndpoints();
+	IFailureMonitor::failureMonitor().setStatus(storage.address(), FailureStatus(false));
+	IFailureMonitor::failureMonitor().setStatus(proxy.address(), FailureStatus(false));
+	db->setCachedLocation(allKeys, { storage });
+
+	const auto enabled = Tuple::makeTuple(true).pack();
+	RangeResult rows;
+	for (KeyRef key : { "A"_sr, "B"_sr, "Y"_sr, "Z"_sr }) {
+		rows.push_back_deep(
+		    rows.arena(),
+		    KeyValueRef(key.withPrefix(globalConfigKeysPrefix), key == "A"_sr ? "\xff"_sr : enabled.contents()));
+	}
+	GlobalConfigSnapshot snapshot;
+	snapshot.data.append_deep(snapshot.data.arena(), rows.begin() + 2, 2);
+	snapshot.stamp = Versionstamp(41, 0);
+	db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
+	auto nextRefresh = [&] { return timeoutError(waitAndForward(proxy.refreshGlobalConfig.getFuture()), 5.0); };
+	auto initial = co_await nextRefresh();
+	initial.reply.send(GlobalConfigRefreshReply{ snapshot.data.arena(), snapshot.stamp.version, snapshot.data });
+	co_await timeoutError(db->globalConfig->onInitialized(), 5.0);
+	ASSERT(db->globalConfig->get<bool>("Z"_sr, false));
+
+	VersionHistory at42(42);
+	at42.mutations.emplace_back_deep(at42.mutations.arena(), MutationRef(MutationRef::SetValue, "A"_sr, "\xff"_sr));
+	at42.mutations.emplace_back_deep(at42.mutations.arena(), MutationRef(MutationRef::SetValue, "B"_sr, enabled));
+	info.id = UID(1, 2);
+	info.history = { VersionHistory(41), at42 };
+	auto changed = db->globalConfig->onChange();
+	clientInfo->set(info);
+	auto recovery = co_await nextRefresh();
+	ASSERT_EQ(recovery.lastKnown, 41);
+
+	auto readPages = [&](Version version, Error lastPageError = {}) -> Future<Void> {
+		const auto previous = snapshot;
+		ReadYourWritesTransaction tr(db);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setVersion(version);
+		tr.set(globalConfigVersionKey, BinaryWriter::toValue(Versionstamp(version, 0), Unversioned()));
+		auto read = snapshot.read(tr, 3);
+		auto first = co_await timeoutError(waitAndForward(storage.getKeyValues.getFuture()), 5.0);
+		ASSERT_EQ(first.version, version);
+		ASSERT_EQ(first.limit, 3);
+		ASSERT_EQ(first.begin.getKey(), globalConfigDataKeys.begin);
+		GetKeyValuesReply page;
+		page.version = version;
+		page.data.append_deep(page.arena, rows.begin(), 3);
+		page.more = true;
+		first.reply.send(page);
+
+		auto next = co_await timeoutError(race(read, storage.getKeyValues.getFuture()), 5.0);
+		if (next.index() == 1) {
+			auto last = std::get<1>(next);
+			ASSERT_EQ(last.version, first.version);
+			ASSERT_EQ(last.begin.getKey(), keyAfter(rows[2].key));
+			ASSERT(snapshot.stamp == previous.stamp);
+			ASSERT(snapshot.data == previous.data);
+			if (lastPageError.isValid()) {
+				if (lastPageError.code() == error_code_actor_cancelled) {
+					read.cancel();
+				} else {
+					last.reply.sendError(lastPageError);
+				}
+				auto result = co_await timeoutError(errorOr(read), 5.0);
+				ASSERT(result.isError());
+				ASSERT_EQ(result.getError().code(), lastPageError.code());
+				ASSERT(snapshot.stamp == previous.stamp);
+				ASSERT(snapshot.data == previous.data);
+				co_return;
+			}
+			GetKeyValuesReply tail;
+			tail.version = version;
+			tail.data.push_back_deep(tail.arena, rows[3]);
+			last.reply.send(tail);
+		}
+		co_await timeoutError(read, 5.0);
+		ASSERT(!lastPageError.isValid());
+	};
+	co_await readPages(42);
+	ASSERT_EQ(snapshot.stamp.version, 42);
+	recovery.reply.send(GlobalConfigRefreshReply{ snapshot.data.arena(), snapshot.stamp.version, snapshot.data });
+	co_await timeoutError(changed, 5.0);
+	ASSERT(!db->globalConfig->get("A"_sr).isValid());
+	ASSERT(db->globalConfig->get<bool>("B"_sr, false));
+	ASSERT(db->globalConfig->get<bool>("Y"_sr, false));
+	ASSERT(db->globalConfig->get<bool>("Z"_sr, false));
+	co_await readPages(43, transaction_too_old());
+	co_await readPages(44, actor_cancelled());
 }
 
 // Handle common GlobalConfig transactions on the server side, because not all
