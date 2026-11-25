@@ -4086,7 +4086,7 @@ struct GlobalConfigTestClient {
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 	Database db;
 
-	GlobalConfigTestClient() {
+	explicit GlobalConfigTestClient(Version initialVersion) {
 		grvProxy.provisional = false;
 		grvProxy.initEndpoints();
 		IFailureMonitor::failureMonitor().setStatus(grvProxy.address(), FailureStatus(false));
@@ -4095,12 +4095,12 @@ struct GlobalConfigTestClient {
 		commitProxy.initEndpoints();
 		ClientDBInfo info;
 		info.id = UID(1, 1);
+		info.history = { VersionHistory(initialVersion - 1), VersionHistory(initialVersion) };
 		info.grvProxies.push_back(grvProxy);
 		info.commitProxies.push_back(commitProxy);
 		clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
 		db = DatabaseContext::create(
 		    clientInfo, Future<Void>(Never()), LocalityData(), EnableLocalityLoadBalance::False);
-		db->updateCachedReadVersion(now(), 50);
 		db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
 	}
 
@@ -4122,7 +4122,7 @@ Future<Void> checkGlobalConfigClientAfterMissedClear(const std::vector<VersionHi
 	const KeyRef keyA = "\xff"_sr;
 	auto enabled = Tuple::makeTuple(true).pack();
 	int removals = 0;
-	GlobalConfigTestClient client;
+	GlobalConfigTestClient client(clientVersion);
 	auto initial = co_await client.nextRefresh();
 	ASSERT_EQ(initial.lastKnown, -1);
 	RangeResult snapshot;
@@ -4137,7 +4137,8 @@ Future<Void> checkGlobalConfigClientAfterMissedClear(const std::vector<VersionHi
 		++removals;
 	});
 
-	// The only publication the client receives is the one for 50, which sets B.
+	// After initialization the client receives only the publication for 50, which sets B.
+	client.db->updateCachedReadVersion(now(), 50);
 	Future<Void> changed = client.db->globalConfig->onChange();
 	client.publish(history);
 	if (expectRefresh) {
@@ -4286,7 +4287,7 @@ TEST_CASE("/fdbserver/clustercontroller/globalConfigClientMissesChangedHistory")
 TEST_CASE("/fdbserver/clustercontroller/globalConfigClientRefreshesUnreadableSetValue") {
 	const auto enabled = Tuple::makeTuple(true).pack();
 	int changesToB = 0;
-	GlobalConfigTestClient client;
+	GlobalConfigTestClient client(41);
 	auto initial = co_await client.nextRefresh();
 	ASSERT_EQ(initial.lastKnown, -1);
 	RangeResult initialData;

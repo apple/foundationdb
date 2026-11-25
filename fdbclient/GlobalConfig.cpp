@@ -179,8 +179,15 @@ void GlobalConfig::erase(std::optional<KeyRangeRef> range) {
 	}
 }
 
-bool GlobalConfig::applyHistory(const std::vector<VersionHistory>& history) {
+bool GlobalConfig::applyHistory(const std::vector<VersionHistory>& history, Optional<Version> snapshotMarker) {
 	const Version latest = history.back().version;
+	if (snapshotMarker.present()) {
+		// The same numeric marker needs only one snapshot. A legacy MAX_VERSION marker can cover new writes.
+		return history.size() == 1 && latest == snapshotMarker.get() && latest != MAX_VERSION;
+	}
+	if (lastUpdate < history.front().version) {
+		return false;
+	}
 	if (latest <= lastUpdate) {
 		return true;
 	}
@@ -215,9 +222,7 @@ bool GlobalConfig::applyHistory(const std::vector<VersionHistory>& history) {
 	return true;
 }
 
-Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
-	// Older controllers use MAX_VERSION to request a refresh without specifying a new version.
-	const Version minimumVersion = largestSeen == MAX_VERSION ? lastKnown : largestSeen;
+Future<GlobalConfigRefreshReply> GlobalConfig::getSnapshot(const ClientDBInfo* dbInfo, Version lastKnown) {
 	Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
 	while (true) {
 		Error err;
@@ -234,18 +239,22 @@ Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
 				    .detail("More", reply.result.more);
 				throw serialization_failed();
 			}
-			if (reply.version < minimumVersion) {
-				TraceEvent("GlobalConfigRefreshStaleSnapshot")
+			// A legacy proxy can cache a damaged stamp ahead of the transaction that read its rows.
+			// Check the current publication after each RPC, since the controller can replace it during a retry.
+			const Version published = dbInfo->history.empty() ? 0 : dbInfo->history.back().version;
+			if (reply.version < lastUpdate ||
+			    (published != MAX_VERSION && reply.version != std::max(lastUpdate, published))) {
+				TraceEvent("GlobalConfigRefreshVersionMismatch")
 				    .suppressFor(1.0)
-				    .detail("LastKnownVersion", lastKnown)
-				    .detail("LargestSeenVersion", largestSeen)
+				    .detail("ReplayFloor", lastUpdate)
+				    .detail("PublishedVersion", published)
 				    .detail("ReplyVersion", reply.version);
 				co_await delay(0.25);
 				continue;
 			}
-			// Older proxies can decode a damaged versionstamp as a future commit. A proxy can also
-			// legitimately be ahead of the controller, so use a database read version as the upper bound.
-			if (reply.version > cx->getCachedReadVersion()) {
+			// On a protocol mismatch an old controller can publish a single version from the same damaged
+			// key as the proxy. An independent read version can rule out an impossible stamp.
+			if (dbInfo->history.size() == 1 && reply.version > std::max(lastUpdate, cx->getCachedReadVersion())) {
 				GetReadVersionRequest getVersion(
 				    {}, 0, TransactionPriority::IMMEDIATE, cx->ssVersionVectorCache.getMaxVersion());
 				auto grv = co_await timeoutError(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
@@ -259,15 +268,11 @@ Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
 					    .detail("ReadVersion", grv.version);
 					throw future_version();
 				}
-			}
-			erase();
-			for (const auto& kv : reply.result) {
-				auto entry = decode(kv.key.removePrefix(globalConfigKeysPrefix), kv.value);
-				if (entry.second.isValid()) {
-					insert(std::move(entry));
+				if (dbInfo->history.size() != 1 || dbInfo->history.front().version != published) {
+					continue;
 				}
 			}
-			co_return reply.version;
+			co_return reply;
 		} catch (Error& e) {
 			err = e;
 		}
@@ -282,34 +287,46 @@ Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
 // process receives an updated history.
 Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 	while (true) {
+		// A single marker can come from the same version key as the proxy reply. Keep the last
+		// independently corroborated replay floor until a multi-row publication confirms a snapshot.
+		// MAX_VERSION requires a fresh snapshot, including on entry after a restart.
+		Optional<Version> snapshotMarker = MAX_VERSION;
 		Error err;
 		try {
-			if (initialized.canBeSet()) {
-				co_await cx->onConnected();
-
-				lastUpdate = co_await refresh(-1, 0);
-
-				cx->addref();
-				initialized.send(Void());
-				cx->delref();
-			}
-
+			co_await cx->onConnected();
 			while (true) {
-				// run one iteration at the beginning
 				co_await delay(0);
 				// Subscribe before processing history so a reentrant DB info update cannot be lost.
 				Future<Void> nextDbInfoChange = dbInfoChanged.onTrigger();
-				if (!dbInfo->history.empty()) {
-					if (lastUpdate < dbInfo->history.front().version || !applyHistory(dbInfo->history)) {
-						lastUpdate = co_await refresh(lastUpdate, dbInfo->history.back().version);
-						// DBInfo could have changed after the wait. If
-						// changes are present, re-run the loop to make
-						// sure they are applied.
-						if (!dbInfo->history.empty() &&
-						    dbInfo->history[0].version != std::numeric_limits<Version>::max()) {
-							continue;
+				const bool initializing = initialized.canBeSet();
+				const auto& history = dbInfo->history;
+				if (initializing || (!history.empty() && !applyHistory(history, snapshotMarker))) {
+					auto reply = co_await getSnapshot(dbInfo, initializing ? invalidVersion : lastUpdate);
+					// getSnapshot checked the latest publication. Watch for any change during callbacks.
+					nextDbInfoChange = dbInfoChanged.onTrigger();
+					const bool needsMarker = history.size() == 1 && reply.version > lastUpdate;
+					snapshotMarker = needsMarker ? Optional<Version>(history.front().version) : Optional<Version>();
+					erase();
+					for (const auto& kv : reply.result) {
+						auto entry = decode(kv.key.removePrefix(globalConfigKeysPrefix), kv.value);
+						if (entry.second.isValid()) {
+							insert(std::move(entry));
 						}
 					}
+					if (!needsMarker) {
+						lastUpdate = reply.version;
+					}
+				}
+				if (initializing) {
+					cx->addref();
+					initialized.send(Void());
+					cx->delref();
+					co_await delay(0);
+				}
+				if (nextDbInfoChange.isReady()) {
+					continue;
+				}
+				if (!dbInfo->history.empty()) {
 					configChanged.trigger();
 				}
 				// In case this actor is canceled in the d'tor of GlobalConfig we can exit here.
@@ -337,7 +354,7 @@ struct GlobalConfigRefreshTest {
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 	Database db;
 
-	GlobalConfigRefreshTest() {
+	explicit GlobalConfigRefreshTest(std::vector<VersionHistory> history = {}) {
 		proxy.provisional = false;
 		proxy.initEndpoints();
 		IFailureMonitor::failureMonitor().setStatus(proxy.address(), FailureStatus(false));
@@ -346,6 +363,7 @@ struct GlobalConfigRefreshTest {
 		commitProxy.initEndpoints();
 		ClientDBInfo info;
 		info.id = UID(1, 1);
+		info.history = std::move(history);
 		info.grvProxies.push_back(proxy);
 		info.commitProxies.push_back(commitProxy);
 		clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
@@ -366,11 +384,22 @@ struct GlobalConfigRefreshTest {
 		}
 	}
 
-	Future<Void> publish(Version version) {
+	Future<Void> serveSnapshots(Version version, RangeResult rows) {
+		while (true) {
+			auto request = co_await proxy.refreshGlobalConfig.getFuture();
+			if (request.lastKnown <= version) {
+				request.reply.send(GlobalConfigRefreshReply{ rows.arena(), version, rows });
+			} else {
+				request.reply.sendError(future_version());
+			}
+		}
+	}
+
+	Future<Void> publish(std::vector<VersionHistory> history) {
 		auto changed = db->globalConfig->onChange();
 		auto info = clientInfo->get();
 		info.id = deterministicRandom()->randomUniqueID();
-		info.history = { VersionHistory(version) };
+		info.history = std::move(history);
 		clientInfo->set(info);
 		return changed;
 	}
@@ -383,12 +412,17 @@ RangeResult snapshotWithSetting(KeyRef key) {
 	return rows;
 }
 
+std::vector<VersionHistory> publishedChange(Version base, Version version, MutationRef mutation) {
+	VersionHistory change(version);
+	change.mutations.emplace_back_deep(change.mutations.arena(), mutation);
+	return { VersionHistory(base), std::move(change) };
+}
+
 } // namespace
 
 TEST_CASE("/fdbclient/GlobalConfig/RejectsInvalidInitialSnapshot") {
 	int callbacks = 0;
 	GlobalConfigRefreshTest test;
-	auto grvs = test.serveReadVersions(50);
 	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any>) { ++callbacks; });
 	auto initialized = test.db->globalConfig->onInitialized();
 	auto rows = snapshotWithSetting("A"_sr);
@@ -407,28 +441,30 @@ TEST_CASE("/fdbclient/GlobalConfig/RejectsInvalidInitialSnapshot") {
 		request = std::get<0>(retry);
 	}
 	ASSERT_EQ(request.lastKnown, -1);
-	rows.more = false;
-	request.reply.send(GlobalConfigRefreshReply{ rows.arena(), 0, rows });
+	RangeResult empty;
+	request.reply.send(GlobalConfigRefreshReply{ empty.arena(), 0, empty });
 	co_await timeoutError(initialized, 5.0);
-	ASSERT(test.db->globalConfig->get<bool>("A"_sr, false));
-	ASSERT_EQ(callbacks, 1);
+	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+	ASSERT_EQ(callbacks, 0);
 }
 
-TEST_CASE("/fdbclient/GlobalConfig/CancelDuringSnapshotVersionCheck") {
+TEST_CASE("/fdbclient/GlobalConfig/CancelDuringSnapshotRetry") {
 	int callbacks = 0;
 	GlobalConfigRefreshTest test;
+	// The status updater holds its own Database reference while it waits for configuration initialization.
+	test.db->clientStatusUpdater.actor.cancel();
 	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any>) { ++callbacks; });
 	auto initialized = test.db->globalConfig->onInitialized();
 	auto snapshot = co_await test.nextRequest();
 	auto rows = snapshotWithSetting("A"_sr);
 	snapshot.reply.send(GlobalConfigRefreshReply{ rows.arena(), 41, rows });
-	auto grv = co_await timeoutError(waitAndForward(test.proxy.getConsistentReadVersion.getFuture()), 5.0);
+	auto retry = co_await test.nextRequest();
+	co_await delay(0);
 	ASSERT(!initialized.isReady());
+	ASSERT_EQ(test.db->debugGetReferenceCount(), 1);
 	test.db = Database();
 	ASSERT(initialized.isError());
-	GetReadVersionReply reply;
-	reply.version = 50;
-	grv.reply.send(reply);
+	retry.reply.send(GlobalConfigRefreshReply{ rows.arena(), 0, rows });
 	co_await delay(0);
 	ASSERT_EQ(callbacks, 0);
 }
@@ -436,14 +472,23 @@ TEST_CASE("/fdbclient/GlobalConfig/CancelDuringSnapshotVersionCheck") {
 TEST_CASE("/fdbclient/GlobalConfig/RejectsStaleRefreshSnapshot") {
 	const KeyRef tail = "\xff"_sr;
 	int callbacks = 0;
-	GlobalConfigRefreshTest test;
+	auto enabled = Tuple::makeTuple(true).pack();
+	GlobalConfigRefreshTest test(publishedChange(40, 41, MutationRef(MutationRef::SetValue, tail, enabled)));
 	auto grvs = test.serveReadVersions(50);
 	auto initial = co_await test.nextRequest();
+	RangeResult empty;
+	initial.reply.send(GlobalConfigRefreshReply{ empty.arena(), 0, empty });
+	auto initialized = test.db->globalConfig->onInitialized();
+	auto next = co_await race(test.nextRequest(), initialized);
+	ASSERT_EQ(next.index(), 0);
+	initial = std::get<0>(next);
 	auto rows = snapshotWithSetting(tail);
 	initial.reply.send(GlobalConfigRefreshReply{ rows.arena(), 41, rows });
-	co_await timeoutError(test.db->globalConfig->onInitialized(), 5.0);
+	co_await timeoutError(initialized, 5.0);
+	ASSERT(test.db->globalConfig->get<bool>(tail, false));
 	test.db->globalConfig->trigger(tail, [&](std::optional<std::any>) { ++callbacks; });
-	auto changed = test.publish(44);
+	auto historyAt44 = publishedChange(43, 44, MutationRef(MutationRef::SetValue, "A"_sr, enabled));
+	auto changed = test.publish(historyAt44);
 	auto request = co_await test.nextRequest();
 	auto firstPage = snapshotWithSetting("A"_sr);
 	for (auto [version, more] :
@@ -461,25 +506,34 @@ TEST_CASE("/fdbclient/GlobalConfig/RejectsStaleRefreshSnapshot") {
 	ASSERT_EQ(request.lastKnown, 41);
 	firstPage.more = false;
 	firstPage.push_back_deep(firstPage.arena(), rows[0]);
+	// An unrelated DBInfo generation must not discard an in-flight reply for the same publication.
+	test.publish(historyAt44);
+	co_await delay(0);
 	request.reply.send(GlobalConfigRefreshReply{ firstPage.arena(), 44, firstPage });
 	co_await timeoutError(changed, 5.0);
 	ASSERT(test.db->globalConfig->get<bool>(tail, false));
 	ASSERT(test.db->globalConfig->get<bool>("A"_sr, false));
 	ASSERT_EQ(callbacks, 2);
 
-	changed = test.publish(45);
+	changed = test.publish({ VersionHistory(45) });
 	request = co_await test.nextRequest();
 	ASSERT_EQ(request.lastKnown, 44);
 	request.reply.send(GlobalConfigRefreshReply{ rows.arena(), 46, rows });
+	auto retry = co_await race(test.nextRequest(), changed);
+	ASSERT_EQ(retry.index(), 0);
+	ASSERT(test.db->globalConfig->get<bool>("A"_sr, false));
+	test.publish(publishedChange(45, 46, MutationRef(MutationRef::ClearRange, "A"_sr, "B"_sr)));
+	std::get<0>(retry).reply.send(GlobalConfigRefreshReply{ rows.arena(), 46, rows });
+	auto at46 = test.serveSnapshots(46, rows);
 	co_await timeoutError(changed, 5.0);
 	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+	at46.cancel();
 
-	changed = test.publish(MAX_VERSION);
+	changed = test.publish({ VersionHistory(MAX_VERSION) });
 	request = co_await test.nextRequest();
 	ASSERT_EQ(request.lastKnown, 46);
-	RangeResult empty;
 	request.reply.send(GlobalConfigRefreshReply{ empty.arena(), 45, empty });
-	auto retry = co_await race(test.nextRequest(), changed);
+	retry = co_await race(test.nextRequest(), changed);
 	ASSERT(test.db->globalConfig->get<bool>(tail, false));
 	ASSERT_EQ(retry.index(), 0);
 	request = std::get<0>(retry);
@@ -487,4 +541,131 @@ TEST_CASE("/fdbclient/GlobalConfig/RejectsStaleRefreshSnapshot") {
 	request.reply.send(GlobalConfigRefreshReply{ empty.arena(), 46, empty });
 	co_await timeoutError(changed, 5.0);
 	ASSERT(!test.db->globalConfig->get(tail).isValid());
+}
+
+TEST_CASE("/fdbclient/GlobalConfig/LaterReadVersionCannotValidateCachedSnapshot") {
+	int callbacks = 0;
+	GlobalConfigRefreshTest test({ VersionHistory(41) });
+	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any>) { ++callbacks; });
+	auto initialized = test.db->globalConfig->onInitialized();
+	auto request = co_await test.nextRequest();
+	auto at41 = snapshotWithSetting("A"_sr);
+	// A legacy proxy read A at 41 with a damaged stamp of 46. The database passes 46 after A is cleared.
+	request.reply.send(GlobalConfigRefreshReply{ at41.arena(), 46, at41 });
+	test.publish(publishedChange(41, 44, MutationRef(MutationRef::ClearRange, "A"_sr, "B"_sr)));
+	auto grvs = test.serveReadVersions(50);
+	auto repaired = test.serveSnapshots(44, RangeResult());
+	co_await timeoutError(initialized, 5.0);
+	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+	ASSERT_EQ(callbacks, 0);
+}
+
+TEST_CASE("/fdbclient/GlobalConfig/PublicationChangesDuringLegacyVersionCheck") {
+	int callbacks = 0;
+	GlobalConfigRefreshTest test({ VersionHistory(46) });
+	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any>) { ++callbacks; });
+	auto request = co_await test.nextRequest();
+	auto rows = snapshotWithSetting("A"_sr);
+	request.reply.send(GlobalConfigRefreshReply{ rows.arena(), 46, rows });
+	auto grv = co_await timeoutError(waitAndForward(test.proxy.getConsistentReadVersion.getFuture()), 5.0);
+	test.publish(publishedChange(41, 44, MutationRef(MutationRef::ClearRange, "A"_sr, "B"_sr)));
+	GetReadVersionReply version;
+	version.version = 50;
+	grv.reply.send(version);
+	auto repaired = test.serveSnapshots(44, RangeResult());
+	co_await timeoutError(test.db->globalConfig->onInitialized(), 5.0);
+	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+	ASSERT_EQ(callbacks, 0);
+}
+
+TEST_CASE("/fdbclient/GlobalConfig/RepairedPublicationReleasesPendingRefresh") {
+	int callbacks = 0;
+	auto enabled = Tuple::makeTuple(true).pack();
+	GlobalConfigRefreshTest test(publishedChange(40, 41, MutationRef(MutationRef::SetValue, "A"_sr, enabled)));
+	auto grvs = test.serveReadVersions(50);
+	auto initial = co_await test.nextRequest();
+	auto at41 = snapshotWithSetting("A"_sr);
+	initial.reply.send(GlobalConfigRefreshReply{ at41.arena(), 41, at41 });
+	co_await timeoutError(test.db->globalConfig->onInitialized(), 5.0);
+	ASSERT(test.db->globalConfig->get<bool>("A"_sr, false));
+	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any> value) {
+		ASSERT(!value.has_value());
+		++callbacks;
+	});
+
+	const Version damagedStamp = Version(1) << 62;
+	auto changed = test.publish({ VersionHistory(damagedStamp) });
+	auto request = co_await test.nextRequest();
+	RangeResult empty;
+	// An old controller and proxy can both read the same damaged versionstamp.
+	for (Version version : { damagedStamp, Version(44) }) {
+		ASSERT_EQ(request.lastKnown, 41);
+		request.reply.send(GlobalConfigRefreshReply{ empty.arena(), version, empty });
+		auto retry = co_await race(test.nextRequest(), changed);
+		ASSERT(test.db->globalConfig->get<bool>("A"_sr, false));
+		ASSERT_EQ(callbacks, 0);
+		ASSERT_EQ(retry.index(), 0);
+		request = std::get<0>(retry);
+	}
+	test.publish(publishedChange(43, 44, MutationRef(MutationRef::ClearRange, "A"_sr, "B"_sr)));
+	request.reply.send(GlobalConfigRefreshReply{ empty.arena(), 44, empty });
+	auto repaired = test.serveSnapshots(44, empty);
+	co_await timeoutError(changed, 5.0);
+	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+	ASSERT_EQ(callbacks, 1);
+}
+
+TEST_CASE("/fdbclient/GlobalConfig/MatchingLegacyStampDoesNotSkipRepairedClear") {
+	int removals = 0;
+	GlobalConfigRefreshTest test;
+	test.db->updateCachedReadVersion(now(), 50);
+	auto grvs = test.serveReadVersions(50);
+	auto initial = co_await test.nextRequest();
+	auto unstamped = snapshotWithSetting("old"_sr);
+	initial.reply.send(GlobalConfigRefreshReply{ unstamped.arena(), 0, unstamped });
+	co_await timeoutError(test.db->globalConfig->onInitialized(), 5.0);
+	ASSERT(test.db->globalConfig->get<bool>("old"_sr, false));
+
+	// The old proxy and controller both used 46 from the same damaged version key.
+	auto changed = test.publish({ VersionHistory(46) });
+	auto request = co_await test.nextRequest();
+	auto at41 = snapshotWithSetting("A"_sr);
+	request.reply.send(GlobalConfigRefreshReply{ at41.arena(), 46, at41 });
+	co_await timeoutError(changed, 5.0);
+	ASSERT(test.db->globalConfig->get<bool>("A"_sr, false));
+	ASSERT(!test.db->globalConfig->get("old"_sr).isValid());
+	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any> value) {
+		ASSERT(!value.has_value());
+		++removals;
+	});
+
+	changed = test.publish(publishedChange(41, 44, MutationRef(MutationRef::ClearRange, "A"_sr, "B"_sr)));
+	auto repair = co_await race(test.nextRequest(), changed);
+	ASSERT_EQ(repair.index(), 0);
+	ASSERT_EQ(std::get<0>(repair).lastKnown, 0);
+	RangeResult empty;
+	std::get<0>(repair).reply.send(GlobalConfigRefreshReply{ empty.arena(), 44, empty });
+	co_await timeoutError(changed, 5.0);
+	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+	ASSERT_EQ(removals, 1);
+}
+
+TEST_CASE("/fdbclient/GlobalConfig/LegacySentinelDoesNotSkipRepairedPublication") {
+	int removals = 0;
+	GlobalConfigRefreshTest test({ VersionHistory(MAX_VERSION) });
+	auto grvs = test.serveReadVersions(50);
+	auto snapshots = test.serveSnapshots(46, snapshotWithSetting("A"_sr));
+	co_await timeoutError(test.db->globalConfig->onInitialized(), 5.0);
+	ASSERT(test.db->globalConfig->get<bool>("A"_sr, false));
+	snapshots.cancel();
+	test.db->globalConfig->trigger("A"_sr, [&](std::optional<std::any> value) {
+		ASSERT(!value.has_value());
+		++removals;
+	});
+
+	auto changed = test.publish({ VersionHistory(44) });
+	auto repaired = test.serveSnapshots(44, RangeResult());
+	co_await timeoutError(changed, 5.0);
+	ASSERT(!test.db->globalConfig->get("A"_sr).isValid());
+	ASSERT_EQ(removals, 1);
 }

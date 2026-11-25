@@ -438,11 +438,11 @@ TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigSnapshotReadsAllPages") {
 	commitProxy.initEndpoints();
 	ClientDBInfo info;
 	info.id = UID(1, 1);
+	info.history = { VersionHistory(40), VersionHistory(41) };
 	info.grvProxies.push_back(proxy);
 	info.commitProxies.push_back(commitProxy);
 	auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
 	auto db = DatabaseContext::create(clientInfo, Never(), LocalityData(), EnableLocalityLoadBalance::False);
-	db->updateCachedReadVersion(now(), 50);
 	StorageServerInterface storage;
 	storage.initEndpoints();
 	IFailureMonitor::failureMonitor().setStatus(storage.address(), FailureStatus(false));

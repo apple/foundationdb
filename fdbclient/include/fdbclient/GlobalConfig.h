@@ -36,6 +36,7 @@
 
 class DatabaseContext;
 struct ClientDBInfo;
+struct GlobalConfigRefreshReply;
 class Transaction;
 
 // Used to store a list of mutations made to the global configuration at a
@@ -181,12 +182,9 @@ private:
 	static Entry decode(KeyRef key, ValueRef value);
 	void insert(Entry entry);
 	void erase(std::optional<KeyRangeRef> range = std::nullopt);
-	bool applyHistory(const std::vector<VersionHistory>& history);
+	bool applyHistory(const std::vector<VersionHistory>& history, Optional<Version> snapshotMarker);
 
-	// Updates local copy of global configuration by reading the entire key-range
-	// from storage (proxied through the GrvProxies). Returns the version of the
-	// refreshed data.
-	Future<Version> refresh(Version lastKnown, Version largestSeen);
+	Future<GlobalConfigRefreshReply> getSnapshot(const ClientDBInfo* dbInfo, Version lastKnown);
 	Future<Void> updater(const ClientDBInfo* dbInfo);
 
 	DatabaseContext* cx;
