@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <memory>
+
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/VersionVector.h"
@@ -78,32 +80,59 @@ TEST_CASE("/fdbclient/VersionVector/RejectsMalformedFields") {
 	Encoding::save(encoded.data(), source, context);
 
 	auto checkRejected = [&](const uint8_t* data, size_t size) {
-		VersionVector output(42);
+		VersionVector output;
+		output.setVersion(Tag(2, 1), 42);
 		try {
 			Encoding::load(data, size, output, context);
 			ASSERT(false);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_serialization_failed);
-			ASSERT(output.empty() && output.getMaxVersion() == 42);
+			ASSERT(output.size() == 1 && output.getVersion(Tag(2, 1)) == 42 && output.getMaxVersion() == 42);
 		}
 	};
 	for (size_t size = 0; size < encoded.size(); ++size) {
-		checkRejected(encoded.data(), size);
+		auto prefix = std::make_unique<uint8_t[]>(size);
+		memcpy(prefix.get(), encoded.data(), size);
+		checkRejected(prefix.get(), size);
 	}
 	auto checkField = [&](size_t offset, auto value) {
 		auto bad = encoded;
 		memcpy(bad.data() + offset, &value, sizeof(value));
 		checkRejected(bad.data(), bad.size());
 	};
-	const size_t runCountOffset = sizeof(size_t) + sizeof(int8_t);
+	const size_t localityOffset = sizeof(size_t);
+	const size_t runSize = sizeof(int8_t) + sizeof(uint16_t);
+	const size_t runCountOffset = localityOffset + sizeof(int8_t);
 	const size_t idSizeOffset = runCountOffset + sizeof(uint16_t);
 	const size_t minVersionOffset = idSizeOffset + 2 * sizeof(uint8_t);
+	const size_t pairCountOffset = minVersionOffset + sizeof(Version);
+	const size_t firstPairOffset = pairCountOffset + sizeof(size_t);
 	checkField(0, std::numeric_limits<size_t>::max());
+	checkField(localityOffset, int8_t(tagLocalityInvalid));
+	checkField(localityOffset, int8_t(tagLocalityInvalid - 1));
 	checkField(runCountOffset, uint16_t(3));
 	checkField(idSizeOffset, uint8_t(0));
 	checkField(idSizeOffset + 1, uint8_t(3));
-	checkField(minVersionOffset, Version(MAX_VERSION));
-	checkField(minVersionOffset + sizeof(Version), std::numeric_limits<size_t>::max());
+	checkField(minVersionOffset, std::numeric_limits<Version>::min());
+	checkField(pairCountOffset, std::numeric_limits<size_t>::max());
+	checkField(firstPairOffset + 2, uint8_t(2)); // duplicate ID
+	checkField(firstPairOffset + 2, uint8_t(1)); // decreasing ID
+	checkField(encoded.size() - sizeof(Version), Version(10)); // below the second entry
+	checkField(encoded.size() - sizeof(Version), Version(9)); // below the encoded minimum
+
+	const Version maxVersion = MAX_VERSION;
+	memcpy(encoded.data() + encoded.size() - sizeof(Version), &maxVersion, sizeof(maxVersion));
+	checkField(minVersionOffset, maxVersion); // the second delta overflows
+
+	source.setVersion(Tag(0, 0), 12);
+	encoded.resize(Encoding::size(source, context));
+	Encoding::save(encoded.data(), source, context);
+	checkField(localityOffset, int8_t(tagLocalitySpecial)); // (-1, 0) is invalidTag
+	checkField(localityOffset + runSize, int8_t(0)); // duplicate locality
+	checkField(localityOffset + runSize, int8_t(-1)); // decreasing locality
+	const uint16_t allThreeTags = 3;
+	memcpy(encoded.data() + runCountOffset + runSize, &allThreeTags, sizeof(allThreeTags));
+	checkField(runCountOffset, uint16_t(0)); // empty run with a correct pair total
 	return Void();
 }
 
@@ -112,24 +141,34 @@ TEST_CASE("/fdbclient/VersionVector/simpleVV") {
 	TestContextArena context{ arena };
 
 	VersionVector serializedVV;
-	serializedVV.setVersion(Tag(-1, 2), 3619339);
+	serializedVV.setVersion(Tag(-1, 2), 0);
 	serializedVV.setVersion(Tag(0, 13), 13292611);
 
 	std::set<Tag> tags;
 	tags.emplace(0, 2);
 	tags.emplace(0, 1);
 	tags.emplace(0, 0);
-	serializedVV.setVersion(tags, 13391141);
+	serializedVV.setVersion(tags, MAX_VERSION - 1);
+	serializedVV.setVersion(tags, MAX_VERSION, 1); // The filter advances only the maximum.
 
-	size_t size = dynamic_size_traits<VersionVector>::size(serializedVV, context);
+	using Encoding = dynamic_size_traits<VersionVector>;
+	size_t size = Encoding::size(serializedVV, context);
 
 	uint8_t* buf = context.allocate(size);
-	dynamic_size_traits<VersionVector>::save(buf, serializedVV, context);
+	Encoding::save(buf, serializedVV, context);
 
 	VersionVector deserializedVV;
-	dynamic_size_traits<VersionVector>::load(buf, size, deserializedVV, context);
+	Encoding::load(buf, size, deserializedVV, context);
 
 	ASSERT(serializedVV.compare(deserializedVV));
+
+	VersionVector cache, reply;
+	cache.applyDelta(deserializedVV);
+	cache.getDelta(invalidVersion, reply);
+	ASSERT(Encoding::size(reply, context) == size);
+	std::vector<uint8_t> forwarded(size);
+	Encoding::save(forwarded.data(), reply, context);
+	ASSERT(memcmp(forwarded.data(), buf, size) == 0);
 
 	return Void();
 }

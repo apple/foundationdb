@@ -46,8 +46,7 @@ struct VersionVector {
 	explicit VersionVector(Version version) : maxVersion(version), cachedEncodedSize(InvalidEncodedSize) {}
 
 private:
-	// Only invoked by getDelta() and applyDelta(), where tag has been validated
-	// and version is guaranteed to be larger than the existing value.
+	// The tag must be valid. An existing entry for this tag must have a lower version.
 	inline void setVersionNoCheck(const Tag& tag, Version version) {
 		versions[tag] = version;
 		invalidateCachedEncodedSize();
@@ -383,22 +382,25 @@ public:
 		data += sizeof(T);
 	}
 
-	// The caller has checked the byte size and the total number of pairs across all runs.
+	// The caller has checked the pair counts and byte size, and 0 <= minVersion <= maxVersion.
 	template <typename TagId, typename Delta>
 	bool deserializePairs(const uint8_t*& data,
 	                      const std::vector<std::pair<int8_t, uint16_t>>& runs,
 	                      Version minVersion) {
-		const uint64_t maxDelta = uint64_t(MAX_VERSION) - uint64_t(minVersion);
+		const uint64_t maxDelta = maxVersion - minVersion;
 		for (const auto& [locality, count] : runs) {
+			int previousId = -1;
 			for (uint16_t i = 0; i < count; ++i) {
 				TagId id;
 				Delta delta;
 				deserialize(data, id);
 				deserialize(data, delta);
-				if (delta > maxDelta) {
+				Tag tag(locality, id);
+				if (tag == invalidTag || id <= previousId || delta > maxDelta) {
 					return false;
 				}
-				setVersionNoCheck(Tag(locality, id), static_cast<Version>(uint64_t(minVersion) + delta));
+				previousId = id;
+				setVersionNoCheck(tag, minVersion + static_cast<Version>(delta));
 			}
 		}
 		return true;
@@ -493,15 +495,21 @@ struct dynamic_size_traits<VersionVector> : std::true_type {
 		}
 
 		VersionVector decoded;
+		memcpy(&decoded.maxVersion, pairsEnd, sizeof(decoded.maxVersion));
 		if (localityCount > 0) {
 			std::vector<std::pair<int8_t, uint16_t>> runs;
 			runs.reserve(localityCount);
 			size_t totalPairs = 0;
+			int8_t previousLocality = tagLocalityInvalid;
 			for (size_t i = 0; i < localityCount; ++i) {
 				int8_t locality;
 				uint16_t count;
 				vv.deserialize(data, locality);
 				vv.deserialize(data, count);
+				if (locality <= previousLocality || count == 0) {
+					detail::load_failed(context, "invalid version vector locality run");
+				}
+				previousLocality = locality;
 				runs.emplace_back(locality, count);
 				totalPairs += count;
 			}
@@ -515,6 +523,9 @@ struct dynamic_size_traits<VersionVector> : std::true_type {
 			vv.deserialize(data, deltaSize);
 			vv.deserialize(data, minVersion);
 			vv.deserialize(data, pairCount);
+			if (minVersion < 0 || minVersion > decoded.maxVersion) {
+				detail::load_failed(context, "invalid version vector minimum version");
+			}
 			if (idSize != sizeof(uint8_t) && idSize != sizeof(uint16_t)) {
 				detail::load_failed(context, "invalid version vector tag ID size");
 			}
@@ -527,12 +538,11 @@ struct dynamic_size_traits<VersionVector> : std::true_type {
 			                 ? decoded.deserializePairs<uint8_t>(data, runs, minVersion, deltaSize)
 			                 : decoded.deserializePairs<uint16_t>(data, runs, minVersion, deltaSize);
 			if (!valid) {
-				detail::load_failed(context, "invalid version vector delta");
+				detail::load_failed(context, "invalid version vector tag or delta");
 			}
 		} else if (data != pairsEnd) {
 			detail::load_failed(context, "empty version vector has extra bytes");
 		}
-		decoded.deserialize(data, decoded.maxVersion);
 		vv = std::move(decoded);
 	}
 };
