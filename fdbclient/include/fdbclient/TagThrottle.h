@@ -155,7 +155,8 @@ struct TagThrottleValue {
 	TagThrottleValue(double tpsRate, double expirationTime, double initialDuration, TagThrottledReason reason)
 	  : tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration), reason(reason) {}
 
-	static Optional<TagThrottleValue> tryFromValue(const ValueRef& value);
+	static bool isValidRate(double tpsRate);
+	static Optional<TagThrottleValue> tryFromValue(const ValueRef& value, TagThrottleType throttleType);
 
 	// To change this serialization, ProtocolVersion::TagThrottleValue must be updated, and downgrades need to be
 	// considered
@@ -260,6 +261,32 @@ Future<Optional<bool>> getValidAutoEnabled(Reference<Tr> tr) {
 	}
 }
 
+template <class Tr>
+Future<std::vector<TagThrottleInfo>> readThrottleRange(Reference<Tr> tr, KeyRange range, int limit) {
+	std::vector<TagThrottleInfo> results;
+	while (true) {
+		auto f = tr->getRange(range, limit);
+		RangeResult throttles = co_await safeThreadFutureToFuture(f);
+		for (const auto& throttle : throttles) {
+			auto key = TagThrottleKey::tryFromKey(throttle.key);
+			if (!key.present()) {
+				continue;
+			}
+			auto value = TagThrottleValue::tryFromValue(throttle.value, key.get().throttleType);
+			if (value.present()) {
+				results.emplace_back(key.get(), value.get());
+				if (limit > 0) {
+					--limit;
+				}
+			}
+		}
+		if (!throttles.more || limit == 0) {
+			co_return results;
+		}
+		range = KeyRangeRef(throttles.getReadThrough(), range.end);
+	}
+}
+
 template <class DB>
 Future<std::vector<TagThrottleInfo>> getRecommendedTags(Reference<DB> db, int limit) {
 	Reference<typename DB::TransactionT> tr = db->createTransaction();
@@ -275,18 +302,8 @@ Future<std::vector<TagThrottleInfo>> getRecommendedTags(Reference<DB> db, int li
 			} else if (enableAuto.get()) {
 				co_return std::vector<TagThrottleInfo>();
 			}
-			typename DB::TransactionT::template FutureT<RangeResult> f =
-			    tr->getRange(KeyRangeRef(tagThrottleAutoKeysPrefix, tagThrottleKeys.end), limit);
-			RangeResult throttles = co_await safeThreadFutureToFuture(f);
-			std::vector<TagThrottleInfo> results;
-			for (auto throttle : throttles) {
-				auto key = TagThrottleKey::tryFromKey(throttle.key);
-				auto value = TagThrottleValue::tryFromValue(throttle.value);
-				if (key.present() && value.present()) {
-					results.emplace_back(key.get(), value.get());
-				}
-			}
-			co_return results;
+			co_return co_await readThrottleRange(
+			    tr, KeyRangeRef(tagThrottleAutoKeysPrefix, tagThrottleKeys.end), limit);
 		} catch (Error& e) {
 			err = e;
 		}
@@ -309,19 +326,9 @@ getThrottledTags(Reference<DB> db, int limit, ContainsRecommended containsRecomm
 				co_await delay(CLIENT_KNOBS->DEFAULT_BACKOFF);
 				continue;
 			}
-			typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(
-			    reportAuto.get() ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix),
-			    limit);
-			RangeResult throttles = co_await safeThreadFutureToFuture(f);
-			std::vector<TagThrottleInfo> results;
-			for (auto throttle : throttles) {
-				auto key = TagThrottleKey::tryFromKey(throttle.key);
-				auto value = TagThrottleValue::tryFromValue(throttle.value);
-				if (key.present() && value.present()) {
-					results.emplace_back(key.get(), value.get());
-				}
-			}
-			co_return results;
+			auto range =
+			    reportAuto.get() ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix);
+			co_return co_await readThrottleRange(tr, range, limit);
 		} catch (Error& e) {
 			err = e;
 		}
@@ -394,7 +401,7 @@ Future<bool> unthrottleMatchingThrottles(Reference<DB> db,
 					continue;
 				}
 				if (onlyExpiredThrottles) {
-					auto value = TagThrottleValue::tryFromValue(tag.value);
+					auto value = TagThrottleValue::tryFromValue(tag.value, key.get().throttleType);
 					if (!value.present() || value.get().expirationTime == 0 || value.get().expirationTime > now()) {
 						continue;
 					}

@@ -86,8 +86,11 @@ public:
 					    .detail("NumThrottledTags", throttledTagKeys.get().size());
 					for (auto entry : throttledTagKeys.get()) {
 						auto key = TagThrottleKey::tryFromKey(entry.key);
-						auto value = TagThrottleValue::tryFromValue(entry.value);
-						if (!key.present() || !value.present()) {
+						Optional<TagThrottleValue> value;
+						if (key.present()) {
+							value = TagThrottleValue::tryFromValue(entry.value, key.get().throttleType);
+						}
+						if (!value.present()) {
 							TraceEvent(SevWarnAlways, "InvalidTagThrottleEntry", id)
 							    .suppressFor(5.0)
 							    .detail("Key", entry.key);

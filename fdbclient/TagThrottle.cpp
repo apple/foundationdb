@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TagThrottle.h"
+#include <cmath>
 
 double const ClientTagThrottleLimits::NO_EXPIRATION = std::numeric_limits<double>::max();
 
@@ -122,7 +125,11 @@ Optional<TagThrottleKey> TagThrottleKey::tryFromKey(const KeyRef& key) {
 	return TagThrottleKey(tags, throttleType, priority);
 }
 
-Optional<TagThrottleValue> TagThrottleValue::tryFromValue(const ValueRef& value) {
+bool TagThrottleValue::isValidRate(double tpsRate) {
+	return std::isfinite(tpsRate) && tpsRate >= 0;
+}
+
+Optional<TagThrottleValue> TagThrottleValue::tryFromValue(const ValueRef& value, TagThrottleType throttleType) {
 	constexpr int minSize = sizeof(ProtocolVersion) + 3 * sizeof(double) + sizeof(TagThrottledReason);
 	if (value.size() < minSize) {
 		return {};
@@ -136,6 +143,18 @@ Optional<TagThrottleValue> TagThrottleValue::tryFromValue(const ValueRef& value)
 	reader.setProtocolVersion(version);
 	TagThrottleValue throttle;
 	reader >> throttle;
+	if (!isValidRate(throttle.tpsRate)) {
+		return {};
+	}
+	if (throttle.reason != TagThrottledReason::UNSET) {
+		bool validReason =
+		    throttleType == TagThrottleType::MANUAL
+		        ? throttle.reason == TagThrottledReason::MANUAL
+		        : throttle.reason == TagThrottledReason::BUSY_READ || throttle.reason == TagThrottledReason::BUSY_WRITE;
+		if (!validReason) {
+			return {};
+		}
+	}
 	return throttle;
 }
 
@@ -162,17 +181,35 @@ TEST_CASE("/fdbclient/TagThrottle/KeyDecoding") {
 }
 
 TEST_CASE("/fdbclient/TagThrottle/ValueDecoding") {
-	BinaryWriter writer(IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
+	auto version = IncludeVersion(ProtocolVersion::withTagThrottleValueReason());
 	TagThrottleValue throttle(1.0, 2.0, 3.0, TagThrottledReason::MANUAL);
-	writer << throttle;
-	auto value = writer.toValue();
+	auto value = BinaryWriter::toValue(throttle, version);
 	for (int size = 0; size < value.size(); ++size) {
-		ASSERT(!TagThrottleValue::tryFromValue(value.substr(0, size)).present());
+		ASSERT(!TagThrottleValue::tryFromValue(value.substr(0, size), TagThrottleType::MANUAL).present());
 	}
-	auto decoded = TagThrottleValue::tryFromValue(value);
+	auto decoded = TagThrottleValue::tryFromValue(value, TagThrottleType::MANUAL);
 	ASSERT(decoded.present());
 	ASSERT(decoded.get().tpsRate == 1.0 && decoded.get().expirationTime == 2.0 &&
 	       decoded.get().initialDuration == 3.0 && decoded.get().reason == TagThrottledReason::MANUAL);
+	for (double rate : { -1.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() }) {
+		throttle.tpsRate = rate;
+		ASSERT(!TagThrottleValue::tryFromValue(BinaryWriter::toValue(throttle, version), TagThrottleType::MANUAL)
+		            .present());
+	}
+	throttle.tpsRate = std::numeric_limits<double>::max();
+	for (auto reason : { TagThrottledReason::UNSET,
+	                     TagThrottledReason::MANUAL,
+	                     TagThrottledReason::BUSY_READ,
+	                     TagThrottledReason::BUSY_WRITE,
+	                     static_cast<TagThrottledReason>(255) }) {
+		throttle.reason = reason;
+		value = BinaryWriter::toValue(throttle, version);
+		ASSERT(TagThrottleValue::tryFromValue(value, TagThrottleType::MANUAL).present() ==
+		       (reason == TagThrottledReason::UNSET || reason == TagThrottledReason::MANUAL));
+		ASSERT(TagThrottleValue::tryFromValue(value, TagThrottleType::AUTO).present() ==
+		       (reason == TagThrottledReason::UNSET || reason == TagThrottledReason::BUSY_READ ||
+		        reason == TagThrottledReason::BUSY_WRITE));
+	}
 	return Void();
 }
 
@@ -199,6 +236,42 @@ TEST_CASE("/fdbclient/TagSet/WireLengths") {
 		}
 	}
 	return Void();
+}
+
+// Share uncommitted test rows with the transactions requested by the list APIs.
+struct TagThrottleTestDatabase : ReferenceCounted<TagThrottleTestDatabase> {
+	using TransactionT = ReadYourWritesTransaction;
+	Reference<TransactionT> tr;
+	Reference<TransactionT> createTransaction() { return tr; }
+};
+
+TEST_CASE("/fdbclient/TagThrottle/ListSkipsMalformedRows") {
+	auto cx = DatabaseContext::create(
+	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
+	auto db = makeReference<TagThrottleTestDatabase>();
+	db->tr = cx->createTransaction();
+	db->tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	db->tr->clear(tagThrottleKeys);
+	db->tr->set(tagThrottleAutoEnabledKey, "0"_sr);
+
+	TagSet bad, good;
+	bad.addTag("a"_sr);
+	good.addTag("b"_sr);
+	for (auto type : { TagThrottleType::MANUAL, TagThrottleType::AUTO }) {
+		auto reason = type == TagThrottleType::MANUAL ? TagThrottledReason::MANUAL : TagThrottledReason::BUSY_READ;
+		TagThrottleValue throttle(1, now() + 60, 60, reason);
+		BinaryWriter writer(IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
+		writer << throttle;
+		db->tr->set(TagThrottleKey(bad, type, TransactionPriority::DEFAULT).toKey(), ""_sr);
+		db->tr->set(TagThrottleKey(good, type, TransactionPriority::DEFAULT).toKey(), writer.toValue());
+	}
+
+	auto throttled = co_await ThrottleApi::getThrottledTags(db, 1);
+	ASSERT(throttled.size() == 1 && throttled[0].throttleType == TagThrottleType::MANUAL && throttled[0].tag == "b"_sr);
+	auto recommended = co_await ThrottleApi::getRecommendedTags(db, 1);
+	ASSERT(recommended.size() == 1 && recommended[0].throttleType == TagThrottleType::AUTO &&
+	       recommended[0].tag == "b"_sr);
+	co_return;
 }
 
 TEST_CASE("TagSet/toString") {

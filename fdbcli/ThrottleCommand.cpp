@@ -145,8 +145,8 @@ Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef
 				fprintf(stderr, "ERROR: failed to parse rate `%s'.\n", printable(tokens[4]).c_str());
 				co_return false;
 			}
-			if (tpsRate < 0) {
-				fprintf(stderr, "ERROR: rate cannot be negative `%f'\n", tpsRate);
+			if (!TagThrottleValue::isValidRate(tpsRate)) {
+				fprintf(stderr, "ERROR: rate must be finite and nonnegative `%f'\n", tpsRate);
 				co_return false;
 			}
 		}
