@@ -337,7 +337,7 @@ TEST_CASE("/fdbserver/AccumulativeChecksum/TruncatedMutationTrailer") {
 		}
 		// An empty SetValue has checksum zero. Its trailer may occupy all of param2.
 		BinaryWriter writer(Unversioned());
-		writer << type << ""_sr << "\x00\x00\x00\x00\x00\x00"_sr.substr(0, trailerSize);
+		writer << type << ""_sr << "\x00\x00\x00\x00\x01\x01"_sr.substr(0, trailerSize);
 		auto record = writer.toValue();
 		ArenaReader reader(record.arena(), record, AssumeVersion(ProtocolVersion::withMutationChecksum()));
 		MutationRef mutation;
@@ -345,6 +345,9 @@ TEST_CASE("/fdbserver/AccumulativeChecksum/TruncatedMutationTrailer") {
 		ASSERT(!mutation.corrupted && mutation.type == MutationRef::SetValue && mutation.param2.empty());
 		ASSERT(mutation.checksum.present() && mutation.checksum.get() == 0);
 		ASSERT(mutation.accumulativeChecksumIndex.present() == withIndex);
+		if (withIndex) {
+			ASSERT(mutation.accumulativeChecksumIndex.get() == 0x0101);
+		}
 	}
 	return Void();
 }
