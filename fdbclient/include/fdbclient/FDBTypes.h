@@ -518,12 +518,12 @@ struct string_serialized_traits<KeyValueRef> : std::true_type {
 	uint32_t save(uint8_t* out, const KeyValueRef& item) const {
 		auto begin = out;
 		uint32_t sz = item.key.size();
-		*reinterpret_cast<decltype(sz)*>(out) = sz;
+		memcpy(out, &sz, sizeof(sz));
 		out += sizeof(sz);
 		memcpy(out, item.key.begin(), sz);
 		out += sz;
 		sz = item.value.size();
-		*reinterpret_cast<decltype(sz)*>(out) = sz;
+		memcpy(out, &sz, sizeof(sz));
 		out += sizeof(sz);
 		memcpy(out, item.value.begin(), sz);
 		out += sz;
