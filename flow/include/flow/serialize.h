@@ -645,7 +645,8 @@ public:
 	using READER = Impl;
 
 	const void* peekBytes(int bytes) const {
-		ASSERT(begin + bytes <= end);
+		ASSERT(bytes >= 0);
+		ASSERT(bytes <= end - begin);
 		return begin;
 	}
 
@@ -695,19 +696,12 @@ class ArenaReader : public _Reader<ArenaReader> {
 
 public:
 	const void* readBytes(int bytes) {
-		const char* b = begin;
-		const char* e = b + bytes;
-		ASSERT(e <= end);
-		begin = e;
-		return b;
+		const void* result = peekBytes(bytes);
+		begin += bytes;
+		return result;
 	}
 
 	const uint8_t* arenaRead(int bytes) { return (const uint8_t*)readBytes(bytes); }
-
-	const void* peekBytes(int bytes) const {
-		ASSERT(begin + bytes <= end);
-		return begin;
-	}
 
 	StringRef arenaReadAll() const { return StringRef(reinterpret_cast<const uint8_t*>(begin), end - begin); }
 
@@ -746,8 +740,9 @@ public:
 		// Could be implemented zero-copy if [begin,end) was in this.arena() already; for now is a copy
 		if (!bytes)
 			return nullptr;
+		const void* source = readBytes(bytes);
 		uint8_t* dat = new (arena()) uint8_t[bytes];
-		serializeBytes(dat, bytes);
+		memcpy(dat, source, bytes);
 		return dat;
 	}
 

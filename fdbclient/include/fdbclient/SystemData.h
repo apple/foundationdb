@@ -821,6 +821,7 @@ extern const KeyRef maxUIDKey;
 
 extern const KeyRef databaseLockedKey;
 extern const KeyRef databaseLockedKeyEnd;
+UID decodeDatabaseLockUID(ValueRef value);
 extern const KeyRef metadataVersionKey;
 extern const KeyRef metadataVersionKeyEnd;
 extern const KeyRef metadataVersionRequiredValue;

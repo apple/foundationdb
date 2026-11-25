@@ -1783,6 +1783,16 @@ const KeyRef maxUIDKey = "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x
 
 const KeyRef databaseLockedKey = "\xff/dbLocked"_sr;
 const KeyRef databaseLockedKeyEnd = "\xff/dbLocked\x00"_sr;
+
+UID decodeDatabaseLockUID(ValueRef value) {
+	constexpr int versionstampSize = 10;
+	BinaryReader reader(value, Unversioned());
+	reader.readBytes(versionstampSize);
+	UID uid;
+	reader >> uid;
+	return uid;
+}
+
 const KeyRef metadataVersionKey = "\xff/metadataVersion"_sr;
 const KeyRef metadataVersionKeyEnd = "\xff/metadataVersion\x00"_sr;
 const KeyRef metadataVersionRequiredValue = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"_sr;
@@ -1850,6 +1860,22 @@ void testSSISerdes(StorageServerInterface const& ssi) {
 	}
 	ASSERT(ssi.address() == ssi2.address());
 	ASSERT(ssi.getValue.getEndpoint().token == ssi2.getValue.getEndpoint().token);
+}
+
+TEST_CASE("noSim/SystemData/DatabaseLockUID") {
+	const UID uid(1, 2);
+	const Value value = BinaryWriter::toValue(uid, Unversioned()).withPrefix("0123456789"_sr);
+	ASSERT_EQ(decodeDatabaseLockUID(value), uid);
+	ASSERT_EQ(decodeDatabaseLockUID(value.withSuffix("x"_sr)), uid);
+	for (int length = 0; length < value.size(); ++length) {
+		try {
+			decodeDatabaseLockUID(value.substr(0, length));
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_serialization_failed);
+		}
+	}
+	return Void();
 }
 
 // unit test for serialization since tss stuff had bugs

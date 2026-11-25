@@ -2775,8 +2775,7 @@ AsyncResult<JsonBuilderObject> lockedStatusFetcher(Database cx,
 				Optional<Value> lockUID = std::get<0>(std::move(res));
 				if (lockUID.present()) {
 					statusObj["locked"] = true;
-					statusObj["lock_uid"] =
-					    BinaryReader::fromStringRef<UID>(lockUID.get().substr(10), Unversioned()).toString();
+					statusObj["lock_uid"] = decodeDatabaseLockUID(lockUID.get()).toString();
 				} else {
 					statusObj["locked"] = false;
 				}

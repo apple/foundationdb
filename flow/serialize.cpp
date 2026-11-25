@@ -41,19 +41,62 @@ _AssumeVersion::_AssumeVersion(ProtocolVersion version) : v(version) {
 }
 
 const void* BinaryReader::readBytes(int bytes) {
-	const char* b = begin;
-	const char* e = b + bytes;
-	if (e > end) {
-		uint64_t bytes_short = e - end;
-		ASSERT(!g_network->isSimulated());
-		TraceEvent("SerializationFailed").detail("ReadBytesTooShort", bytes_short).backtrace();
+	const auto remaining = end - begin;
+	if (bytes < 0 || bytes > remaining) {
+		ASSERT(!g_network || !g_network->isSimulated());
+		TraceEvent("SerializationFailed")
+		    .detail("RequestedBytes", bytes)
+		    .detail("RemainingBytes", remaining)
+		    .backtrace();
 		throw serialization_failed();
 	}
-	begin = e;
-	return b;
+	const char* result = begin;
+	begin += bytes;
+	return result;
 }
 
 namespace {
+
+TEST_CASE("flow/serialize/RejectsInvalidReadLengths") {
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+	// The first length is too large for a StringRef. Only the final byte belongs to the following field.
+	BinaryWriter writer(Unversioned());
+	writer << uint32_t(0x80000000) << uint8_t(42);
+	auto bytes = writer.toValue();
+	BinaryReader reader(bytes, Unversioned());
+	StringRef value;
+	try {
+		reader >> value;
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_serialization_failed);
+	}
+	ASSERT_EQ(reader.remainingBytes(), 1);
+	for (int length : { -1, 2, std::numeric_limits<int>::max() }) {
+		try {
+			reader.arenaRead(length);
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_serialization_failed);
+		}
+		ASSERT_EQ(reader.remainingBytes(), 1);
+	}
+	ASSERT_EQ(*static_cast<const uint8_t*>(reader.peekBytes(1)), 42);
+	ASSERT_EQ(*reader.arenaRead(1), 42);
+	ASSERT(reader.empty());
+
+	char buffer[4]{};
+	BinaryReader reversed(buffer + 1, -1, Unversioned());
+	try {
+		reversed.readBytes(1);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_serialization_failed);
+	}
+	return Void();
+}
 
 struct _Struct {
 	static constexpr FileIdentifier file_identifier = 2340487;
