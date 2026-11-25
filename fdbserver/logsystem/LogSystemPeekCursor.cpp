@@ -141,30 +141,32 @@ void ServerPeekCursor::nextMessage() {
 	    .detail("Tag", tag.toString())
 	    .detail("MessageVersion", messageVersion.toString());
 	ASSERT(hasMsg);
+	hasMsg = false;
 	if (rd.empty()) {
 		messageVersion.reset(std::min(results.end, end.version));
-		hasMsg = false;
 		return;
 	}
-	if (*(int32_t*)rd.peekBytes(4) == VERSION_HEADER) {
-		// A version
-		int32_t dummy;
-		Version ver;
-		rd >> dummy >> ver;
-
-		//TraceEvent("SPC_ProcessSeq", randomID).detail("MessageVersion", messageVersion.toString()).detail("Ver", ver).detail("Tag", tag.toString());
-		// ASSERT( ver >= messageVersion.version );
-
-		messageVersion.reset(ver);
-
-		if (messageVersion >= end) {
-			messageVersion = end;
-			hasMsg = false;
-			return;
+	LogMessageVersion nextVersion = messageVersion;
+	try {
+		if (rd.remainingBytes() >= sizeof(VERSION_HEADER) &&
+		    memcmp(rd.peekBytes(sizeof(VERSION_HEADER)), &VERSION_HEADER, sizeof(VERSION_HEADER)) == 0) {
+			rd.readBytes(sizeof(VERSION_HEADER));
+			if (rd.remainingBytes() < sizeof(Version)) {
+				throw serialization_failed();
+			}
+			rd.serializeBytes(&nextVersion.version, sizeof(Version));
+			nextVersion.sub = 0;
+			if (nextVersion >= end) {
+				messageVersion = end;
+				return;
+			}
 		}
+		messageAndTags.loadFromArena(&rd, &nextVersion.sub);
+	} catch (Error& e) {
+		decodeError = e;
+		throw;
 	}
-
-	messageAndTags.loadFromArena(&rd, &messageVersion.sub);
+	messageVersion = nextVersion;
 	DEBUG_TAGS_AND_MESSAGE("ServerPeekCursor", messageVersion.version, messageAndTags.getRawMessage(), this->randomID);
 	// Rewind and consume the header so that reader() starts from the message.
 	rd.rewind();
@@ -220,8 +222,14 @@ void updateCursorWithReply(ServerPeekCursor* self, const TLogPeekReply& res) {
 	self->rd = ArenaReader(self->results.arena, self->results.messages, Unversioned());
 	LogMessageVersion skipSeq = self->messageVersion;
 	self->hasMsg = true;
-	self->nextMessage();
-	self->advanceTo(skipSeq);
+	try {
+		self->nextMessage();
+		self->advanceTo(skipSeq);
+	} catch (Error&) {
+		// The cursor may have advanced while this reply was in flight.
+		self->messageVersion = skipSeq;
+		throw;
+	}
 }
 
 Future<Void> resetChecker(ServerPeekCursor* self, NetworkAddress addr) {
@@ -558,6 +566,9 @@ Future<Void> ServerPeekCursor::getMore(TaskPriority taskID) {
 	    .detail("Parallel", parallelGetMore)
 	    .detail("MessageVersion", messageVersion.toString())
 	    .detail("End", end.toString());
+	if (decodeError.isValid()) {
+		return decodeError;
+	}
 	if (hasMessage() && !parallelGetMore) {
 		return Void();
 	}
@@ -572,6 +583,9 @@ Future<Void> ServerPeekCursor::getMore(TaskPriority taskID) {
 		}
 		if (usePeekStream &&
 		    (tag.locality >= 0 || tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityRemoteLog)) {
+			if (hasMessage()) {
+				return Void();
+			}
 			more = serverPeekStreamGetMore(this, taskID);
 		} else if (parallelGetMore || onlySpilled || !futureResults.empty()) {
 			more = serverPeekParallelGetMore(this, taskID);
@@ -1648,6 +1662,89 @@ Version MultiCursor::getMinKnownCommittedVersion() const {
 
 Version MultiCursor::popped() const {
 	return std::max(poppedVersion, cursors.back()->popped());
+}
+
+TEST_CASE("/LogSystem/PeekCursor/MalformedPrefetch") {
+	for (bool parallel : { false, true }) {
+		const Tag tag(tagLocalityCDC, 0);
+		auto oldEpoch = makeReference<ServerPeekCursor>(
+		    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, 0, 50, false, false);
+		BinaryWriter good(Unversioned());
+		good << VERSION_HEADER << Version(10) << int32_t(10) << uint32_t(1) << uint16_t(0);
+		good.serializeBytes("good"_sr);
+		good << VERSION_HEADER << Version(50);
+		TLogPeekReply oldReply{};
+		oldReply.end = 50;
+		oldReply.messages = good.toValue(oldReply.arena);
+		updateCursorWithReply(oldEpoch.getPtr(), oldReply);
+
+		TLogInterface tlog{ LocalityData() };
+		auto interf = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(OptionalInterface<TLogInterface>(tlog));
+		auto newEpoch = makeReference<ServerPeekCursor>(interf, tag, 50, 100, false, parallel);
+		auto replay = makeReference<ReplayMultiCursor>(std::vector<Reference<IReplayPeekCursor>>{ newEpoch, oldEpoch },
+		                                               std::vector<LogMessageVersion>{ LogMessageVersion(50) });
+		auto requests = tlog.peekMessages.getFuture();
+		ASSERT(requests.isReady());
+		Future<Void> prefetch = newEpoch->getMore();
+		ASSERT(!prefetch.isReady());
+		TLogPeekRequest req = requests.pop();
+		BinaryWriter bad(Unversioned());
+		const LogMessageVersion position = parallel ? LogMessageVersion(55, 3) : LogMessageVersion(50);
+		if (parallel) {
+			newEpoch->advanceTo(position);
+			bad << VERSION_HEADER << Version(52) << int32_t(6) << uint32_t(1) << uint16_t(0);
+		}
+		bad << VERSION_HEADER << Version(60) << int32_t(6) << uint32_t(2) << uint16_t(1);
+		TLogPeekReply badReply{};
+		badReply.begin = req.begin;
+		badReply.end = 61;
+		badReply.messages = bad.toValue(badReply.arena);
+		req.reply.send(badReply);
+		co_await ready(prefetch);
+		ASSERT(prefetch.isError() && prefetch.getError().code() == error_code_serialization_failed);
+		ASSERT(!newEpoch->hasMessage() && newEpoch->version() == position);
+
+		ASSERT(replay->hasMessage() && replay->version() == LogMessageVersion(10, 1));
+		ASSERT(replay->getMessage() == "good"_sr);
+		replay->nextMessage();
+		ASSERT(!replay->hasMessage() && replay->version() == LogMessageVersion(50));
+		Future<Void> handoff = replay->getMore();
+		if (parallel) {
+			ASSERT(handoff.canGet() && replay->version() == position);
+			handoff = replay->getMore();
+		}
+		ASSERT(handoff.isError() && handoff.getError().code() == error_code_serialization_failed);
+	}
+	co_return;
+}
+
+TEST_CASE("/LogSystem/PeekCursor/BufferedStreamingMessage") {
+	TLogInterface tlog{ LocalityData() };
+	auto interf = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(OptionalInterface<TLogInterface>(tlog));
+	auto cursor = makeReference<ServerPeekCursor>(interf, Tag(0, 0), 0, 100, false, true);
+	cursor->usePeekStream = true;
+	BinaryWriter writer(Unversioned());
+	writer << VERSION_HEADER << Version(10) << int32_t(10) << uint32_t(1) << uint16_t(0);
+	writer.serializeBytes("good"_sr);
+	writer << VERSION_HEADER;
+	TLogPeekReply reply{};
+	reply.end = 20;
+	reply.messages = writer.toValue(reply.arena);
+	updateCursorWithReply(cursor.getPtr(), reply);
+
+	ASSERT(cursor->getMore().canGet());
+	ASSERT(cursor->hasMessage() && cursor->version() == LogMessageVersion(10, 1));
+	ASSERT(cursor->getMessage() == "good"_sr);
+	try {
+		cursor->nextMessage();
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_serialization_failed);
+	}
+	ASSERT(!cursor->hasMessage() && cursor->version() == LogMessageVersion(10, 1));
+	Future<Void> more = cursor->getMore();
+	ASSERT(more.isError() && more.getError().code() == error_code_serialization_failed);
+	return Void();
 }
 
 TEST_CASE("/NativeCDC/ReplayPeekReplyAccounting") {
