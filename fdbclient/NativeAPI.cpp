@@ -6576,6 +6576,36 @@ TEST_CASE("/fdbclient/NativeAPI/sameVersionWatch/preservesInstalledWatch") {
 	return Void();
 }
 
+TEST_CASE("/fdbclient/NativeAPI/tssMapping/releasesRetiredMetrics") {
+	Database cx(new DatabaseContext(operation_failed()));
+	GetKeyServerLocationsReply reply;
+	std::vector<StorageServerInterface> servers;
+	for (int i = 0; i < 16; ++i) {
+		StorageServerInterface ss(UID(1, i));
+		StorageServerInterface tss(UID(2, i));
+		ss.initEndpoints();
+		tss.initEndpoints();
+		tss.tssPairID = ss.id();
+		servers.push_back(ss);
+		reply.resultsTssMapping.emplace_back(ss.id(), tss);
+	}
+	reply.results.emplace_back(allKeys, servers);
+	updateTssMappings(cx, reply);
+	ASSERT_EQ(cx->tssMetrics.size(), servers.size());
+
+	const UID activeTss = reply.resultsTssMapping.front().second.id();
+	reply.resultsTssMapping.resize(1);
+	updateTssMappings(cx, reply);
+	ASSERT_EQ(cx->tssMapping.size(), 1);
+	ASSERT_EQ(cx->tssMetrics.size(), 1);
+	ASSERT(cx->tssMetrics.contains(activeTss));
+
+	reply.resultsTssMapping.clear();
+	updateTssMappings(cx, reply);
+	ASSERT(cx->tssMetrics.empty());
+	return Void();
+}
+
 TEST_CASE("/fdbclient/NativeAPI/watchRefCount/removesEmptyEntries") {
 	// Default error "operation_failed()" avoids "internal" range (4xxx),
 	// which causes simulation tests with --crash enabled to abort/fail.
