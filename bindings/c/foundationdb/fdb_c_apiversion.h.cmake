@@ -24,7 +24,7 @@
  */
 
 /* The latest FDB C API version */
-#define FDB_LATEST_API_VERSION @FDB_AV_LATEST_VERSION@
+#define FDB_LATEST_API_VERSION @FDB_AV_LATEST_C_VERSION@
 
 /* The latest FDB API version supported by bindings. It may lag behind the latest C API version */
 #define FDB_LATEST_BINDINGS_API_VERSION @FDB_AV_LATEST_BINDINGS_VERSION@

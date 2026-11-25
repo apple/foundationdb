@@ -916,8 +916,7 @@ struct CLIOptions {
 
 	std::vector<std::pair<std::string, std::string>> knobs;
 
-	// api version, using the latest version by default
-	int apiVersion = ApiVersion::LATEST_VERSION;
+	int apiVersion = ApiVersion::LATEST_C_VERSION;
 
 	CLIOptions(int argc, char* argv[]) {
 		program_name = argv[0];
@@ -985,12 +984,12 @@ struct CLIOptions {
 			if (*endptr != '\0') {
 				fprintf(stderr, "ERROR: invalid client version %s\n", args.OptionArg());
 				return 1;
-			} else if (apiVersion < 700 || apiVersion > ApiVersion::LATEST_VERSION) {
+			} else if (apiVersion < 700 || apiVersion > ApiVersion::LATEST_C_VERSION) {
 				// multi-version fdbcli only available after 7.0
 				fprintf(stderr,
 				        "ERROR: api version %s is not supported. (Min: 700, Max: %d)\n",
 				        args.OptionArg(),
-				        ApiVersion::LATEST_VERSION);
+				        ApiVersion::LATEST_C_VERSION);
 				return 1;
 			}
 			break;

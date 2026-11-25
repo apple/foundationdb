@@ -1,5 +1,6 @@
 # API Versions
 set(FDB_AV_LATEST_VERSION                   "900")
+set(FDB_AV_LATEST_C_VERSION                 "800")
 set(FDB_AV_LATEST_BINDINGS_VERSION          "800")
 
 # Features
