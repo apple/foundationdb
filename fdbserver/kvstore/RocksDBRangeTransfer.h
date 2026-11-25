@@ -155,6 +155,10 @@ public:
 	// The finished files, in key order.
 	const std::vector<FileInfo>& getFiles() const { return files; }
 
+	// Deletes every file built so far, finished or not. Don't use the builder after this. Returns the first error, if
+	// a file could not be deleted; a file that is already gone is not an error.
+	rocksdb::Status abort();
+
 private:
 	rocksdb::Status finishCurrentFile();
 

@@ -155,6 +155,27 @@ rocksdb::Status IngestSSTFileSetBuilder::finishCurrentFile() {
 	return s;
 }
 
+rocksdb::Status IngestSSTFileSetBuilder::abort() {
+	std::vector<std::string> paths;
+	for (const FileInfo& file : files) {
+		paths.push_back(file.path);
+	}
+	if (current) {
+		paths.push_back(current->getPath());
+		current.reset(); // Close the unfinished file before deleting it.
+	}
+	files.clear();
+
+	rocksdb::Status firstError;
+	for (const std::string& path : paths) {
+		rocksdb::Status s = options.env->DeleteFile(path);
+		if (!s.ok() && !s.IsNotFound() && firstError.ok()) {
+			firstError = s;
+		}
+	}
+	return firstError;
+}
+
 } // namespace RocksDBRangeTransfer
 
 #endif // WITH_ROCKSDB
