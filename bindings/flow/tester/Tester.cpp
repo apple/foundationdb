@@ -1578,6 +1578,15 @@ struct UnitTestsFunc : InstructionFunc {
 			ASSERT_EQ(Tuple::unpack(packed).getInt(0), value);
 		}
 
+		auto truncated = Tuple::unpack("\x15"_sr);
+		truncated.appendNull();
+		try {
+			truncated.getInt(0);
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_invalid_tuple_data_type);
+		}
+
 		const uint64_t locationCacheSize = 100001;
 		const uint64_t maxWatches = 10001;
 		const uint64_t timeout = 60ULL * 1000;

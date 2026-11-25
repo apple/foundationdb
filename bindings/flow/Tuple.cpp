@@ -375,7 +375,8 @@ int64_t Tuple::getInt(size_t index) const {
 		neg = true;
 	}
 
-	if (data.size() - offsets[index] - 1 < len) {
+	const size_t end = index + 1 < offsets.size() ? offsets[index + 1] : data.size();
+	if (offsets[index] + 1 + len > end) {
 		throw invalid_tuple_data_type();
 	}
 	memset(&swap, neg ? '\xff' : 0, 8 - len);
