@@ -25,6 +25,42 @@ You can invoke ``fdbcli`` at the command line simply by typing it. For example::
 
 This will result in ``fdbcli`` connecting to the :ref:`default cluster file <default-cluster-file>` (``/etc/foundationdb/fdb.cluster`` for Linux.) You can also specify a cluster file as an argument to ``fdbcli`` using the ``-C`` option. For further information, see :ref:`specifying-a-cluster-file`.
 
+.. _cli-audit-logging:
+
+Audit logging
+=============
+
+``fdbcli`` can log every key returned by ``get``, ``getrange``, ``getrangekeys`` and ``getall`` as an ``FdbCliAudit`` trace event. Audit events go to their own ``trace_audit.*`` trace files, separate from the regular ``trace.*`` files. Audit logging is turned on and pointed at a directory the same way tracing is, but separately:
+
+.. list-table::
+   :header-rows: 1
+
+   * -
+     - Tracing
+     - Audit logging
+   * - Turn on
+     - ``--log``
+     - ``--audit-log``
+   * - Directory
+     - ``--log-dir PATH``
+     - ``--audit-log-dir PATH``
+   * - Environment variable (set = on, value = directory)
+     - ``FDB_NETWORK_OPTION_TRACE_ENABLE``
+     - ``FDB_CLI_AUDIT_LOG_ENABLE``
+
+Audit logging doesn't require tracing. The audit directory is the ``FDB_CLI_AUDIT_LOG_ENABLE`` value if it's set, otherwise ``--audit-log-dir``. If that's empty, audit files go next to the trace files if tracing is on, otherwise in the current directory. Like ``FDB_NETWORK_OPTION_TRACE_ENABLE`` over ``--log-dir``, the environment variable wins over ``--audit-log-dir``, even when it's set to an empty value. ``--trace-format``, ``--log-group`` and the ``FDB_NETWORK_OPTION_TRACE_*`` environment variables (roll size, max logs size, file identifier, partial file suffix) apply to audit files too. Audit files roll and get deleted on their own size budget.
+
+``--audit-log-values none|system|all`` picks which returned values are logged. The default is ``system``: only values of system keys (``\xff`` prefix). Keys are always logged.
+
+Each ``FdbCliAudit`` event has ``Command``, ``AuditID`` (the same for every key returned by one command), ``Cluster`` (the cluster file's description), ``IPAddress`` (the client's IP), ``Key``, ``Value`` (per ``--audit-log-values``) and ``StorageServer`` (``getall`` only), plus the usual ``Machine`` and ``LogGroup``. Missing keys, empty ranges and failed reads log nothing.
+
+So reads can't silently go unaudited:
+
+* ``--audit-log-dir`` without ``--audit-log`` or ``FDB_CLI_AUDIT_LOG_ENABLE`` is an error (unlike ``--log-dir`` without ``--log``, which is ignored).
+* If the audit directory doesn't exist or isn't writable, ``fdbcli`` aborts before running any command. ``FDB_CLI_AUDIT_LOG_ENABLE=1`` means a directory named ``1``.
+
+For now, ``fdbcli`` is the only process that writes audit trace files. Other processes and clients using ``libfdb_c`` through the C API or a language binding have no way to turn them on.
+
 Commands within ``fdbcli``
 ==========================
 
@@ -644,6 +680,33 @@ heap
 ``profile heap <PROCESS>``
 
 Enables heap profiling for the specified process.
+
+rangeconfig
+-----------
+
+The ``rangeconfig`` command shows or changes the configuration options of key ranges. These options are hints to data distribution. They do not change the shard map directly.
+
+Use it to give a key range more replicas than the rest of the database, for example a small range that is read heavily or needs extra durability, or to keep two ranges on different storage teams. A range with a replication factor above the cluster's replication level is placed on a larger storage team, and data distribution does not merge shards across the boundaries of a configured range. The ``DD_MAX_SHARDS_ON_LARGE_TEAMS`` knob limits how many shards can be placed on larger teams.
+
+``rangeconfig show [includeDefault]``
+
+Prints the range configuration as JSON. Ranges with no configured options are not shown, unless ``includeDefault`` is given.
+
+``rangeconfig update <BEGINKEY> <ENDKEY> [OPTION...]``
+
+Applies the given options to the key range from ``BEGINKEY`` to ``ENDKEY``. Options that are not given keep their current setting for the range.
+
+``rangeconfig set <BEGINKEY> <ENDKEY> [OPTION...]``
+
+Makes the key range have exactly the given configuration. Options that are not given are unset for the range.
+
+The options are:
+
+* ``default`` resets the range to have no options set. Used with ``set``, it clears all options for the range. Used with ``update``, it changes nothing, because ``update`` keeps the existing values.
+* ``replication <N>`` sets the replication factor for the range. A factor lower than the cluster's replication level is treated as the cluster's replication level.
+* ``teamID <N>`` indicates that shards in ranges with different team IDs should be assigned to different storage teams. Shards with the same team ID can share a storage team, but nothing enforces this.
+
+``rangeconfig`` requires the end key to be greater than the begin key.
 
 reset
 -----

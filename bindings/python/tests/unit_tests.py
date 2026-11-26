@@ -210,6 +210,23 @@ def test_predicates():
     assert not fdb.predicates.is_retryable(fdb.FDBError(10))
 
 
+def test_value_truthiness(db):
+    missing = b"\x02value-truthiness-missing"
+    empty = b"\x02value-truthiness-empty"
+    present = b"\x02value-truthiness-present"
+
+    # Nothing is committed; the reads below see the transaction's own writes.
+    tr = db.create_transaction()
+    del tr[missing]
+    tr[empty] = b""
+    tr[present] = b"x"
+
+    assert not tr[missing]
+    assert not tr[empty]
+    assert tr[present]
+    assert tr.get_key(fdb.KeySelector.first_greater_or_equal(present))
+
+
 def test_get_client_status(db):
     @fdb.transactional
     def simple_txn(tr):
@@ -263,6 +280,8 @@ def run_unit_tests(db):
         test_locality(db)
         log("test_predicates")
         test_predicates()
+        log("test_value_truthiness")
+        test_value_truthiness(db)
         log("test_size_limit_option")
         test_size_limit_option(db)
         log("test_get_approximate_size")

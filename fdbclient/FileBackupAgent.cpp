@@ -272,6 +272,20 @@ Key FileBackupAgent::getPauseKey() {
 	return backupAgent.taskBucket->getPauseKey();
 }
 
+Future<bool> FileBackupAgent::isBackupUnderBulkLoadJob(Reference<ReadYourWritesTransaction> tr,
+                                                       MutationLogType mutationLogType,
+                                                       Standalone<VectorRef<KeyRangeRef>> ranges) {
+	if (mutationLogType != MutationLogType::DEFAULT) {
+		co_return co_await isRangeUnderBulkLoadJob(tr, normalKeys);
+	}
+	for (const auto& range : ranges) {
+		if (co_await isRangeUnderBulkLoadJob(tr, range)) {
+			co_return true;
+		}
+	}
+	co_return false;
+}
+
 Optional<std::string> FileBackupAgent::bulkLoadRestoreRefusal(Key tagName,
                                                               Standalone<VectorRef<KeyRangeRef>> ranges,
                                                               Key addPrefix,
@@ -3550,8 +3564,9 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 
 		Reference<TaskFuture> logDispatchBatchFuture = futureBucket->future(tr);
 
-		// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag
-		int priority = latestSnapshotEndVersion.present() ? 1 : 0;
+		// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag.
+		// Priority 2 also puts them ahead of other backups' initial snapshot range tasks (priority 1).
+		int priority = latestSnapshotEndVersion.present() ? 2 : 0;
 
 		if (!mutationLogType.present() || mutationLogType.get() == MutationLogType::DEFAULT) {
 			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will
@@ -4709,7 +4724,23 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("BulkLoadJobId", bulkLoadJob.getJobId());
 
 				// Submit BulkLoad job (must be lockAware since DB is locked during restore)
-				co_await submitBulkLoadJob(cx, bulkLoadJob, true /* lockAware */);
+				bool underBackup = false;
+				try {
+					co_await submitBulkLoadJob(cx, bulkLoadJob, true /* lockAware */);
+				} catch (Error& e) {
+					if (e.code() != error_code_bulkload_range_under_backup) {
+						throw;
+					}
+					underBackup = true;
+				}
+				if (underBackup) {
+					// A retry fails the same way while the backup runs, and the restore holds the database lock.
+					co_await abortBulkLoadRestore(
+					    cx,
+					    restore,
+					    "A backup or DR covers the restore range; stop it, or restore with --mode rangefile");
+					throw restore_bulkload_failed();
+				}
 
 				TraceEvent("BulkLoadRestoreJobSubmitted")
 				    .detail("RestoreUID", restore.getUid())
@@ -5142,7 +5173,21 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 					                 : data[start].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()),
 					    (iend == end) ? fileRange.end
 					                  : data[iend].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()));
-					tr->clear(trRange);
+					// A clear in the same transaction as the sets makes the storage server split it around every
+					// set. A span with no keys has nothing to remove, so skip the clear; a span that has keys (a
+					// re-applied block, the validation prefix, an overlapping file) is cleared as before. The read is
+					// not a snapshot read, and the span stays in the write conflict set either way, so two
+					// transactions cannot both see an overlapping span empty and both skip the clear.
+					bool clearSpan = true;
+					if (CLIENT_KNOBS->RESTORE_RANGE_READ_BEFORE_CLEAR) {
+						RangeResult existing = co_await tr->getRange(trRange, 1);
+						clearSpan = !existing.empty();
+					}
+					if (clearSpan) {
+						tr->clear(trRange);
+					} else {
+						tr->addWriteConflictRange(trRange);
+					}
 
 					for (; i < iend; ++i) {
 						tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
@@ -8012,6 +8057,12 @@ public:
 			throw backup_error();
 		}
 
+		// A load commits no mutations, so a backup starting under it would never log the loaded data.
+		if (co_await FileBackupAgent::isBackupUnderBulkLoadJob(tr, mutationLogType, backupRanges)) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkLoadRunning").detail("TagName", tagName);
+			throw backup_range_under_bulkload();
+		}
+
 		// This check will ensure that current backupUid is later than the last backup Uid
 		Standalone<StringRef> nowStr = BackupAgentBase::getCurrentTime();
 		std::string backupContainer = outContainer.toString();
@@ -8637,23 +8688,6 @@ public:
 							bdDoc.setKey("AvgBytesPerSecond", bdProgress.avgBytesPerSecond());
 							bdDoc.setKey("ElapsedSeconds", bdProgress.elapsedSeconds);
 
-							// Add stalled tasks if any
-							if (!bdProgress.stalledTasks.empty()) {
-								JsonBuilderArray stalledArray;
-								for (const auto& stalled : bdProgress.stalledTasks) {
-									JsonBuilderObject stalledDoc;
-									stalledDoc.setKey("TaskId", stalled.taskId.toString());
-									stalledDoc.setKey("Range", stalled.range.toString());
-									stalledDoc.setKey("StalledSeconds", stalled.stalledSeconds);
-									stalledDoc.setKey("RestartCount", stalled.restartCount);
-									if (!stalled.lastError.empty()) {
-										stalledDoc.setKey("LastError", stalled.lastError);
-									}
-									stalledArray.push_back(stalledDoc);
-								}
-								bdDoc.setKey("StalledTasks", stalledArray);
-							}
-
 							doc.setKey("BulkDumpProgress", bdDoc);
 						}
 					}
@@ -8848,22 +8882,6 @@ public:
 									statusText +=
 									    format(" Elapsed: %s\n",
 									           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
-								}
-
-								if (!bdProgress.stalledTasks.empty()) {
-									statusText += format("\nWARNING: %zu stalled tasks (no progress > 60s):\n",
-									                     bdProgress.stalledTasks.size());
-									for (const auto& stalled : bdProgress.stalledTasks) {
-										statusText += format(" Task %s: %s, stalled %.0fs, %d restarts\n",
-										                     stalled.taskId.shortString().c_str(),
-										                     stalled.range.toString().c_str(),
-										                     stalled.stalledSeconds,
-										                     stalled.restartCount);
-										if (!stalled.lastError.empty()) {
-											statusText +=
-											    format("           Last error: %s\n", stalled.lastError.c_str());
-										}
-									}
 								}
 							} else {
 								statusText += " Status: pending\n";

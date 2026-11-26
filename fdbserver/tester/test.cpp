@@ -179,10 +179,18 @@ Future<DistributedTestResults> runWorkload(Database const& cx,
 		}
 	}
 
-	// Stopping the workloads is unreliable, but they have a timeout
 	// FIXME: stop if one of the above phases throws an exception
+	TraceEvent("TestStoppingWorkloads").detail("WorkloadTitle", specCopy.title);
+	printf("stopping (%s)...\n", printable(specCopy.title).c_str());
+	// Wait for the stops to be delivered, since a tester that exits right after its last test would otherwise leave
+	// that test's workloads running until they time out
+	std::vector<Future<ErrorOr<Void>>> stops;
+	stops.reserve(workloads.size());
 	for (const auto& workload : workloads)
-		workload.stop.send(ReplyPromise<Void>());
+		stops.push_back(workload.stop.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0));
+	co_await waitForAll(stops);
+	// Errors are ignored: a stop that was delivered but retried finds the workload already gone, which is fine
+	TraceEvent("TestExiting").detail("WorkloadTitle", specCopy.title);
 
 	co_return DistributedTestResults(aggregateMetrics(metricsResults), success, failure);
 }
