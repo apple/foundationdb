@@ -28,6 +28,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/UnitTest.h"
 #include "flow/flow.h"
 #include "flow/CoroUtils.h"
 
@@ -39,6 +40,16 @@ const KeyRef INDEX = "INDEX"_sr;
 
 int recordSize;
 int indexSize;
+static bool getStorageQueueMax(StatusObjectReader& role, int64_t& queueMax) {
+	if (role["role"].get_str() != "storage") {
+		return false;
+	}
+	// Fault injection can stall a test storage server indefinitely.
+	bool isTss = false;
+	role.get("tss", isTss);
+	return !isTss && role.get("query_queue_max", queueMax);
+}
+
 struct GetMappedRangeWorkload : ApiWorkload {
 	static constexpr auto NAME = "GetMappedRange";
 	bool enabled;
@@ -449,8 +460,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				if (process.has("roles")) {
 					StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
 					for (StatusObjectReader role : rolesArray) {
-						if (role["role"].get_str() == "storage") {
-							role.get("query_queue_max", queryQueueMax);
+						if (getStorageQueueMax(role, queryQueueMax)) {
 							CODE_PROBE(queryQueueMax > 0, " SS query queue is non-empty");
 							TraceEvent(SevDebug, "QueryQueueMax")
 							    .detail("Value", queryQueueMax)
@@ -769,5 +779,22 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
+
+TEST_CASE("/fdbserver/workloads/GetMappedRange/storageQueueMax") {
+	StatusObject storage;
+	storage["role"] = "storage";
+	storage["query_queue_max"] = 8;
+	StatusObjectReader role(storage);
+	int64_t queueMax = 0;
+	ASSERT(getStorageQueueMax(role, queueMax) && queueMax == 8);
+
+	storage["query_queue_max"] = 1533;
+	storage["tss"] = true;
+	ASSERT(!getStorageQueueMax(role, queueMax));
+
+	storage["tss"] = false;
+	ASSERT(getStorageQueueMax(role, queueMax) && queueMax == 1533);
+	return Void();
+}
 
 WorkloadFactory<GetMappedRangeWorkload> GetMappedRangeWorkloadFactory;
