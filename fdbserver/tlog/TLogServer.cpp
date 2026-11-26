@@ -3697,7 +3697,7 @@ Future<Void> pullAsyncData(TLogData* self,
 
 				if (!foundMessage) {
 					ver--;
-					if (ver > logData->version.get()) {
+					while (ver > logData->version.get()) {
 						if (logData->stopped() || (endVersion.present() && ver > endVersion.get())) {
 							co_return;
 						}
@@ -3728,6 +3728,14 @@ Future<Void> pullAsyncData(TLogData* self,
 						// actors
 						logData->version.set(ver);
 						co_await yield(TaskPriority::TLogCommit);
+
+						// Prefetch can advance an empty cursor while we wait. Persist that progress
+						// before getMore() can block waiting for a still later version.
+						if (r->hasMessage()) {
+							break;
+						}
+						ver = r->version().version - 1;
+						CODE_PROBE(ver > logData->version.get(), "Empty TLog cursor advanced during a write");
 					}
 					break;
 				}
