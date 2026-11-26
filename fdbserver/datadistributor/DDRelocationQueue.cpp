@@ -962,7 +962,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 	// getSourceServers
 	auto queueMapItr = queueMap.rangeContaining(affectedQueuedItems[0].begin);
 
-	// Put off erasing elements from fetchingSourcesQueue
+	// An interior insertion leaves two remainders. Both must see the original relocation in its queue.
 	std::set<RelocateData, std::greater<RelocateData>> delayDelete;
 	for (int r = 0; r < affectedQueuedItems.size(); ++r, ++queueMapItr) {
 		// ASSERT(queueMapItr->value() == queueMap.rangeContaining(affectedQueuedItems[r].begin)->value());
@@ -1001,8 +1001,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 			for (int i = 0; i < rrs.src.size(); i++) {
 				auto& serverQueue = queue[rrs.src[i]];
 
-				if (serverQueue.erase(rrs) > 0) {
+				if (serverQueue.contains(rrs)) {
 					if (!foundActiveRelocation) {
+						delayDelete.insert(rrs);
 						newData.interval = TraceInterval("QueuedRelocation", rrs.randomId); // inherit the old randomId
 
 						DebugRelocationTraceEvent(newData.interval.begin(), distributorId)
@@ -1032,8 +1033,14 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		}
 	}
 
-	for (const auto& it : delayDelete) {
-		fetchingSourcesQueue.erase(it);
+	for (const auto& original : delayDelete) {
+		if (original.src.empty()) {
+			fetchingSourcesQueue.erase(original);
+		} else {
+			for (UID source : original.src) {
+				queue[source].erase(original);
+			}
+		}
 	}
 	DebugRelocationTraceEvent("ReceivedRelocateShard", distributorId)
 	    .detail("KeyBegin", rd.keys.begin)
@@ -3414,6 +3421,41 @@ TEST_CASE("/DataDistribution/DDQueue/ReplacementPreservesPipelineCapacity") {
 	ASSERT_EQ(self.pipelineSize(), SERVER_KNOBS->DD_MAX_PIPELINE_MOVES - 1);
 	ASSERT(!self.pipelineFull->get());
 	ASSERT(capacityChanged.isReady());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/DDQueue/InteriorRequestPreservesQueuedRemainders") {
+	DDQueue self;
+	self.activeRelocations = 0;
+	self.queuedRelocations = 0;
+	self.pendingGateRelocations = 0;
+	self.unhealthyRelocations = 0;
+	self.pipelineFull = makeReference<AsyncVar<bool>>(false);
+	self.rawProcessingUnhealthy = makeReference<AsyncVar<bool>>(false);
+	self.rawProcessingWiggle = makeReference<AsyncVar<bool>>(false);
+	self.fetchSourceLock = makeReference<FlowLock>(0);
+
+	std::set<UID> serversToLaunchFrom;
+	const int priority = SERVER_KNOBS->PRIORITY_TEAM_2_LEFT;
+	RelocateShard parent(KeyRangeRef("a"_sr, "z"_sr), priority, RelocateReason::OTHER, UID(1, 0));
+	self.queueRelocation(parent, serversToLaunchFrom);
+	RelocateData queued = *self.fetchingSourcesQueue.begin();
+	queued.src = { UID(2, 0), UID(3, 0) };
+	queued.completeSources = queued.src;
+	self.completeSourceFetch(queued);
+
+	RelocateShard interior(KeyRangeRef("c"_sr, "m"_sr), priority, RelocateReason::OTHER, UID(4, 0));
+	self.queueRelocation(interior, serversToLaunchFrom);
+	for (auto const& range : { KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("m"_sr, "z"_sr) }) {
+		RelocateData remainder = queued;
+		remainder.keys = range;
+		for (UID source : queued.src) {
+			ASSERT(self.queue.at(source).contains(remainder));
+			ASSERT_EQ(self.queue.at(source).size(), 2);
+		}
+	}
+	ASSERT_EQ(self.fetchingSourcesQueue.size(), 1);
+	ASSERT_EQ(self.queuedRelocations, 3);
 	return Void();
 }
 
