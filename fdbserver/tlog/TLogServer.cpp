@@ -3592,6 +3592,55 @@ static Future<Void> waitUntilTLogAcceptsNewData(TLogData* self,
 	return waitUntilTLogAcceptsNewDataImpl(self, logData, ver);
 }
 
+// Returns false when the pull must stop. The caller owns the cursor until the drain completes.
+template <class Cursor, class Accept, class Append>
+static Future<bool> drainEmptyVersions(TLogData* self,
+                                       Reference<LogData> logData,
+                                       Cursor* r,
+                                       Version ver,
+                                       Optional<Version> endVersion,
+                                       bool poppedIsKnownCommitted,
+                                       Accept accept,
+                                       Append append) {
+	while (ver > logData->version.get()) {
+		if (logData->stopped() || (endVersion.present() && ver > endVersion.get())) {
+			co_return false;
+		}
+
+		if (poppedIsKnownCommitted) {
+			logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+			logData->minKnownCommittedVersion.advance(r->getMinKnownCommittedVersion());
+		}
+
+		co_await accept(ver);
+		if (logData->stopped() || self->terminated.isSet()) {
+			co_return false;
+		}
+
+		// Log the changes to the persistent queue, to be committed by commitQueue()
+		TLogQueueEntryRef qe;
+		qe.version = ver;
+		qe.knownCommittedVersion = logData->knownCommittedVersion;
+		qe.messages = StringRef();
+		qe.id = logData->logId;
+		append(qe);
+
+		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages
+		// actors
+		logData->version.set(ver);
+		co_await yield(TaskPriority::TLogCommit);
+
+		// Prefetch can advance an empty cursor while we wait. Persist that progress
+		// before getMore() can block waiting for a still later version.
+		if (r->hasMessage()) {
+			break;
+		}
+		ver = r->version().version - 1;
+		CODE_PROBE(ver > logData->version.get(), "Empty TLog cursor advanced during a write");
+	}
+	co_return true;
+}
+
 // remote tLog pull data from log routers
 Future<Void> pullAsyncData(TLogData* self,
                            Reference<LogData> logData,
@@ -3697,45 +3746,23 @@ Future<Void> pullAsyncData(TLogData* self,
 
 				if (!foundMessage) {
 					ver--;
-					while (ver > logData->version.get()) {
-						if (logData->stopped() || (endVersion.present() && ver > endVersion.get())) {
+					if (ver > logData->version.get()) {
+						bool keepPulling = co_await drainEmptyVersions(
+						    self,
+						    logData,
+						    r.getPtr(),
+						    ver,
+						    endVersion,
+						    poppedIsKnownCommitted,
+						    [&](Version target) {
+							    return waitUntilTLogAcceptsNewData(self, logData, target, endVersion);
+						    },
+						    [&](TLogQueueEntryRef& qe) {
+							    self->recordDiskQueueWrite(self->persistentQueue->push(qe, logData), qe.expectedSize());
+						    });
+						if (!keepPulling) {
 							co_return;
 						}
-
-						if (poppedIsKnownCommitted) {
-							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
-							logData->minKnownCommittedVersion.advance(r->getMinKnownCommittedVersion());
-						}
-
-						co_await waitUntilTLogAcceptsNewData(self, logData, ver, endVersion);
-						if (logData->stopped()) {
-							co_return;
-						}
-
-						if (self->terminated.isSet()) {
-							co_return;
-						}
-
-						// Log the changes to the persistent queue, to be committed by commitQueue()
-						TLogQueueEntryRef qe;
-						qe.version = ver;
-						qe.knownCommittedVersion = logData->knownCommittedVersion;
-						qe.messages = StringRef();
-						qe.id = logData->logId;
-						self->recordDiskQueueWrite(self->persistentQueue->push(qe, logData), qe.expectedSize());
-
-						// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages
-						// actors
-						logData->version.set(ver);
-						co_await yield(TaskPriority::TLogCommit);
-
-						// Prefetch can advance an empty cursor while we wait. Persist that progress
-						// before getMore() can block waiting for a still later version.
-						if (r->hasMessage()) {
-							break;
-						}
-						ver = r->version().version - 1;
-						CODE_PROBE(ver > logData->version.get(), "Empty TLog cursor advanced during a write");
 					}
 					break;
 				}
@@ -4603,8 +4630,7 @@ public:
 	}
 
 	~CommittedPeekTestFixture() {
-		// This fixture only exercises in-memory peeks and duplicate commits. Termination prevents
-		// LogData's normal persistent-state removal from dereferencing the absent disk stores.
+		// Termination prevents persistent-state removal from dereferencing the absent disk stores.
 		shared.terminated.send(Void());
 	}
 
@@ -4653,6 +4679,40 @@ public:
 	void popPastBegin() { logData->getTagData(cdcTag())->popped = 101; }
 	Version frontier() const { return logData->minKnownCommittedVersion.get(); }
 	int64_t timedOutPeeks() const { return logData->blockingPeekTimeouts.getValue(); }
+	Future<Void> checkEmptyProgress(bool messageReady, Optional<Version> endVersion) {
+		struct Cursor {
+			Version next = 111;
+			bool message = false;
+			LogMessageVersion version() const { return LogMessageVersion(next); }
+			bool hasMessage() const { return message; }
+			Version popped() const { return 99; }
+			Version getMinKnownCommittedVersion() const { return 99; }
+		} cursor;
+		Promise<Void> writable;
+		std::vector<Version> writes;
+		auto drain = drainEmptyVersions(
+		    &shared,
+		    logData,
+		    &cursor,
+		    cursor.next - 1,
+		    endVersion,
+		    false,
+		    [&](Version) { return writable.getFuture(); },
+		    [&](const TLogQueueEntryRef& entry) { writes.push_back(entry.version); });
+		ASSERT(!drain.isReady());
+		cursor.next = 121;
+		cursor.message = messageReady;
+		writable.send(Void());
+		bool keepPulling = co_await drain;
+		ASSERT(keepPulling == !endVersion.present());
+		if (messageReady || endVersion.present()) {
+			ASSERT(writes == std::vector<Version>({ 110 }));
+		} else {
+			ASSERT(writes == std::vector<Version>({ 110, 120 }));
+		}
+		ASSERT(logData->version.get() == writes.back());
+	}
+
 	void assertNoDiskCommit() const {
 		ASSERT(shared.diskQueueCommitBytes == 0);
 		ASSERT(logData->version.get() == 100);
@@ -4696,6 +4756,15 @@ Future<Void> testCommittedPeekProgress(bool speculative) {
 }
 
 } // namespace
+
+TEST_CASE("/TLog/PullAsyncData/EmptyCursorAdvancesDuringWrite") {
+	for (bool messageReady : { false, true }) {
+		CommittedPeekTestFixture fixture;
+		co_await fixture.checkEmptyProgress(messageReady, {});
+	}
+	CommittedPeekTestFixture recovery;
+	co_await recovery.checkEmptyProgress(false, Version(115));
+}
 
 TEST_CASE("/NativeCDC/TLogCommittedFrontier/Empty") {
 	co_await testCommittedPeekProgress(false);
