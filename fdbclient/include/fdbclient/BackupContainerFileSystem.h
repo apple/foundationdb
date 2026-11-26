@@ -229,7 +229,7 @@ private:
 
 	friend class BackupContainerFileSystemImpl;
 
-	Future<std::shared_ptr<const StreamCipherKey>> encryptionKey;
+	mutable Future<std::shared_ptr<const StreamCipherKey>> encryptionKey;
 };
 
 #endif

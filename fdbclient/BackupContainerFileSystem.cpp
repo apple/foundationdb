@@ -1920,9 +1920,18 @@ public:
 					throw;
 				}
 			}
-			// Containers retain this setup future, so recover disk errors before publishing a permanent failure.
 			co_await delay(1.0);
 		}
+	}
+
+	static Future<std::shared_ptr<const StreamCipherKey>> getEncryptionKey(
+	    Future<std::shared_ptr<const StreamCipherKey>>& key,
+	    const std::string& keyFileName) {
+		// Share in-flight reads and keep using the first successfully loaded key for the life of the container.
+		if (key.isError() && key.getError().isDiskError()) {
+			key = readEncryptionKey(keyFileName);
+		}
+		return key;
 	}
 
 	static Future<Void> writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem> bc,
@@ -2377,14 +2386,18 @@ std::string BackupContainerFileSystem::encryptionMetadataFileName() {
 bool BackupContainerFileSystem::usesEncryption() const {
 	return encryptionKey.isValid();
 }
+
 Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
-	return usesEncryption() ? success(encryptionKey) : Future<Void>();
+	return usesEncryption()
+	           ? success(BackupContainerFileSystemImpl::getEncryptionKey(encryptionKey, encryptionKeyFileName.get()))
+	           : Future<Void>();
 }
 
 Future<Reference<IAsyncFile>> BackupContainerFileSystem::encryptedFile(Future<Reference<IAsyncFile>> file,
                                                                        AsyncFileEncrypted::Mode mode) const {
-	return map(success(file) && encryptionSetupComplete(),
-	           [file, key = encryptionKey, mode, blockSize = encryptionBlockSize](Void) -> Reference<IAsyncFile> {
+	auto key = BackupContainerFileSystemImpl::getEncryptionKey(encryptionKey, encryptionKeyFileName.get());
+	return map(success(file) && success(key),
+	           [file, key, mode, blockSize = encryptionBlockSize](Void) -> Reference<IAsyncFile> {
 		           return makeReference<AsyncFileEncrypted>(file.get(), mode, blockSize, key.get());
 	           });
 }
@@ -2396,6 +2409,7 @@ Future<Void> BackupContainerFileSystem::writeEntireFileFallback(const std::strin
 }
 
 void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
+	this->encryptionKeyFileName = encryptionKeyFileName;
 	if (encryptionKeyFileName.present()) {
 		encryptionKey = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
 	}
@@ -2414,6 +2428,22 @@ int chooseFileSize(std::vector<int>& sizes) {
 		return size;
 	}
 	return deterministicRandom()->randomInt(0, 2e6);
+}
+
+TEST_CASE("/backup/containers/encryptionKeyAfterReadFailure") {
+	const std::string keyFile = joinPath(params.getDataDir(), deterministicRandom()->randomUniqueID().toString());
+	co_await BackupContainerFileSystem::createTestEncryptionKeyFile(keyFile);
+	Future<std::shared_ptr<const StreamCipherKey>> cached = io_timeout();
+	auto first = BackupContainerFileSystemImpl::getEncryptionKey(cached, keyFile);
+	auto second = BackupContainerFileSystemImpl::getEncryptionKey(cached, keyFile);
+	co_await (success(first) && success(second));
+	ASSERT(first.get() == second.get());
+	ASSERT(BackupContainerFileSystemImpl::getEncryptionKey(cached, keyFile).get() == first.get());
+
+	cached = invalid_encryption_key_file();
+	auto invalid = BackupContainerFileSystemImpl::getEncryptionKey(cached, keyFile);
+	ASSERT(invalid.isError());
+	ASSERT_EQ(invalid.getError().code(), error_code_invalid_encryption_key_file);
 }
 
 TEST_CASE("/backup/containers/localdir/independentEncryptionKeys") {
