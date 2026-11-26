@@ -205,7 +205,7 @@ TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/CancelMove") {
 	shards.moveShard(moveRange, { destination });
 	shards.moveShard(KeyRangeRef("aa"_sr, "ab"_sr), { redirected });
 	restored = shards.cancelMove(moveRange, { destination }, { source });
-	ASSERT((restored == std::vector<KeyRange>{ leftRange, rightRange }));
+	ASSERT((restored == std::vector<KeyRange>{ rightRange }));
 	ASSERT(shards.getTeamsForFirstShard(leftRange).first ==
 	       std::vector<ShardsAffectedByTeamFailure::Team>{ redirected });
 	ASSERT(shards.getTeamsForFirstShard(rightRange).first == std::vector<ShardsAffectedByTeamFailure::Team>{ source });

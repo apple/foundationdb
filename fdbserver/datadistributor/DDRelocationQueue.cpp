@@ -143,8 +143,19 @@ static RelocateShard makeDestinationFailureRetry(RelocateData const& rd, UID ret
 	return retry;
 }
 
-static bool shouldRetryDestinationTeamFailure(bool doBulkLoading, RelocateData const&) {
-	return !doBulkLoading;
+static std::vector<KeyRange> destinationFailureRetryRanges(const RelocateData& rd,
+                                                           bool doBulkLoading,
+                                                           bool transferFailed,
+                                                           std::vector<KeyRange> restoredRanges) {
+	if (doBulkLoading) {
+		return {};
+	}
+	if (transferFailed) {
+		return { rd.keys };
+	}
+	// The source team tracker may have stopped while the destination owned the shard.
+	// If destination selection failed before transfer, retry only ranges returned to their sources.
+	return restoredRanges;
 }
 
 // See the declaration in DDRelocationQueue.h for why this state lives on the queue.
@@ -1588,7 +1599,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 	bool signalledTransferComplete = false;
 	// Source transfer completion is shared across retries, while each attempt registers new destination work.
 	bool ownsDestBusyness = false;
-	bool retryAfterDestinationTeamFailure = false;
+	bool destinationFailedDuringTransfer = false;
 	UID distributorId = self->distributorId;
 	ParallelTCInfo healthyDestinations;
 
@@ -2350,7 +2361,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 									rd.bulkLoadTask.get().completeAck.send(
 									    BulkLoadAck(BulkLoadAck::Outcome::Retryable, rd.priority));
 								}
-								retryAfterDestinationTeamFailure = shouldRetryDestinationTeamFailure(doBulkLoading, rd);
+								destinationFailedDuringTransfer = true;
 								throw data_move_dest_team_not_found();
 							}
 						}
@@ -2560,6 +2571,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 		completeOwnedDest(rd, self->destBusymap, ownsDestBusyness);
 	}
 
+	std::vector<KeyRange> retryRanges;
 	if (err.code() == error_code_data_move_dest_team_not_found && rd.isRestore()) {
 		std::vector<ShardsAffectedByTeamFailure::Team> destinationTeams = { ShardsAffectedByTeamFailure::Team(
 			rd.dataMove->primaryDest, true) };
@@ -2576,14 +2588,20 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 		    .detail("Range", rd.keys)
 		    .detail("DataMoveID", rd.dataMoveId)
 		    .detail("RestoredRanges", restoredRanges.size());
+		retryRanges = std::move(restoredRanges);
 	}
 
-	if (err.code() == error_code_data_move_dest_team_not_found && retryAfterDestinationTeamFailure) {
+	if (err.code() == error_code_data_move_dest_team_not_found) {
+		retryRanges =
+		    destinationFailureRetryRanges(rd, doBulkLoading, destinationFailedDuringTransfer, std::move(retryRanges));
+	}
+	for (const auto& range : retryRanges) {
 		// randomId participates in RelocateData's queue ordering, so a new attempt needs a new identity.
 		RelocateShard retry = makeDestinationFailureRetry(rd, deterministicRandom()->randomUniqueID());
+		retry.keys = range;
 		self->output.send(retry);
 		TraceEvent(SevWarnAlways, "RelocateShardRetryDestinationTeamFailure", self->distributorId)
-		    .detail("Range", rd.keys)
+		    .detail("Range", range)
 		    .detail("DataMoveID", rd.dataMoveId)
 		    .detail("Priority", rd.priority)
 		    .detail("Reason", rd.reason.toString())
@@ -3665,8 +3683,8 @@ TEST_CASE("/DataDistribution/DDQueue/RetryDestinationTeamFailure") {
 	ASSERT(retry.dataMoveId == anonymousShardId);
 	ASSERT(!retry.isRestore());
 	ASSERT(!retry.bulkLoadTask.present());
-	ASSERT(shouldRetryDestinationTeamFailure(false, rd));
-	ASSERT(!shouldRetryDestinationTeamFailure(true, rd));
+	ASSERT(destinationFailureRetryRanges(rd, false, true, {}) == std::vector<KeyRange>{ keys });
+	ASSERT(destinationFailureRetryRanges(rd, true, true, {}).empty());
 	RelocateData nested(
 	    RelocateShard(KeyRangeRef("a"_sr, "aa"_sr), DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT));
 	ASSERT(shouldYieldDestinationFailureRetry(retry, nested));
@@ -3676,8 +3694,12 @@ TEST_CASE("/DataDistribution/DDQueue/RetryDestinationTeamFailure") {
 	ASSERT(!shouldYieldDestinationFailureRetry(retry, unrelated));
 	RelocateData restore = rd;
 	restore.dataMove = std::make_shared<DataMove>();
-	ASSERT(shouldRetryDestinationTeamFailure(false, restore));
-	ASSERT(!shouldRetryDestinationTeamFailure(true, restore));
+	const std::vector<KeyRange> restored{ nested.keys };
+	ASSERT(destinationFailureRetryRanges(restore, false, false, restored) == restored);
+	ASSERT(destinationFailureRetryRanges(restore, false, false, {}).empty());
+	ASSERT(destinationFailureRetryRanges(restore, false, true, restored) == std::vector<KeyRange>{ keys });
+	ASSERT(destinationFailureRetryRanges(restore, true, false, restored).empty());
+	ASSERT(!makeDestinationFailureRetry(restore, UID(5, 6)).isRestore());
 	return Void();
 }
 

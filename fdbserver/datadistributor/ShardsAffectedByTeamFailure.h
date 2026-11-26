@@ -98,7 +98,7 @@ public:
 	// updating shard_teams, the old destination teams will be added to new source teams.
 	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
 	// Remove a cancelled move's destination teams from contained shards. Restore the move's source teams when no
-	// newer destination remains; otherwise retain the newer destination teams.
+	// newer destination remains. Return only the ranges restored to their sources.
 	std::vector<KeyRange> cancelMove(KeyRangeRef keys,
 	                                 const std::vector<Team>& destinationTeams,
 	                                 const std::vector<Team>& sourceTeams);
