@@ -13523,21 +13523,23 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.bulkDumpFolder = joinPath(self.folder, serverBulkDumpFolder);
 	self.bulkLoadFolder = joinPath(self.folder, serverBulkLoadFolder);
 
-	if (!directoryExists(self.checkpointFolder)) {
-		TraceEvent(SevWarnAlways, "SSRebootCheckpointDirNotExists", self.thisServerID);
-		platform::createDirectory(self.checkpointFolder);
-	}
-	if (!directoryExists(self.fetchedCheckpointFolder)) {
-		TraceEvent(SevWarnAlways, "SSRebootFetchedCheckpointDirNotExists", self.thisServerID);
-		platform::createDirectory(self.fetchedCheckpointFolder);
-	}
-
-	clearFileFolder(self.bulkDumpFolder, self.thisServerID, /*ignoreError=*/false);
-	clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
-
-	self.actors.add(rocksdbLogCleaner(folder));
+	bool foldersReady = false;
 	Error err;
 	try {
+		if (!directoryExists(self.checkpointFolder)) {
+			TraceEvent(SevWarnAlways, "SSRebootCheckpointDirNotExists", self.thisServerID);
+			platform::createDirectory(self.checkpointFolder);
+		}
+		if (!directoryExists(self.fetchedCheckpointFolder)) {
+			TraceEvent(SevWarnAlways, "SSRebootFetchedCheckpointDirNotExists", self.thisServerID);
+			platform::createDirectory(self.fetchedCheckpointFolder);
+		}
+
+		clearFileFolder(self.bulkDumpFolder, self.thisServerID, /*ignoreError=*/false);
+		clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
+		foldersReady = true;
+
+		self.actors.add(rocksdbLogCleaner(folder));
 		double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID).log();
 
@@ -13600,6 +13602,7 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		throw internal_error();
 	} catch (Error& e) {
+		CODE_PROBE(!foldersReady, "Storage server closes its store after recovery folder setup fails");
 		err = e;
 	}
 

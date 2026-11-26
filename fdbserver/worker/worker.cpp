@@ -1703,9 +1703,10 @@ Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStore
 		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
 		Future<ErrorOr<Void>> storeError = errorOr(store->getError());
+		Future<Void> storeClosed = store->onClosed();
 		prevStorageServer =
 		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
-		prevStorageServer = handleIOErrors(prevStorageServer, storeError, id, store->onClosed());
+		prevStorageServer = handleIOErrors(prevStorageServer, storeError, id, storeClosed);
 	}
 }
 
