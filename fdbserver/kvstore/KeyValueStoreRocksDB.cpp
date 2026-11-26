@@ -3058,14 +3058,14 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/IngestSSTFileVisibility") {
 	// Model a cancelled bulk load clearing a range before the network thread observes ingest completion.
 	kvStore->clear(KeyRangeRef("discard"_sr, "discard~"_sr), nullptr);
 	ASSERT(kvStore->writeBatch->HasDeleteRange());
-	co_await kvStore->commit(false);
 	co_await ingest;
-	ASSERT(!(co_await kvStore->readValue("discard_key"_sr, Optional<ReadOptions>())).present());
+	// Read before committing the clear because commit also invalidates cached iterators.
 	RangeResult after = co_await kvStore->readRange(range, 10, 1000, {});
 	ASSERT_EQ(after.size(), 1);
 	ASSERT(after[0].key == "test_key"_sr && after[0].value == "test_value"_sr);
 
-	// Verify the key is visible
+	co_await kvStore->commit(false);
+	ASSERT(!(co_await kvStore->readValue("discard_key"_sr, Optional<ReadOptions>())).present());
 	Optional<Value> value = co_await kvStore->readValue("test_key"_sr, Optional<ReadOptions>());
 	ASSERT(value.present());
 	ASSERT(value.get() == "test_value"_sr);
