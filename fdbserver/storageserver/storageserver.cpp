@@ -1378,6 +1378,7 @@ public:
 	};
 
 	ActorCollection actors;
+	SignalableActorCollection bulkLoadFolderCleanups;
 
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
 	AsyncVar<bool> byteSampleClearsTooLarge;
@@ -7606,6 +7607,15 @@ TEST_CASE("/fdbserver/storageserver/selectOwnedBulkLoadFileSets") {
 	return Void();
 }
 
+// The writer keeps running even if the storage server is cancelled during shutdown.
+static Future<Void> clearBulkLoadFolderAfterIngest(Future<Void> ingest,
+                                                   std::string folder,
+                                                   UID serverID,
+                                                   Uncancellable = {}) {
+	co_await ready(ingest);
+	clearFileFolder(folder, serverID, /*ignoreError=*/true);
+}
+
 Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	TraceInterval interval("FetchKeys");
@@ -7617,6 +7627,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	int priority = dataMovementPriority(shard->reason);
 	UID dataMoveId = shard->getSSBulkLoadMetadata().getDataMoveId();
 	ConductBulkLoad conductBulkLoad = ConductBulkLoad(shard->getSSBulkLoadMetadata().getConductBulkLoad());
+	Future<Void> bulkLoadIngest = Void();
 	std::string bulkLoadLocalDir =
 	    joinPath(joinPath(data->bulkLoadFolder, dataMoveId.toString()), fetchKeysID.toString());
 	std::shared_ptr<BulkLoadFileSetKeyMap> localBulkLoadFileSets;
@@ -7934,7 +7945,8 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// Ingest the SST files.
 					// Measure duration at this level so we capture the inter-thread handoff time.
 					double ingestStartTime = g_network->timer(); // Record start time
-					co_await data->storage.getKeyValueStore()->ingestSSTFiles(ownedBulkLoadFileSets);
+					bulkLoadIngest = data->storage.getKeyValueStore()->ingestSSTFiles(ownedBulkLoadFileSets);
+					co_await bulkLoadIngest;
 					const double ingestDuration = g_network->timer() - ingestStartTime;
 					data->counters.ingestDurationLatencySample->addMeasurement(ingestDuration);
 
@@ -8342,8 +8354,9 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			data->otherError.sendError(e); // Kill the storage server.  Are there any recoverable errors?
 		if (conductBulkLoad) {
 			data->bulkLoadMetrics->removeTask();
-			// Do best effort cleanup
-			clearFileFolder(bulkLoadLocalDir, data->thisServerID, /*ignoreError=*/true);
+			// Cancelling fetchKeys does not recall an ingest already posted to the storage writer.
+			data->bulkLoadFolderCleanups.add(
+			    clearBulkLoadFolderAfterIngest(bulkLoadIngest, bulkLoadLocalDir, data->thisServerID));
 		}
 		throw; // goes nowhere
 	}
@@ -13115,7 +13128,47 @@ Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) 
 	}
 }
 
-bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData, Error const& e) {
+static Future<Void> stopStorageServerActors(ActorCollection& actors,
+                                            SignalableActorCollection& bulkLoadFolderCleanups) {
+	actors = ActorCollection(false);
+	// A rollback reuses the store and recursively clears its staging root at startup.
+	co_await bulkLoadFolderCleanups.signal();
+	// Let any actors still using the storage server on the stack finish unwinding.
+	co_await delay(0);
+}
+
+TEST_CASE("/fdbserver/storageserver/bulkLoadFolderSurvivesPendingIngest") {
+	for (bool cancelShutdown : { false, true }) {
+		const UID id = deterministicRandom()->randomUniqueID();
+		const std::string dir = abspath("bulk-load-test-" + id.toString());
+		ASSERT(platform::createDirectory(dir));
+		Promise<Void> ingest;
+		{
+			ActorCollection actors;
+			SignalableActorCollection cleanups;
+			cleanups.add(clearBulkLoadFolderAfterIngest(ingest.getFuture(), dir, id));
+			Future<Void> stopped = stopStorageServerActors(actors, cleanups);
+			co_await delay(0);
+			ASSERT(!stopped.isReady());
+			ASSERT(directoryExists(dir));
+			if (!cancelShutdown) {
+				ingest.send(Void());
+				co_await stopped;
+			}
+		}
+		if (cancelShutdown) {
+			// The writer reports failure after its storage server and the collections are gone.
+			ASSERT(directoryExists(dir));
+			ingest.sendError(io_error());
+		}
+		ASSERT(!directoryExists(dir));
+	}
+}
+
+static Future<Void> terminateStorageServer(StorageServer& self,
+                                           IKeyValueStore* persistentData,
+                                           Future<Void> ssCore,
+                                           Error e) {
 	self.shuttingDown = true;
 
 	// Clearing shards shuts down any fetchKeys actors; these may do things on cancellation that are best done with
@@ -13135,12 +13188,23 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 		persistentData->close();
 	}
 
-	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
-	    e.code() == error_code_file_not_found || e.code() == error_code_actor_cancelled) {
+	const bool terminated = e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
+	                        e.code() == error_code_file_not_found || e.code() == error_code_actor_cancelled;
+	if (terminated) {
 		TraceEvent("StorageServerTerminated", self.thisServerID).errorUnsuppressed(e);
-		return true;
-	} else {
-		return false;
+	}
+	ssCore.cancel();
+	try {
+		co_await stopStorageServerActors(self.actors, self.bulkLoadFolderCleanups);
+	} catch (Error& cleanupError) {
+		// A rollback keeps the KVS open for its rebooter, which cannot reclaim it after cancellation.
+		if (cleanupError.code() == error_code_actor_cancelled && e.code() == error_code_please_reboot) {
+			persistentData->close();
+		}
+		throw;
+	}
+	if (!terminated) {
+		throw e;
 	}
 }
 
@@ -13480,31 +13544,11 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (!recruitReply.isSet())
 			recruitReply.sendError(recruitment_failed());
 
-		// If the storage server dies while something that uses self is still on the stack,
-		// we want that actor to complete before we terminate and that memory goes out of scope
-
 		self.ssLock->halt();
 
 		self.moveInShards.clear();
 
-		if (storageServerTerminated(self, persistentData, err)) {
-			ssCore.cancel();
-			self.actors = ActorCollection(false);
-			co_await delay(0);
-			co_return;
-		}
-		ssCore.cancel();
-		self.actors = ActorCollection(false);
-		try {
-			co_await delay(0);
-		} catch (Error& cleanupError) {
-			// A rollback keeps the KVS open for its rebooter, which cannot reclaim it after cancellation.
-			if (cleanupError.code() == error_code_actor_cancelled && err.code() == error_code_please_reboot) {
-				persistentData->close();
-			}
-			throw;
-		}
-		throw err;
+		co_await terminateStorageServer(self, persistentData, ssCore, err);
 	}
 }
 
@@ -13612,26 +13656,7 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 	if (recovered.canBeSet())
 		recovered.send(Void());
 
-	// If the storage server dies while something that uses self is still on the stack,
-	// we want that actor to complete before we terminate and that memory goes out of scope
-	if (storageServerTerminated(self, persistentData, err)) {
-		ssCore.cancel();
-		self.actors = ActorCollection(false);
-		co_await delay(0);
-		co_return;
-	}
-	ssCore.cancel();
-	self.actors = ActorCollection(false);
-	try {
-		co_await delay(0);
-	} catch (Error& cleanupError) {
-		// A rollback keeps the KVS open for its rebooter, which cannot reclaim it after cancellation.
-		if (cleanupError.code() == error_code_actor_cancelled && err.code() == error_code_please_reboot) {
-			persistentData->close();
-		}
-		throw;
-	}
-	throw err;
+	co_await terminateStorageServer(self, persistentData, ssCore, err);
 }
 
 #ifndef __INTEL_COMPILER
