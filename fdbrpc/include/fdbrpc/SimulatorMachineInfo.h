@@ -36,6 +36,7 @@ struct ProcessInfo;
 // A set of data associated with a simulated machine
 struct MachineInfo {
 	ProcessInfo* machineProcess;
+	uint64_t ioTimeoutCount = 0;
 	std::vector<ProcessInfo*> processes;
 
 	// A map from filename to file handle for all open files on a machine

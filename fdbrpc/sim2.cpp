@@ -104,7 +104,7 @@ bool simulator_should_inject_fault(const char* context, const char* file, int li
 			    .detail("Line", line)
 			    .detail("ErrorCode", error_code);
 			if (error_code == error_code_io_timeout) {
-				g_network->setGlobal(INetwork::enASIOTimedOut, (flowGlobalType) true);
+				p->recordInjectedIOTimeout();
 			}
 			return true;
 		}
@@ -1660,7 +1660,7 @@ public:
 		if (machine.machineProcess == 0) {
 			NetworkAddress machineAddress(ip, 0, false, false);
 			machine.machineProcess = new ProcessInfo("Machine", locality, metadata, { machineAddress }, this, "", "");
-			machine.machineProcess->machine = &machine;
+			machine.machineProcess->attachToMachine(machine);
 		}
 
 		NetworkAddressList addresses;
@@ -1676,7 +1676,7 @@ public:
 			m->listenerMap[address] = makeReference<Sim2Listener>(m, address);
 			addressMap[address] = m;
 		}
-		m->machine = &machine;
+		m->attachToMachine(machine);
 		machine.processes.push_back(m);
 		currentlyRebootingProcesses.erase(addresses.address);
 		m->excluded = g_simulator->isExcluded(NetworkAddress(ip, port, true, false));
