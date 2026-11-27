@@ -1575,7 +1575,7 @@ Value bulkJobControlStateValue(const BulkJobControlState& controlState) {
 
 BulkJobControlState decodeBulkJobControlState(const ValueRef& value) {
 	BulkJobControlState controlState;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(value, IncludeVersion());
 	reader.deserialize(controlState);
 	return controlState;
 }
