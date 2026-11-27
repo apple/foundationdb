@@ -24,6 +24,7 @@
 #include <map>
 #include <string>
 
+#include "flow/network.h"
 #include "flow/NetworkAddress.h"
 #include "flow/IConnection.h"
 #include "flow/IUDPSocket.h"
@@ -89,6 +90,24 @@ struct ProcessInfo : NonCopyable {
 		ASSERT(metadata);
 		uid = deterministicRandom()->randomUniqueID();
 	}
+
+private:
+	uint64_t machineIOTimeoutCountAtBoot = 0;
+
+public:
+	void attachToMachine(MachineInfo& host) {
+		machine = &host;
+		machineIOTimeoutCountAtBoot = host.ioTimeoutCount;
+	}
+
+	void recordInjectedIOTimeout() {
+		setGlobal(INetwork::enASIOTimedOut, (flowGlobalType) true);
+		if (machine && this == machine->machineProcess) {
+			++machine->ioTimeoutCount;
+		}
+	}
+
+	bool machineTimedOutSinceBoot() const { return machine && machine->ioTimeoutCount != machineIOTimeoutCountAtBoot; }
 
 	Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 

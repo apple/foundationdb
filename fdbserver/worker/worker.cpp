@@ -139,14 +139,11 @@ struct PrimaryAndRemoteAddresses {
 namespace {
 RoleLineageCollector roleLineageCollector;
 
-Error checkIOTimeout(Error const& e) {
-	// Convert all_errors to io_timeout if global timeout bool was set
-	bool timeoutOccurred = (bool)g_network->global(INetwork::enASIOTimedOut);
-	// In simulation, have to check global timed out flag for both this process and the machine process on which IO is
-	// done
-	if (g_network->isSimulated() && !timeoutOccurred)
-		timeoutOccurred = g_simulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
-
+Error checkIOTimeout(Error const& e, simulator::ProcessInfo* process) {
+	// The simulator runs shared disk I/O on a machine process that survives individual worker reboots.
+	const bool timeoutOccurred = process
+	                                 ? process->global(INetwork::enASIOTimedOut) || process->machineTimedOutSinceBoot()
+	                                 : (bool)g_network->global(INetwork::enASIOTimedOut);
 	if (timeoutOccurred) {
 		CODE_PROBE(true, "Timeout occurred");
 		Error timeout = io_timeout();
@@ -156,6 +153,39 @@ Error checkIOTimeout(Error const& e) {
 		return timeout;
 	}
 	return e;
+}
+
+Error checkIOTimeout(Error const& e) {
+	return checkIOTimeout(e, g_network->isSimulated() ? g_simulator->getCurrentProcess() : nullptr);
+}
+
+TEST_CASE("/fdbserver/worker/ioTimeoutClassificationAfterReboot") {
+	simulator::MachineInfo host;
+	auto metadata = makeReference<simulator::ProcessInfoMetadata>("unset");
+	auto makeProcess = [&]() {
+		auto process = std::make_unique<simulator::ProcessInfo>(
+		    "process", LocalityData(), metadata, NetworkAddressList{}, nullptr, "", "");
+		process->attachToMachine(host);
+		return process;
+	};
+	auto io = makeProcess();
+	host.machineProcess = io.get();
+	auto sibling = makeProcess();
+	io->recordInjectedIOTimeout();
+	auto restarted = makeProcess();
+	ASSERT_EQ(checkIOTimeout(file_not_found(), sibling.get()).code(), error_code_io_timeout);
+	const Error after = checkIOTimeout(file_not_found(), restarted.get());
+	ASSERT_EQ(after.code(), error_code_file_not_found);
+	ASSERT(!after.isInjectedFault());
+	auto local = makeProcess();
+	local->recordInjectedIOTimeout();
+	ASSERT_EQ(checkIOTimeout(file_not_found(), local.get()).code(), error_code_io_timeout);
+	ASSERT_EQ(checkIOTimeout(file_not_found(), restarted.get()).code(), error_code_file_not_found);
+	io->recordInjectedIOTimeout();
+	const Error renewed = checkIOTimeout(file_not_found().asInjectedFault(), restarted.get());
+	ASSERT_EQ(renewed.code(), error_code_io_timeout);
+	ASSERT(renewed.isInjectedFault());
+	co_return;
 }
 
 Future<Void> forwardError(PromiseStream<ErrorInfo> errors, Role role, UID id, Future<Void> process) {
