@@ -6729,7 +6729,12 @@ public:
 		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
 
-		int result = collection->addTeamsBestOf(200, desiredTeams, maxTeams);
+		// Team building samples at random and gives up on a call once its attempts all land on existing teams, so one
+		// call can stop short of the last few teams. Call again until everything has been built.
+		int result = 0;
+		for (int call = 0; call < 20 && result < 80; ++call) {
+			result += collection->addTeamsBestOf(200, desiredTeams, maxTeams);
+		}
 
 		// The maximum number of available server teams without considering zone locality is 120
 		// The maximum number of available server teams with zone locality constraint is 120 - 40, because
