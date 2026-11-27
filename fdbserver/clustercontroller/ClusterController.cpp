@@ -5264,6 +5264,30 @@ static ClusterControllerData makeRecruitmentTestData(Key const& dcId) {
 	    makeReference<AsyncVar<Optional<UID>>>());
 }
 
+static void checkStorageRecruitmentLocality(bool critical, KeyRef localityExclusion) {
+	const Key dcId = "dc1"_sr;
+	auto data = makeRecruitmentTestData(dcId);
+	auto workers = addRecruitmentTestWorkers(
+	    data, dcId, critical ? ProcessClass::LogClass : ProcessClass::StorageClass, "worker"_sr, 2);
+	RecruitStorageRequest request;
+	request.criticalRecruitment = critical;
+	ASSERT(data.getStorageWorker(request).interf.locality.processId() == workers.front().locality.processId());
+
+	// Once the old storage server leaves serverList, DD's request omits its worker's address.
+	data.db.config.set(localityExclusion, StringRef());
+	ASSERT(data.getStorageWorker(request).interf.locality.processId() == workers.back().locality.processId());
+}
+
+TEST_CASE("/fdbserver/clustercontroller/storageRecruitmentLocality/excluded") {
+	checkStorageRecruitmentLocality(false, encodeExcludedLocalityKey("locality_zoneid:worker0_zone"));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/storageRecruitmentLocality/criticalFailed") {
+	checkStorageRecruitmentLocality(true, encodeFailedLocalityKey("locality_processid:worker0"));
+	return Void();
+}
+
 // Regression test for the original bug: in a small cluster where the desired commit-proxy
 // count equals the number of stateless processes, only one proxy was recruited. The candidate
 // filter compared each candidate's usage against the first-selected worker's usage and so

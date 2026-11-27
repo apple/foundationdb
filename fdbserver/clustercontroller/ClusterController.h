@@ -348,7 +348,8 @@ public:
 			    (!it.second.details.interf.secondaryAddress().present() ||
 			     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
 			    recruitment::machineClassFitness(it.second.details.processClass, recruitment::Storage) <=
-			        recruitment::UnsetFit) {
+			        recruitment::UnsetFit &&
+			    !db.config.isExcludedLocality(it.second.details.interf.locality)) {
 				return it.second.details;
 			}
 		}
@@ -362,7 +363,8 @@ public:
 				if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
 				    !excludedMachines.contains(it.second.details.interf.locality.zoneId()) &&
 				    (includeDCs.empty() || includeDCs.contains(it.second.details.interf.locality.dcId())) &&
-				    !addressExcluded(excludedAddresses, it.second.details.interf.address()) && fit < bestFit) {
+				    !addressExcluded(excludedAddresses, it.second.details.interf.address()) && fit < bestFit &&
+				    !db.config.isExcludedLocality(it.second.details.interf.locality)) {
 					bestFit = fit;
 					bestInfo = it.second.details;
 				}
