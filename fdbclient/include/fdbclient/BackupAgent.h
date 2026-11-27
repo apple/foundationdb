@@ -342,8 +342,11 @@ public:
 
 	Future<Void> discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> discontinueBackup(Database cx, Key tagName) {
-		return runRYWTransaction(
-		           cx, [=](Reference<ReadYourWritesTransaction> tr) { return discontinueBackup(tr, tagName); }) +
+		return cancelBulkDumpOfBackup(
+		           cx,
+		           tagName.toString(),
+		           runRYWTransaction(
+		               cx, [=](Reference<ReadYourWritesTransaction> tr) { return discontinueBackup(tr, tagName); })) +
 		       checkAndDisableBackupWorkers(cx) + checkAndDisableRangePartitionedBackupWorkers(cx);
 	}
 
@@ -357,10 +360,23 @@ public:
 	Future<Void> abortBackup(Reference<ReadYourWritesTransaction> tr, std::string tagName);
 	Future<Void> abortBackup(Database cx, std::string tagName) {
 		// First abort the backup, then check and disable backup workers if needed.
-		return runRYWTransaction(cx,
-		                         [=](Reference<ReadYourWritesTransaction> tr) { return abortBackup(tr, tagName); }) +
+		return cancelBulkDumpOfBackup(
+		           cx,
+		           tagName,
+		           runRYWTransaction(
+		               cx, [=](Reference<ReadYourWritesTransaction> tr) { return abortBackup(tr, tagName); })) +
 		       checkAndDisableBackupWorkers(cx) + checkAndDisableRangePartitionedBackupWorkers(cx);
 	}
+
+	// Once backupStopped completes, cancel the bulkdump job the backup left running if it is no longer runnable.
+	// Cancelling a backup's tasks does not reach the job data distribution is executing for it, which would
+	// otherwise run on, holding the one bulk job slot, until it completed.
+	Future<Void> cancelBulkDumpOfBackup(Database cx, std::string tagName, Future<Void> backupStopped);
+
+	// Retarget the bulkdump snapshot in flight for this backup to end `seconds` after it started, and return its job
+	// id. Returns nothing when the backup has no bulkdump snapshot in flight, which is the case for every
+	// rangefile snapshot.
+	Future<Optional<UID>> applyActiveBulkDumpInterval(Database cx, std::string tagName, int64_t seconds);
 
 	// Disable backup workers if no active partitioned backup is running.
 	Future<Void> checkAndDisableBackupWorkers(Database cx);

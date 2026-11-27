@@ -37,6 +37,11 @@ static const std::string BULK_LOAD_LOAD_USAGE =
     " blobstore url to load SST files from.\n";
 static const std::string BULK_LOAD_STATUS_USAGE = "To get status: bulkload status\n";
 static const std::string BULK_LOAD_CANCEL_USAGE = "To cancel current bulkload job: bulkload cancel <JOBID>\n";
+static const std::string BULK_LOAD_PAUSE_USAGE =
+    "To pause a bulkload job: bulkload pause <JOBID>\n"
+    " No further tasks are dispatched. Tasks already dispatched run to completion,\n"
+    " so the job quiesces once that work drains. The job range lock stays held.\n";
+static const std::string BULK_LOAD_RESUME_USAGE = "To resume a paused bulkload job: bulkload resume <JOBID>\n";
 static const std::string BULK_LOAD_HISTORY_USAGE = "To print bulkload job history: bulkload history\n";
 static const std::string BULK_LOAD_HISTORY_CLEAR_USAGE = "To clear history: bulkload history clear [all|id]\n";
 
@@ -48,8 +53,9 @@ static const std::string BULKLOAD_CLEAR_LOCK_USAGE = "To clear a range lock: bul
 
 static const std::string BULK_LOAD_HELP_MESSAGE =
     BULK_LOAD_MODE_USAGE + BULK_LOAD_LOAD_USAGE + BULK_LOAD_STATUS_USAGE + BULK_LOAD_CANCEL_USAGE +
-    BULK_LOAD_HISTORY_USAGE + BULK_LOAD_HISTORY_CLEAR_USAGE + BULKLOAD_ADD_LOCK_OWNER_USAGE +
-    BULKLOAD_PRINT_LOCK_USAGE + BULKLOAD_PRINT_LOCK_OWNER_USAGE + BULKLOAD_CLEAR_LOCK_USAGE;
+    BULK_LOAD_PAUSE_USAGE + BULK_LOAD_RESUME_USAGE + BULK_LOAD_HISTORY_USAGE + BULK_LOAD_HISTORY_CLEAR_USAGE +
+    BULKLOAD_ADD_LOCK_OWNER_USAGE + BULKLOAD_PRINT_LOCK_USAGE + BULKLOAD_PRINT_LOCK_OWNER_USAGE +
+    BULKLOAD_CLEAR_LOCK_USAGE;
 
 Future<Void> printPastBulkLoadJob(Database cx) {
 	std::vector<BulkLoadJobState> jobs = co_await getBulkLoadJobFromHistory(cx);
@@ -160,6 +166,30 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 		UID cancelJobId = validateBulkJobId(tokens[2], BULK_LOAD_CANCEL_USAGE.c_str());
 		co_await cancelBulkLoadJob(cx, cancelJobId);
 		fmt::println("Job {} has been cancelled. The job range lock has been cleared", cancelJobId.toString());
+		co_return UID();
+
+	} else if (tokencmp(tokens[1], "pause") || tokencmp(tokens[1], "resume")) {
+		const bool pause = tokencmp(tokens[1], "pause");
+		const std::string& usage = pause ? BULK_LOAD_PAUSE_USAGE : BULK_LOAD_RESUME_USAGE;
+		if (tokens.size() != 3) {
+			fmt::println("{}", usage);
+			co_return UID();
+		}
+		UID controlJobId = validateBulkJobId(tokens[2], usage.c_str());
+		// A control record written for a job that is not running would never be read and never cleaned up.
+		Optional<BulkLoadJobState> liveJob = co_await getRunningBulkLoadJob(cx);
+		if (!liveJob.present() || liveJob.get().getJobId() != controlJobId) {
+			fmt::println("No bulkload job {} is running.", controlJobId.toString());
+			co_return UID();
+		}
+		co_await setBulkJobPaused(cx, controlJobId, pause, /*isBulkDump=*/false);
+		if (pause) {
+			fmt::println("Job {} is paused. Tasks already dispatched will run to completion, so the job keeps "
+			             "making progress until that work drains. The job range lock remains held.",
+			             controlJobId.toString());
+		} else {
+			fmt::println("Job {} is resumed.", controlJobId.toString());
+		}
 		co_return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {
@@ -321,7 +351,7 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 }
 
 CommandFactory bulkLoadFactory("bulkload",
-                               CommandHelp("bulkload [mode|load|status|cancel|history] [ARGs]",
+                               CommandHelp("bulkload [mode|load|status|cancel|pause|resume|history] [ARGs]",
                                            "bulkload commands",
                                            BULK_LOAD_HELP_MESSAGE.c_str()));
 } // namespace fdb_cli

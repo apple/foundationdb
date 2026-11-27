@@ -75,6 +75,7 @@ TEST_CASE("/backup/throttling") {
 	double dur = now() - ts;
 	int speed = int(total / dur);
 	printf("Speed limit was %d, measured speed was %d\n", limit, speed);
-	// Host scheduling can delay completions; only exceeding the rate limit is an error.
-	ASSERT(speed <= limit * 1.01);
+	// SpeedLimit is a token bucket one window deep (its budget cap), so over any interval it may pass up to
+	// limit * windowSeconds more than limit * dur. Only exceeding that is an error.
+	ASSERT(total <= limit * (dur + 1.0));
 }
