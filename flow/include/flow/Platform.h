@@ -497,6 +497,41 @@ private:
 	void createTmpFile(const std::string_view dir, const std::string_view prefix);
 };
 
+#ifndef _WIN32
+// Waits on one thread for many descriptors, using epoll on Linux and kqueue elsewhere. Watch one direction per
+// descriptor. Readiness is edge-triggered, so callers must drive I/O until EAGAIN before waiting again.
+// Only wake() may be called from other threads.
+class ReadinessPoller {
+public:
+	// Throws platform_error() if the kernel objects cannot be created.
+	ReadinessPoller();
+	~ReadinessPoller();
+
+	ReadinessPoller(const ReadinessPoller&) = delete;
+	ReadinessPoller& operator=(const ReadinessPoller&) = delete;
+
+	// Starts watching `fd`: wait() reports `tag` when the requested direction is ready or the peer closes.
+	// Returns 0 or an errno value.
+	int watch(int fd, void* tag, bool write);
+
+	// Stops watching the current direction of `fd`.
+	void unwatch(int fd, bool write);
+
+	// Waits for readiness, wake(), or the timeout (-1 for no limit). Appends each ready tag at most once.
+	void wait(int timeoutMs, std::vector<void*>& ready);
+
+	// Makes the current or the next wait() return. Safe to call from any thread.
+	void wake();
+
+private:
+	int pollFd = -1; // The epoll or kqueue instance.
+#ifdef __linux__
+	int wakeFd = -1; // An eventfd, watched by `pollFd`, that wake() signals.
+#endif
+};
+
+#endif // _WIN32
+
 } // namespace platform
 
 #ifdef __linux__
