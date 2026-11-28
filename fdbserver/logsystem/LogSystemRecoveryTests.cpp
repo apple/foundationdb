@@ -22,6 +22,7 @@
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/CoroUtils.h"
+#include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 
 namespace {
@@ -213,8 +214,10 @@ std::tuple<int, std::vector<TLogLockResult>, bool> makeLogGroupResults(
 		TLogLockResult result;
 		result.logId = tlogs[i].id();
 		result.knownCommittedVersion = (i < knownCommitted.size()) ? knownCommitted[i] : 0;
+		result.end = result.knownCommittedVersion;
 		for (const auto& ucv : perTLogUCV[i]) {
 			result.unknownCommittedVersions.push_back(ucv);
+			result.end = std::max(result.end, ucv.version);
 		}
 		lockResults.push_back(result);
 	}
@@ -532,6 +535,34 @@ TEST_CASE("/LogSystem/PeekLogRouter/EmptyOldRangeIsExhausted") {
 	return Void();
 }
 
+TEST_CASE("/LogSystem/UnicastRecovery/PeekWhenOnlySatelliteLocked") {
+	auto* knobs = const_cast<ServerKnobs*>(SERVER_KNOBS);
+	const bool wasUnicast = std::exchange(knobs->ENABLE_VERSION_VECTOR_TLOG_UNICAST, true);
+	ScopeExit restore([&]() { knobs->ENABLE_VERSION_VECTOR_TLOG_UNICAST = wasUnicast; });
+
+	LocalityData locality;
+	auto logSystem = makeReference<LogSystem>(UID(), locality, LogEpoch(1));
+	logSystem->stopped = true;
+	auto primary = makeRemotePrefixLogSet({ TLogInterface(locality), TLogInterface(locality) }, true, 0, 1);
+	primary->tLogReplicationFactor = 2;
+	primary->tLogWriteAntiQuorum = 1;
+	auto satelliteLog = makeRemotePrefixRouterClient(TLogInterface(locality));
+	auto satellite = makeRemotePrefixLogSet({ satelliteLog }, true, tagLocalitySatellite, 1);
+	satellite->satelliteTagLocations = { { 0 } };
+	logSystem->tLogs = { primary, satellite };
+	logSystem->knownLockedTLogIds[1] = { 0 };
+
+	LogSystemConsumer consumer(logSystem);
+	auto txs = consumer.peekAll(UID(), 1, 10, Tag(tagLocalityTxs, 0), false);
+	ASSERT(txs->getCurrentPeekLocation() == satelliteLog.id());
+
+	// A primary-only tag still requires multiple replicas. No single primary log may prove an empty tail.
+	auto local = consumer.peekLocal(UID(), Tag(0, 0), 1, 10, false);
+	ASSERT(!local->getPrimaryPeekLocation().present());
+	ASSERT(!logSystem->knownLockedTLogIds.contains(0));
+	return Void();
+}
+
 TEST_CASE("/LogSystem/GetRecoverVersionUnicast/Simple") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();
@@ -549,7 +580,7 @@ TEST_CASE("/LogSystem/GetRecoverVersionUnicast/Simple") {
 	auto logGroupResults = makeLogGroupResults(2, { { ucv }, { ucv } }, { tlogA, tlogB }, true, { 100, 100 });
 
 	Version minDV = 90;
-	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
+	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV, 0);
 	ASSERT(result.present());
 	Version maxKCV = std::get<0>(result.get());
 	Version recoverVersion = std::get<1>(result.get());
@@ -580,7 +611,7 @@ TEST_CASE("/LogSystem/GetRecoverVersionUnicast/FallbackToMaxKCV") {
 	auto logGroupResults = makeLogGroupResults(2, { {}, {} }, { tlogA, tlogB }, true, { 80, 90 });
 
 	Version minDV = 70;
-	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
+	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV, 0);
 	ASSERT(result.present());
 	Version maxKCV = std::get<0>(result.get());
 	Version recoverVersion = std::get<1>(result.get());
@@ -614,7 +645,7 @@ TEST_CASE("/LogSystem/GetRecoverVersionUnicast/HaltOnMissingDelivery") {
 	auto logGroupResults = makeLogGroupResults(2, { { ucv, ucvLate }, { ucv } }, { tlogA, tlogB }, true, { 100, 100 });
 
 	Version minDV = 90;
-	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
+	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV, 0);
 	ASSERT(result.present());
 	Version maxKCV = std::get<0>(result.get());
 	Version recoverVersion = std::get<1>(result.get());
@@ -632,6 +663,82 @@ TEST_CASE("/LogSystem/GetRecoverVersionUnicast/HaltOnMissingDelivery") {
 		    .detail("Reason", "tlogB did not receive version 120");
 	}
 	ASSERT(recoverVersion == 110);
+	return Void();
+}
+
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/WriteAntiQuorum") {
+	LocalityData locality;
+	TLogInterface primary(locality), a(locality), b(locality), c(locality), d(locality), e(locality);
+	std::vector<Reference<LogSet>> logServers{ makeSingleLogSet({ primary }), makeSingleLogSet({ a, b, c, d, e }) };
+	// The second set has replication factor three. Logs a, b, c, e locked, and d is unavailable.
+	// Batch 110 could have been acknowledged by b and d. Only b received 120.
+	UnknownCommittedVersions first(110, 100, { 1, 2, 4 });
+	UnknownCommittedVersions partial(120, 110, { 1, 2, 3 });
+	auto locks =
+	    makeLogGroupResults(3, { {}, { first, partial }, {}, {} }, { a, b, c, e }, false, { 100, 100, 100, 100 });
+	auto recover = [&](int writeAntiQuorum) {
+		return std::get<1>(getRecoverVersionUnicast(logServers, locks, 100, writeAntiQuorum).get());
+	};
+	ASSERT_EQ(recover(0), 100);
+	ASSERT_EQ(recover(1), 110);
+
+	// a restored its data through 120 without its in-memory batch metadata. Its durable end
+	// proves delivery to a when another log identifies a as a target.
+	std::get<1>(locks)[0].end = 120;
+	ASSERT_EQ(recover(1), 120);
+
+	// The same delivery evidence cannot bridge a missing predecessor.
+	std::get<1>(locks)[1].unknownCommittedVersions.back().prev = 115;
+	ASSERT(!getRecoverVersionUnicast(logServers, locks, 100, 1).present());
+	std::get<1>(locks)[0].unknownCommittedVersions = std::get<1>(locks)[1].unknownCommittedVersions;
+	ASSERT_EQ(recover(1), 110);
+	return Void();
+}
+
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/WriteAntiQuorumWithoutBatchMetadata") {
+	LocalityData locality;
+	TLogInterface a(locality), b(locality), c(locality);
+	std::vector<Reference<LogSet>> logServers{ makeSingleLogSet({ a, b, c }) };
+	auto locks = makeLogGroupResults(3, { {}, {}, {} }, { a, b, c }, false, { 100, 100, 100 });
+	std::get<1>(locks)[1].end = std::get<1>(locks)[2].end = 110;
+	auto result = getRecoverVersionUnicast(logServers, locks, 110, 1).get();
+	ASSERT_EQ(std::get<0>(result), 100);
+	ASSERT_EQ(std::get<1>(result), 110);
+	return Void();
+}
+
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/WriteAntiQuorumWithRestoredLogs") {
+	LocalityData locality;
+	TLogInterface a(locality), b(locality), c(locality), d(locality);
+	std::vector<Reference<LogSet>> logServers{ makeSingleLogSet({ a, b, c, d }) };
+	UnknownCommittedVersions first(110, 100, { 0, 1, 2 });
+	auto locks = makeLogGroupResults(3, { { first }, {}, {}, {} }, { a, b, c, d }, false, { 100, 100, 100, 100 });
+	auto& replies = std::get<1>(locks);
+	// The only copies of 120 are on b, c and d. They restored their queues without batch metadata.
+	replies[1].end = replies[2].end = replies[3].end = 120;
+	ASSERT_EQ(std::get<1>(getRecoverVersionUnicast(logServers, locks, 120, 1).get()), 120);
+
+	// The surviving metadata on a links the next batch to the durable prefix. Although b lost its
+	// metadata, it also has that batch, so c is the only target behind.
+	replies[0].unknownCommittedVersions.emplace_back(130, 120, std::vector<uint16_t>{ 0, 1, 2 });
+	replies[0].end = replies[1].end = 130;
+	ASSERT_EQ(std::get<1>(getRecoverVersionUnicast(logServers, locks, 120, 1).get()), 130);
+	return Void();
+}
+
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/WriteAntiQuorumAmbiguousSuffix") {
+	LocalityData locality;
+	TLogInterface a(locality), b(locality), c(locality), d(locality), e(locality);
+	std::vector<Reference<LogSet>> logServers{ makeSingleLogSet({ a, b, c, d, e }) };
+	auto locks = makeLogGroupResults(3, { {}, {}, {}, {} }, { a, b, c, d }, false, { 100, 100, 100, 100 });
+	std::get<1>(locks)[0].end = std::get<1>(locks)[1].end = 110;
+	// A and B may have acknowledged 110, but after disk recovery neither remembers its targets.
+	ASSERT(!getRecoverVersionUnicast(logServers, locks, 100, 1).present());
+
+	UnknownCommittedVersions committed(110, 100, { 0, 1, 4 });
+	auto witness = makeLogGroupResults(3, { { committed } }, { e }, false, { 100 });
+	std::get<1>(locks).push_back(std::get<1>(witness).front());
+	ASSERT_EQ(std::get<1>(getRecoverVersionUnicast(logServers, locks, 100, 1).get()), 110);
 	return Void();
 }
 
@@ -653,7 +760,7 @@ TEST_CASE("/LogSystem/GetRecoverVersionUnicast/PolicyNotSatisfied") {
 	auto logGroupResults = makeLogGroupResults(2, { { ucv, ucv2 }, { ucv } }, { tlogA, tlogB }, true, { 100, 100 });
 
 	Version minDV = 90;
-	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
+	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV, 0);
 	ASSERT(result.present());
 	Version maxKCV = std::get<0>(result.get());
 	Version recoverVersion = std::get<1>(result.get());
@@ -688,7 +795,7 @@ TEST_CASE("/LogSystem/GetRecoverVersionUnicast/MinDVRespected") {
 	auto logGroupResults = makeLogGroupResults(2, { { ucv }, { ucv } }, { tlogA, tlogB }, true, { 90, 90 });
 
 	Version minDV = 80;
-	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
+	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV, 0);
 	ASSERT(result.present());
 	Version maxKCV = std::get<0>(result.get());
 	Version recoverVersion = std::get<1>(result.get());
@@ -727,7 +834,7 @@ TEST_CASE("/LogSystem/GetRecoverVersionUnicast/BrokenChain") {
 	    makeLogGroupResults(2, { { ucv110, ucv120 }, { ucv110, ucv120 } }, { tlogA, tlogB }, true, { 100, 100 });
 
 	Version minDV = 90;
-	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
+	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV, 0);
 	ASSERT(result.present());
 	Version maxKCV = std::get<0>(result.get());
 	Version recoverVersion = std::get<1>(result.get());
@@ -767,7 +874,7 @@ TEST_CASE("/LogSystem/GetRecoverVersionUnicast/MultipleLogSets") {
 	auto logGroupResults = makeLogGroupResults(2, { { ucv }, { ucv } }, { primary1, primary2 }, true, { 100, 100 });
 
 	Version minDV = 90;
-	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
+	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV, 0);
 	ASSERT(result.present());
 	Version maxKCV = std::get<0>(result.get());
 	Version recoverVersion = std::get<1>(result.get());
@@ -805,7 +912,7 @@ TEST_CASE("/LogSystem/GetRecoverVersionUnicast/PartialAvailabilityPolicyFail") {
 	    3, { { ucv110, ucv120 }, { ucv110, ucv120 }, { ucv110 } }, { tlogA, tlogB, tlogC }, false, { 100, 100, 100 });
 
 	Version minDV = 90;
-	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
+	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV, 0);
 	ASSERT(result.present());
 	Version maxKCV = std::get<0>(result.get());
 	Version recoverVersion = std::get<1>(result.get());
@@ -842,7 +949,7 @@ TEST_CASE("/LogSystem/GetRecoverVersionUnicast/VersionsBelowMaxKCV") {
 	auto logGroupResults = makeLogGroupResults(2, { { ucv80 }, { ucv80 } }, { tlogA, tlogB }, true, { 100, 100 });
 
 	Version minDV = 90;
-	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
+	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV, 0);
 	ASSERT(result.present());
 	Version maxKCV = std::get<0>(result.get());
 	Version recoverVersion = std::get<1>(result.get());
@@ -904,7 +1011,7 @@ TEST_CASE("/LogSystem/GetRecoverVersionUnicast/RandomVersionsPartialDelivery") {
 	                                           { 100, 100, 100, 100 });
 
 	Version minDV = 90;
-	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
+	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV, 0);
 	ASSERT(result.present());
 	Version maxKCV = std::get<0>(result.get());
 	Version recoverVersion = std::get<1>(result.get());

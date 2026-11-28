@@ -404,12 +404,6 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	Reference<LogSystemConsumer> makeConsumer();
 
-	// Version vector/Unicast specific: reset best server if it is not known to have been locked/stopped.
-	void resetBestServerIfNotLocked(int bestSet,
-	                                int& bestServer,
-	                                Optional<Version> end,
-	                                const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownLockedTLogIds);
-
 	Version getKnownCommittedVersion();
 
 	Future<Void> onKnownCommittedVersionChange();
@@ -568,7 +562,8 @@ private:
 Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
     const std::vector<Reference<LogSet>>& logServers,
     const std::tuple<int, std::vector<TLogLockResult>, bool>& logGroupResults,
-    Version minDV);
+    Version minDV,
+    int writeAntiQuorum);
 
 template <class T>
 std::vector<T> LogSystem::getReadyNonError(std::vector<Future<T>> const& futures) {
