@@ -415,7 +415,7 @@ graph TB
 - BulkDump continuously retries on transient failures (network issues, temporary S3 problems, etc.) with exponential backoff
 - BulkDump runs until successful completion or explicit operator cancellation
 - If backup period ends before BulkDump completes, it continues in the next backup period
-- When Restore runs with BulkLoad enabled, the mechanism verifies whether a complete BulkDump dataset is available. If not, it returns an error to the user. In this case, the user may still rerun Restore without BulkLoad to recover the data
+- A BulkLoad restore fails if the BulkDump dataset is incomplete.
 
 **Rationale:** This resilient approach ensures BulkDump completes successfully under normal operational conditions while maintaining the proven reliability patterns of traditional backup systems.
 
@@ -425,7 +425,7 @@ graph TB
 - When `--mode bulkload` is specified, fdbrestore first verifies that a complete BulkDump dataset exists in `bulkdump_data/`
 - Verification checks job manifest completeness and shard manifest integrity
 - If complete dataset found: restore proceeds with BulkLoad-based range data loading
-- If incomplete or missing dataset: restore returns error with clear message directing user to retry with `--mode rangefile`
+- If the dataset is incomplete or missing, the BulkLoad restore fails.
 
 **Rationale:** This provides early detection of incomplete BulkDump datasets and clear guidance for fallback, fulfilling the backward compatibility requirement.
 
@@ -669,13 +669,13 @@ BulkDump/BulkLoad integration uses the same error handling as current backup/res
 2. **Incomplete BulkDump Dataset at Restore**
    - Restore pre-flight check verifies manifest completeness
    - If incomplete: throw `restore_bulkload_dataset_incomplete` error
-   - Error message: "BulkDump dataset incomplete. Use --mode rangefile"
+   - A rangefile restore skips manifests without range files and looks for a rangefile snapshot that can reach the target version.
 
 3. **BulkLoad Fails During Restore**
    - When user specifies `--mode bulkload`, BulkLoad task fails and logs error
    - Restore fails with error: `restore_bulkload_failed`
    - Recovery options (in order of preference):
-     - **Format fallback**: If backup has `kvranges/` (created with `--mode both`), retry with `--mode rangefile` using same snapshot
+     - **Format fallback**: Use a backup with a rangefile snapshot and any logs needed to reach the target version. A backup created with `--mode both` can contain a suitable rangefile snapshot.
      - **Older snapshot fallback**: Use an older snapshot from the backup dataset (if available) and replay more mutation logs to reach target version
      - **No recovery**: If only current BulkDump snapshot exists and BulkLoad consistently fails, restore cannot proceed
 
@@ -694,9 +694,7 @@ error_code_actor bulkload_invalid_configuration()  // NEW: Configuration validat
 #### Emergency Rollback
 If critical issues are discovered post-deployment:
 1. **Disable BulkDump** in new backups (revert to default `--mode rangefile`)
-2. **Use traditional restore** for all operations (use `--mode rangefile`)
-3. **Existing data** remains accessible through range files (for backups created with dual datasets)
-4. **No data loss** due to dual dataset approach during transition period
+2. **Use traditional restore** with a verified rangefile snapshot and any logs needed to reach the target version.
 
 ---
 

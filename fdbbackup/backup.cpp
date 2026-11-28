@@ -1040,7 +1040,7 @@ static void printRestoreUsage(bool devhelp) {
 	       "                 Has no effect unless --log is specified.\n");
 	printf("  --incremental\n"
 	       "                 Performs incremental restore without the base backup.\n"
-	       "                 This tells the backup agent to only replay the log files from the backup source.\n"
+	       "                 Replays non-partitioned mutation logs. Requires --mode rangefile.\n"
 	       "                 This also allows a restore to be performed into a non-empty destination database.\n");
 	printf("  --begin-version\n"
 	       "                 To be used in conjunction with incremental restore.\n"
@@ -1050,8 +1050,7 @@ static void printRestoreUsage(bool devhelp) {
 	    "  --mode MODE    Restore mechanism to use: rangefile (default), bulkload.\n"
 	    "                 rangefile: Traditional range file restore from kvranges/\n"
 	    "                 bulkload: Use BulkLoad for faster range data restoration if BulkDump dataset is available\n"
-	    "                 If incomplete dataset: restore returns error with clear message directing user to retry with "
-	    "--mode rangefile.\n");
+	    "                 A full rangefile restore skips snapshots that contain only BulkDump data.\n");
 	printf("  --encryption-key-file"
 	       "                 The AES-256-GCM key in the provided file is used for decrypting backup files.\n");
 	printf(TLS_HELP);
@@ -2265,6 +2264,11 @@ Future<Void> runRestore(Database db,
                         RestoreMode restoreMode = RestoreMode::RANGEFILE) {
 	ASSERT(!ranges.empty());
 
+	if (const char* error = FileBackupAgent::getRestoreModeError(
+	        onlyApplyMutationLogs, inconsistentSnapshotOnly, restoreMode == RestoreMode::RANGEFILE)) {
+		fmt::print(stderr, "ERROR: {}\n", error);
+		throw invalid_option();
+	}
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
 		fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");
 		throw restore_error();
@@ -2300,16 +2304,28 @@ Future<Void> runRestore(Database db,
 		// describeBackup call after this.
 		Reference<IBackupContainer> bc = openBackupContainer(
 		    exeRestore.toString().c_str(), container, proxy, encryptionKeyFile, /*encryptionBlockSize=*/0);
-		// If targetVersion is unset then use the maximum restorable version from the backup description
+		const bool incrementalDryRun = !performRestore && onlyApplyMutationLogs;
+		BackupDescription desc;
+		if (targetVersion == invalidVersion || incrementalDryRun) {
+			// Incremental dry runs need the same log format as submission, including files outside the replay interval.
+			Version logStart = performRestore && isBlobstoreUrl(container) ? invalidVersion : 0;
+			desc = co_await bc->describeBackup(incrementalDryRun, logStart);
+			if (const char* error = FileBackupAgent::getRestoreModeError(onlyApplyMutationLogs,
+			                                                             inconsistentSnapshotOnly,
+			                                                             restoreMode == RestoreMode::RANGEFILE,
+			                                                             desc.mutationLogType)) {
+				fmt::print(stderr, "ERROR: {}\n", error);
+				throw invalid_option();
+			}
+		}
 		if (targetVersion == invalidVersion) {
-			if (verbose)
+			if (verbose && !inconsistentSnapshotOnly)
 				printf(
 				    "No restore target version given, will use maximum restorable version from backup description.\n");
 
-			// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
-			BackupDescription desc = co_await bc->describeBackup(false, isBlobstoreUrl(container) ? invalidVersion : 0);
-
-			if (onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
+			if (inconsistentSnapshotOnly) {
+				targetVersion = latestVersion;
+			} else if (onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 				targetVersion = desc.contiguousLogEnd.get() - 1;
 			} else if (desc.maxRestorableVersion.present()) {
 				targetVersion = desc.maxRestorableVersion.get();
@@ -2318,7 +2334,7 @@ Future<Void> runRestore(Database db,
 				throw restore_error();
 			}
 
-			if (verbose) {
+			if (verbose && !inconsistentSnapshotOnly) {
 				fmt::print("Using target restore version {}\n", targetVersion);
 			}
 		}
@@ -2345,20 +2361,37 @@ Future<Void> runRestore(Database db,
 			                                                       restoreMode == RestoreMode::RANGEFILE);
 
 			if (waitForDone && verbose) {
-				// If restore is now complete then report version restored
-				fmt::print("Restored to version {}\n", restoredVersion);
+				if (inconsistentSnapshotOnly) {
+					fmt::print("Snapshot-only restore completed\n");
+				} else {
+					fmt::print("Restored to version {}\n", restoredVersion);
+				}
 			}
 		} else {
-			Optional<RestorableFileSet> rset = co_await bc->getRestoreSet(targetVersion, ranges);
+			Optional<RestorableFileSet> rset =
+			    co_await bc->getRestoreSet(targetVersion,
+			                               ranges,
+			                               onlyApplyMutationLogs,
+			                               beginVersion,
+			                               RequireRangeFiles{ restoreMode == RestoreMode::RANGEFILE },
+			                               inconsistentSnapshotOnly);
 
 			if (!rset.present()) {
-				fmt::print(stderr,
-				           "Insufficient data to restore to version {}.  Describe backup for more information.\n",
-				           targetVersion);
+				if (targetVersion == latestVersion && inconsistentSnapshotOnly) {
+					fmt::print(stderr, "No matching rangefile snapshot available.\n");
+				} else {
+					fmt::print(stderr,
+					           "Insufficient data to restore to version {}.  Describe backup for more information.\n",
+					           targetVersion);
+				}
 				throw restore_invalid_version();
 			}
 
-			fmt::print("Backup can be used to restore to version {}\n", targetVersion);
+			if (inconsistentSnapshotOnly) {
+				fmt::print("Snapshot-only restore can use snapshot {}\n", rset.get().snapshot.fileName);
+			} else {
+				fmt::print("Backup can be used to restore to version {}\n", targetVersion);
+			}
 		}
 
 	} catch (Error& e) {
