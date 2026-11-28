@@ -27,6 +27,8 @@
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"
 
+#include <boost/algorithm/string/case_conv.hpp>
+
 class BackupContainerBlobStoreImpl {
 public:
 	// Backup files to under a single folder prefix with subfolders for each named backup
@@ -141,7 +143,7 @@ public:
 const std::string BackupContainerBlobStoreImpl::DATAFOLDER = "data";
 const std::string BackupContainerBlobStoreImpl::INDEXFOLDER = "backups";
 
-std::string BackupContainerBlobStore::dataPath(const std::string& path) {
+std::string BackupContainerBlobStore::dataPath(const std::string& path) const {
 	// if a key prefix was given, the entire layout lives under it.
 	// if backup, include the backup data prefix.
 	// if m_name ends in a trailing slash, don't add another
@@ -286,6 +288,22 @@ std::string BackupContainerBlobStore::getPrefix() const {
 	return m_prefix;
 }
 
+std::string BackupContainerBlobStore::getLocation() const {
+	// Spell the service as a port, so a URL without one matches the same URL with the default port.
+	std::string service = m_bstore->service.empty() ? m_bstore->defaultService() : m_bstore->service;
+	if (service == "https") {
+		service = "443";
+	} else if (service == "http") {
+		service = "80";
+	}
+	// Bucket names cannot contain '/', so the data path that follows keeps the location unambiguous.
+	return format("blobstore://%s:%s/%s/%s",
+	              boost::algorithm::to_lower_copy(m_bstore->host).c_str(),
+	              service.c_str(),
+	              m_bucket.c_str(),
+	              dataPath("").c_str());
+}
+
 TEST_CASE("/backup/containers/blobstore/encryptionSetup") {
 	std::string keyFile = joinPath(params.getDataDir(), "encryption-key");
 	co_await BackupContainerFileSystem::createTestEncryptionKeyFile(keyFile);
@@ -377,5 +395,51 @@ TEST_CASE("/backup/containers/blobstore/prefix") {
 		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
 	}
 
+	return Void();
+}
+
+TEST_CASE("/backup/containers/location") {
+	// Non-AWS hosts need an explicit region to parse.
+	auto location = [](const std::string& url) {
+		return IBackupContainer::openContainer(url, {}, {}, 0)->getLocation();
+	};
+	const std::string base = location("blobstore://ak:sk@host.example.com:8080/name?bucket=bkt&prefix=p1/p2&region=r1");
+
+	// Credentials, parameter order, other parameters, host case and slashes around the prefix are ignored.
+	for (auto same :
+	     { "blobstore://other:creds@host.example.com:8080/name?bucket=bkt&prefix=p1/p2&region=r1",
+	       "blobstore://host.example.com:8080/name?region=r1&prefix=p1/p2&bucket=bkt",
+	       "blobstore://ak:sk@HOST.example.com:8080/name?bucket=bkt&prefix=/p1/p2/&sc=0&region=r2",
+	       "blobstore://ak:sk@host.example.com:8080/name?bucket=bkt&prefix=p1/p2&region=r1&header=x-a:b&cu=1",
+	       // A trailing slash on the name does not change the data path.
+	       "blobstore://ak:sk@host.example.com:8080/name/?bucket=bkt&prefix=p1/p2&region=r1" }) {
+		ASSERT_EQ(location(same), base);
+	}
+	ASSERT_EQ(location("blobstore://h:80/n?region=r1"), location("blobstore://h:80/n?bucket=FDB_BACKUPS_V2&region=r1"));
+	// A missing port is the default port for the connection type.
+	ASSERT_EQ(location("blobstore://h/n?region=r1"), location("blobstore://h:443/n?region=r1"));
+	ASSERT_EQ(location("blobstore://h/n?region=r1"), location("blobstore://h:https/n?region=r1"));
+	ASSERT_EQ(location("blobstore://h/n?region=r1&sc=0"), location("blobstore://h:80/n?region=r1&sc=0"));
+	ASSERT_NE(location("blobstore://h/n?region=r1"), location("blobstore://h:80/n?region=r1"));
+	ASSERT_NE(location("blobstore://h/n?region=r1&sc=0"), location("blobstore://h:443/n?region=r1&sc=0"));
+	// Different prefix and name splits can address the same data objects.
+	ASSERT_EQ(location("blobstore://h:80/b?prefix=a/data&region=r1"),
+	          location("blobstore://h:80/data/b?prefix=a&region=r1"));
+
+	for (auto different : { "blobstore://ak:sk@other.example.com:8080/name?bucket=bkt&prefix=p1/p2&region=r1",
+	                        "blobstore://ak:sk@host.example.com:8081/name?bucket=bkt&prefix=p1/p2&region=r1",
+	                        "blobstore://ak:sk@host.example.com:8080/name?bucket=bkt2&prefix=p1/p2&region=r1",
+	                        "blobstore://ak:sk@host.example.com:8080/name?bucket=bkt&region=r1",
+	                        "blobstore://ak:sk@host.example.com:8080/name?bucket=bkt&prefix=p1&region=r1",
+	                        "blobstore://ak:sk@host.example.com:8080/name?bucket=bkt&prefix=p1/p3&region=r1",
+	                        "blobstore://ak:sk@host.example.com:8080/name2?bucket=bkt&prefix=p1/p2&region=r1",
+	                        "blobstore://ak:sk@host.example.com:8080/name/sub?bucket=bkt&prefix=p1/p2&region=r1",
+	                        "blobstore://ak:sk@host.example.com:8080//name?bucket=bkt&prefix=p1/p2&region=r1",
+	                        "file:///p1/p2/data/name" }) {
+		ASSERT_NE(location(different), base);
+	}
+
+	ASSERT_EQ(location("file:///backups/a"), location("file:///backups/a/"));
+	ASSERT_NE(location("file:///backups/a"), location("file:///backups/b"));
 	return Void();
 }

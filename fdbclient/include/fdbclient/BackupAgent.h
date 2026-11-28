@@ -170,6 +170,22 @@ public:
 	static StringRef restoreStateText(ERestoreState id);
 	static Key getPauseKey();
 
+	static Optional<std::string> bulkBackupRefusal(SnapshotMode mode,
+	                                               const VectorRef<KeyRangeRef>& ranges,
+	                                               IncrementalBackupOnly logsOnly,
+	                                               bool encrypted);
+
+	// Why a bulkload restore cannot honor these arguments, or empty if it can (always empty for rangefile).
+	static Optional<std::string> bulkLoadRestoreRefusal(Key tagName,
+	                                                    Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                                    Key addPrefix,
+	                                                    Key removePrefix,
+	                                                    OnlyApplyMutationLogs onlyApplyMutationLogs,
+	                                                    Optional<std::string> encryptionKeyFileName,
+	                                                    bool useRangeFileRestore);
+
+	static void checkRestoreLogLayout(const RestorableFileSet& files, RestoreMode mode);
+
 	// restore() will
 	//   - make sure that url is readable and appears to be a complete backup
 	//   - make sure the requested TargetVersion is valid
@@ -311,6 +327,11 @@ public:
 			                    snapshotMode);
 		});
 	}
+
+	// Returns the tag of a runnable backup, other than excludeTag, whose container is at bc's location.
+	static Future<Optional<std::string>> findRunningBackupAtLocation(Reference<ReadYourWritesTransaction> tr,
+	                                                                 Reference<IBackupContainer> bc,
+	                                                                 std::string excludeTag);
 
 	Future<Void> discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> discontinueBackup(Database cx, Key tagName) {
