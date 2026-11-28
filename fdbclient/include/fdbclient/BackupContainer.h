@@ -380,6 +380,8 @@ public:
 	                                                       const Optional<std::string>& proxy);
 
 	std::string const& getURL() const { return URL; }
+	// Local containers compare the directory they use for I/O. Other containers compare their full URL.
+	virtual const std::string& getLocation() const { return getURL(); }
 	Optional<std::string> const& getProxy() const { return proxy; }
 	Optional<std::string> const& getEncryptionKeyFileName() const { return encryptionKeyFileName; }
 

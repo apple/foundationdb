@@ -41,6 +41,7 @@ FDB_BOOLEAN_PARAM(IncrementalBackupOnly);
 FDB_BOOLEAN_PARAM(OnlyApplyMutationLogs);
 FDB_BOOLEAN_PARAM(InconsistentSnapshotOnly);
 FDB_BOOLEAN_PARAM(ShowErrors);
+enum class BackupStatusSchema { V1, V2 };
 FDB_BOOLEAN_PARAM(AbortOldBackup);
 FDB_BOOLEAN_PARAM(DstOnly); // TODO: More descriptive name?
 FDB_BOOLEAN_PARAM(WaitForDestUID);
@@ -341,7 +342,9 @@ public:
 	Future<Void> checkAndDisableRangePartitionedBackupWorkers(Database cx);
 
 	Future<std::string> getStatus(Database cx, ShowErrors, std::string tagName);
-	Future<std::string> getStatusJSON(Database cx, std::string tagName);
+	Future<std::string> getStatusJSON(Database cx,
+	                                  std::string tagName,
+	                                  BackupStatusSchema schema = BackupStatusSchema::V1);
 
 	Future<Optional<Version>> getLastRestorable(Reference<ReadYourWritesTransaction> tr,
 	                                            Key tagName,
@@ -895,6 +898,13 @@ public:
 
 	KeyBackedProperty<Reference<IBackupContainer>> backupContainer() { return configSpace.pack(__FUNCTION__sr); }
 
+	// A URL edit can separate files that belong to the same backup. Older clients did not record edits.
+	KeyBackedProperty<bool> backupURLChanged() { return configSpace.pack(__FUNCTION__sr); }
+	// Reject a new key file for the same destination before staging any changes.
+	[[nodiscard]] bool tryChangeBackupContainer(Reference<ReadYourWritesTransaction> tr,
+	                                            const Reference<IBackupContainer>& previous,
+	                                            const Reference<IBackupContainer>& next);
+
 	// Set to true when all backup workers for saving mutation logs have been started.
 	KeyBackedProperty<bool> allWorkerStarted() { return configSpace.pack(__FUNCTION__sr); }
 
@@ -944,6 +954,21 @@ public:
 	KeyBackedProperty<Version> firstSnapshotEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
 	KeyBackedProperty<Key> destUidValue() { return configSpace.pack(__FUNCTION__sr); }
+
+	struct LogProgress {
+		Optional<MutationLogType> type;
+		Optional<Version> exclusiveLogEnd;
+		Optional<Version> restorable;
+		bool restorePointUnknown = false;
+		Optional<Version> sharedWorkerVersion = {};
+		Optional<Version> logDispatchCursor = {};
+		bool destinationURLChanged = false;
+		Version sharedWorkerLogEnd() const { return sharedWorkerVersion.get() + 1; }
+		std::string typeName() const { return type.present() ? mutationLogTypeToString(type.get()) : "unknown"; }
+	};
+	Future<LogProgress> getStatusLogProgress(Reference<ReadYourWritesTransaction> tr,
+	                                         EBackupState state,
+	                                         BackupStatusSchema schema = BackupStatusSchema::V2);
 
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);

@@ -335,7 +335,8 @@ The ``modify`` subcommand is used to modify parameters of a running backup.  All
    user@host$ fdbbackup modify [-t <TAG>] [-d <BACKUP_URL>] [-s <DURATION>] [--active-snapshot-interval <DURATION>] [--verify-uid <UID>]
 
 ``-d <BACKUP_URL>``
-  Sets a new Backup URL for the backup to write to.  This is most likely to be used to change only URL parameters or account information.  However, it can also be used to start writing to a new destination mid-backup.  The new old location will cease gaining any additional restorability, while the new location will not be restorable until a new snapshot begins and completes.  Full restorability would be regained, however, if the contents of the two destinations were to be combined by the user.
+  Sets the URL used by new backup tasks. You can update credentials or switch to a different container.
+  Tasks already copying files can finish at the previous URL. Restoring across a move can require files from both containers.
 
 ``-s <DURATION>`` or ``--snapshot-interval <DURATION>``  
   Sets a new duration for backup snapshots, in seconds.
@@ -393,7 +394,50 @@ The ``status`` subcommand is used to get information on the current status of ba
 
 ::
 
-   user@host$ fdbbackup status [-t <TAG>]
+   user@host$ fdbbackup status [-t <TAG>] [--json | --json-v2]
+
+Text output and ``--json-v2`` use the backup's database records to report restore progress.
+Schema 2 reports ``Restorable`` as true and gives the version in ``ConfirmedRestorablePoint`` when the records confirm a target.
+This assumes the recorded files are available together. Status does not read the container.
+For a rangefile backup, the version is a target for rangefile restore. For a logs-only backup, it is a target for incremental restore.
+For a backup with both snapshot formats, a confirmed target must work with both restore methods.
+
+``DestinationURL`` is the currently configured URL. For example, the backup can write a snapshot and logs through 149 to A, then write logs through 169 to B after ``fdbbackup modify -d``.
+Schema 2 still reports ``LatestLogEnd`` as 170. Neither container alone has the files to restore 169.
+When a client records a URL change, schema 2 reports ``DestinationURLChanged`` as true and ``RestorePointStatus`` as ``unknown``. It omits ``Restorable`` and ``ConfirmedRestorablePoint``.
+This applies even if only blobstore credentials changed, a later snapshot completed, or the URL changed back. The database has no record of which files exist together at that URL.
+Older clients stored only the current URL. An absent ``DestinationURLChanged`` means no edit was recorded.
+Use ``fdbrestore start --dryrun -r <BACKUP_URL> -v <VERSION>`` to check file selection in a container.
+In 8.0 this dry run uses the same file selection for all modes. To verify bulkload or incremental restore, run that restore on a test database.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Ordinary backup evidence, with no recorded URL change
+     - Restore point in text and schema 2
+   * - Logs-only backup before the first dispatch
+     - None (``Restorable`` is false)
+   * - First dispatch cursor recorded on a logs-only backup, no copy confirmed
+     - Unknown
+   * - Logs-only backup with a confirmed exclusive log end
+     - The log end minus one
+   * - Rangefile backup with a completed snapshot and a confirmed log end past that snapshot
+     - The log end minus one
+   * - Completed rangefile snapshot with one retained range file at its recorded end
+     - The file's version, even without logs
+   * - Newly submitted full backup, or a rangefile backup with no completed snapshot or recorded range files
+     - None
+   * - Other snapshot evidence, including a full backup that needs bulkload
+     - Unknown
+
+A range manifest can be published before its completion marker commits. After rotation, a range snapshot end alone cannot establish that all its files used a single version.
+In 8.0, a bulk dump completion marker records the backup start version. Individual SST batches can contain data read at other versions. A later completed range snapshot cannot confirm the bulkload target.
+``BulkDumpJobRecorded`` tells whether the database has recorded a bulk dump job ID.
+
+``LogDispatchCursor`` can show the initial ordinary dispatch before any files exist. It can also advance independently of partitioned backup workers.
+For example, a ``SharedWorkerSavedVersion`` of 301 gives a ``SharedWorkerLogEndExclusive`` of 302. A shared checkpoint cannot establish continuous file coverage for every partition.
+
+Existing clients can continue to use ``--json`` for schema 1. Its ``Restorable`` Boolean and ``LatestRestorablePoint`` retain their historical calculation.
 
 .. program:: fdbbackup delete
 

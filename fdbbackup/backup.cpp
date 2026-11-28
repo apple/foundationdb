@@ -132,6 +132,7 @@ enum {
 	OPT_DUMP_BEGIN,
 	OPT_DUMP_END,
 	OPT_JSON,
+	OPT_BACKUP_STATUS_JSON_V2,
 	OPT_DELETE_DATA,
 	OPT_MIN_CLEANUP_SECONDS,
 	OPT_MUTATION_LOG_TYPE,
@@ -335,6 +336,7 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	BACKUP_MEMORY_OPTIONS,
 	BACKUP_HELP_OPTIONS,
 	{ OPT_JSON, "--json", SO_NONE },
+	{ OPT_BACKUP_STATUS_JSON_V2, "--json-v2", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -854,6 +856,8 @@ static void printBackupUsage(bool devhelp) {
 	printf("\n");
 
 	printf(" ACTION OPTIONS:\n");
+	printf("  --json-v2      For status, emit JSON schema 2 with log progress and confirmed restore points.\n");
+	printf("  --json         For status, emit JSON schema 1 for existing clients.\n");
 	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
 	       "                 FoundationDB cluster. The default is first the value of the\n"
 	       "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
@@ -966,9 +970,9 @@ static void printBackupUsage(bool devhelp) {
 	       "and ignore the range files.\n");
 	printf("  --encryption-key-file"
 	       "                 The AES-256-GCM key in the provided file is used for encrypting backup files.\n"
-	       "                 For modify operations, need to pass encryption key file only if Backup container URL is "
-	       "changed to "
-	       "re-encrypt all future backup files. \n");
+	       "                 With modify -d, supply the original key file when specifying the same encrypted "
+	       "destination.\n"
+	       "                 For a new destination, this key encrypts future backup files.\n");
 	printf("  --encryption-block-size"
 	       "                 Block size in bytes for file encryption. Only used with fdbbackup start command. Default "
 	       "is 1048576 (1MB).\n");
@@ -2050,16 +2054,26 @@ Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, in
 	}
 }
 
-Future<Void> statusBackup(Database db, std::string tagName, ShowErrors showErrors, bool json) {
+Future<Void> statusBackup(Database db,
+                          std::string tagName,
+                          ShowErrors showErrors,
+                          bool json,
+                          BackupStatusSchema schema) {
 	try {
 		FileBackupAgent backupAgent;
 
-		std::string statusText =
-		    co_await (json ? backupAgent.getStatusJSON(db, tagName) : backupAgent.getStatus(db, showErrors, tagName));
+		std::string statusText = co_await (json ? backupAgent.getStatusJSON(db, tagName, schema)
+		                                        : backupAgent.getStatus(db, showErrors, tagName));
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
+		if (json && schema == BackupStatusSchema::V2) {
+			JsonBuilderObject error;
+			error.setKey("SchemaVersion", "2.0.0");
+			error.setKey("error", e.what());
+			printf("%s\n", error.getJson().c_str());
+		}
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -2842,39 +2856,23 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 			if (options.destURL.present()) {
 				Reference<IBackupContainer> prevContainer =
 				    co_await config.backupContainer().getOrThrow(tr, Snapshot::False, backup_invalid_info());
-				std::string prevURL = prevContainer->getURL();
-				std::string newURL = options.destURL.get();
-				if (!prevURL.empty() && prevURL.back() == '/') {
-					prevURL.pop_back();
-				}
-				if (!newURL.empty() && newURL.back() == '/') {
-					newURL.pop_back();
-				}
-
-				if (prevURL == newURL) {
-					if ((options.encryptionKeyFile.present() && !prevContainer->getEncryptionKeyFileName().present()) ||
-					    (!options.encryptionKeyFile.present() && prevContainer->getEncryptionKeyFileName().present()) ||
-					    (options.encryptionKeyFile.present() && prevContainer->getEncryptionKeyFileName().present() &&
-					     options.encryptionKeyFile.get() != prevContainer->getEncryptionKeyFileName().get())) {
-						fprintf(stderr,
-						        "Destination URL matches the existing backup URL for tag '%s', "
-						        "but the encryption key file does not match.\n",
-						        tagName.c_str());
-						throw backup_error();
-					}
-				}
-
-				Reference<IBackupContainer> bc;
 				TraceEvent("ModifyBackupSetNewContainer")
 				    .detail("TagName", tagName)
 				    .detail("DestURL", options.destURL.get())
 				    .detail("EncryptionKeyFile",
 				            options.encryptionKeyFile.present() ? options.encryptionKeyFile.get() : "None");
-				bc = openBackupContainer(exeBackup.toString().c_str(),
-				                         options.destURL.get(),
-				                         options.proxy,
-				                         options.encryptionKeyFile,
-				                         prevContainer->getEncryptionBlockSize());
+				auto bc = openBackupContainer(exeBackup.toString().c_str(),
+				                              options.destURL.get(),
+				                              options.proxy,
+				                              options.encryptionKeyFile,
+				                              prevContainer->getEncryptionBlockSize());
+				if (!config.tryChangeBackupContainer(tr, prevContainer, bc)) {
+					fprintf(stderr,
+					        "Destination URL matches the existing backup URL for tag '%s', "
+					        "but the encryption key file does not match.\n",
+					        tagName.c_str());
+					throw backup_error();
+				}
 				try {
 					co_await timeoutError(bc->create(), 30);
 				} catch (Error& e) {
@@ -2886,7 +2884,6 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 					        e.what());
 					throw backup_error();
 				}
-				config.backupContainer().set(tr, bc);
 				co_await bc->writeEncryptionMetadata(bc->getEncryptionBlockSize());
 			} else if (options.encryptionKeyFile.present()) {
 				fprintf(stdout,
@@ -3508,6 +3505,7 @@ int main(int argc, char* argv[]) {
 		std::string restoreClusterFileDest;
 		std::string restoreClusterFileOrig;
 		bool jsonOutput = false;
+		BackupStatusSchema backupStatusSchema = BackupStatusSchema::V1;
 		DeleteData deleteData{ false };
 		Optional<std::string> encryptionKeyFile;
 		int encryptionBlockSize = 0;
@@ -3949,6 +3947,10 @@ int main(int argc, char* argv[]) {
 			case OPT_DUMP_END:
 				dumpEnd = parseVersion(args->OptionArg());
 				break;
+			case OPT_BACKUP_STATUS_JSON_V2:
+				backupStatusSchema = BackupStatusSchema::V2;
+				jsonOutput = true;
+				break;
 			case OPT_JSON:
 				jsonOutput = true;
 				break;
@@ -4238,7 +4240,7 @@ int main(int argc, char* argv[]) {
 			case BackupType::STATUS:
 				if (!initCluster())
 					return FDB_EXIT_ERROR;
-				f = stopAfter(statusBackup(db, tagName, ShowErrors::True, jsonOutput));
+				f = stopAfter(statusBackup(db, tagName, ShowErrors::True, jsonOutput, backupStatusSchema));
 				break;
 
 			case BackupType::ABORT:

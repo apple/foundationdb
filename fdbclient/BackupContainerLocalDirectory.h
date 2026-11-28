@@ -32,6 +32,7 @@ public:
 	void delref() final;
 
 	static std::string getURLFormat();
+	const std::string& getLocation() const override { return m_path; }
 
 	BackupContainerLocalDirectory(const std::string& url,
 	                              Optional<std::string> const& encryptionKeyFileName,
