@@ -1,3 +1,7 @@
+[[knobs]]
+# Exercise range-read visibility with an iterator cached before external SST ingestion.
+rocksdb_read_range_reuse_iterators = true
+
 [[test]]
  testTitle = 'UnitTests'
  useDB = false
