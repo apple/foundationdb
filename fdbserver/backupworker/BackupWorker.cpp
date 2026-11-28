@@ -711,11 +711,30 @@ static Future<Void> updateLogBytesWritten(BackupData* self,
 	}
 }
 
-// Saves messages in the range of [0, numMsg) to a file and then remove these
-// messages. The file content format is a sequence of (Version, sub#, msgSize, message).
-// Note only ready backups are saved.
-Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
-	int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
+struct MutationLogFiles {
+	std::vector<UID> backupUids;
+	std::vector<Reference<IBackupFile>> files;
+};
+
+static bool retryableBackupFileError(Error error) {
+	switch (error.code()) {
+	case error_code_io_error:
+	case error_code_io_timeout:
+	case error_code_platform_error:
+	case error_code_timed_out:
+	case error_code_connection_failed:
+	case error_code_lookup_failed:
+	case error_code_http_request_failed:
+	case error_code_http_bad_response:
+		return true;
+	default:
+		return false;
+	}
+}
+
+// One complete-file attempt for messages in [0, numMsg), without advancing progress or accounting.
+// The file content format is a sequence of (Version, sub#, msgSize, message).
+static Future<MutationLogFiles> writeMutationsToFile(BackupData* self, Version popVersion, int numMsg, int blockSize) {
 	std::vector<Future<Reference<IBackupFile>>> logFileFutures;
 	std::vector<Reference<IBackupFile>> logFiles;
 	std::vector<int64_t> blockEnds;
@@ -724,11 +743,6 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 	KeyRangeMap<std::set<int>> keyRangeMap; // range to index in logFileFutures, logFiles, & blockEnds
 	std::vector<Standalone<StringRef>> mutations;
 	int idx{ 0 };
-
-	// Make sure all backups are ready, otherwise mutations will be lost.
-	while (!self->isAllInfoReady()) {
-		co_await self->waitAllInfoReady();
-	}
 
 	for (auto it = self->backups.begin(); it != self->backups.end();) {
 		if (it->second.stopped || !it->second.container.get().present()) {
@@ -776,7 +790,7 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 
 	blockEnds = std::vector<int64_t>(logFiles.size(), 0);
 	for (idx = 0; idx < numMsg; idx++) {
-		auto& message = self->messages[idx];
+		auto message = self->messages[idx];
 		MutationRef m;
 		if (!message.isCandidateBackupMessage(&m)) {
 			continue;
@@ -812,6 +826,9 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 						    addMutation(logFiles[index], message, mutations.back(), &blockEnds[index], blockSize));
 					}
 				}
+				// Split clears can target the same file, which permits only one outstanding append.
+				co_await waitForAll(adds);
+				adds.clear();
 			}
 		}
 		co_await waitForAll(adds);
@@ -831,11 +848,62 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 		    .detail("TagId", self->tag.id)
 		    .detail("File", file->getFileName());
 	}
-	for (const UID& uid : activeUids) {
+	co_return MutationLogFiles{ std::move(activeUids), std::move(logFiles) };
+}
+
+Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
+	// Resolve metadata before the file retry boundary. The unchanged configuration and retained message prefix
+	// ensure each complete-file attempt has identical contents; accounting is performed only after success.
+	while (!self->isAllInfoReady()) {
+		co_await self->waitAllInfoReady();
+	}
+	const int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
+	const int retryLimit = SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_LIMIT;
+	const double maxDelay = std::max(0.0, SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY);
+	double retryDelay = std::max(0.0, std::min(SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_DELAY, maxDelay));
+	Future<Void> configChanged = self->changedTrigger.onTrigger();
+	MutationLogFiles completed;
+	Optional<Error> lastError;
+	int retries = 0;
+	while (true) {
+		try {
+			completed = co_await writeMutationsToFile(self, popVersion, numMsg, blockSize);
+			// Recipient changes can alter ClearRange splits. Recovery must replay the retained prefix if
+			// configuration drifted during a retry, even when that attempt's files finished successfully.
+			if (lastError.present() && configChanged.isReady()) {
+				throw lastError.get();
+			}
+			break;
+		} catch (Error& e) {
+			if (!retryableBackupFileError(e) || retries >= retryLimit || self->stopped || configChanged.isReady()) {
+				throw;
+			}
+			lastError = e;
+		}
+		const double waitSeconds = retryDelay * (0.5 + 0.5 * deterministicRandom()->random01());
+		retryDelay = std::min(maxDelay, retryDelay * 2);
+		++retries;
+		TraceEvent(SevWarn, "BackupWorkerFileRetry", self->myId)
+		    .errorUnsuppressed(lastError.get())
+		    .detail("Retry", retries)
+		    .detail("RetryLimit", retryLimit)
+		    .detail("Delay", waitSeconds);
+		Future<Void> backoff = delay(waitSeconds);
+		while (!backoff.isReady()) {
+			co_await (backoff || self->doneTrigger.onTrigger() || configChanged);
+			if (self->stopped || configChanged.isReady()) {
+				throw lastError.get();
+			}
+		}
+		co_await backoff;
+		if (self->stopped || configChanged.isReady()) {
+			throw lastError.get();
+		}
+	}
+	for (UID uid : completed.backupUids) {
 		self->backups[uid].lastSavedVersion = popVersion + 1;
 	}
-
-	co_await updateLogBytesWritten(self, activeUids, logFiles);
+	co_await updateLogBytesWritten(self, completed.backupUids, completed.files);
 }
 
 // Uploads self->messages to cloud storage and updates savedVersion.
