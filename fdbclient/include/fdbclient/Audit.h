@@ -96,13 +96,10 @@ struct AuditStorageState {
 	}
 
 	UID id;
-	UID ddId; // ddId indicates this audit is managed by which dd
-	// ddId is used to check if dd has changed
-	// When a new dd starts in the middle of an onging audit,
-	// The ongoing audit's ddId gets updated
-	// When SS updates the progress, it checks ddId
-	// If the ddId is updated, SS Audit actors of the old dd will stop themselves
-	// New dd will issue new requests to SSes to continue the remaining work
+	UID ddId; // the data distributor that manages this audit
+	// A data distributor that starts in the middle of an ongoing audit takes it over by updating ddId, and issues new
+	// requests to the storage servers to continue the remaining work. Progress that a task of the previous data
+	// distributor persists afterwards is still accepted and recorded under the current ddId, since the work is valid.
 	UID auditServerId; // UID of SS who is working on this audit task
 	KeyRange range;
 	uint8_t type;
