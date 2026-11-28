@@ -185,6 +185,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/RangeDigestValidation.toml)
 
   add_fdb_test(TEST_FILES fast/BulkDumping.toml)
+  add_fdb_test(TEST_FILES fast/BulkLoadBackupGuard.toml)
   add_fdb_test(TEST_FILES slow/BulkDumpingS3.toml)
   add_fdb_test(TEST_FILES slow/BulkDumpingS3WithChaos.toml)
   add_fdb_test(TEST_FILES slow/BackupS3BlobBulkLoadRestore.toml)
