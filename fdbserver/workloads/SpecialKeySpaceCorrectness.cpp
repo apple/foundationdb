@@ -124,8 +124,38 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		                 testDuration,
 		                 Void());
 		// Only use one client to avoid potential conflicts on changing cluster configuration
-		if (clientId == 0)
+		if (clientId == 0) {
+			co_await testVersionstampedWriteConflicts(cx->clone());
 			co_await managementApiCorrectnessActor(cx, this);
+		}
+	}
+
+	static Future<Void> testVersionstampedWriteConflicts(Database cx) {
+		const KeyRef flushedKeys[] = { "b1"_sr, "b2"_sr, "b3"_sr };
+		while (true) {
+			ReadYourWritesTransaction tr(cx);
+			Error err;
+			try {
+				tr.addReadConflictRange(singleKeyRange("a"_sr));
+				for (KeyRef key : flushedKeys) {
+					tr.set(key, "v"_sr);
+				}
+				// The stamp flushes three ranges. Commit sorts the later "a" range ahead of all three.
+				tr.atomicOp("b0123456789\x01\x00\x00\x00"_sr, "v"_sr, MutationRef::SetVersionstampedKey);
+				tr.set("a"_sr, "v"_sr);
+				co_await tr.commit();
+				for (KeyRef key : flushedKeys) {
+					auto boundary = co_await tr.get(writeConflictRangeKeysRange.begin.withSuffix(key));
+					ASSERT(boundary.present() && boundary.get() == "1"_sr);
+				}
+				co_return;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
 	}
 
 	// This would be a unit test except we need a Database to create an ryw transaction

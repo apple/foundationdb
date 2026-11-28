@@ -19,6 +19,7 @@
  */
 
 #include <algorithm>
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/MutationLogReader.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/Tuple.h"
@@ -543,6 +544,62 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
+	Future<Void> checkReverseMappedShardConflict(Database cx, Key mapper) {
+		Database readerCx = cx->clone();
+		for (int id = 500;; ++id) {
+			Key boundary = Tuple::makeTuple(prefix, INDEX, indexKey(id)).pack();
+			Key insertKey = Tuple::makeTuple(prefix, INDEX, indexKey(id), ""_sr).pack();
+			Key row = indexEntryKey(id);
+			Key end = keyAfter(row);
+			KeyRangeRef shard(boundary, end);
+			Transaction setup(readerCx);
+			ReadYourWritesTransaction reader(readerCx);
+			Error err;
+			try {
+				if ((co_await setup.get(insertKey)).present()) {
+					continue;
+				}
+				setup.set(row, EMPTY);
+				co_await setup.commit();
+				auto location = readerCx->getCachedLocation(insertKey);
+				if (!location.present() || !location.get().range.contains(shard)) {
+					continue;
+				}
+				// Give only this reader a shard boundary below its lowest index row.
+				readerCx->invalidateCache(insertKey);
+				readerCx->locationCache.insert(shard, location.get().locations);
+				MappedRangeResult page = co_await reader.getMappedRange(lastLessThan(allKeys.begin),
+				                                                        firstGreaterOrEqual(end),
+				                                                        mapper,
+				                                                        GetRangeLimits(100, 100000),
+				                                                        Snapshot::False,
+				                                                        Reverse::True);
+				auto currentLocation = readerCx->getCachedLocation(insertKey);
+				if (!currentLocation.present() || currentLocation.get().range != shard) {
+					continue; // A location refresh replaced the narrower cache entry.
+				}
+				ASSERT(page.more && !page.readToBegin);
+				ASSERT_EQ(page.size(), 1);
+				ASSERT_EQ(page.front().key, row);
+				ASSERT(page.readThrough.present() && page.readThrough.get() == boundary);
+
+				Transaction writer(cx);
+				writer.set(insertKey, EMPTY);
+				co_await writer.commit();
+				reader.set("mapped-range-reverse-conflict"_sr, SOMETHING);
+				ErrorOr<Void> commit = co_await errorOr(reader.commit());
+				ASSERT(commit.isError());
+				if (commit.getError().code() == error_code_not_committed) {
+					co_return;
+				}
+				err = commit.getError();
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await reader.onError(err);
+		}
+	}
+
 	Future<Void> checkUnsupportedMappedRange(Database cx,
 	                                         Key begin,
 	                                         Key end,
@@ -655,6 +712,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 		// TODO: Use toml to config
 		co_await fillInRecords(cx, 500);
+		co_await checkReverseMappedShardConflict(cx, getMapper(false));
 
 		if (transactionType == NATIVE) {
 			snapshot = Snapshot::True;
