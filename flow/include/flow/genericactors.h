@@ -1677,8 +1677,9 @@ Future<T> tagError(Future<Void> future, Error e) {
 
 template <class T>
 Future<T> detach(Future<T> f, ExplicitVoid = {}) {
-	T x = co_await f;
-	co_return x;
+	// A caller can cache our result without retaining the completed input frame.
+	Future<T> input(std::move(f));
+	co_return co_await input;
 }
 
 // If the future is ready, yields and returns. Otherwise, returns when future is set.

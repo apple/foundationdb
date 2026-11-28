@@ -667,7 +667,9 @@ AsyncResult<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> 
 	co_return statusObj;
 }
 
-Future<Void> timeoutMonitorLeader(Database db) {
+Future<Void> timeoutMonitorLeader(Database dbInput) {
+	// The database keeps the monitor future after the idle timeout.
+	Database db(std::move(dbInput));
 	Future<Void> leadMon = monitorLeader<ClusterInterface>(db->getConnectionRecord(), db->statusClusterInterface);
 	while (true) {
 		co_await delay(CLIENT_KNOBS->STATUS_IDLE_TIMEOUT + 0.00001 + db->lastStatusFetch - now());
@@ -686,4 +688,20 @@ AsyncResult<StatusObject> StatusClient::statusFetcher(Database db, std::string s
 	}
 
 	return statusFetcherImpl(db->getConnectionRecord(), db->statusClusterInterface, statusField);
+}
+
+TEST_CASE("/fdbclient/status/idleMonitorReleasesDatabase") {
+	auto record = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString("test:test@127.0.0.1:1"));
+	auto connectionRecord = makeReference<AsyncVar<Reference<IClusterConnectionRecord>>>(record);
+	Database db(new DatabaseContext(operation_failed()));
+	db->connectionRecord = connectionRecord;
+	db->statusClusterInterface = makeReference<AsyncVar<Optional<ClusterInterface>>>();
+	db->lastStatusFetch = now() - CLIENT_KNOBS->STATUS_IDLE_TIMEOUT;
+	db->statusLeaderMon = timeoutMonitorLeader(db);
+	Future<Void> monitor = db->statusLeaderMon;
+	db = Database();
+
+	co_await monitor;
+	// The database owned the other reference to its connection-record variable.
+	ASSERT_EQ(connectionRecord->debugGetReferenceCount(), 1);
 }

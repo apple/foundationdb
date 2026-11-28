@@ -339,10 +339,12 @@ private:
 	// or none of the write.  It may also corrupt parts of sectors which have not been written correctly
 	Future<Void> write(AsyncFileNonDurable* self,
 	                   Promise<Void> writeStarted,
-	                   Future<Future<Void>> ownFuture,
+	                   Future<Future<Void>> ownFutureInput,
 	                   void const* data,
 	                   int length,
 	                   int64_t offset) {
+		// The outer future holds this coroutine's own result. Drop it before final suspend.
+		auto ownFuture = std::move(ownFutureInput);
 		Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
 		ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
 		TaskPriority currentTaskID = g_network->getCurrentTask();
@@ -515,8 +517,9 @@ private:
 	// If a kill interrupts the delay, then the truncate may or may not be performed
 	Future<Void> truncate(AsyncFileNonDurable* self,
 	                      Promise<Void> truncateStarted,
-	                      Future<Future<Void>> ownFuture,
+	                      Future<Future<Void>> ownFutureInput,
 	                      int64_t size) {
+		auto ownFuture = std::move(ownFutureInput);
 		ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
 		TaskPriority currentTaskID = g_network->getCurrentTask();
 		co_await g_simulator->onMachine(currentProcess);
