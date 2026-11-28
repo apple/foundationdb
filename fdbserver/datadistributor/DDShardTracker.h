@@ -88,6 +88,7 @@ public:
 	bool shardEncodeLocationMetadata = false;
 
 	Promise<Void> readyToStart;
+	Promise<Void> shardBoundariesReady;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 
 	// Read hot detection
