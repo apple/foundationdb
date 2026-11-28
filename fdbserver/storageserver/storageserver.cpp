@@ -3419,7 +3419,7 @@ Future<Key> findKey(StorageServer* data,
                     KeySelectorRef sel,
                     Version version,
                     KeyRange range,
-                    int* pOffset,
+                    int64_t* pOffset,
                     SpanContext parentSpan,
                     Optional<ReadOptions> options)
 // Attempts to find the key indicated by sel in the data at version, within range.
@@ -3440,7 +3440,9 @@ Future<Key> findKey(StorageServer* data,
 	bool forward = sel.offset > 0; // If forward, result >= sel.getKey(); else result <= sel.getKey()
 	int sign = forward ? +1 : -1;
 	bool skipEqualKey = sel.orEqual == forward;
-	int distance = forward ? sel.offset : 1 - sel.offset;
+	int64_t distance = forward ? sel.offset : 1 - int64_t(sel.offset);
+	// readRange takes a signed row limit; INT_MIN cannot be safely negated there.
+	int rowLimit = std::min<int64_t>(distance + skipEqualKey, std::numeric_limits<int>::max()) * sign;
 	Span span("SS.findKey"_loc, parentSpan);
 
 	// Don't limit the number of bytes if this is a trivial key selector (there will be at most two items returned from
@@ -3459,7 +3461,7 @@ Future<Key> findKey(StorageServer* data,
 	                                           version,
 	                                           forward ? KeyRangeRef(sel.getKey(), range.end)
 	                                                   : KeyRangeRef(range.begin, keyAfter(sel.getKey())),
-	                                           (distance + skipEqualKey) * sign,
+	                                           rowLimit,
 	                                           &maxBytes,
 	                                           span.context,
 	                                           options);
@@ -3477,7 +3479,7 @@ Future<Key> findKey(StorageServer* data,
 		ASSERT(rep.data.size() == 2 || !more);
 	}
 
-	int index = distance - 1;
+	int64_t index = distance - 1;
 	if (skipEqualKey && !rep.data.empty() && rep.data[0].key == sel.getKey())
 		++index;
 
@@ -3698,8 +3700,8 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			throw wrong_shard_server();
 		}
 
-		int offset1 = 0;
-		int offset2{ 0 };
+		int64_t offset1 = 0;
+		int64_t offset2{ 0 };
 		Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
 		                         ? Future<Key>(req.begin.getKey())
 		                         : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
@@ -3841,11 +3843,11 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
 		int maxSelectorOffset =
 		    data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
-		data->counters.readLatencyBands.addMeasurement(duration,
-		                                               1,
-		                                               Filtered(resultSize > maxReadBytes ||
-		                                                        abs(req.begin.offset) > maxSelectorOffset ||
-		                                                        abs(req.end.offset) > maxSelectorOffset));
+		data->counters.readLatencyBands.addMeasurement(
+		    duration,
+		    1,
+		    Filtered(resultSize > maxReadBytes || std::abs(int64_t(req.begin.offset)) > maxSelectorOffset ||
+		             std::abs(int64_t(req.end.offset)) > maxSelectorOffset));
 	}
 }
 
@@ -6280,8 +6282,8 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 			throw wrong_shard_server();
 		}
 
-		int offset1 = 0;
-		int offset2{ 0 };
+		int64_t offset1 = 0;
+		int64_t offset2{ 0 };
 		Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
 		                         ? Future<Key>(req.begin.getKey())
 		                         : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
@@ -6402,11 +6404,11 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 		    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
 		int maxSelectorOffset =
 		    data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
-		data->counters.readLatencyBands.addMeasurement(duration,
-		                                               1,
-		                                               Filtered(resultSize > maxReadBytes ||
-		                                                        abs(req.begin.offset) > maxSelectorOffset ||
-		                                                        abs(req.end.offset) > maxSelectorOffset));
+		data->counters.readLatencyBands.addMeasurement(
+		    duration,
+		    1,
+		    Filtered(resultSize > maxReadBytes || std::abs(int64_t(req.begin.offset)) > maxSelectorOffset ||
+		             std::abs(int64_t(req.end.offset)) > maxSelectorOffset));
 	}
 }
 
@@ -6465,8 +6467,8 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 			throw wrong_shard_server();
 		}
 
-		int offset1 = 0;
-		int offset2{ 0 };
+		int64_t offset1 = 0;
+		int64_t offset2{ 0 };
 		Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
 		                         ? Future<Key>(req.begin.getKey())
 		                         : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
@@ -6614,6 +6616,84 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 }
 
+KeySelectorRef keySelectorAfterFindKey(KeyRef key, int64_t offset) {
+	if (offset == 0) {
+		return KeySelectorRef(key, true, 0);
+	}
+	// An empty backward shard can leave INT_MIN - 1 unresolved rows.
+	int64_t selectorOffset = offset < 0 ? offset + 1 : offset;
+	ASSERT(selectorOffset >= std::numeric_limits<int>::min() && selectorOffset <= std::numeric_limits<int>::max());
+	return KeySelectorRef(key, false, static_cast<int>(selectorOffset));
+}
+
+TEST_CASE("/fdbserver/storageserver/findKeyOffsetBounds") {
+	const UID id = deterministicRandom()->randomUniqueID();
+	std::unique_ptr<IKeyValueStore, void (*)(IKeyValueStore*)> store(
+	    keyValueStoreMemory(joinPath(params.getDataDir(), "key-selector-" + id.toString()), id, 10e6),
+	    [](IKeyValueStore* store) { store->dispose(); });
+	Future<Void> closed = store->onClosed();
+	co_await store->init();
+	{
+		StorageServer data(store.get(), makeReference<AsyncVar<ServerDBInfo>>(), StorageServerInterface(id));
+		data.mutableData().createNewVersion(1);
+		data.mutableData().forgetVersionsBefore(1);
+		data.oldestVersion.set(1);
+		data.version.set(1);
+		for (bool empty : { true, false }) {
+			std::vector<KeyRef> keys;
+			if (!empty) {
+				keys = { "a"_sr, "m"_sr, "z"_sr };
+				for (auto key : keys) {
+					store->set(KeyValueRef(key, "v"_sr));
+				}
+				co_await store->commit();
+			}
+			for (auto anchor : { "b"_sr, "m"_sr, "y"_sr }) {
+				for (bool orEqual : { false, true }) {
+					for (int offset : { std::numeric_limits<int>::min(),
+					                    std::numeric_limits<int>::min() + 1,
+					                    std::numeric_limits<int>::min() + 2,
+					                    -2,
+					                    -1,
+					                    0,
+					                    1,
+					                    2,
+					                    std::numeric_limits<int>::max() - 1,
+					                    std::numeric_limits<int>::max() }) {
+						const auto base = orEqual ? std::upper_bound(keys.begin(), keys.end(), anchor)
+						                          : std::lower_bound(keys.begin(), keys.end(), anchor);
+						const int64_t expectedIndex = (base - keys.begin()) + int64_t(offset) - 1;
+						int64_t remaining = 0;
+						Key key = co_await findKey(&data,
+						                           KeySelectorRef(anchor, orEqual, offset),
+						                           1,
+						                           allKeys,
+						                           &remaining,
+						                           SpanContext(),
+						                           Optional<ReadOptions>());
+						KeySelectorRef next = keySelectorAfterFindKey(key, remaining);
+						if (expectedIndex < 0) {
+							ASSERT_EQ(key, allKeys.begin);
+							ASSERT(!next.orEqual);
+							ASSERT_EQ(int64_t(next.offset), expectedIndex + 1);
+						} else if (expectedIndex >= int64_t(keys.size())) {
+							ASSERT_EQ(key, allKeys.end);
+							ASSERT(!next.orEqual);
+							ASSERT_EQ(int64_t(next.offset), expectedIndex - int64_t(keys.size()) + 1);
+						} else {
+							ASSERT_EQ(key, keys[expectedIndex]);
+							ASSERT(next.orEqual);
+							ASSERT_EQ(next.offset, 0);
+						}
+					}
+				}
+			}
+		}
+	}
+	store.reset();
+	co_await closed;
+}
+
 Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	Span span("SS:getKey"_loc, req.spanContext);
 	int64_t resultSize = 0;
@@ -6645,7 +6725,7 @@ Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 		KeyRange shard = getShardKeyRange(data, req.sel);
 
-		int offset{ 0 };
+		int64_t offset{ 0 };
 		Key absoluteKey = co_await findKey(data, req.sel, version, shard, &offset, req.spanContext, req.options);
 
 		data->checkChangeCounter(changeCounter,
@@ -6653,17 +6733,7 @@ Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		                                     std::max<KeyRef>(req.sel.getKey(), absoluteKey)));
 
 		KeyRef k = absoluteKey;
-		KeySelector updated;
-		if (offset < 0) {
-			updated = firstGreaterOrEqual(k) +
-			          offset; // first thing on this shard OR (large offset case) smallest key retrieved in range read
-		} else if (offset > 0) {
-			updated =
-			    firstGreaterOrEqual(k) + offset -
-			    1; // first thing on next shard OR (large offset case) keyAfter largest key retrieved in range read
-		} else {
-			updated = KeySelectorRef(k, true, 0); // found
-		}
+		KeySelector updated = keySelectorAfterFindKey(k, offset);
 
 		resultSize = k.size();
 		data->counters.bytesQueried += resultSize;
@@ -6695,7 +6765,7 @@ Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		int maxSelectorOffset =
 		    data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
 		data->counters.readLatencyBands.addMeasurement(
-		    duration, 1, Filtered(resultSize > maxReadBytes || abs(req.sel.offset) > maxSelectorOffset));
+		    duration, 1, Filtered(resultSize > maxReadBytes || std::abs(int64_t(req.sel.offset)) > maxSelectorOffset));
 	}
 }
 
