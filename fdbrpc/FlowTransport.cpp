@@ -1829,6 +1829,12 @@ static Future<Void> connectionReader(TransportData* transport,
 }
 
 static Future<Void> connectionIncoming(TransportData* self, Reference<IConnection> conn) {
+	bool handedOff = false;
+	auto closeIfUnassociated = ScopeExit([&]() {
+		if (!handedOff) {
+			conn->close();
+		}
+	});
 	TransportData::ConnectionHistoryEntry entry;
 	entry.time = now();
 	entry.addr = conn->getPeerAddress();
@@ -1851,6 +1857,7 @@ static Future<Void> connectionIncoming(TransportData* self, Reference<IConnectio
 		} else if (res.index() == 1) {
 			Reference<Peer> p = std::get<1>(std::move(res));
 			p->onIncomingConnection(p, conn, reader);
+			handedOff = true;
 		} else if (res.index() == 2) {
 			CODE_PROBE(true, "Incoming connection timed out");
 			static SimpleCounter<int64_t>* countIncomingConnectionTimedout =
@@ -1877,11 +1884,11 @@ static Future<Void> connectionIncoming(TransportData* self, Reference<IConnectio
 				self->connectionHistory.push_back(entry);
 			}
 		}
-		conn->close();
 	}
 }
 
 static Future<Void> listenImpl(TransportData* self, NetworkAddress listenAddr, Reference<IListener> listener) {
+	const int maxPendingConnections = FLOW_KNOBS->MAX_PENDING_INCOMING_CONNECTIONS_PER_LISTENER;
 	ActorCollectionNoErrors
 	    incoming; // Actors monitoring incoming connections that haven't yet been associated with a peer
 	uint64_t connectionCount = 0;
@@ -1891,7 +1898,13 @@ static Future<Void> listenImpl(TransportData* self, NetworkAddress listenAddr, R
 			static SimpleCounter<int64_t>* countIncomingConnectionCreated =
 			    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionCreated");
 			countIncomingConnectionCreated->increment(1);
-			if (conn) {
+			if (conn && maxPendingConnections > 0 && incoming.size() >= maxPendingConnections) {
+				// Close this overflow socket before accepting another, without starting TLS or a reader.
+				conn->close();
+				static SimpleCounter<int64_t>* countIncomingConnectionOverloadRejected =
+				    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionOverloadRejected");
+				countIncomingConnectionOverloadRejected->increment(1);
+			} else if (conn) {
 				TraceEvent("ConnectionFrom", conn->getDebugID())
 				    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 				    .detail("FromAddress", conn->getPeerAddress())
