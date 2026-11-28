@@ -570,7 +570,22 @@ public:
 		return singleEmpty;
 	}
 
-	static void setRequestLimits(GetRangeLimits& requestLimit, int64_t additionalRows, int offset, int requestCount) {
+	static int getClearLimit(int beginOffset, int endOffset, int requestCount) {
+		int64_t clearLimit = requestCount ? 1 << std::min(requestCount, 20) : 0;
+		// Skipping local clears must not move either wire selector outside its signed offset range.
+		if (beginOffset < 1) {
+			clearLimit = std::min(clearLimit, int64_t(beginOffset) - std::numeric_limits<int>::min());
+		}
+		if (endOffset > 1) {
+			clearLimit = std::min(clearLimit, int64_t(std::numeric_limits<int>::max()) - endOffset);
+		}
+		return clearLimit;
+	}
+
+	static void setRequestLimits(GetRangeLimits& requestLimit,
+	                             int64_t additionalRows,
+	                             int64_t offset,
+	                             int requestCount) {
 		requestLimit.minRows =
 		    (int)std::min(std::max(1 + additionalRows, (int64_t)offset), (int64_t)std::numeric_limits<int>::max());
 		if (requestLimit.hasRowLimit()) {
@@ -604,7 +619,7 @@ public:
 		Iter itEnd(*pit);
 		RangeResult result;
 		int64_t additionalRows = 0;
-		int itemsPastEnd = 0;
+		int64_t itemsPastEnd = 0;
 		int requestCount = 0;
 		bool readToBegin = false;
 		bool readThroughEnd = false;
@@ -688,7 +703,7 @@ public:
 				co_return RangeResultRef(readToBegin, readThroughEnd);
 			}
 
-			if (limits.isReached() && itemsPastEnd >= 1 - end.offset)
+			if (limits.isReached() && itemsPastEnd >= 1 - int64_t(end.offset))
 				break;
 
 			if (it == itEnd && ((!it.is_unreadable() && !it.is_unknown_range()) ||
@@ -697,14 +712,14 @@ public:
 
 			if (it.is_unknown_range()) {
 				if (limits.hasByteLimit() && limits.hasSatisfiedMinRows() && !result.empty() &&
-				    itemsPastEnd >= 1 - end.offset) {
+				    itemsPastEnd >= 1 - int64_t(end.offset)) {
 					result.more = true;
 					break;
 				}
 
 				Iter ucEnd(it);
 				int singleClears = 0;
-				int clearLimit = requestCount ? 1 << std::min(requestCount, 20) : 0;
+				int clearLimit = getClearLimit(begin.offset, end.offset, requestCount);
 				if (it.beginKey() < itEnd.beginKey())
 					singleClears = std::min(skipUncached(ucEnd, itEnd, buggify() ? 0 : clearLimit + 100), clearLimit);
 
@@ -713,10 +728,10 @@ public:
 					Key k = ucEnd.endKey().toStandaloneStringRef();
 					read_end = KeySelector(firstGreaterOrEqual(k), k.arena());
 					if (end.offset < 1)
-						additionalRows += 1 - end.offset; // extra for items past end
+						additionalRows += 1 - int64_t(end.offset); // extra for items past end
 				} else if (end.offset < 1) {
 					read_end = KeySelector(firstGreaterOrEqual(end.getKey()), end.arena());
-					additionalRows += 1 - end.offset;
+					additionalRows += 1 - int64_t(end.offset);
 				} else {
 					read_end = end;
 					if (end.offset > 1) {
@@ -752,7 +767,7 @@ public:
 				}
 
 				GetRangeLimits requestLimit = limits;
-				setRequestLimits(requestLimit, additionalRows, 2 - read_begin.offset, requestCount);
+				setRequestLimits(requestLimit, additionalRows, 2 - int64_t(read_begin.offset), requestCount);
 				requestCount++;
 
 				ASSERT(!requestLimit.hasRowLimit() || requestLimit.rows > 0);
@@ -912,7 +927,7 @@ public:
 		Iter itEnd(*pit);
 		RangeResult result;
 		int64_t additionalRows = 0;
-		int itemsPastBegin = 0;
+		int64_t itemsPastBegin = 0;
 		int requestCount = 0;
 		bool readToBegin = false;
 		bool readThroughEnd = false;
@@ -991,31 +1006,31 @@ public:
 				break;
 			}
 
-			if (itemsPastBegin >= begin.offset - 1 && !it.is_unreadable() && !it.is_unknown_range() &&
+			if (itemsPastBegin >= int64_t(begin.offset) - 1 && !it.is_unreadable() && !it.is_unknown_range() &&
 			    it.beginKey() < itEnd.beginKey()) {
 				if (begin.isFirstGreaterOrEqual())
 					break;
 				co_return RangeResultRef(readToBegin, readThroughEnd);
 			}
 
-			if (limits.isReached() && itemsPastBegin >= begin.offset - 1)
+			if (limits.isReached() && itemsPastBegin >= int64_t(begin.offset) - 1)
 				break;
 
 			if (end.isFirstGreaterOrEqual() && end.getKey() == it.beginKey()) {
-				if (itemsPastBegin >= begin.offset - 1 && it == itEnd)
+				if (itemsPastBegin >= int64_t(begin.offset) - 1 && it == itEnd)
 					break;
 				--it;
 			}
 
 			if (it.is_unknown_range()) {
-				if (limits.hasByteLimit() && !result.empty() && itemsPastBegin >= begin.offset - 1) {
+				if (limits.hasByteLimit() && !result.empty() && itemsPastBegin >= int64_t(begin.offset) - 1) {
 					result.more = true;
 					break;
 				}
 
 				Iter ucEnd(it);
 				int singleClears = 0;
-				int clearLimit = requestCount ? 1 << std::min(requestCount, 20) : 0;
+				int clearLimit = getClearLimit(begin.offset, end.offset, requestCount);
 				if (it.beginKey() > itEnd.beginKey())
 					singleClears =
 					    std::min(skipUncachedBack(ucEnd, itEnd, buggify() ? 0 : clearLimit + 100), clearLimit);
@@ -1046,7 +1061,7 @@ public:
 					read_end = end;
 				} else if (end.offset < 1) {
 					read_end = KeySelector(firstGreaterOrEqual(end.getKey()), end.arena());
-					additionalRows += 1 - end.offset;
+					additionalRows += 1 - int64_t(end.offset);
 				} else {
 					read_end = end;
 					ucEnd = it;
@@ -2833,5 +2848,32 @@ TEST_CASE("/fdbclient/ReadYourWrites/resolveKeySelectorSkipsClearedKeyForward") 
 	ASSERT(selector.isFirstGreaterOrEqual());
 	ASSERT(selector.getKey() == "d"_sr);
 
+	return Void();
+}
+
+TEST_CASE("/fdbclient/ReadYourWrites/rangeRequestOffsetBounds") {
+	constexpr int minOffset = std::numeric_limits<int>::min();
+	constexpr int maxOffset = std::numeric_limits<int>::max();
+	for (int offset : { minOffset, minOffset + 1, minOffset + 2 }) {
+		GetRangeLimits limits(1);
+		RYWImpl::setRequestLimits(limits, 0, 2 - int64_t(offset), 0);
+		ASSERT_EQ(limits.rows, maxOffset);
+		ASSERT_EQ(limits.minRows, maxOffset);
+	}
+	GetRangeLimits byteLimited(GetRangeLimits::ROW_LIMIT_UNLIMITED, 16);
+	RYWImpl::setRequestLimits(byteLimited, 1 - int64_t(minOffset), 1, 0);
+	ASSERT_EQ(byteLimited.rows, GetRangeLimits::ROW_LIMIT_UNLIMITED);
+	ASSERT_EQ(byteLimited.minRows, maxOffset);
+	GetRangeLimits ordinary(10);
+	RYWImpl::setRequestLimits(ordinary, 3, 2, 0);
+	ASSERT_EQ(ordinary.rows, 13);
+	ASSERT_EQ(ordinary.minRows, 4);
+
+	ASSERT_EQ(RYWImpl::getClearLimit(0, 2, 0), 0);
+	ASSERT_EQ(RYWImpl::getClearLimit(0, 2, 3), 8);
+	ASSERT_EQ(RYWImpl::getClearLimit(minOffset, 2, 3), 0);
+	ASSERT_EQ(RYWImpl::getClearLimit(0, maxOffset, 3), 0);
+	ASSERT_EQ(RYWImpl::getClearLimit(minOffset + 1, maxOffset - 1, 3), 1);
+	ASSERT_EQ(RYWImpl::getClearLimit(0, 2, 30), 1 << 20);
 	return Void();
 }
