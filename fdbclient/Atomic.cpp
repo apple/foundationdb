@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/Atomic.h"
+#include "fdbclient/SystemData.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
 
@@ -44,4 +45,56 @@ TEST_CASE("/Atomic/DoAppendIfFits") {
 	return Void();
 }
 
-// TODO: Add more unit tests for atomic operations defined in Atomic.h
+TEST_CASE("/Atomic/VersionstampOffsetBounds") {
+	for (int payloadSize : { 0, 9, 10, 11, 31 }) {
+		for (int32_t offset : { std::numeric_limits<int32_t>::min(),
+		                        -1,
+		                        0,
+		                        1,
+		                        21,
+		                        22,
+		                        std::numeric_limits<int32_t>::max() - 9,
+		                        std::numeric_limits<int32_t>::max() }) {
+			Arena arena;
+			StringRef encoded = makeString(payloadSize + 4, arena);
+			memset(mutateString(encoded), 'x', encoded.size());
+			int32_t littleEndianOffset = littleEndian32(offset);
+			memcpy(mutateString(encoded) + payloadSize, &littleEndianOffset, sizeof(littleEndianOffset));
+			const bool valid = offset >= 0 && int64_t(offset) + 10 <= payloadSize;
+			bool rangeRejected = false;
+			try {
+				getVersionstampKeyRange(arena, encoded, Optional<Version>(), allKeys.end);
+			} catch (Error& e) {
+				ASSERT_EQ(e.code(), error_code_client_invalid_operation);
+				rangeRejected = true;
+			}
+			ASSERT_EQ(rangeRejected, !valid);
+
+			StringRef key(arena, encoded);
+			bool keyRejected = false;
+			try {
+				transformVersionstampKey(key, 100, 7);
+			} catch (Error& e) {
+				ASSERT_EQ(e.code(), error_code_client_invalid_operation);
+				keyRejected = true;
+			}
+			ASSERT_EQ(keyRejected, !valid);
+
+			for (auto param : { &MutationRef::param1, &MutationRef::param2 }) {
+				MutationRef mutation(
+				    MutationRef::SetVersionstampedKey, StringRef(arena, encoded), StringRef(arena, encoded));
+				transformVersionstampMutation(mutation, param, 100, 7);
+				StringRef expected = makeString(payloadSize, arena);
+				memset(mutateString(expected), 'x', payloadSize);
+				if (valid) {
+					placeVersionstamp(mutateString(expected) + offset, 100, 7);
+					ASSERT_EQ(key.substr(0, payloadSize), expected);
+					ASSERT_EQ(key.substr(payloadSize), encoded.substr(payloadSize));
+				}
+				ASSERT_EQ(mutation.type, MutationRef::SetValue);
+				ASSERT_EQ(mutation.*param, expected);
+			}
+		}
+	}
+	return Void();
+}

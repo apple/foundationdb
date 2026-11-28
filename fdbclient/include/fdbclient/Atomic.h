@@ -286,7 +286,7 @@ inline KeyRangeRef getVersionstampKeyRange(Arena& arena,
 	end = end.substr(0, end.size() - 3);
 	mutateString(end)[end.size() - 1] = 0;
 
-	if (pos < 0 || pos + 10 > begin.size())
+	if (pos < 0 || pos > begin.size() - 10)
 		throw client_invalid_operation();
 
 	placeVersionstamp(mutateString(begin) + pos, readVersion.map([](Version v) { return v + 1; }).orDefault(0), 0);
@@ -300,7 +300,7 @@ inline void transformVersionstampKey(StringRef& key, Version version, uint16_t t
 		throw client_invalid_operation();
 
 	int32_t pos = parseVersionstampOffset(key);
-	if (pos < 0 || pos + 10 > key.size())
+	if (pos < 0 || pos > key.size() - 4 - 10)
 		throw client_invalid_operation();
 
 	placeVersionstamp(mutateString(key) + pos, version, transactionNumber);
@@ -315,7 +315,7 @@ inline void transformVersionstampMutation(MutationRef& mutation,
 		int32_t pos = parseVersionstampOffset(mutation.*param);
 		mutation.*param = (mutation.*param).substr(0, (mutation.*param).size() - 4);
 
-		if (pos >= 0 && pos + 10 <= (mutation.*param).size()) {
+		if (pos >= 0 && pos <= (mutation.*param).size() - 10) {
 			placeVersionstamp(mutateString(mutation.*param) + pos, version, transactionNumber);
 		}
 	}

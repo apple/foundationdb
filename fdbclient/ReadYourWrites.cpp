@@ -2220,7 +2220,7 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 		int32_t pos;
 		memcpy(&pos, v.end() - sizeof(int32_t), sizeof(int32_t));
 		pos = littleEndian32(pos);
-		if (pos < 0 || pos + 10 > v.size() - 4)
+		if (pos < 0 || pos > v.size() - 4 - 10)
 			throw client_invalid_operation();
 	}
 
@@ -2765,6 +2765,42 @@ void ReadYourWritesTransaction::debugTrace(BaseTraceEvent&& event) {
 
 void ReadYourWritesTransaction::debugPrint(std::string const& message) {
 	debugMessages.push_back(message);
+}
+
+TEST_CASE("/fdbclient/ReadYourWrites/versionstampOffsetBounds") {
+	auto db = DatabaseContext::create(
+	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
+	for (bool disableRyw : { false, true }) {
+		for (auto type : { MutationRef::SetVersionstampedKey, MutationRef::SetVersionstampedValue }) {
+			for (int32_t offset : { std::numeric_limits<int32_t>::min(),
+			                        -1,
+			                        0,
+			                        1,
+			                        std::numeric_limits<int32_t>::max() - 9,
+			                        std::numeric_limits<int32_t>::max() }) {
+				ReadYourWritesTransaction tr(db);
+				if (disableRyw) {
+					tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				}
+				Arena arena;
+				StringRef encoded = makeString(14, arena);
+				memset(mutateString(encoded), 'x', encoded.size());
+				int32_t littleEndianOffset = littleEndian32(offset);
+				memcpy(mutateString(encoded) + 10, &littleEndianOffset, sizeof(littleEndianOffset));
+				bool rejected = false;
+				try {
+					tr.atomicOp(type == MutationRef::SetVersionstampedKey ? encoded : "k"_sr,
+					            type == MutationRef::SetVersionstampedValue ? encoded : "v"_sr,
+					            type);
+				} catch (Error& e) {
+					ASSERT_EQ(e.code(), error_code_client_invalid_operation);
+					rejected = true;
+				}
+				ASSERT_EQ(rejected, offset != 0);
+			}
+		}
+	}
+	return Void();
 }
 
 TEST_CASE("/fdbclient/ReadYourWrites/writeConflictRangesAfterVersionstampedKey") {
